@@ -263,15 +263,15 @@ impl AppCore {
         let reply = chat::ask(&view, question, history, options, on_text).await;
         match &reply {
             Ok(reply) => log::info(format!(
-                "chat answered in {:?}: {} chars, {} context tokens, ${:.2}",
-                started.elapsed(),
+                "chat answered in {:.1}s: {} chars, {} context tokens, ${:.2}",
+                started.elapsed().as_secs_f64(),
                 reply.answer.len(),
                 reply.usage.context_tokens,
                 reply.usage.cost_usd.unwrap_or(0.0)
             )),
             Err(error) => log::warn(format!(
-                "chat failed after {:?}: {error}",
-                started.elapsed()
+                "chat failed after {:.1}s: {error}",
+                started.elapsed().as_secs_f64()
             )),
         }
         reply
@@ -369,10 +369,12 @@ impl AppCore {
             let config = self.config.lock().await;
             let view = build_view(loaded, &config);
             log::info(format!(
-                "feed changed: seq {}, {} picks, on pick {}{}",
+                "feed changed: seq {}, status {}, {} picks, on pick {} (slot {}){}",
                 view.seq,
+                view.draft.status,
                 view.draft.total_picks_made,
                 view.draft.current_pick,
+                view.draft.on_clock_slot,
                 if manual_changed {
                     ", manual picks reconciled"
                 } else {
