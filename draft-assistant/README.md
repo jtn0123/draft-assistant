@@ -115,9 +115,13 @@ gone before my next pick?", "why?". Each question is sent with:
 - the conversation so far (the last six exchanges, plus any summary), so
   follow-ups like "what about the RB instead?" mean something.
 
-Expect 15–40 seconds per answer with Opus (a measured example: 36 s and
-~42k context tokens for a three-position plan); the panel offers **Cancel**
-while it waits and never blocks the board.
+The answer **streams in as it is written** — the first words land in a few
+seconds and a three-pick plan finishes in 10–20 s with Opus (measured on
+draft day: 5.7 s, 7.7 s and 19.5 s for three questions, ~21k context tokens
+each). Each answer is rendered — bold, bullets, numbered lists — and stamped
+**as of pick N**; if picks have landed since, the stamp turns amber and says
+how many. **Cancel** keeps whatever had been written so far, and the board
+never waits on the chat.
 
 **Settings** (folded at the top of the panel, remembered between launches):
 
@@ -127,6 +131,8 @@ while it waits and never blocks the board.
 | Thinking effort | Default, Low … Max | Passed as `--effort`. Low is enough for lookups; Max for "plan my next three picks". |
 | Fast mode | off / on | Asks for the CLI's fast mode. If the account cannot serve it the panel says so once (e.g. `extra_usage_disabled`) and answers at standard speed. |
 | Web search | off (default) / on | Lets the model search for injury details, holdouts or depth-chart news. It says when an answer relies on the web; rankings still come from the board. Slower. |
+| Ask when I'm on the clock | off (default) / on | Sends "Who should I take next?" by itself the moment your pick comes up in a live draft, and opens the panel. One question per pick, never on top of an answer in flight. |
+| Session budget ($) | 5 by default; 0 = no limit | Asking stops once the session has cost this much (the note under the thread says so); raise it or start a new chat to continue. |
 
 Under the thread a usage line shows the last answer's context size in
 tokens, its duration, the model, the question count and the session cost as
@@ -139,7 +145,20 @@ It works by shelling out to the locally installed [Claude
 Code](https://claude.com/claude-code) CLI, so it needs no API key — it uses
 whatever that CLI is already logged in as. The panel is read-only advice: it
 cannot draft. The CLI runs with `--restricted` and `--tools ""` (or `--tools
-WebSearch` when web search is on), so it has no command, code or file tools.
+WebSearch` when web search is on), so it has no command, code or file tools,
+and with `--strict-mcp-config` so none of your own MCP servers are loaded
+into the call — on a machine with a few configured they were adding ~16k
+tokens of tool schemas to every question. The state and board go to the
+model inside `<draft_state>` / `<board>` tags that the system prompt names as
+data, and names are stripped of pipes and line breaks before they enter the
+table, so a manager called "ignore previous instructions" is met as an odd
+name, not an instruction.
+
+A real session can be recorded headlessly and replayed in the browser
+preview — `dump_state <league> <user> --ask "…" --ask "…" --chat-out
+session.json`, then `?chat=/session.json` — which is how the screenshots in
+`../dogfood-output/ai-session-*/` were made and how the E2E test drives the
+panel without the CLI.
 
 If the CLI is not on `PATH` (notably inside a packaged `.app`, which gets a
 minimal environment), the app looks in `~/.local/bin`, `/opt/homebrew/bin`, and
@@ -251,7 +270,8 @@ fade from the top-right corner.
 | Ask Claude `could not run the Claude CLI at … set DRAFT_ASSISTANT_CLAUDE_BIN` | The `claude` binary was not found. | `which claude`, then `export DRAFT_ASSISTANT_CLAUDE_BIN=<that path>` and relaunch. |
 | Ask Claude `Claude CLI error: …` | The CLI ran and failed — usually not logged in. | Run `claude` in a terminal and complete the login. |
 | Ask Claude `Claude did not answer within 90s` (150 s with web search, 180 s for Compact) / `returned an empty answer` | Slow or hung model call. | Ask again — lower the thinking effort or switch to Sonnet if it keeps happening — or **Cancel** and carry on; the board never waits on the chat. |
-| Ask Claude `unexpected Claude CLI output (…)` | The CLI printed something other than its JSON result — usually a CLI update changed the format. | Run `claude --version`; report it. Answers are unavailable until the format is handled. |
+| Ask Claude `unexpected Claude CLI output: …` / `Claude stopped before finishing` | The CLI printed something other than its streamed JSON, or ended without a result — usually a CLI update changed the format, or the process was killed. | Run `claude --version`; ask again. Whatever had streamed is kept. |
+| Ask Claude note `Session budget of $5.00 reached` | The session has cost what the budget allows. | Raise **Session budget** in Settings (0 = no limit) or start a **New chat**. |
 | Ask Claude `unknown model '…'` / `unknown effort '…'` | `DRAFT_ASSISTANT_CLAUDE_MODEL` names something the panel does not know. | Use `opus`, `sonnet`, `fable`, or `haiku`, or unset it. |
 | Ask Claude note `Fast mode unavailable (extra_usage_disabled) — answered at standard speed.` | Fast mode was requested but the account cannot serve it. | Answers still arrive; turn the setting off to silence the note, or enable extra usage on the account. |
 | Ask Claude `Nothing to compact yet` | Compact was pressed on a thread that is already just a summary. | Ask more questions first. |

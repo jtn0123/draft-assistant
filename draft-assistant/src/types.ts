@@ -182,7 +182,15 @@ export interface ChatUsage {
   fast_mode_reason: string | null;
 }
 
+/** The draft moment an answer was written against. */
+export interface ChatAsOf {
+  pick: number;
+  seq: number;
+}
+
 export interface ChatReply {
   answer: string;
   usage: ChatUsage;
+  /** null for a compaction, which is about the conversation, not a pick. */
+  as_of: ChatAsOf | null;
 }

@@ -1,7 +1,52 @@
 import type { ChatOptions, ChatTurn } from "../types";
 
-/** A line in the panel. `note` is panel-only (cancellations, fast-mode hints). */
-export type Turn = { role: "you" | "claude" | "summary" | "note"; text: string };
+/**
+ * A line in the panel. `note` is panel-only (cancellations, fast-mode hints).
+ * `asOfPick` is the pick an answer was written against.
+ */
+export type Turn = {
+  role: "you" | "claude" | "summary" | "note";
+  text: string;
+  asOfPick?: number;
+};
+
+/** Sent by itself when the user's pick comes up and auto-ask is on. */
+export const AUTO_QUESTION = "Who should I take next?";
+
+/** Panel behaviour the backend never sees. */
+export interface ChatPrefs {
+  /** Ask "Who should I take next?" by itself when the user's pick comes up. */
+  auto_ask: boolean;
+  /** Stop asking once the session has cost this much. 0 = no limit. */
+  budget_usd: number;
+}
+
+export const DEFAULT_PREFS: ChatPrefs = { auto_ask: false, budget_usd: 5 };
+
+const PREFS_KEY = "draft-assistant.chat-prefs";
+
+export function loadPrefs(): ChatPrefs {
+  try {
+    const raw = window.localStorage.getItem(PREFS_KEY);
+    if (!raw) return DEFAULT_PREFS;
+    const parsed = JSON.parse(raw) as Partial<ChatPrefs>;
+    const budget = Number(parsed.budget_usd);
+    return {
+      auto_ask: parsed.auto_ask === true,
+      budget_usd: Number.isFinite(budget) && budget >= 0 ? budget : DEFAULT_PREFS.budget_usd,
+    };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
+
+export function savePrefs(prefs: ChatPrefs): void {
+  try {
+    window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    // Storage can be unavailable (private mode); the choice still applies.
+  }
+}
 
 export const MODELS = [
   { id: "opus", label: "Opus", hint: "Best judgement. Usually 15–40 s." },

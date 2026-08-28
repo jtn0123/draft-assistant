@@ -345,7 +345,13 @@ export default function App() {
         </div>
       )}
     </div>
-    <Chat open={chatOpen} onClose={() => setChatOpen(false)} />
+    <Chat
+      open={chatOpen}
+      onClose={() => setChatOpen(false)}
+      currentPick={view.draft.current_pick}
+      onClock={view.draft.is_my_pick && view.draft.status === "drafting"}
+      onAutoAsk={() => setChatOpen(true)}
+    />
     </div>
   );
 }

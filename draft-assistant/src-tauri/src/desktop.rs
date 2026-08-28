@@ -11,6 +11,7 @@ use crate::view::{build_view, DraftView};
 use crate::{engine, manual, view};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use tauri::ipc::Channel;
 use tauri::{Emitter, Manager, State};
 use tokio::sync::Mutex;
 
@@ -187,13 +188,15 @@ async fn export_state(state: State<'_, AppState>) -> Result<String, String> {
 
 /// Ask Claude about the current draft, with the panel's conversation so far
 /// and its model/effort/search choices. The answer comes from the local
-/// `claude` CLI, so this can take 10–20s.
+/// `claude` CLI and is streamed back over `on_text` as it is written; the
+/// whole answer is returned at the end.
 #[tauri::command]
 async fn chat(
     state: State<'_, AppState>,
     question: String,
     history: Vec<ChatTurn>,
     options: ChatOptions,
+    on_text: Channel<String>,
 ) -> Result<ChatReply, String> {
     // Snapshot the view and release both locks before the CLI call: the poll
     // task takes `loaded` every few seconds and must not wait on a model.
@@ -204,7 +207,12 @@ async fn chat(
         view_from(loaded, &config)
     };
     // `chat` here is the command; the module is spelled out to disambiguate.
-    crate::chat::ask(&view, &question, &history, &options).await
+    let mut send = |text: &str| {
+        // A closed channel means the panel went away; the answer still
+        // completes and is returned whole.
+        let _ = on_text.send(text.to_string());
+    };
+    crate::chat::ask(&view, &question, &history, &options, &mut send).await
 }
 
 /// Fold the conversation into one summary turn. Needs no draft state.

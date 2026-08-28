@@ -1,17 +1,29 @@
 import type { ChatOptions, ChatUsage } from "../types";
-import { describeOptions, EFFORTS, formatSeconds, formatTokens, MODELS } from "./chatOptions";
+import {
+  describeOptions,
+  EFFORTS,
+  formatSeconds,
+  formatTokens,
+  MODELS,
+  type ChatPrefs,
+} from "./chatOptions";
 
-/** Model, effort, speed, and web-search choices, folded up by default. */
+/** Model, effort, speed, web-search, auto-ask and budget choices, folded up by default. */
 export function ChatSettings({
   options,
   onChange,
+  prefs,
+  onPrefsChange,
   disabled,
 }: {
   options: ChatOptions;
   onChange: (next: ChatOptions) => void;
+  prefs: ChatPrefs;
+  onPrefsChange: (next: ChatPrefs) => void;
   disabled: boolean;
 }) {
   const set = (patch: Partial<ChatOptions>) => onChange({ ...options, ...patch });
+  const setPref = (patch: Partial<ChatPrefs>) => onPrefsChange({ ...prefs, ...patch });
   const modelHint = MODELS.find((m) => m.id === options.model)?.hint;
   return (
     <details className="chat-settings">
@@ -79,6 +91,36 @@ export function ChatSettings({
           <span className="muted small-text">
             Off by default. Turn on to ask why someone is flagged, or for news the
             board cannot hold. Slower.
+          </span>
+        </label>
+        <label className="chat-check">
+          <input
+            type="checkbox"
+            aria-label="Ask when I'm on the clock"
+            checked={prefs.auto_ask}
+            onChange={(e) => setPref({ auto_ask: e.target.checked })}
+          />
+          Ask when I&apos;m on the clock
+          <span className="muted small-text">
+            Sends &ldquo;Who should I take next?&rdquo; by itself the moment your pick
+            comes up, and opens this panel. One question per pick.
+          </span>
+        </label>
+        <label>
+          Session budget ($)
+          <input
+            type="number"
+            aria-label="Session budget"
+            min={0}
+            step={1}
+            value={prefs.budget_usd}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              setPref({ budget_usd: Number.isFinite(value) && value >= 0 ? value : 0 });
+            }}
+          />
+          <span className="muted small-text">
+            Asking stops once this session has cost this much. 0 means no limit.
           </span>
         </label>
       </div>

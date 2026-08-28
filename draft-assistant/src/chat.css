@@ -255,3 +255,72 @@
   font-size: 12px;
   font-style: italic;
 }
+
+/* ---------- answers ---------- */
+
+/* The answer is rendered as it streams; the bar marks where it has got to. */
+.chat-turn.streaming .chat-md > :last-child::after {
+  content: "▍";
+  color: var(--accent);
+  animation: chat-caret 1s steps(2) infinite;
+}
+
+@keyframes chat-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.chat-md {
+  font-size: 13px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-md p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.chat-md h4 {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.chat-md ul,
+.chat-md ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.chat-md li {
+  margin: 2px 0;
+}
+
+.chat-md code {
+  font-size: 12px;
+  background: var(--bg-hover);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.chat-asof {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.chat-asof.stale {
+  color: var(--warn, #d9a441);
+}
+
+.chat-settings-body input[type="number"] {
+  font: inherit;
+  width: 80px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}

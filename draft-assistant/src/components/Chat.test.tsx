@@ -28,8 +28,8 @@ function usage(over: Partial<ChatUsage> = {}): ChatUsage {
   };
 }
 
-function reply(answer: string, over: Partial<ChatUsage> = {}): ChatReply {
-  return { answer, usage: usage(over) };
+function reply(answer: string, over: Partial<ChatUsage> = {}, pick = 12): ChatReply {
+  return { answer, usage: usage(over), as_of: { pick, seq: 1 } };
 }
 
 /** A chat call that stays pending until the test releases it. */
@@ -66,12 +66,12 @@ describe("Chat panel", () => {
     await user.click(askButton());
 
     // The first question carries no history and the default settings.
-    expect(testState.api.chat).toHaveBeenCalledWith("Who should I take?", [], {
-      model: "opus",
-      effort: null,
-      fast: false,
-      web_search: false,
-    });
+    expect(testState.api.chat).toHaveBeenCalledWith(
+      "Who should I take?",
+      [],
+      { model: "opus", effort: null, fast: false, web_search: false },
+      expect.any(Function),
+    );
     expect(await screen.findByText("Take Chris Olave.")).toBeInTheDocument();
     // The question stays visible so the thread reads as a conversation.
     expect(screen.getByText("Who should I take?")).toBeInTheDocument();
@@ -87,6 +87,7 @@ describe("Chat panel", () => {
         { role: "claude", text: "Take Chris Olave." },
       ],
       expect.objectContaining({ model: "opus" }),
+      expect.any(Function),
     );
   });
 
@@ -223,6 +224,7 @@ describe("Chat panel", () => {
       "What position am I weakest at?",
       [],
       expect.anything(),
+      expect.any(Function),
     );
     expect(await screen.findByText("Weakest at WR.")).toBeInTheDocument();
   });
@@ -251,7 +253,12 @@ describe("Chat panel", () => {
     expect(screen.getByRole("button", { name: "Who should I take next?" })).toBeInTheDocument();
 
     await user.type(question(), "Again?{Enter}");
-    expect(testState.api.chat).toHaveBeenLastCalledWith("Again?", [], expect.anything());
+    expect(testState.api.chat).toHaveBeenLastCalledWith(
+      "Again?",
+      [],
+      expect.anything(),
+      expect.any(Function),
+    );
   });
 
   it("Compact folds the thread into a summary that replaces it as history", async () => {
@@ -306,6 +313,7 @@ describe("Chat panel", () => {
       "And now?",
       [{ role: "summary", text: "User wants Olave; WR is thin." }],
       expect.anything(),
+      expect.any(Function),
     );
   });
 
@@ -323,12 +331,12 @@ describe("Chat panel", () => {
 
     await user.type(question(), "Who?{Enter}");
     await screen.findByText("Olave.");
-    expect(testState.api.chat).toHaveBeenCalledWith("Who?", [], {
-      model: "sonnet",
-      effort: "low",
-      fast: false,
-      web_search: true,
-    });
+    expect(testState.api.chat).toHaveBeenCalledWith(
+      "Who?",
+      [],
+      { model: "sonnet", effort: "low", fast: false, web_search: true },
+      expect.any(Function),
+    );
 
     unmount();
     render(<Chat open onClose={() => undefined} />);

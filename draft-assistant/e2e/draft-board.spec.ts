@@ -110,6 +110,35 @@ test("a chat failure is reported in the panel", async ({ page }) => {
   await expect(panel.getByRole("alert")).toContainText(/desktop app/i);
 });
 
+test("a recorded answer streams into the panel and renders as markdown", async ({ page }) => {
+  // `?chat=` plays a recorded session back through the same streaming path
+  // the desktop app uses (public/chat-fixture.json is synthetic; real ones
+  // come from `dump_state --chat-out`).
+  await page.goto("/?chat=/chat-fixture.json");
+  await page.getByRole("button", { name: "Ask Claude" }).click();
+  await page.getByRole("button", { name: "Who should I take next?" }).click();
+
+  const panel = page.getByRole("complementary", { name: /Ask Claude about this draft/ });
+  // The answer is visible while it is still being written...
+  await expect(panel.locator(".chat-turn.streaming")).toBeVisible();
+  // ...and settles into a rendered answer: bold names, a bullet list, no raw
+  // asterisks, stamped with the pick it saw and what it cost.
+  await expect(panel.locator(".chat-turn.streaming")).toHaveCount(0);
+  const answer = panel.locator(".chat-turn.claude").first();
+  await expect(answer.locator("strong").first()).toHaveText("Ladd McConkey");
+  await expect(answer.locator("li")).toHaveCount(2);
+  await expect(answer).not.toContainText("**");
+  await expect(answer.locator(".chat-asof")).toContainText(/as of pick 1 · \d+ picks? since/);
+  await expect(panel.getByLabel("Usage")).toContainText("Context 13.2k tokens · 8 s · Opus · 1 question · $0.11");
+
+  // A follow-up carries on the thread and renders a numbered list.
+  await page.getByLabel("Your question").fill("Why?");
+  await page.keyboard.press("Enter");
+  await expect(panel.locator(".chat-turn.claude")).toHaveCount(2);
+  await expect(panel.locator(".chat-turn.claude").nth(1).locator("ol li")).toHaveCount(3);
+  await expect(panel.getByLabel("Usage")).toContainText("2 questions · $0.21");
+});
+
 test("Escape cancels the draft confirmation and focus returns to the row", async ({ page }) => {
   const draft = page.getByRole("button", { name: "Draft", exact: true }).first();
   await draft.click();

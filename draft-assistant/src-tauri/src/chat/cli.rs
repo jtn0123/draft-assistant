@@ -1,13 +1,13 @@
 //! Running the `claude` CLI: locating the binary, translating the panel's
-//! options into flags, and reading the JSON result it prints.
+//! options into flags, and streaming its answer back as it is written.
 
+use super::stream::{self, ChatUsage};
 use super::ChatOptions;
-use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 /// Tried in order when `claude` is not on `PATH`. A packaged .app gets a
@@ -30,25 +30,6 @@ pub struct Request<'a> {
     pub system_prompt: &'a str,
     pub options: &'a ChatOptions,
     pub timeout: Duration,
-}
-
-/// What one call cost, as the CLI reports it. `context_tokens` is everything
-/// the model read (fresh + cached input) — the number that tells the user how
-/// big the thread has grown.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ChatUsage {
-    pub model: String,
-    pub input_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub cache_write_tokens: u64,
-    pub output_tokens: u64,
-    pub context_tokens: u64,
-    pub web_searches: u64,
-    pub duration_ms: u64,
-    pub cost_usd: Option<f64>,
-    /// `active` / `off` as reported; `None` when the CLI did not say.
-    pub fast_mode: Option<String>,
-    pub fast_mode_reason: Option<String>,
 }
 
 /// Resolve the CLI. `DRAFT_ASSISTANT_CLAUDE_BIN` overrides everything.
@@ -110,18 +91,29 @@ fn effort_for(options: &ChatOptions) -> Result<Option<String>, String> {
     }
 }
 
-/// Flags for one call. `--restricted` drops the tools that run commands or
-/// code: this is a chat panel, not a coding agent. `--bare` is deliberately
+/// Flags for one call.
+///
+/// `--restricted` drops the tools that run commands or code: this is a chat
+/// panel, not a coding agent. `--tools` names exactly what is left: nothing,
+/// or web search when the panel asked for it. `--strict-mcp-config` with an
+/// empty server list keeps the user's own MCP servers out of the call — on
+/// this machine they added ~16k tokens of tool schemas to every question, so
+/// the board was a third of what the model read. `--bare` is deliberately
 /// NOT used — it forces API-key auth and would break the CLI's existing
-/// subscription login. `--tools` names exactly what is left: nothing, or web
-/// search when the panel asked for it.
+/// subscription login. `stream-json` (which needs `--verbose`) is what lets
+/// the panel show the answer as it is written.
 pub fn args(options: &ChatOptions, system_prompt: &str) -> Result<Vec<OsString>, String> {
     let mut args: Vec<OsString> = vec![
         "--print".into(),
         "--restricted".into(),
         "--no-session-persistence".into(),
+        "--strict-mcp-config".into(),
+        "--mcp-config".into(),
+        r#"{"mcpServers":{}}"#.into(),
+        "--verbose".into(),
         "--output-format".into(),
-        "json".into(),
+        "stream-json".into(),
+        "--include-partial-messages".into(),
         "--model".into(),
         model_for(options)?.into(),
         "--tools".into(),
@@ -146,94 +138,30 @@ pub fn args(options: &ChatOptions, system_prompt: &str) -> Result<Vec<OsString>,
     Ok(args)
 }
 
-#[derive(Deserialize, Default)]
-struct ServerToolUse {
-    #[serde(default)]
-    web_search_requests: u64,
+/// Run the CLI, handing each piece of the answer to `on_text` as it arrives,
+/// and return the whole answer with its usage.
+pub async fn run(
+    request: &Request<'_>,
+    on_text: &mut (dyn FnMut(&str) + Send),
+) -> Result<(String, ChatUsage), String> {
+    run_at(&claude_binary(), request, on_text).await
 }
 
-#[derive(Deserialize, Default)]
-struct CliUsage {
-    #[serde(default)]
-    input_tokens: u64,
-    #[serde(default)]
-    cache_creation_input_tokens: u64,
-    #[serde(default)]
-    cache_read_input_tokens: u64,
-    #[serde(default)]
-    output_tokens: u64,
-    #[serde(default)]
-    server_tool_use: ServerToolUse,
-}
-
-#[derive(Deserialize)]
-struct CliResult {
-    #[serde(default)]
-    result: String,
-    #[serde(default)]
-    is_error: bool,
-    #[serde(default)]
-    duration_ms: u64,
-    #[serde(default)]
-    total_cost_usd: Option<f64>,
-    #[serde(default)]
-    usage: CliUsage,
-    #[serde(default)]
-    fast_mode_state: Option<String>,
-    #[serde(default)]
-    fast_mode_disabled_reason: Option<String>,
-}
-
-/// Read the single JSON object `--output-format json` prints.
-pub fn parse_result(stdout: &str, model: &str) -> Result<(String, ChatUsage), String> {
-    let trimmed = stdout.trim();
-    if trimmed.is_empty() {
-        return Err("Claude returned an empty answer — try again".into());
-    }
-    let parsed: CliResult = serde_json::from_str(trimmed).map_err(|e| {
-        let head: String = trimmed.chars().take(160).collect();
-        format!("unexpected Claude CLI output ({e}): {head}")
-    })?;
-    let answer = parsed.result.trim().to_string();
-    if parsed.is_error {
-        let detail = if answer.is_empty() {
-            "no detail".to_string()
-        } else {
-            answer
-        };
-        return Err(format!("Claude CLI error: {detail}"));
-    }
-    if answer.is_empty() {
-        return Err("Claude returned an empty answer — try again".into());
-    }
-    let u = parsed.usage;
-    let usage = ChatUsage {
-        model: model.to_string(),
-        input_tokens: u.input_tokens,
-        cache_read_tokens: u.cache_read_input_tokens,
-        cache_write_tokens: u.cache_creation_input_tokens,
-        output_tokens: u.output_tokens,
-        context_tokens: u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens,
-        web_searches: u.server_tool_use.web_search_requests,
-        duration_ms: parsed.duration_ms,
-        cost_usd: parsed.total_cost_usd,
-        fast_mode: parsed.fast_mode_state,
-        fast_mode_reason: parsed.fast_mode_disabled_reason,
-    };
-    Ok((answer, usage))
-}
-
-pub async fn run(request: &Request<'_>) -> Result<(String, ChatUsage), String> {
-    run_at(&claude_binary(), request).await
-}
-
-async fn run_at(binary: &Path, request: &Request<'_>) -> Result<(String, ChatUsage), String> {
+async fn run_at(
+    binary: &Path,
+    request: &Request<'_>,
+    on_text: &mut (dyn FnMut(&str) + Send),
+) -> Result<(String, ChatUsage), String> {
     let model = model_for(request.options)?;
     let mut child = Command::new(binary)
         .args(args(request.options, request.system_prompt)?)
+        // A neutral directory: the CLI reads CLAUDE.md files from wherever it
+        // is started, and the app's working directory is whatever launched it.
+        .current_dir(std::env::temp_dir())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| {
             format!(
@@ -259,28 +187,72 @@ async fn run_at(binary: &Path, request: &Request<'_>) -> Result<(String, ChatUsa
         .map_err(|e| format!("close prompt: {e}"))?;
     drop(stdin);
 
-    let output = match tokio::time::timeout(request.timeout, child.wait_with_output()).await {
-        Ok(result) => result.map_err(|e| format!("Claude CLI failed: {e}"))?,
-        Err(_) => {
-            return Err(format!(
-                "Claude did not answer within {}s — try again",
-                request.timeout.as_secs()
-            ))
-        }
-    };
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Claude CLI stdout unavailable".to_string())?;
+    // Drain stderr on its own task so a chatty CLI cannot fill the pipe and
+    // block itself while stdout is being read line by line.
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Claude CLI stderr unavailable".to_string())?;
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        let _ = stderr.read_to_string(&mut buf).await;
+        buf
+    });
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr.trim();
-        let detail = if detail.is_empty() {
-            "no error output".to_string()
-        } else {
-            detail.lines().take(3).collect::<Vec<_>>().join(" ")
+    let outcome =
+        match tokio::time::timeout(request.timeout, read_stream(stdout, &model, on_text)).await {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                let _ = child.kill().await;
+                return Err(format!(
+                    "Claude did not answer within {}s — try again",
+                    request.timeout.as_secs()
+                ));
+            }
         };
-        return Err(format!("Claude CLI error: {detail}"));
-    }
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("Claude CLI failed: {e}"))?;
+    let stderr = stderr_task.await.unwrap_or_default();
 
-    parse_result(&String::from_utf8_lossy(&output.stdout), &model)
+    match outcome {
+        Ok(done) => Ok(done),
+        Err(err) if status.success() => Err(err),
+        Err(_) => {
+            let detail = stderr.trim();
+            let detail = if detail.is_empty() {
+                "no error output".to_string()
+            } else {
+                detail.lines().take(3).collect::<Vec<_>>().join(" ")
+            };
+            Err(format!("Claude CLI error: {detail}"))
+        }
+    }
+}
+
+/// Read stdout line by line until the `result` line (or EOF), streaming text.
+async fn read_stream(
+    stdout: tokio::process::ChildStdout,
+    model: &str,
+    on_text: &mut (dyn FnMut(&str) + Send),
+) -> Result<(String, ChatUsage), String> {
+    let mut lines = BufReader::new(stdout).lines();
+    let mut acc = stream::Accumulator::new(model);
+    while let Some(line) = lines
+        .next_line()
+        .await
+        .map_err(|e| format!("read Claude CLI output: {e}"))?
+    {
+        if let Some(done) = acc.push(&line, on_text) {
+            return done;
+        }
+    }
+    Err(acc.finish())
 }
 
 #[cfg(test)]
@@ -327,13 +299,28 @@ mod tests {
             .collect()
     }
 
+    async fn run_collecting(
+        path: &Path,
+        req: &Request<'_>,
+    ) -> (Result<(String, ChatUsage), String>, Vec<String>) {
+        let mut seen = Vec::new();
+        let result = run_at(path, req, &mut |t| seen.push(t.to_string())).await;
+        (result, seen)
+    }
+
     #[test]
-    fn defaults_are_opus_no_tools_no_effort_flag() {
+    fn defaults_are_opus_streaming_no_tools_no_mcp_no_effort_flag() {
         let a = strings(&args(&ChatOptions::default(), "sys").unwrap());
         let joined = a.join(" ");
         assert!(joined.contains("--model opus"), "{joined}");
-        assert!(joined.contains("--output-format json"), "{joined}");
+        assert!(joined.contains("--output-format stream-json"), "{joined}");
+        assert!(joined.contains("--verbose"), "{joined}");
+        assert!(joined.contains("--include-partial-messages"), "{joined}");
         assert!(joined.contains("--restricted"), "{joined}");
+        assert!(
+            joined.contains(r#"--strict-mcp-config --mcp-config {"mcpServers":{}}"#),
+            "{joined}"
+        );
         assert!(!joined.contains("--effort"), "{joined}");
         assert!(!joined.contains("fastMode"), "{joined}");
         let tools = a.iter().position(|x| x == "--tools").unwrap();
@@ -364,62 +351,45 @@ mod tests {
         assert!(args(&opts(Some(""), Some(" "), false, false), "sys").is_ok());
     }
 
-    #[test]
-    fn the_json_result_yields_the_answer_and_usage() {
-        let json = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":9120,
-            "result":"  Take Chris Olave.  ","total_cost_usd":0.31,
-            "usage":{"input_tokens":12000,"cache_creation_input_tokens":3000,"cache_read_input_tokens":15000,
-                     "output_tokens":80,"server_tool_use":{"web_search_requests":2}},
-            "fast_mode_state":"off","fast_mode_disabled_reason":"extra_usage_disabled"}"#;
-        let (answer, usage) = parse_result(json, "opus").unwrap();
-        assert_eq!(answer, "Take Chris Olave.");
-        assert_eq!(usage.context_tokens, 30000);
-        assert_eq!(usage.output_tokens, 80);
-        assert_eq!(usage.web_searches, 2);
-        assert_eq!(usage.duration_ms, 9120);
-        assert_eq!(usage.cost_usd, Some(0.31));
-        assert_eq!(usage.fast_mode.as_deref(), Some("off"));
-        assert_eq!(
-            usage.fast_mode_reason.as_deref(),
-            Some("extra_usage_disabled")
-        );
-        assert_eq!(usage.model, "opus");
-    }
-
-    #[test]
-    fn an_error_result_or_garbage_is_an_error_not_a_bubble() {
-        let err =
-            parse_result(r#"{"is_error":true,"result":"Not logged in"}"#, "opus").unwrap_err();
-        assert!(err.contains("Not logged in"), "{err}");
-        let err = parse_result("Take Olave.", "opus").unwrap_err();
-        assert!(err.contains("unexpected Claude CLI output"), "{err}");
-        assert!(err.contains("Take Olave."), "{err}");
-        let err = parse_result(r#"{"is_error":false,"result":""}"#, "opus").unwrap_err();
-        assert!(err.contains("empty answer"), "{err}");
-    }
-
     #[tokio::test]
     async fn a_missing_cli_explains_how_to_fix_it() {
         let options = ChatOptions::default();
-        let err = run_at(Path::new("/nonexistent/claude"), &request("hi", &options))
-            .await
-            .unwrap_err();
+        let (result, _) =
+            run_collecting(Path::new("/nonexistent/claude"), &request("hi", &options)).await;
+        let err = result.unwrap_err();
         assert!(err.contains("DRAFT_ASSISTANT_CLAUDE_BIN"), "{err}");
     }
 
     #[tokio::test]
-    async fn the_answer_is_read_from_stdout_and_the_flags_are_passed() {
-        // The stub echoes its own argv as the answer, so the test can see
-        // exactly what the CLI would have received.
+    async fn the_answer_streams_from_stdout_and_the_flags_are_passed() {
+        // The stub streams two chunks, then a result line that echoes its own
+        // argv and working directory, so the test sees exactly what the CLI
+        // would have received.
         let path = stub(
             "ok",
-            "#!/bin/sh\ncat >/dev/null\nprintf '{\"is_error\":false,\"result\":\"args: %s\",\"usage\":{\"input_tokens\":7}}' \"$*\"\n",
+            concat!(
+                "#!/bin/sh\ncat >/dev/null\n",
+                "printf '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Take \"}}}\\n'\n",
+                "printf '{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Olave.\"}}}\\n'\n",
+                // The argv holds JSON of its own; its quotes are dropped so the
+                // echoed line is still one valid JSON object.
+                "printf '{\"type\":\"result\",\"is_error\":false,\"result\":\"args: %s cwd: %s\",\"usage\":{\"input_tokens\":7}}\\n' \"$(printf '%s' \"$*\" | tr -d '\"')\" \"$PWD\"\n",
+            ),
         );
         let options = opts(Some("sonnet"), Some("low"), false, true);
-        let (answer, usage) = run_at(&path, &request("prompt", &options)).await.unwrap();
+        let (result, seen) = run_collecting(&path, &request("prompt", &options)).await;
+        let (answer, usage) = result.unwrap();
+        assert_eq!(seen, vec!["Take ", "Olave."]);
         assert!(answer.contains("--model sonnet"), "{answer}");
         assert!(answer.contains("--tools WebSearch"), "{answer}");
         assert!(answer.contains("--effort low"), "{answer}");
+        let tmp = std::env::temp_dir();
+        let tmp = tmp.canonicalize().unwrap_or(tmp);
+        assert!(
+            answer.contains(&format!("cwd: {}", tmp.display()))
+                || answer.contains(&format!("cwd: {}", std::env::temp_dir().display())),
+            "{answer}"
+        );
         assert_eq!(usage.context_tokens, 7);
         assert_eq!(usage.model, "sonnet");
         std::fs::remove_file(path).unwrap();
@@ -432,10 +402,20 @@ mod tests {
             "#!/bin/sh\ncat >/dev/null\necho 'not logged in' >&2\nexit 1\n",
         );
         let options = ChatOptions::default();
-        let err = run_at(&path, &request("prompt", &options))
-            .await
-            .unwrap_err();
+        let (result, _) = run_collecting(&path, &request("prompt", &options)).await;
+        let err = result.unwrap_err();
         assert!(err.contains("not logged in"), "{err}");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_cli_that_prints_prose_instead_of_json_is_reported_with_its_head() {
+        let path = stub("prose", "#!/bin/sh\ncat >/dev/null\necho 'Take Olave.'\n");
+        let options = ChatOptions::default();
+        let (result, _) = run_collecting(&path, &request("prompt", &options)).await;
+        let err = result.unwrap_err();
+        assert!(err.contains("unexpected Claude CLI output"), "{err}");
+        assert!(err.contains("Take Olave."), "{err}");
         std::fs::remove_file(path).unwrap();
     }
 
@@ -449,7 +429,8 @@ mod tests {
             options: &options,
             timeout: Duration::from_millis(200),
         };
-        let err = run_at(&path, &req).await.unwrap_err();
+        let (result, _) = run_collecting(&path, &req).await;
+        let err = result.unwrap_err();
         assert!(err.contains("did not answer"), "{err}");
         std::fs::remove_file(path).unwrap();
     }

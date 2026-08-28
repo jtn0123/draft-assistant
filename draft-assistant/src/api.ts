@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppConfig,
@@ -36,6 +36,12 @@ interface Api {
    * (`scripts/replay-sleeper.mjs`) without the desktop shell.
    */
   replay: string | null;
+  /**
+   * Browser preview only: a recorded Ask Claude session (`?chat=<url>`, as
+   * written by `dump_state --chat-out`) played back one exchange per
+   * question, so the panel can be seen and tested without the CLI.
+   */
+  chatRecording: string | null;
   addLeague(leagueId: string, force?: boolean): Promise<DraftView>;
   setMyUsername(username: string): Promise<string>;
   getConfig(): Promise<AppConfig>;
@@ -45,7 +51,16 @@ interface Api {
   recordManualPick(playerId: string): Promise<DraftView>;
   undoManualPick(): Promise<DraftView>;
   exportState(): Promise<string>;
-  chat(question: string, history: ChatTurn[], options: ChatOptions): Promise<ChatReply>;
+  /**
+   * Ask Claude. `onText` receives each piece of the answer as it is written;
+   * the resolved reply carries the whole answer.
+   */
+  chat(
+    question: string,
+    history: ChatTurn[],
+    options: ChatOptions,
+    onText?: (text: string) => void,
+  ): Promise<ChatReply>;
   chatCompact(history: ChatTurn[], options: ChatOptions): Promise<ChatReply>;
   startPolling(intervalSecs?: number): Promise<void>;
   stopPolling(): Promise<void>;
@@ -64,6 +79,7 @@ interface Api {
 const tauriApi: Api = {
   preview: false,
   replay: null,
+  chatRecording: null,
   addLeague: (leagueId, force = false) =>
     invokeView("add_league", { leagueId, force }),
   setMyUsername: (username) => invoke<string>("set_my_username", { username }),
@@ -75,8 +91,11 @@ const tauriApi: Api = {
     invokeView("record_manual_pick", { playerId }),
   undoManualPick: () => invokeView("undo_manual_pick"),
   exportState: () => invoke<string>("export_state"),
-  chat: (question, history, options) =>
-    invoke<ChatReply>("chat", { question, history, options }),
+  chat: (question, history, options, onText) => {
+    const channel = new Channel<string>();
+    channel.onmessage = (text) => onText?.(text);
+    return invoke<ChatReply>("chat", { question, history, options, onText: channel });
+  },
   chatCompact: (history, options) =>
     invoke<ChatReply>("chat_compact", { history, options }),
   startPolling: (intervalSecs = 3) =>
@@ -101,8 +120,43 @@ const tauriApi: Api = {
  */
 const REPLAY_POLL_MS = 3000;
 
+/** How a recorded answer is paced when played back: word by word, briskly. */
+const RECORDING_CHUNK_MS = 12;
+
+interface RecordedExchange {
+  question: string;
+  answer: string;
+  usage: ChatReply["usage"];
+  as_of: ChatReply["as_of"];
+}
+
 function browserApi(): Api {
-  const replay = new URLSearchParams(window.location.search).get("replay");
+  const params = new URLSearchParams(window.location.search);
+  const replay = params.get("replay");
+  const chatRecording = params.get("chat");
+  let recording: RecordedExchange[] | null = null;
+  let played = 0;
+  // Play back the next recorded exchange, streaming its answer so the panel
+  // behaves as it does against the real CLI.
+  const playRecording = async (onText?: (text: string) => void): Promise<ChatReply> => {
+    if (chatRecording === null) {
+      throw new Error("browser preview cannot reach the Claude CLI — run the desktop app");
+    }
+    if (recording === null) {
+      const resp = await fetch(chatRecording, { cache: "no-store" });
+      if (!resp.ok) throw new Error(`chat recording ${chatRecording} returned ${resp.status}`);
+      recording = (await resp.json()) as RecordedExchange[];
+    }
+    const next = recording[played];
+    if (!next) throw new Error("the recorded session has no more answers — start a new chat");
+    played += 1;
+    const words = next.answer.split(/(?<=\s)/);
+    for (const word of words) {
+      await new Promise((resolve) => window.setTimeout(resolve, RECORDING_CHUNK_MS));
+      onText?.(word);
+    }
+    return { answer: next.answer, usage: next.usage, as_of: next.as_of };
+  };
   let cached: DraftView | null = null;
   const source = replay ?? "/dev-fixture.json";
   const load = async (): Promise<DraftView> => {
@@ -159,6 +213,7 @@ function browserApi(): Api {
   return {
     preview: true,
     replay,
+    chatRecording,
     addLeague: fixture,
     setMyUsername: async (u) => u,
     getConfig: async () => {
@@ -198,9 +253,7 @@ function browserApi(): Api {
     exportState: async () => {
       throw new Error("browser preview is read-only — run the desktop app to export state");
     },
-    chat: async () => {
-      throw new Error("browser preview cannot reach the Claude CLI — run the desktop app");
-    },
+    chat: (_question, _history, _options, onText) => playRecording(onText),
     chatCompact: async () => {
       throw new Error("browser preview cannot reach the Claude CLI — run the desktop app");
     },
