@@ -62,7 +62,7 @@ pub fn slot_for_pick(pick_no: u32, teams: u32, order: DraftOrder) -> u32 {
     if order.linear {
         return idx + 1;
     }
-    let mut forward = round % 2 == 0;
+    let mut forward = round.is_multiple_of(2);
     // Third-round reversal: from that round on, every direction is flipped
     // relative to a plain snake, so the reversal round repeats the previous
     // round's direction and the snake resumes from there.
@@ -293,7 +293,7 @@ mod tests {
         .iter()
         .map(|s| s.to_string())
         .collect();
-        let players = vec![
+        let players = [
             RosterEntry {
                 player_id: "a".into(),
                 name: "A".into(),

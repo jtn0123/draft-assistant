@@ -27,10 +27,14 @@ jobs:
           bun-version: latest
 
       - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
-
-      - name: Use stable Rust
-        run: rustup override set stable
+        # Version and components come from rust-toolchain.toml at the repo root,
+        # so CI and a laptop run the same compiler and the same clippy lint set.
+        # `rustup override set stable` used to defeat that: the runner moved to
+        # 1.98 while local was 1.88, and three new lints failed a green branch.
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' ../rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component rustfmt,clippy
+          rustup show active-toolchain
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
