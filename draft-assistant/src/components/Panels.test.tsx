@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fixtureJson from "../../public/dev-fixture.json";
 import type { DraftView } from "../types";
@@ -32,9 +32,9 @@ describe("ClockBanner pick clock", () => {
     const v = view();
     v.draft.status = "pre_draft";
     v.draft.total_picks_made = 0;
-    v.draft.start_time = new Date("2026-08-28T17:00:00-07:00").getTime();
+    v.draft.start_time = new Date("2026-08-28T17:30:00-07:00").getTime();
     render(<ClockBanner view={v} />);
-    expect(screen.getByText(/Draft has not started/)).toHaveTextContent(/starts .*5:00/);
+    expect(screen.getByText(/Draft has not started/)).toHaveTextContent(/starts .*5:30/);
   });
 
   it("shows no clock when the draft has none", () => {
@@ -43,6 +43,16 @@ describe("ClockBanner pick clock", () => {
     v.draft.pick_deadline = null;
     render(<ClockBanner view={v} />);
     expect(screen.queryByLabelText("Pick clock")).not.toBeInTheDocument();
+  });
+});
+
+describe("SidePanel structure", () => {
+  // Dogfood ISSUE-010: the document jumped from h1 straight to h3.
+  it("uses second-level headings under the page title", () => {
+    render(<SidePanel view={view()} />);
+    for (const name of ["My roster", "Tier alerts", "Recent picks"]) {
+      expect(screen.getByRole("heading", { level: 2, name })).toBeInTheDocument();
+    }
   });
 });
 
@@ -62,13 +72,61 @@ describe("SidePanel recent picks", () => {
 });
 
 describe("ClockBanner accessibility", () => {
-  it("is a polite live region so 'on the clock' is announced", () => {
+  it("announces the draft status politely", () => {
     const v = view();
     v.draft.is_my_pick = true;
-    const { container } = render(<ClockBanner view={v} />);
-    const banner = container.querySelector(".clock");
-    expect(banner).toHaveAttribute("role", "status");
-    expect(banner).toHaveAttribute("aria-live", "polite");
-    expect(screen.getByRole("status")).toHaveTextContent("YOU ARE ON THE CLOCK");
+    v.draft.pick_deadline = null;
+    render(<ClockBanner view={v} />);
+    const live = screen.getByRole("status");
+    expect(live).toHaveAttribute("aria-live", "polite");
+    expect(live).toHaveTextContent("YOU ARE ON THE CLOCK");
+  });
+
+  // Dogfood ISSUE-006: the countdown sat inside the live region, so a screen
+  // reader re-read the whole banner once a second for the whole draft and
+  // buried the one announcement that matters.
+  it("keeps the ticking countdown out of the live region", () => {
+    vi.useFakeTimers();
+    const v = view();
+    v.draft.status = "drafting";
+    v.draft.is_my_pick = true;
+    v.draft.pick_deadline = Date.now() + 47_000;
+    render(<ClockBanner view={v} />);
+
+    const live = screen.getByRole("status");
+    expect(within(live).queryByLabelText("Pick clock")).not.toBeInTheDocument();
+    expect(live).not.toHaveTextContent("0:47");
+    // …and the clock is still there to be read on demand.
+    expect(screen.getByLabelText("Pick clock")).toHaveTextContent("0:47");
+
+    const announced = live.textContent;
+    act(() => vi.advanceTimersByTime(3_000));
+    expect(screen.getByLabelText("Pick clock")).toHaveTextContent("0:44");
+    expect(live.textContent).toBe(announced);
+    vi.useRealTimers();
+  });
+});
+
+describe("ClockBanner start time", () => {
+  // Dogfood ISSUE-012: a start time that had already passed still read
+  // "starts 5:00 PM", which on draft day is exactly when it misleads.
+  it("says the draft is late once its start time has passed", () => {
+    const v = view();
+    v.draft.status = "pre_draft";
+    v.draft.total_picks_made = 0;
+    v.draft.start_time = Date.now() - 20 * 60_000;
+    render(<ClockBanner view={v} />);
+    const status = screen.getByText(/Draft has not started/);
+    expect(status).toHaveTextContent(/scheduled/i);
+    expect(status).not.toHaveTextContent(/starts /);
+  });
+
+  it("still shows a future start time as a start time", () => {
+    const v = view();
+    v.draft.status = "pre_draft";
+    v.draft.total_picks_made = 0;
+    v.draft.start_time = Date.now() + 30 * 60_000;
+    render(<ClockBanner view={v} />);
+    expect(screen.getByText(/Draft has not started/)).toHaveTextContent(/starts /);
   });
 });

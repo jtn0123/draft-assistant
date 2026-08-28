@@ -84,7 +84,7 @@ main {
   padding: 12px 14px;
 }
 
-.side h3 {
+.side h2 {
   margin: 0 0 10px;
   font-size: 13px;
   text-transform: uppercase;
@@ -348,3 +348,17 @@ dialog.modal::backdrop {
   font-size: 13px;
 }
 
+
+/* Visible to assistive technology only: table caption and the action column's
+   header, which would otherwise be an unnamed empty cell. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

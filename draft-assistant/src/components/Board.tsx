@@ -142,6 +142,9 @@ export function Board({
         </span>
       </div>
       <table>
+        <caption className="sr-only">
+          Available players, sorted by {COLUMNS.find((c) => c.key === sort.key)?.label ?? "rank"}
+        </caption>
         <thead>
           <tr>
             {COLUMNS.map((c) => {
@@ -149,6 +152,7 @@ export function Board({
               return (
                 <th
                   key={c.key}
+                  scope="col"
                   className={c.left ? "left" : undefined}
                   aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
                 >
@@ -163,7 +167,9 @@ export function Board({
                 </th>
               );
             })}
-            <th></th>
+            <th scope="col">
+              <span className="sr-only">Action</span>
+            </th>
           </tr>
         </thead>
         <tbody>

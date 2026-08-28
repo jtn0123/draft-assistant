@@ -81,8 +81,11 @@ function formatCountdown(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-function formatStart(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+function formatStart(ms: number, now: number): string {
+  const at = new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  // Sleeper leaves a draft in pre_draft past its scheduled time until the
+  // commissioner starts it, and "starts 5:00 PM" at 5:20 reads like a bug.
+  return ms <= now ? `scheduled for ${at} — waiting on the commissioner` : `starts ${at}`;
 }
 
 export function ClockBanner({ view }: { view: DraftView }) {
@@ -90,10 +93,10 @@ export function ClockBanner({ view }: { view: DraftView }) {
   const preDraft = d.status === "pre_draft" && d.total_picks_made === 0;
   const complete = d.status === "complete";
   const cls = d.is_my_pick ? "clock mine" : "clock";
-  const now = useNow(d.pick_deadline !== null);
+  const now = useNow(d.pick_deadline !== null || preDraft);
   const remaining = d.pick_deadline === null ? null : d.pick_deadline - now;
   return (
-    <div className={cls} role="status" aria-live="polite">
+    <div className={cls}>
       <div className="clock-cell">
         <span className="clock-label">Round</span>
         <span className="clock-big">{d.current_round}</span>
@@ -102,13 +105,16 @@ export function ClockBanner({ view }: { view: DraftView }) {
         <span className="clock-label">Pick</span>
         <span className="clock-big">{d.current_pick}</span>
       </div>
-      <div className="clock-main">
+      {/* Only the status text is a live region: the countdown below changes
+          every second, and inside here a screen reader would re-read the whole
+          banner on every tick. */}
+      <div className="clock-main" role="status" aria-live="polite">
         {complete ? (
           <span className="clock-status">Draft complete</span>
         ) : preDraft ? (
           <span className="clock-status">
             Draft has not started
-            {d.start_time !== null && ` · starts ${formatStart(d.start_time)}`}
+            {d.start_time !== null && ` · ${formatStart(d.start_time, now)}`}
           </span>
         ) : d.is_my_pick ? (
           <span className="clock-status you">YOU ARE ON THE CLOCK</span>
@@ -181,7 +187,7 @@ export function SidePanel({ view }: { view: DraftView }) {
   return (
     <aside className="side">
       <section>
-        <h3>My roster</h3>
+        <h2>My roster</h2>
         {roster === null ? (
           <p className="muted">Set your Sleeper username to track your team.</p>
         ) : roster.players.length === 0 ? (
@@ -206,7 +212,7 @@ export function SidePanel({ view }: { view: DraftView }) {
         )}
       </section>
       <section>
-        <h3>Tier alerts</h3>
+        <h2>Tier alerts</h2>
         <ul className="alerts">
           {view.tier_alerts.map((a) => (
             <li key={a.position} className={a.players_left <= 2 ? "urgent" : ""}>
@@ -223,7 +229,7 @@ export function SidePanel({ view }: { view: DraftView }) {
         )}
       </section>
       <section>
-        <h3>Recent picks</h3>
+        <h2>Recent picks</h2>
         <ul className="recent">
           {view.recent_picks.map((p) => (
             <li key={p.pick_no}>

@@ -37,6 +37,19 @@ const rowNames = () =>
     .map((row) => within(row).getAllByRole("cell")[1].textContent);
 
 describe("Board", () => {
+  // Dogfood ISSUE-010: 11 columns and 200 rows with no way for a screen
+  // reader to tie "T4" to "Tier".
+  it("names its columns for assistive technology", () => {
+    render(
+      <Board players={[player("a", "Alpha", "WR")]} positions={["WR"]} onDraft={vi.fn()} />,
+    );
+    const table = screen.getByRole("table");
+    expect(table).toHaveAccessibleName(/available players/i);
+    for (const header of screen.getAllByRole("columnheader")) {
+      expect(header).toHaveAttribute("scope", "col");
+    }
+  });
+
   // Dogfood ISSUE-011.
   it("offers no draft action once the draft is complete", () => {
     render(
