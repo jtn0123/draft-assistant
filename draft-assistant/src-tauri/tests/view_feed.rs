@@ -173,6 +173,46 @@ pub mod clock_tests {
         assert_eq!(view.draft.pick_deadline, Some(1_700_000_060_000));
     }
 
+    /// The 2026 league entered its keepers at 10:35 on draft morning, which
+    /// stamped `last_picked` six hours before the 17:00 start. Preferring it
+    /// would have opened the draft with a clock that expired before anyone
+    /// sat down.
+    #[test]
+    fn a_last_picked_older_than_the_start_time_does_not_win_the_clock() {
+        let start = 1_700_000_000_000i64;
+        let keepers_entered = start - 6 * 60 * 60 * 1000;
+        let view = build_view(
+            &loaded(
+                serde_json::json!({
+                    "draft_id": "d1", "status": "drafting", "type": "snake",
+                    "settings": {"teams": 2, "rounds": 2, "pick_timer": 90},
+                    "start_time": start, "last_picked": keepers_entered
+                }),
+                vec![pick(4, "keeper")],
+            ),
+            &AppConfig::default(),
+        );
+        assert_eq!(
+            view.draft.pick_deadline,
+            Some(start + 90_000),
+            "the clock runs from the start, not from this morning"
+        );
+
+        // Once a real pick lands the stamp is newer, and it wins again.
+        let after = build_view(
+            &loaded(
+                serde_json::json!({
+                    "draft_id": "d1", "status": "drafting", "type": "snake",
+                    "settings": {"teams": 2, "rounds": 2, "pick_timer": 90},
+                    "start_time": start, "last_picked": start + 30_000
+                }),
+                vec![pick(1, "a")],
+            ),
+            &AppConfig::default(),
+        );
+        assert_eq!(after.draft.pick_deadline, Some(start + 120_000));
+    }
+
     #[test]
     fn no_deadline_before_the_draft_after_it_or_without_a_timer() {
         let pre = build_view(

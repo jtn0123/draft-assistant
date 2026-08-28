@@ -379,13 +379,21 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         )
     };
 
-    // The clock on the current pick: Sleeper stamps `last_picked` on every
-    // pick; the first pick's clock runs from the scheduled start.
+    // The clock on the current pick runs from whichever happened later: the
+    // previous pick, or the draft starting.
+    //
+    // Not `last_picked` alone. Sleeper stamps it when *keepers* are entered
+    // too — this league's keepers went in at 10:35 on draft morning, six
+    // hours before the 17:00 start — so preferring it would open the draft
+    // with a clock that expired before anyone sat down.
     let pick_deadline = match draft.settings.pick_timer {
-        Some(timer) if timer > 0 && draft.status == "drafting" && !draft_over => draft
-            .last_picked
-            .or(draft.start_time)
-            .map(|since| since + i64::from(timer) * 1000),
+        Some(timer) if timer > 0 && draft.status == "drafting" && !draft_over => {
+            match (draft.last_picked, draft.start_time) {
+                (Some(picked), Some(start)) => Some(picked.max(start)),
+                (picked, start) => picked.or(start),
+            }
+            .map(|since| since + i64::from(timer) * 1000)
+        }
         _ => None,
     };
 
