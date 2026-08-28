@@ -36,16 +36,6 @@ fn parse_args() -> (String, Option<String>, Option<String>, u32) {
     )
 }
 
-async fn lookup_user(username: &str) -> Option<String> {
-    #[derive(serde::Deserialize)]
-    struct User {
-        user_id: String,
-    }
-    let url = format!("https://api.sleeper.app/v1/user/{username}");
-    let user: Option<User> = reqwest::get(&url).await.ok()?.json().await.ok()?;
-    user.map(|u| u.user_id)
-}
-
 #[tokio::main]
 async fn main() {
     let (league_id, username, out_path, simulate) = parse_args();
@@ -59,9 +49,10 @@ async fn main() {
 
     let mut config = AppConfig::default();
     if let Some(username) = &username {
-        config.my_user_id = lookup_user(username).await;
-        if config.my_user_id.is_none() {
-            eprintln!("warning: Sleeper user '{username}' not found");
+        match engine.client.user_id(username).await {
+            Ok(Some(user_id)) => config.my_user_id = Some(user_id),
+            Ok(None) => eprintln!("warning: Sleeper user '{username}' not found"),
+            Err(error) => eprintln!("warning: could not look up '{username}': {error}"),
         }
     }
 

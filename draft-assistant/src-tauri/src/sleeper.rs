@@ -186,11 +186,25 @@ impl SleeperClient {
     }
 
     pub fn with_base_url(base: &str) -> Self {
+        Self::with_base_url_and_timeouts(
+            base,
+            std::time::Duration::from_secs(3),
+            std::time::Duration::from_secs(8),
+        )
+    }
+
+    /// Every request gives up after `connect` to connect and `total` overall:
+    /// a stalled socket must fail loudly, never hang a screen.
+    pub fn with_base_url_and_timeouts(
+        base: &str,
+        connect: std::time::Duration,
+        total: std::time::Duration,
+    ) -> Self {
         let http = reqwest::Client::builder()
             .user_agent("draft-assistant/0.1 (local second-screen tool)")
             .gzip(true)
-            .connect_timeout(std::time::Duration::from_secs(3))
-            .timeout(std::time::Duration::from_secs(8))
+            .connect_timeout(connect)
+            .timeout(total)
             .build()
             .expect("failed to build http client");
         Self {
@@ -209,13 +223,23 @@ impl SleeperClient {
             .get(url)
             .send()
             .await
-            .map_err(|e| format!("request failed: {url}: {e}"))?;
+            .map_err(|e| format!("request failed: {url}: {}", describe(&e)))?;
         if !resp.status().is_success() {
             return Err(format!("HTTP {} for {url}", resp.status()));
         }
         resp.json::<T>()
             .await
             .map_err(|e| format!("bad JSON from {url}: {e}"))
+    }
+
+    /// Resolve a Sleeper username to its user id; `None` when no such user.
+    pub async fn user_id(&self, username: &str) -> Result<Option<String>, String> {
+        #[derive(Deserialize)]
+        struct User {
+            user_id: String,
+        }
+        let user: Option<User> = self.get_json(&self.v1(&format!("user/{username}"))).await?;
+        Ok(user.map(|u| u.user_id))
     }
 
     pub async fn league(&self, league_id: &str) -> Result<League, String> {
@@ -275,6 +299,23 @@ impl SleeperClient {
     }
 }
 
+/// reqwest's Display stops at "error sending request for url (…)"; the cause
+/// — "operation timed out", "connection refused" — sits in the source chain,
+/// and that is the part a person reading the sync pill or Setup needs.
+fn describe(error: &reqwest::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        let cause_text = cause.to_string();
+        if !text.contains(&cause_text) {
+            text.push_str(": ");
+            text.push_str(&cause_text);
+        }
+        source = cause.source();
+    }
+    text
+}
+
 /// Pull the Sleeper ID out of whatever the user pasted — a bare ID or a full
 /// URL like https://sleeper.com/draft/nfl/139888...?ftue=commish. Sleeper IDs
 /// are 18–19 digit snowflakes; anything shorter is handed back untouched so
@@ -326,6 +367,44 @@ mod extract_id_tests {
     #[test]
     fn a_short_string_is_returned_trimmed_for_the_api_to_reject() {
         assert_eq!(extract_id(" abc123 "), "abc123");
+    }
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::SleeperClient;
+    use std::time::{Duration, Instant};
+
+    // A username lookup used to go through `reqwest::get`, whose default
+    // client never times out — a stalled connection left Setup on "Looking up
+    // your Sleeper account…" forever. Every request must give up.
+    #[tokio::test]
+    async fn a_username_lookup_against_a_silent_server_fails_within_the_timeout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Accept connections and hold them open without ever answering.
+        let held = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = held.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                sink.lock().unwrap().push(stream);
+            }
+        });
+        let client = SleeperClient::with_base_url_and_timeouts(
+            &format!("http://{addr}"),
+            Duration::from_millis(300),
+            Duration::from_millis(300),
+        );
+        let started = Instant::now();
+        let result = tokio::time::timeout(Duration::from_secs(2), client.user_id("mcsleeper26"))
+            .await
+            .expect("the lookup hung past 2s: no request timeout is applied");
+        let error = result.expect_err("a silent server must be an error");
+        assert!(
+            error.contains("timed out") || error.contains("timeout"),
+            "unexpected error text: {error}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }
 

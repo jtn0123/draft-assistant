@@ -57,18 +57,16 @@ async fn add_league(
 /// Identify the user by Sleeper username so "my team" resolves per league.
 #[tauri::command]
 async fn set_my_username(state: State<'_, AppState>, username: String) -> Result<String, String> {
-    #[derive(serde::Deserialize)]
-    struct User {
-        user_id: String,
-    }
-    let url = format!("https://api.sleeper.app/v1/user/{username}");
-    let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-    let user: Option<User> = resp.json().await.map_err(|e| e.to_string())?;
-    let user = user.ok_or_else(|| format!("Sleeper user '{username}' not found"))?;
+    let user_id = state
+        .engine
+        .client
+        .user_id(&username)
+        .await?
+        .ok_or_else(|| format!("Sleeper user '{username}' not found"))?;
     let mut config = state.config.lock().await;
-    config.my_user_id = Some(user.user_id.clone());
+    config.my_user_id = Some(user_id.clone());
     state.engine.save_config(&config)?;
-    Ok(user.user_id)
+    Ok(user_id)
 }
 
 #[tauri::command]
