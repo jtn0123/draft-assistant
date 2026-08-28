@@ -277,6 +277,31 @@ likely to bite on draft night.
 Two keystrokes worth remembering: **`/`** jumps to the player search, **Esc**
 closes the confirm dialog or the chat panel.
 
+## The log
+
+The app writes one line per interesting event to
+`~/Library/Logs/com.justin.draft-assistant/draft-assistant.log` (Console.app
+finds it under that name; `dump_state` writes one beside its cache dir).
+It rolls at 4 MB, keeping one previous file as `draft-assistant.log.1`.
+
+```
+23:24:21Z 1787959461 INFO manual pick: 9221 at pick 1 (slot 1)
+23:24:25Z 1787959465 INFO undo manual pick 9221 at 1
+```
+
+The clock is UTC (marked `Z`) and the number beside it is epoch seconds —
+the same stamp `data_health` carries in an exported state dump, which is how
+you line the two up. What gets a line:
+
+| | |
+|---|---|
+| `INFO` | launch and data dir · `add_league` and what loaded (board size, pick count, warning count) · every cache read (`fresh (1214s old)` / `expired … refetching` / `absent`) and every cache write with its size · poll loop start and stop · **every feed change** with `seq`, pick count and the pick on the clock · manual picks and undos · chat questions and, on the way back, duration, context tokens and cost · a poll recovering after failures |
+| `WARN` | every load, refresh and cache warning the banners show · poll failures with the consecutive count · a manual pick or undo that could not be saved (and was rolled back) · chat failures with how long they took · a `draft-updated` or `poll-health` event the window did not accept · streamed chat text that could not reach the panel |
+
+The two `WARN` lines at the end of that list are the ones with no other
+symptom: a dropped event means a board frozen on a stale pick, and a closed
+channel means an answer that is written but never appears.
+
 ## Draft-day troubleshooting
 
 Every failure the app can detect is shown on screen. This is what each one
@@ -309,6 +334,7 @@ fade from the top-right corner.
 | Ask Claude `Claude CLI error: …` | The CLI ran and failed — usually not logged in. | Run `claude` in a terminal and complete the login. |
 | Ask Claude `Claude did not answer within 90s` (150 s with web search, 180 s for Compact) / `returned an empty answer` | Slow or hung model call. | Ask again — lower the thinking effort or switch to Sonnet if it keeps happening — or **Cancel** and carry on; the board never waits on the chat. |
 | Ask Claude `unexpected Claude CLI output: …` / `Claude stopped before finishing` | The CLI printed something other than its streamed JSON, or ended without a result — usually a CLI update changed the format, or the process was killed. | Run `claude --version`; ask again. Whatever had streamed is kept. |
+| Anything unexplained after the fact | Read `~/Library/Logs/com.justin.draft-assistant/draft-assistant.log` — it has every feed change with its pick number, every poll failure, and every chat call with cost. |
 | Ask Claude alert `Could not save this chat: …` | The session file could not be written (disk space, permissions, a data dir that vanished). The answer is still on screen; it is just not on disk. | Free disk space or fix permissions; the next answer retries the save. |
 | Ask Claude note `Session budget of $5.00 reached` | The session has cost what the budget allows. | Raise **Session budget** in Settings (0 = no limit) or start a **New chat**. |
 | Ask Claude `unknown model '…'` / `unknown effort '…'` | `DRAFT_ASSISTANT_CLAUDE_MODEL` names something the panel does not know. | Use `opus`, `sonnet`, `fable`, or `haiku`, or unset it. |

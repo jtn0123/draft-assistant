@@ -28,15 +28,25 @@ impl Engine {
         self.cache_path(&format!("{name}.{}.{seq}.tmp", std::process::id()))
     }
 
+    /// A cache read that respects the TTL. Logged either way: "why did it
+    /// re-download 20 MB on the venue wifi" is a question with an answer.
     pub(crate) fn read_cache<T: serde::de::DeserializeOwned>(
         &self,
         name: &str,
         ttl: u64,
     ) -> Option<(u64, T)> {
-        let (fetched_at, data) = self.read_cache_any(name)?;
-        if now_secs().saturating_sub(fetched_at) > ttl {
+        let Some((fetched_at, data)) = self.read_cache_any(name) else {
+            crate::log::info(format!("cache {name}: absent, fetching"));
+            return None;
+        };
+        let age = now_secs().saturating_sub(fetched_at);
+        if age > ttl {
+            crate::log::info(format!(
+                "cache {name}: expired ({age}s old, ttl {ttl}s), refetching"
+            ));
             return None;
         }
+        crate::log::info(format!("cache {name}: fresh ({age}s old)"));
         Some((fetched_at, data))
     }
 
@@ -70,9 +80,11 @@ impl Engine {
         let fetched_at = now_secs();
         let env = Cached { fetched_at, data };
         let json = serde_json::to_string(&env).map_err(|e| format!("serialize {name}: {e}"))?;
+        let bytes = json.len();
         let tmp = self.tmp_path(name);
         std::fs::write(&tmp, json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
         std::fs::rename(&tmp, self.cache_path(name)).map_err(|e| format!("replace {name}: {e}"))?;
+        crate::log::info(format!("cache {name}: wrote {bytes} bytes"));
         Ok(fetched_at)
     }
 

@@ -124,6 +124,9 @@ async fn main() {
     let data_dir = std::env::var_os("DRAFT_ASSISTANT_DATA_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::temp_dir().join("draft-assistant-cli"));
+    // The CLI already talks on stderr; this also leaves a file behind next
+    // to the caches, so a scripted run can be read after the fact.
+    draft_assistant_lib::log::init(&data_dir);
     let engine = match Engine::new(data_dir) {
         Ok(engine) => engine,
         Err(e) => {

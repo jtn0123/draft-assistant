@@ -7,6 +7,7 @@
 
 use crate::chat::{self, ChatOptions, ChatReply, ChatSession, ChatTurn, SessionSummary};
 use crate::engine::{self, AppConfig, Engine, LoadedLeague, StoredLeague};
+use crate::log;
 use crate::sleeper::extract_id;
 use crate::view::{self, build_view, DraftView, PollHealth};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -56,7 +57,22 @@ impl AppCore {
     /// Also accepts a bare draft ID (mock drafts) or a pasted sleeper.com URL.
     pub async fn add_league(&self, league_id: &str, force: bool) -> Result<DraftView, String> {
         let league_id = extract_id(league_id);
-        let new_loaded = self.engine.load_any(&league_id, force).await?;
+        log::info(format!("add_league {league_id} force={force}"));
+        let new_loaded = self
+            .engine
+            .load_any(&league_id, force)
+            .await
+            .inspect_err(|error| {
+                log::warn(format!("add_league {league_id} failed: {error}"));
+            })?;
+        log::info(format!(
+            "loaded '{}': {} on the board, {} api picks, {} warnings",
+            new_loaded.league.name,
+            new_loaded.board.len(),
+            new_loaded.api_picks.len(),
+            new_loaded.warnings.len()
+        ));
+        log::warnings("load", &new_loaded.warnings);
         let mut config = self.config.lock().await;
         if !config.leagues.iter().any(|l| l.league_id == league_id) {
             config.leagues.push(StoredLeague {
@@ -125,6 +141,11 @@ impl AppCore {
         let loaded = loaded.as_mut().ok_or("no league loaded")?;
         loaded.api_picks = picks;
         note_keepers(loaded);
+        log::info(format!(
+            "refresh_picks: {} picks, status {}",
+            loaded.api_picks.len(),
+            loaded.draft.status
+        ));
         if engine::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
             self.engine
                 .save_manual_picks(&draft_id, &loaded.manual_picks)?;
@@ -146,7 +167,15 @@ impl AppCore {
             let config = self.config.lock().await;
             config.active_league_id.clone().ok_or("no active league")?
         };
-        let new_loaded = self.engine.load_any(&league_id, true).await?;
+        log::info(format!("refresh_data {league_id} (forced refetch)"));
+        let new_loaded = self
+            .engine
+            .load_any(&league_id, true)
+            .await
+            .inspect_err(|error| {
+                log::warn(format!("refresh_data failed: {error}"));
+            })?;
+        log::warnings("refresh_data", &new_loaded.warnings);
         let config = self.config.lock().await.clone();
         let view = build_view(&new_loaded, &config);
         *self.loaded.lock().await = Some(new_loaded);
@@ -160,11 +189,20 @@ impl AppCore {
     pub async fn record_manual_pick(&self, player_id: String) -> Result<DraftView, String> {
         let mut loaded = self.loaded.lock().await;
         let loaded = loaded.as_mut().ok_or("no league loaded")?;
-        crate::manual::apply_manual_pick(loaded, player_id)?;
+        crate::manual::apply_manual_pick(loaded, player_id.clone()).inspect_err(|error| {
+            log::warn(format!("manual pick {player_id} refused: {error}"));
+        })?;
+        if let Some(added) = loaded.manual_picks.last() {
+            log::info(format!(
+                "manual pick: {player_id} at pick {} (slot {})",
+                added.pick_no, added.draft_slot
+            ));
+        }
         if let Err(error) = self
             .engine
             .save_manual_picks(&loaded.draft.draft_id, &loaded.manual_picks)
         {
+            log::warn(format!("manual pick not saved, rolled back: {error}"));
             loaded.manual_picks.pop();
             return Err(error);
         }
@@ -175,11 +213,18 @@ impl AppCore {
     pub async fn undo_manual_pick(&self) -> Result<DraftView, String> {
         let mut loaded = self.loaded.lock().await;
         let loaded = loaded.as_mut().ok_or("no league loaded")?;
-        let removed = crate::manual::undo_manual_pick(loaded)?;
+        let removed = crate::manual::undo_manual_pick(loaded).inspect_err(|error| {
+            log::warn(format!("undo refused: {error}"));
+        })?;
+        log::info(format!(
+            "undo manual pick {} at {}",
+            removed.player_id, removed.pick_no
+        ));
         if let Err(error) = self
             .engine
             .save_manual_picks(&loaded.draft.draft_id, &loaded.manual_picks)
         {
+            log::warn(format!("undo not saved, restored: {error}"));
             loaded.manual_picks.push(removed);
             return Err(error);
         }
@@ -207,7 +252,29 @@ impl AppCore {
         on_text: &mut (dyn FnMut(&str) + Send),
     ) -> Result<ChatReply, String> {
         let view = self.get_state().await?;
-        chat::ask(&view, question, history, options, on_text).await
+        log::info(format!(
+            "chat ask: {} chars, {} prior turns, model {}, pick {}",
+            question.len(),
+            history.len(),
+            options.model.as_deref().unwrap_or("default"),
+            view.draft.current_pick
+        ));
+        let started = std::time::Instant::now();
+        let reply = chat::ask(&view, question, history, options, on_text).await;
+        match &reply {
+            Ok(reply) => log::info(format!(
+                "chat answered in {:?}: {} chars, {} context tokens, ${:.2}",
+                started.elapsed(),
+                reply.answer.len(),
+                reply.usage.context_tokens,
+                reply.usage.cost_usd.unwrap_or(0.0)
+            )),
+            Err(error) => log::warn(format!(
+                "chat failed after {:?}: {error}",
+                started.elapsed()
+            )),
+        }
+        reply
     }
 
     pub async fn compact(
@@ -277,17 +344,42 @@ impl AppCore {
         let changed = *last_fingerprint != Some(fingerprint) || manual_changed;
         *last_fingerprint = Some(fingerprint);
         if errors.is_empty() {
+            // Only worth a line when it is news: a poll recovering after a
+            // failure. Every quiet poll would be three lines a minute.
+            if loaded.poll_consecutive_failures > 0 {
+                log::info(format!(
+                    "poll recovered after {} failures",
+                    loaded.poll_consecutive_failures
+                ));
+            }
             loaded.poll_last_success_at = Some(engine::now_secs());
             loaded.poll_consecutive_failures = 0;
             loaded.poll_last_error = None;
         } else {
             loaded.poll_consecutive_failures = loaded.poll_consecutive_failures.saturating_add(1);
             loaded.poll_last_error = Some(errors.join("; "));
+            log::warn(format!(
+                "poll failed ({} in a row): {}",
+                loaded.poll_consecutive_failures,
+                errors.join("; ")
+            ));
         }
         let health = view::poll_health(loaded);
         let view = if changed {
             let config = self.config.lock().await;
-            Some(build_view(loaded, &config))
+            let view = build_view(loaded, &config);
+            log::info(format!(
+                "feed changed: seq {}, {} picks, on pick {}{}",
+                view.seq,
+                view.draft.total_picks_made,
+                view.draft.current_pick,
+                if manual_changed {
+                    ", manual picks reconciled"
+                } else {
+                    ""
+                }
+            ));
+            Some(view)
         } else {
             None
         };
@@ -321,6 +413,9 @@ impl AppCore {
         emit: &(dyn Fn(PollEvent) + Send + Sync),
     ) {
         let mut last_fingerprint: Option<u64> = None;
+        log::info(format!(
+            "poll loop {generation} started at {interval:?} intervals"
+        ));
         while self.poll_active(generation) {
             if let Some((health, view)) = self.poll_once(&mut last_fingerprint).await {
                 emit(PollEvent::Health(health));
@@ -330,5 +425,6 @@ impl AppCore {
             }
             tokio::time::sleep(interval).await;
         }
+        log::info(format!("poll loop {generation} stopped"));
     }
 }

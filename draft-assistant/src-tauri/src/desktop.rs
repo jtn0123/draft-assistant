@@ -9,6 +9,7 @@
 use crate::app::{AppCore, PollEvent};
 use crate::chat::{ChatOptions, ChatReply, ChatSession, ChatTurn, SessionSummary};
 use crate::engine::{AppConfig, Engine};
+use crate::log;
 use crate::view::DraftView;
 use std::sync::Arc;
 use std::time::Duration;
@@ -84,15 +85,26 @@ async fn chat(
     options: ChatOptions,
     on_text: Channel<String>,
 ) -> Result<ChatReply, String> {
+    let mut dropped = 0_u32;
     let mut send = |text: &str| {
         // A closed channel means the panel went away; the answer still
-        // completes and is returned whole.
-        let _ = on_text.send(text.to_string());
+        // completes and is returned whole. Counted rather than ignored: if
+        // an answer never appears, this is the difference between "the model
+        // said nothing" and "the words never reached the window".
+        if on_text.send(text.to_string()).is_err() {
+            dropped += 1;
+        }
     };
-    state
+    let reply = state
         .core
         .ask(&question, &history, &options, &mut send)
-        .await
+        .await;
+    if dropped > 0 {
+        log::warn(format!(
+            "chat: {dropped} streamed chunks could not reach the panel (channel closed)"
+        ));
+    }
+    reply
 }
 
 #[tauri::command]
@@ -141,10 +153,16 @@ async fn start_polling(
     tauri::async_runtime::spawn(async move {
         let emit = move |event: PollEvent| match event {
             PollEvent::Health(health) => {
-                app.emit("poll-health", &health).ok();
+                if let Err(error) = app.emit("poll-health", &health) {
+                    log::warn(format!("poll-health emit failed: {error}"));
+                }
             }
             PollEvent::View(view) => {
-                app.emit("draft-updated", &view).ok();
+                // A dropped view is a board frozen on a stale pick, which is
+                // exactly the symptom nobody could explain afterwards.
+                if let Err(error) = app.emit("draft-updated", &view) {
+                    log::warn(format!("draft-updated emit failed: {error}"));
+                }
             }
         };
         core.poll_loop(interval, generation, &emit).await;
@@ -163,7 +181,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // The log goes where macOS keeps logs, not into the data dir, so
+            // it can be found (and sent on) without hunting through caches.
+            match app.path().app_log_dir() {
+                Ok(dir) => log::init(&dir),
+                Err(error) => eprintln!("no log dir: {error}"),
+            }
             let data_dir = app.path().app_data_dir().expect("no app data dir");
+            log::info(format!(
+                "starting draft-assistant {} (data {})",
+                env!("CARGO_PKG_VERSION"),
+                data_dir.display()
+            ));
             let engine = Engine::new(data_dir)?;
             app.manage(AppState {
                 core: Arc::new(AppCore::new(engine)),
