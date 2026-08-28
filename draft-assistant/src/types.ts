@@ -93,6 +93,7 @@ export interface LeagueSummary {
   season: string;
   total_rosters: number;
   roster_positions: string[];
+  draftable_positions: string[];
   scoring_settings: Record<string, number>;
 }
 
@@ -102,6 +103,15 @@ export interface DataHealth {
   weekly_fetched_at: number;
   board_size: number;
   warnings: string[];
+  poll_last_success_at: number | null;
+  poll_consecutive_failures: number;
+  poll_last_error: string | null;
+}
+
+export interface PollHealth {
+  last_success_at: number | null;
+  consecutive_failures: number;
+  last_error: string | null;
 }
 
 export interface DraftView {
@@ -133,4 +143,4 @@ export interface AppConfig {
   leagues: StoredLeague[];
 }
 
-export type Position = "ALL" | "QB" | "RB" | "WR" | "TE" | "DEF";
+export type Position = string;

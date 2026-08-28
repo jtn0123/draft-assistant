@@ -10,6 +10,8 @@
 
 use std::collections::HashMap;
 
+use crate::roster::RosterRules;
+
 /// A player already scored under league rules.
 #[derive(Debug, Clone)]
 pub struct ScoredPlayer {
@@ -17,6 +19,7 @@ pub struct ScoredPlayer {
     pub points: f64,
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct ReplacementModel {
     /// position -> replacement rank (1-based count of startable players)
     pub demand: HashMap<String, usize>,
@@ -24,31 +27,19 @@ pub struct ReplacementModel {
     pub baseline: HashMap<String, f64>,
 }
 
-/// roster_positions comes straight from the Sleeper league
-/// (e.g. ["QB","RB","WR","TE","FLEX","FLEX","FLEX","FLEX","DEF","BN",...]).
-pub fn flex_eligible(slot: &str) -> Option<Vec<&'static str>> {
-    match slot {
-        "FLEX" => Some(vec!["RB", "WR", "TE"]),
-        "WRRB_FLEX" => Some(vec!["RB", "WR"]),
-        "REC_FLEX" => Some(vec!["WR", "TE"]),
-        "SUPER_FLEX" => Some(vec!["QB", "RB", "WR", "TE"]),
-        _ => None,
-    }
-}
-
 pub fn compute_replacement(
     players: &[ScoredPlayer],
-    roster_positions: &[String],
+    rules: &RosterRules,
     teams: usize,
 ) -> ReplacementModel {
     // League-wide dedicated demand per position.
     let mut base_demand: HashMap<String, usize> = HashMap::new();
-    let mut flex_slots: Vec<Vec<&'static str>> = Vec::new();
-    for slot in roster_positions {
-        if slot == "BN" {
+    let mut flex_slots: Vec<&[&str]> = Vec::new();
+    for slot in rules.slots() {
+        if RosterRules::is_non_starting(slot) {
             continue;
         }
-        if let Some(elig) = flex_eligible(slot) {
+        if let Some(elig) = RosterRules::flex_eligible(slot) {
             flex_slots.push(elig);
         } else {
             *base_demand.entry(slot.clone()).or_insert(0) += 1;
@@ -57,6 +48,7 @@ pub fn compute_replacement(
     for demand in base_demand.values_mut() {
         *demand *= teams;
     }
+    flex_slots.sort_by_key(|eligible| eligible.len());
 
     // Sort each position's pool by points, descending.
     let mut pools: HashMap<String, Vec<&ScoredPlayer>> = HashMap::new();
@@ -64,29 +56,32 @@ pub fn compute_replacement(
         pools.entry(p.position.clone()).or_default().push(p);
     }
     for pool in pools.values_mut() {
-        pool.sort_by(|a, b| b.points.partial_cmp(&a.points).unwrap_or(std::cmp::Ordering::Equal));
+        pool.sort_by(|a, b| {
+            b.points
+                .partial_cmp(&a.points)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
-    // Allocate flex demand: pool all players past each position's dedicated
-    // starters, take the best (flex_count * teams) of them, and count which
-    // positions they come from.
+    // Allocate each flex slot independently against its own eligible pool.
+    // This remains correct when a league mixes FLEX, REC_FLEX, and SUPER_FLEX.
     let mut demand = base_demand.clone();
-    if !flex_slots.is_empty() {
-        // All current flex slot types in this league share eligibility, so
-        // treat them as one pool sized by count. (A league mixing FLEX and
-        // REC_FLEX would need per-slot allocation; not needed for v1.)
-        let flex_count = flex_slots.len() * teams;
-        let eligible: Vec<&str> = flex_slots[0].clone();
-        let mut overflow: Vec<&ScoredPlayer> = Vec::new();
-        for pos in &eligible {
-            let dedicated = base_demand.get(*pos).copied().unwrap_or(0);
-            if let Some(pool) = pools.get(*pos) {
-                overflow.extend(pool.iter().skip(dedicated).copied());
+    for eligible in flex_slots {
+        for _ in 0..teams {
+            let best_position = eligible
+                .iter()
+                .filter_map(|position| {
+                    let index = demand.get(*position).copied().unwrap_or(0);
+                    pools
+                        .get(*position)
+                        .and_then(|pool| pool.get(index))
+                        .map(|player| (*position, player.points))
+                })
+                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(position, _)| position);
+            if let Some(position) = best_position {
+                *demand.entry(position.to_string()).or_insert(0) += 1;
             }
-        }
-        overflow.sort_by(|a, b| b.points.partial_cmp(&a.points).unwrap_or(std::cmp::Ordering::Equal));
-        for p in overflow.into_iter().take(flex_count) {
-            *demand.entry(p.position.clone()).or_insert(0) += 1;
         }
     }
 
@@ -141,14 +136,20 @@ mod tests {
     use super::*;
 
     fn sp(pos: &str, pts: f64) -> ScoredPlayer {
-        ScoredPlayer { position: pos.into(), points: pts }
+        ScoredPlayer {
+            position: pos.into(),
+            points: pts,
+        }
     }
 
     #[test]
     fn flex_demand_goes_to_best_positions() {
         // 2 teams, 1 RB + 1 WR + 1 FLEX each. RBs dominate the overflow, so
         // flex demand should land on RB.
-        let roster: Vec<String> = ["RB", "WR", "FLEX", "BN"].iter().map(|s| s.to_string()).collect();
+        let roster: Vec<String> = ["RB", "WR", "FLEX", "BN"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let players = vec![
             sp("RB", 300.0),
             sp("RB", 290.0),
@@ -159,9 +160,33 @@ mod tests {
             sp("WR", 100.0),
             sp("WR", 90.0),
         ];
-        let model = compute_replacement(&players, &roster, 2);
+        let model = compute_replacement(&players, &RosterRules::new(&roster), 2);
         assert_eq!(model.demand.get("RB"), Some(&4)); // 2 dedicated + 2 flex
         assert_eq!(model.demand.get("WR"), Some(&2)); // dedicated only
+    }
+
+    #[test]
+    fn mixed_flex_types_allocate_only_eligible_players() {
+        let players = vec![
+            sp("QB", 300.0),
+            sp("QB", 290.0),
+            sp("QB", 280.0),
+            sp("WR", 250.0),
+            sp("WR", 240.0),
+            sp("WR", 230.0),
+            sp("TE", 220.0),
+            sp("TE", 210.0),
+            sp("RB", 200.0),
+            sp("RB", 190.0),
+        ];
+        let slots = ["QB", "SUPER_FLEX", "REC_FLEX"]
+            .iter()
+            .map(|slot| (*slot).to_string())
+            .collect::<Vec<_>>();
+        let model = compute_replacement(&players, &RosterRules::new(&slots), 1);
+
+        assert_eq!(model.demand.get("QB"), Some(&2));
+        assert_eq!(model.demand.get("WR"), Some(&1));
     }
 
     #[test]

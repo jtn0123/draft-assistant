@@ -1,12 +1,11 @@
 //! The one true view: DraftView is BOTH the UI's data source and the
 //! AI-readable state dump — no difference between what human and model see.
 
+use crate::board::AvailablePlayer;
 use crate::draft::{self, TeamRoster};
 use crate::engine::{now_secs, AppConfig, LoadedLeague};
-use crate::board::BoardPlayer;
 use crate::recommend::{recommend, Recommendation};
 use crate::sleeper::Pick;
-use crate::valuation::{self, ScoredPlayer};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -27,14 +26,6 @@ pub struct DraftStatus {
     pub my_next_picks: Vec<u32>,
     pub total_picks_made: usize,
     pub manual_picks_active: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct AvailablePlayer {
-    #[serde(flatten)]
-    pub player: BoardPlayer,
-    /// P(still available at my next pick after the current one).
-    pub survival_next: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -81,6 +72,7 @@ pub struct LeagueSummary {
     pub season: String,
     pub total_rosters: u32,
     pub roster_positions: Vec<String>,
+    pub draftable_positions: Vec<String>,
     pub scoring_settings: HashMap<String, f64>,
 }
 
@@ -91,8 +83,37 @@ pub struct DataHealth {
     pub weekly_fetched_at: u64,
     pub board_size: usize,
     pub warnings: Vec<String>,
+    pub poll_last_success_at: Option<u64>,
+    pub poll_consecutive_failures: u32,
+    pub poll_last_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PollHealth {
+    pub last_success_at: Option<u64>,
+    pub consecutive_failures: u32,
+    pub last_error: Option<String>,
+}
+
+pub fn poll_health(loaded: &LoadedLeague) -> PollHealth {
+    PollHealth {
+        last_success_at: loaded.poll_last_success_at,
+        consecutive_failures: loaded.poll_consecutive_failures,
+        last_error: loaded.poll_last_error.clone(),
+    }
+}
+
+fn validated_slot(slot: Option<u32>, teams: u32) -> (Option<u32>, Option<String>) {
+    match slot {
+        Some(value) if !(1..=teams).contains(&value) => (
+            None,
+            Some(format!(
+                "your draft slot {value} is outside the valid range 1..={teams}"
+            )),
+        ),
+        _ => (slot, None),
+    }
+}
 
 /// Merge API picks with manual fallback picks. API picks are authoritative;
 /// manual picks only fill pick numbers beyond what the API has reported.
@@ -159,6 +180,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
                 }
             })
     });
+    let (my_slot, slot_warning) = validated_slot(my_slot, teams);
 
     let my_next_picks: Vec<u32> = my_slot
         .map(|slot| {
@@ -187,7 +209,9 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             (p.name.clone(), p.position.clone(), p.team.clone())
         } else if let Some(meta) = loaded.player_meta.get(player_id) {
             (
-                meta.full_name.clone().unwrap_or_else(|| player_id.to_string()),
+                meta.full_name
+                    .clone()
+                    .unwrap_or_else(|| player_id.to_string()),
                 meta.position.clone().unwrap_or_default(),
                 meta.team.clone(),
             )
@@ -196,8 +220,8 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         }
     };
 
-    let rosters = draft::build_rosters(&picks, teams, &league.roster_positions, &slot_names, name_of);
-    let my_roster = my_slot.map(|slot| rosters[(slot - 1) as usize].clone());
+    let rosters = draft::build_rosters(&picks, teams, &loaded.roster_rules, &slot_names, name_of);
+    let my_roster = my_slot.and_then(|slot| rosters.get((slot - 1) as usize).cloned());
 
     // Available players with survival probabilities.
     let available: Vec<AvailablePlayer> = loaded
@@ -213,7 +237,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
     // Tier alerts: top remaining tier per position and how many are left in it.
     let mut tier_alerts: Vec<TierAlert> = Vec::new();
-    for pos in ["QB", "RB", "WR", "TE", "DEF"] {
+    for pos in loaded.roster_rules.draftable_positions() {
         let mut best_tier: Option<u32> = None;
         let mut count = 0;
         for a in &available {
@@ -229,7 +253,11 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             }
         }
         if let Some(tier) = best_tier {
-            tier_alerts.push(TierAlert { position: pos.into(), tier, players_left: count });
+            tier_alerts.push(TierAlert {
+                position: pos,
+                tier,
+                players_left: count,
+            });
         }
     }
 
@@ -243,10 +271,21 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
                 *counts.entry(pos).or_insert(0) += 1;
             }
         }
-        counts.into_iter().filter(|(_, c)| *c >= 4).map(|(pos, _)| pos).next()
+        counts
+            .into_iter()
+            .filter(|(_, c)| *c >= 4)
+            .map(|(pos, _)| pos)
+            .next()
     };
 
-    let recommendations = recommend(&available, my_roster.as_ref(), &league.roster_positions, current_round, rounds, current_pick);
+    let recommendations = recommend(
+        &available,
+        my_roster.as_ref(),
+        &loaded.roster_rules,
+        current_round,
+        rounds,
+        current_pick,
+    );
 
     let recent_picks: Vec<RecentPick> = picks
         .iter()
@@ -266,23 +305,11 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         })
         .collect();
 
-    // Replacement baselines for the AI dump.
-    let as_scored: Vec<ScoredPlayer> = loaded
-        .board
-        .iter()
-        .map(|p| ScoredPlayer {
-            position: p.position.clone(),
-            points: p.points,
-        })
-        .collect();
-    let model = valuation::compute_replacement(
-        &as_scored,
-        &league.roster_positions,
-        league.total_rosters as usize,
-    );
+    let mut warnings = loaded.warnings.clone();
+    warnings.extend(slot_warning);
 
     DraftView {
-        schema_version: "1.0".into(),
+        schema_version: "1.1".into(),
         generated_at: now_secs(),
         league: LeagueSummary {
             league_id: league.league_id.clone(),
@@ -290,11 +317,16 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             season: league.season.clone(),
             total_rosters: league.total_rosters,
             roster_positions: league.roster_positions.clone(),
+            draftable_positions: loaded.roster_rules.draftable_positions(),
             scoring_settings: league.scoring_settings.clone(),
         },
         draft: DraftStatus {
             draft_id: draft.draft_id.clone(),
-            status: if draft_over { "complete".into() } else { draft.status.clone() },
+            status: if draft_over {
+                "complete".into()
+            } else {
+                draft.status.clone()
+            },
             teams,
             rounds,
             pick_timer: draft.settings.pick_timer,
@@ -316,15 +348,29 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         position_run,
         recommendations,
         recent_picks,
-        replacement_demand: model.demand,
-        replacement_baselines: model.baseline,
+        replacement_demand: loaded.replacement_model.demand.clone(),
+        replacement_baselines: loaded.replacement_model.baseline.clone(),
         data_health: DataHealth {
             players_fetched_at: loaded.players_fetched_at,
             projections_fetched_at: loaded.projections_fetched_at,
             weekly_fetched_at: loaded.weekly_fetched_at,
             board_size: loaded.board.len(),
-            warnings: loaded.warnings.clone(),
+            warnings,
+            poll_last_success_at: loaded.poll_last_success_at,
+            poll_consecutive_failures: loaded.poll_consecutive_failures,
+            poll_last_error: loaded.poll_last_error.clone(),
         },
     }
 }
 
+#[cfg(test)]
+mod reliability_tests {
+    use super::validated_slot;
+
+    #[test]
+    fn invalid_user_slots_are_rejected_before_roster_indexing() {
+        assert_eq!(validated_slot(Some(0), 14).0, None);
+        assert_eq!(validated_slot(Some(15), 14).0, None);
+        assert_eq!(validated_slot(Some(2), 14).0, Some(2));
+    }
+}

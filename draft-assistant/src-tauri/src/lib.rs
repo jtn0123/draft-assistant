@@ -1,18 +1,22 @@
 pub mod board;
 pub mod draft;
 pub mod engine;
+mod mock_league;
 pub mod recommend;
-pub mod view;
+pub mod roster;
 pub mod scoring;
+pub mod simulation;
 pub mod sleeper;
 pub mod valuation;
+pub mod view;
 
-use engine::{AppConfig, DraftView, Engine, LoadedLeague, StoredLeague};
+use engine::{AppConfig, Engine, LoadedLeague, StoredLeague};
 use sleeper::Pick;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 use tokio::sync::Mutex;
+use view::{build_view, DraftView};
 
 struct AppState {
     engine: Arc<Engine>,
@@ -23,7 +27,7 @@ struct AppState {
 }
 
 fn view_from(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
-    engine::build_view(loaded, config)
+    build_view(loaded, config)
 }
 
 /// Pull the Sleeper ID out of whatever the user pasted — a bare ID or a full
@@ -59,6 +63,8 @@ async fn add_league(
     config.active_league_id = Some(league_id);
     state.engine.save_config(&config);
     let view = view_from(&new_loaded, &config);
+    // Never hold config while waiting for loaded: the live path reads loaded first.
+    drop(config);
     *state.loaded.lock().await = Some(new_loaded);
     Ok(view)
 }
@@ -98,12 +104,34 @@ async fn get_state(state: State<'_, AppState>) -> Result<DraftView, String> {
 /// Re-poll picks once, right now.
 #[tauri::command]
 async fn refresh_picks(state: State<'_, AppState>) -> Result<DraftView, String> {
+    let draft_id = {
+        let loaded = state.loaded.lock().await;
+        loaded
+            .as_ref()
+            .ok_or("no league loaded")?
+            .draft
+            .draft_id
+            .clone()
+    };
+    let (picks, draft) = tokio::join!(
+        state.engine.client.picks(&draft_id),
+        state.engine.client.draft(&draft_id)
+    );
+    let picks = picks?;
+
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
-    let draft_id = loaded.draft.draft_id.clone();
-    loaded.api_picks = state.engine.client.picks(&draft_id).await?;
+    loaded.api_picks = picks;
+    if engine::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
+        state
+            .engine
+            .save_manual_picks(&draft_id, &loaded.manual_picks)?;
+    }
+    loaded.poll_last_success_at = Some(engine::now_secs());
+    loaded.poll_consecutive_failures = 0;
+    loaded.poll_last_error = None;
     // Also refresh draft status/order — it flips to "drafting" at start time.
-    if let Ok(draft) = state.engine.client.draft(&draft_id).await {
+    if let Ok(draft) = draft {
         loaded.draft = draft;
     }
     let config = state.config.lock().await;
@@ -118,7 +146,7 @@ async fn refresh_data(state: State<'_, AppState>) -> Result<DraftView, String> {
         config.active_league_id.clone().ok_or("no active league")?
     };
     let new_loaded = state.engine.load_any(&league_id, true).await?;
-    let config = state.config.lock().await;
+    let config = state.config.lock().await.clone();
     let view = view_from(&new_loaded, &config);
     *state.loaded.lock().await = Some(new_loaded);
     Ok(view)
@@ -134,7 +162,7 @@ async fn record_manual_pick(
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
     let teams = loaded.draft.settings.teams;
-    let picks = engine::merged_picks(&loaded.api_picks, &loaded.manual_picks);
+    let picks = view::merged_picks(&loaded.api_picks, &loaded.manual_picks);
     if picks.iter().any(|p| p.player_id == player_id) {
         return Err("player already drafted".into());
     }
@@ -150,6 +178,13 @@ async fn record_manual_pick(
         picked_by: None,
         metadata: None,
     });
+    if let Err(error) = state
+        .engine
+        .save_manual_picks(&loaded.draft.draft_id, &loaded.manual_picks)
+    {
+        loaded.manual_picks.pop();
+        return Err(error);
+    }
     let config = state.config.lock().await;
     Ok(view_from(loaded, &config))
 }
@@ -158,8 +193,16 @@ async fn record_manual_pick(
 async fn undo_manual_pick(state: State<'_, AppState>) -> Result<DraftView, String> {
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
-    if loaded.manual_picks.pop().is_none() {
-        return Err("no manual picks to undo (API picks cannot be undone locally)".into());
+    let removed = loaded
+        .manual_picks
+        .pop()
+        .ok_or("no manual picks to undo (API picks cannot be undone locally)")?;
+    if let Err(error) = state
+        .engine
+        .save_manual_picks(&loaded.draft.draft_id, &loaded.manual_picks)
+    {
+        loaded.manual_picks.push(removed);
+        return Err(error);
     }
     let config = state.config.lock().await;
     Ok(view_from(loaded, &config))
@@ -210,27 +253,60 @@ async fn start_polling(
                 loaded.as_ref().map(|l| l.draft.draft_id.clone())
             };
             if let Some(draft_id) = draft_id {
-                let picks = engine.client.picks(&draft_id).await;
-                let draft = engine.client.draft(&draft_id).await;
+                let (picks, draft) = tokio::join!(
+                    engine.client.picks(&draft_id),
+                    engine.client.draft(&draft_id)
+                );
                 let mut changed = false;
+                let mut errors = Vec::new();
+                let mut health = None;
                 {
                     let mut loaded = loaded_ref.lock().await;
                     if let Some(loaded) = loaded.as_mut() {
-                        if let Ok(picks) = picks {
-                            if last_count != Some(picks.len()) {
-                                last_count = Some(picks.len());
-                                changed = true;
+                        match picks {
+                            Ok(picks) => {
+                                if last_count != Some(picks.len()) {
+                                    last_count = Some(picks.len());
+                                    changed = true;
+                                }
+                                loaded.api_picks = picks;
+                                if engine::reconcile_manual_picks(
+                                    &loaded.api_picks,
+                                    &mut loaded.manual_picks,
+                                ) {
+                                    if let Err(error) =
+                                        engine.save_manual_picks(&draft_id, &loaded.manual_picks)
+                                    {
+                                        errors.push(error);
+                                    }
+                                }
                             }
-                            loaded.api_picks = picks;
+                            Err(error) => errors.push(error),
                         }
-                        if let Ok(draft) = draft {
-                            if draft.status != last_status {
-                                last_status = draft.status.clone();
-                                changed = true;
+                        match draft {
+                            Ok(draft) => {
+                                if draft.status != last_status {
+                                    last_status = draft.status.clone();
+                                    changed = true;
+                                }
+                                loaded.draft = draft;
                             }
-                            loaded.draft = draft;
+                            Err(error) => errors.push(error),
                         }
+                        if errors.is_empty() {
+                            loaded.poll_last_success_at = Some(engine::now_secs());
+                            loaded.poll_consecutive_failures = 0;
+                            loaded.poll_last_error = None;
+                        } else {
+                            loaded.poll_consecutive_failures =
+                                loaded.poll_consecutive_failures.saturating_add(1);
+                            loaded.poll_last_error = Some(errors.join("; "));
+                        }
+                        health = Some(view::poll_health(loaded));
                     }
+                }
+                if let Some(health) = health {
+                    app.emit("poll-health", &health).ok();
                 }
                 if changed {
                     let loaded = loaded_ref.lock().await;
@@ -258,10 +334,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("no app data dir");
+            let data_dir = app.path().app_data_dir().expect("no app data dir");
             let engine = Engine::new(data_dir);
             let config = engine.load_config();
             app.manage(AppState {

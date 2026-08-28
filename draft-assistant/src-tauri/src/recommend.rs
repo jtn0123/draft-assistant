@@ -1,7 +1,8 @@
 //! Deterministic, auditable pick recommendations (safe + balanced modes).
 
+use crate::board::AvailablePlayer;
 use crate::draft::TeamRoster;
-use crate::view::AvailablePlayer;
+use crate::roster::RosterRules;
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -21,11 +22,10 @@ pub struct Recommendation {
     pub reasons: Vec<String>,
 }
 
-
 pub fn recommend(
     available: &[AvailablePlayer],
     my_roster: Option<&TeamRoster>,
-    roster_positions: &[String],
+    rules: &RosterRules,
     current_round: u32,
     total_rounds: u32,
     current_pick: u32,
@@ -33,15 +33,15 @@ pub fn recommend(
     let open: HashMap<String, u32> = my_roster
         .map(|r| r.open_starters.iter().cloned().collect())
         .unwrap_or_else(|| {
-            roster_positions
+            rules
+                .slots()
                 .iter()
-                .filter(|s| *s != "BN")
+                .filter(|slot| !RosterRules::is_non_starting(slot))
                 .fold(HashMap::new(), |mut m, s| {
                     *m.entry(s.clone()).or_insert(0) += 1;
                     m
                 })
         });
-    let open_flex = open.get("FLEX").copied().unwrap_or(0);
     let rounds_left = total_rounds.saturating_sub(current_round) + 1;
     let total_open: u32 = open.values().sum();
     // When open starting slots ~= rounds left, filling starters is urgent.
@@ -86,14 +86,13 @@ pub fn recommend(
             reasons.push(format!("{:.0} VORP under league scoring", p.vorp));
 
             // Roster need: dedicated slot open, then flex eligibility.
-            let fills_dedicated = open.get(&p.position).copied().unwrap_or(0) > 0;
-            let flex_ok = open_flex > 0 && matches!(p.position.as_str(), "RB" | "WR" | "TE");
-            if fills_dedicated {
+            let open_slot = rules.first_open_slot_for(&open, &p.position);
+            if open_slot == Some(p.position.as_str()) {
                 score += 12.0 * need_pressure.min(2.0);
                 reasons.push(format!("fills open {} starter slot", p.position));
-            } else if flex_ok {
+            } else if let Some(slot) = open_slot {
                 score += 8.0 * need_pressure.min(2.0);
-                reasons.push("fills an open FLEX slot".into());
+                reasons.push(format!("fills an open {slot} slot"));
             } else {
                 score -= 10.0;
                 reasons.push("depth pick — starters already filled at position".into());
@@ -104,15 +103,15 @@ pub fn recommend(
             // second DEF is worthless outright.
             let count = have.get(p.position.as_str()).copied().unwrap_or(0);
             match p.position.as_str() {
-                "DEF" => {
+                "DEF" | "K" => {
                     if count >= 1 {
-                        continue; // never draft a second defense
+                        continue; // never draft a second defense or kicker
                     }
                     if current_round < total_rounds.saturating_sub(2) {
                         score -= 60.0; // never early either
                     } else {
                         score += 15.0;
-                        reasons.push("last rounds — lock in your one DEF".into());
+                        reasons.push(format!("last rounds — lock in your one {}", p.position));
                     }
                 }
                 "QB" => {
@@ -140,7 +139,10 @@ pub fn recommend(
                     // starting slot — escalate hard.
                     if count < 2 && current_round > 8 {
                         score += 20.0;
-                        reasons.push(format!("only {count} {} rostered — one injury from an empty slot", p.position));
+                        reasons.push(format!(
+                            "only {count} {} rostered — one injury from an empty slot",
+                            p.position
+                        ));
                     }
                     if count < 3 {
                         score += 3.0 * (3 - count) as f64;
@@ -159,7 +161,10 @@ pub fn recommend(
                 .count();
             if tier_left <= 2 {
                 score += 8.0;
-                reasons.push(format!("only {tier_left} left in {} tier {}", p.position, p.tier));
+                reasons.push(format!(
+                    "only {tier_left} left in {} tier {}",
+                    p.position, p.tier
+                ));
             }
 
             // Survival: if they'll likely make it back to my next pick, waiting
@@ -167,10 +172,16 @@ pub fn recommend(
             if let Some(surv) = a.survival_next {
                 if surv > 0.7 {
                     score -= 6.0;
-                    reasons.push(format!("{:.0}% likely to survive to your next pick", surv * 100.0));
+                    reasons.push(format!(
+                        "{:.0}% likely to survive to your next pick",
+                        surv * 100.0
+                    ));
                 } else if surv < 0.35 {
                     score += 6.0;
-                    reasons.push(format!("only {:.0}% chance they last to your next pick", surv * 100.0));
+                    reasons.push(format!(
+                        "only {:.0}% chance they last to your next pick",
+                        surv * 100.0
+                    ));
                 }
             }
 
@@ -238,9 +249,9 @@ pub fn recommend(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::board::AvailablePlayer;
     use crate::board::BoardPlayer;
     use crate::draft::RosterEntry;
-    use crate::view::AvailablePlayer;
 
     fn player(id: &str, pos: &str, vorp: f64) -> AvailablePlayer {
         AvailablePlayer {
@@ -289,10 +300,12 @@ mod tests {
     }
 
     fn slots() -> Vec<String> {
-        ["QB", "RB", "WR", "TE", "FLEX", "FLEX", "FLEX", "FLEX", "DEF", "BN"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
+        [
+            "QB", "RB", "WR", "TE", "FLEX", "FLEX", "FLEX", "FLEX", "DEF", "BN",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
     }
 
     #[test]
@@ -300,7 +313,14 @@ mod tests {
         // A monster-VORP second DEF must lose to a modest RB.
         let available = vec![player("def2", "DEF", 90.0), player("rb1", "RB", 30.0)];
         let mine = roster(&["QB", "RB", "WR", "TE", "DEF"]);
-        let recs = recommend(&available, Some(&mine), &slots(), 14, 15, 180);
+        let recs = recommend(
+            &available,
+            Some(&mine),
+            &RosterRules::new(&slots()),
+            14,
+            15,
+            180,
+        );
         assert!(recs.iter().all(|r| r.position != "DEF"), "{recs:?}");
     }
 
@@ -308,7 +328,14 @@ mod tests {
     fn never_recommends_third_qb() {
         let available = vec![player("qb3", "QB", 95.0), player("wr1", "WR", 20.0)];
         let mine = roster(&["QB", "QB", "RB", "WR"]);
-        let recs = recommend(&available, Some(&mine), &slots(), 10, 15, 130);
+        let recs = recommend(
+            &available,
+            Some(&mine),
+            &RosterRules::new(&slots()),
+            10,
+            15,
+            130,
+        );
         assert!(recs.iter().all(|r| r.position != "QB"), "{recs:?}");
     }
 
@@ -318,7 +345,14 @@ mod tests {
         let mut mine = roster(&["QB", "RB", "RB", "WR", "WR", "WR", "TE"]);
         // As the engine would report it: the DEF starter slot is still open.
         mine.open_starters = vec![("DEF".into(), 1), ("FLEX".into(), 1)];
-        let recs = recommend(&available, Some(&mine), &slots(), 14, 15, 184);
+        let recs = recommend(
+            &available,
+            Some(&mine),
+            &RosterRules::new(&slots()),
+            14,
+            15,
+            184,
+        );
         assert_eq!(recs[0].position, "DEF", "{recs:?}");
     }
 
@@ -327,7 +361,61 @@ mod tests {
         // Only a second DEF available — fallback must still recommend it.
         let available = vec![player("def2", "DEF", 50.0)];
         let mine = roster(&["QB", "RB", "WR", "TE", "DEF"]);
-        let recs = recommend(&available, Some(&mine), &slots(), 15, 15, 200);
+        let recs = recommend(
+            &available,
+            Some(&mine),
+            &RosterRules::new(&slots()),
+            15,
+            15,
+            200,
+        );
         assert!(!recs.is_empty());
+    }
+
+    #[test]
+    fn superflex_qb_is_recognized_as_filling_a_starter() {
+        let available = vec![player("qb2", "QB", 80.0), player("wr2", "WR", 10.0)];
+        let mut mine = roster(&["QB", "RB", "WR", "TE"]);
+        mine.open_starters = vec![("SUPER_FLEX".into(), 1)];
+        let superflex_slots = ["QB", "RB", "WR", "TE", "SUPER_FLEX", "BN"]
+            .iter()
+            .map(|slot| (*slot).to_string())
+            .collect::<Vec<_>>();
+
+        let recs = recommend(
+            &available,
+            Some(&mine),
+            &RosterRules::new(&superflex_slots),
+            5,
+            10,
+            50,
+        );
+
+        assert_eq!(recs[0].player_id, "qb2", "{recs:?}");
+        assert!(recs[0]
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("SUPER_FLEX")));
+    }
+
+    #[test]
+    fn never_recommends_a_second_kicker() {
+        let available = vec![player("k2", "K", 100.0), player("rb2", "RB", 10.0)];
+        let mine = roster(&["QB", "RB", "WR", "TE", "K"]);
+        let kicker_slots = ["QB", "RB", "WR", "TE", "K", "BN"]
+            .iter()
+            .map(|slot| (*slot).to_string())
+            .collect::<Vec<_>>();
+        let recs = recommend(
+            &available,
+            Some(&mine),
+            &RosterRules::new(&kicker_slots),
+            9,
+            10,
+            90,
+        );
+        assert!(recs
+            .iter()
+            .all(|recommendation| recommendation.position != "K"));
     }
 }

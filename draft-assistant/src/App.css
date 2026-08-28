@@ -164,6 +164,23 @@ button.live.on {
   color: var(--accent);
 }
 
+button.live.retrying {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+button.live.stale {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.sync-age {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 /* ---------- clock ---------- */
 
 .clock {
@@ -244,4 +261,3 @@ button.live.on {
   margin-bottom: 14px;
   font-size: 13px;
 }
-

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import type { DraftView } from "./types";
+import type { DraftView, PollHealth } from "./types";
 import { Board } from "./components/Board";
 import { ClockBanner, RecCard, SidePanel, Setup } from "./components/Panels";
 import "./App.css";
@@ -13,15 +13,27 @@ type Confirm = { playerId: string; name: string } | null;
 export default function App() {
   const [view, setView] = useState<DraftView | null>(null);
   const [polling, setPolling] = useState(false);
+  const [pollHealth, setPollHealth] = useState<PollHealth | null>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const toastTimer = useRef<number | undefined>(undefined);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  const applyView = useCallback((next: DraftView) => {
+    setView(next);
+    setPollHealth({
+      last_success_at:
+        next.data_health.poll_last_success_at ?? next.generated_at,
+      consecutive_failures:
+        next.data_health.poll_consecutive_failures ?? 0,
+      last_error: next.data_health.poll_last_error ?? null,
+    });
   }, []);
 
   const startLive = useCallback(async () => {
@@ -41,7 +53,7 @@ export default function App() {
         if (config.active_league_id) {
           setBusy(true);
           const v = await api.addLeague(config.active_league_id);
-          setView(v);
+          applyView(v);
           await startLive();
         }
       } catch (e) {
@@ -50,11 +62,18 @@ export default function App() {
         setBusy(false);
       }
     })();
-  }, [showToast, startLive]);
+  }, [showToast, startLive, applyView]);
 
   // Live updates from the poller.
   useEffect(() => {
-    const un = api.onDraftUpdated((v) => setView(v));
+    const un = api.onDraftUpdated(applyView);
+    return () => {
+      un.then((f) => f()).catch(() => undefined);
+    };
+  }, [applyView]);
+
+  useEffect(() => {
+    const un = api.onPollHealth(setPollHealth);
     return () => {
       un.then((f) => f()).catch(() => undefined);
     };
@@ -77,7 +96,7 @@ export default function App() {
   const doDraft = async (playerId: string) => {
     try {
       const v = await api.recordManualPick(playerId);
-      setView(v);
+      applyView(v);
       setConfirm(null);
     } catch (e) {
       showToast(String(e));
@@ -87,7 +106,7 @@ export default function App() {
 
   const doUndo = async () => {
     try {
-      setView(await api.undoManualPick());
+      applyView(await api.undoManualPick());
     } catch (e) {
       showToast(String(e));
     }
@@ -105,7 +124,7 @@ export default function App() {
   const doRefreshData = async () => {
     setBusy(true);
     try {
-      setView(await api.refreshData());
+      applyView(await api.refreshData());
       showToast("Projections refreshed and board rebuilt");
     } catch (e) {
       showToast(String(e));
@@ -123,7 +142,7 @@ export default function App() {
     ) : (
       <Setup
         onReady={(v) => {
-          setView(v);
+          applyView(v);
           void startLive();
         }}
       />
@@ -141,9 +160,18 @@ export default function App() {
           </span>
         </div>
         <div className="actions">
-          <button className={polling ? "live on" : "live"} onClick={togglePolling}>
-            {polling ? "● Live sync on" : "○ Live sync off"}
+          <button
+            className={`live ${syncClass(polling, pollHealth)}`}
+            onClick={togglePolling}
+            title={pollHealth?.last_error ?? undefined}
+          >
+            {syncLabel(polling, pollHealth)}
           </button>
+          {polling && pollHealth?.last_success_at && (
+            <span className="sync-age">
+              Last sync {formatAge(pollHealth.last_success_at)}
+            </span>
+          )}
           <button className="ghost" onClick={doUndo} title="Undo last manual pick">
             Undo
           </button>
@@ -175,7 +203,11 @@ export default function App() {
 
       <main>
         <SidePanel view={view} />
-        <Board players={view.available} onDraft={(id, name) => setConfirm({ playerId: id, name })} />
+        <Board
+          players={view.available}
+          positions={view.league.draftable_positions}
+          onDraft={(id, name) => setConfirm({ playerId: id, name })}
+        />
       </main>
 
       {confirm && (
@@ -201,4 +233,25 @@ export default function App() {
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
+}
+
+function syncClass(polling: boolean, health: PollHealth | null): string {
+  if (!polling) return "";
+  if ((health?.consecutive_failures ?? 0) >= 2) return "stale";
+  if ((health?.consecutive_failures ?? 0) === 1) return "retrying";
+  return "on";
+}
+
+function syncLabel(polling: boolean, health: PollHealth | null): string {
+  if (!polling) return "○ Live sync off";
+  const failures = health?.consecutive_failures ?? 0;
+  if (failures >= 2) return `● Sync stale · ${failures} failures`;
+  if (failures === 1) return "● Sync retrying";
+  return "● Live sync on";
+}
+
+function formatAge(timestamp: number): string {
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.floor(seconds / 60)}m ago`;
 }

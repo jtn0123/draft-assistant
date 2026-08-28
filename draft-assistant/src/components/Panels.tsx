@@ -18,7 +18,7 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
         setBusy("Looking up your Sleeper account…");
         await api.setMyUsername(username.trim());
       }
-      setBusy("Pulling league, players, and projections… (first load takes ~a minute)");
+      setBusy("Pulling league, players, and projections… (first load takes ~10 seconds)");
       const view = await api.addLeague(leagueId.trim());
       onReady(view);
     } catch (e) {
@@ -197,4 +197,3 @@ export function SidePanel({ view }: { view: DraftView }) {
     </aside>
   );
 }
-

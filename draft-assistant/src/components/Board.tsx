@@ -2,37 +2,38 @@ import { useMemo, useState } from "react";
 import type { AvailablePlayer, Position } from "../types";
 import { fmt, pct } from "../format";
 
-const POSITIONS: Position[] = ["ALL", "QB", "RB", "WR", "TE", "DEF"];
-
 // ---------- board table ----------
 
 export function Board({
   players,
+  positions,
   onDraft,
 }: {
   players: AvailablePlayer[];
+  positions: Position[];
   onDraft: (id: string, name: string) => void;
 }) {
   const [pos, setPos] = useState<Position>("ALL");
   const [query, setQuery] = useState("");
 
-  const filtered = useMemo(() => {
+  const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
     return players
       .filter((p) => pos === "ALL" || p.position === pos)
-      .filter((p) => !q || p.name.toLowerCase().includes(q))
-      .slice(0, 200);
+      .filter((p) => !q || p.name.toLowerCase().includes(q));
   }, [players, pos, query]);
+  const filtered = matching.slice(0, 200);
 
   return (
     <div className="board">
       <div className="board-controls">
-        <div className="tabs">
-          {POSITIONS.map((p) => (
+        <div className="tabs" role="group" aria-label="Filter players by position">
+          {["ALL", ...positions].map((p) => (
             <button
               key={p}
               className={p === pos ? "tab active" : "tab"}
               onClick={() => setPos(p)}
+              aria-pressed={p === pos}
             >
               {p}
             </button>
@@ -41,9 +42,15 @@ export function Board({
         <input
           className="search"
           placeholder="Search players…"
+          aria-label="Search players"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        <span className="board-count" aria-live="polite">
+          {matching.length > 200
+            ? `Showing 200 of ${matching.length}`
+            : `${matching.length} player${matching.length === 1 ? "" : "s"}`}
+        </span>
       </div>
       <table>
         <thead>
@@ -91,6 +98,13 @@ export function Board({
               </td>
             </tr>
           ))}
+          {filtered.length === 0 && (
+            <tr>
+              <td className="empty-board" colSpan={11}>
+                No matching players
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
@@ -103,4 +117,3 @@ function surClass(p: number | null): string {
   if (p < 0.7) return "surv mid";
   return "surv high";
 }
-

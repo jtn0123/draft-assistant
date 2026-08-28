@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "generated_at": 1787882005,
   "league": {
     "league_id": "1389710366300200960",
@@ -23,6 +23,7 @@
       "BN",
       "BN"
     ],
+    "draftable_positions": ["QB", "RB", "WR", "TE", "DEF"],
     "scoring_settings": {
       "pass_td": 6.0,
       "bonus_pass_yd_300": 3.0,
@@ -7585,6 +7586,9 @@
     "projections_fetched_at": 1787879732,
     "weekly_fetched_at": 1787879733,
     "board_size": 419,
-    "warnings": []
+    "warnings": [],
+    "poll_last_success_at": 1787879733,
+    "poll_consecutive_failures": 0,
+    "poll_last_error": null
   }
 }

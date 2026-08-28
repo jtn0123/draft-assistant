@@ -1,14 +1,15 @@
 //! The scored draft board: players valued under the league's exact rules.
 
+use crate::roster::RosterRules;
 use crate::scoring;
 use crate::sleeper::{Draft, League, PlayerMeta, ProjectionRow};
-use crate::valuation::{self, ScoredPlayer};
-use serde::Serialize;
+use crate::valuation::{self, ReplacementModel, ScoredPlayer};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub const WEEKS: u32 = 18;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BoardPlayer {
     pub player_id: String,
     pub name: String,
@@ -29,6 +30,18 @@ pub struct BoardPlayer {
     pub sleeper_pts_ppr: Option<f64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvailablePlayer {
+    #[serde(flatten)]
+    pub player: BoardPlayer,
+    /// P(still available at my next pick after the current one).
+    pub survival_next: Option<f64>,
+}
+
+pub struct BoardBuild {
+    pub players: Vec<BoardPlayer>,
+    pub replacement: ReplacementModel,
+}
 
 pub fn build_board(
     league: &League,
@@ -36,32 +49,14 @@ pub fn build_board(
     player_meta: &HashMap<String, PlayerMeta>,
     season_rows: &[ProjectionRow],
     weekly_rows: &[ProjectionRow],
+    rules: &RosterRules,
     warnings: &mut Vec<String>,
-) -> Vec<BoardPlayer> {
+) -> BoardBuild {
     let scoring_map = &league.scoring_settings;
 
     // Positions this league actually rosters (K excluded automatically for
     // this league because there is no K slot).
-    let mut wanted: Vec<&str> = vec![];
-    for slot in &league.roster_positions {
-        match slot.as_str() {
-            "QB" | "RB" | "WR" | "TE" | "DEF" | "K" => {
-                if !wanted.contains(&slot.as_str()) {
-                    wanted.push(slot.as_str());
-                }
-            }
-            _ => {}
-        }
-    }
-    for slot in &league.roster_positions {
-        if let Some(elig) = valuation::flex_eligible(slot) {
-            for pos in elig {
-                if !wanted.contains(&pos) {
-                    wanted.push(pos);
-                }
-            }
-        }
-    }
+    let wanted = rules.draftable_positions();
 
     // Weekly rows grouped per player for bonus expectations, and per-team
     // week coverage for bye inference.
@@ -73,13 +68,17 @@ pub fn build_board(
     let mut team_week_counts: HashMap<String, [u32; WEEKS as usize]> = HashMap::new();
     for row in weekly_rows {
         if let Some(stats) = &row.stats {
-            weekly_by_player.entry(row.player_id.as_str()).or_default().push(stats);
+            weekly_by_player
+                .entry(row.player_id.as_str())
+                .or_default()
+                .push(stats);
         }
         if let (Some(meta), Some(week), Some(_)) = (&row.player, row.week, row.opponent.as_ref()) {
             if let Some(team) = &meta.team {
                 if (1..=WEEKS).contains(&week) {
-                    team_week_counts.entry(team.clone()).or_insert([0; WEEKS as usize])
-                        [(week - 1) as usize] += 1;
+                    team_week_counts
+                        .entry(team.clone())
+                        .or_insert([0; WEEKS as usize])[(week - 1) as usize] += 1;
                 }
             }
         }
@@ -92,10 +91,7 @@ pub fn build_board(
             return None;
         }
         // The bye week has at most a stray row or two vs a full slate.
-        let (week_idx, &min) = counts
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, &c)| c)?;
+        let (week_idx, &min) = counts.iter().enumerate().min_by_key(|(_, &c)| c)?;
         if min * 4 <= max {
             Some(week_idx as u32 + 1)
         } else {
@@ -115,7 +111,7 @@ pub fn build_board(
                     .and_then(|m| m.position.clone())
             })
             .unwrap_or_default();
-        if !wanted.contains(&position.as_str()) {
+        if !wanted.contains(&position) {
             continue;
         }
         let name = match position.as_str() {
@@ -131,7 +127,11 @@ pub fn build_board(
                     let first = meta.and_then(|m| m.first_name.clone()).unwrap_or_default();
                     let last = meta.and_then(|m| m.last_name.clone()).unwrap_or_default();
                     let joined = format!("{first} {last}").trim().to_string();
-                    if joined.is_empty() { None } else { Some(joined) }
+                    if joined.is_empty() {
+                        None
+                    } else {
+                        Some(joined)
+                    }
                 })
                 .unwrap_or_else(|| row.player_id.clone()),
         };
@@ -169,7 +169,10 @@ pub fn build_board(
 
     if scored.is_empty() {
         warnings.push("no scored players — projections fetch likely failed".into());
-        return scored;
+        return BoardBuild {
+            players: scored,
+            replacement: ReplacementModel::default(),
+        };
     }
 
     // Replacement + VORP.
@@ -180,11 +183,7 @@ pub fn build_board(
             points: p.points,
         })
         .collect();
-    let model = valuation::compute_replacement(
-        &as_scored,
-        &league.roster_positions,
-        league.total_rosters as usize,
-    );
+    let model = valuation::compute_replacement(&as_scored, rules, league.total_rosters as usize);
     for p in &mut scored {
         p.vorp = p.points - model.baseline.get(&p.position).copied().unwrap_or(0.0);
     }
@@ -221,6 +220,8 @@ pub fn build_board(
         scored[i].overall_rank = rank as u32 + 1;
     }
     scored.sort_by(|a, b| a.overall_rank.cmp(&b.overall_rank));
-    scored
+    BoardBuild {
+        players: scored,
+        replacement: model,
+    }
 }
-

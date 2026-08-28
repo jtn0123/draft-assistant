@@ -174,6 +174,8 @@ impl SleeperClient {
         let http = reqwest::Client::builder()
             .user_agent("draft-assistant/0.1 (local second-screen tool)")
             .gzip(true)
+            .connect_timeout(std::time::Duration::from_secs(3))
+            .timeout(std::time::Duration::from_secs(8))
             .build()
             .expect("failed to build http client");
         Self { http }
@@ -227,7 +229,7 @@ impl SleeperClient {
     /// Undocumented: full-season raw-stat projections for one season.
     pub async fn season_projections(&self, season: u32) -> Result<Vec<ProjectionRow>, String> {
         let url = format!(
-            "{BASE_UNDOC}/projections/nfl/{season}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=DEF&order_by=adp_ppr"
+            "{BASE_UNDOC}/projections/nfl/{season}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF&order_by=adp_ppr"
         );
         self.get_json(&url).await
     }
@@ -239,7 +241,7 @@ impl SleeperClient {
         week: u32,
     ) -> Result<Vec<ProjectionRow>, String> {
         let url = format!(
-            "{BASE_UNDOC}/projections/nfl/{season}/{week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=DEF"
+            "{BASE_UNDOC}/projections/nfl/{season}/{week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF"
         );
         self.get_json(&url).await
     }

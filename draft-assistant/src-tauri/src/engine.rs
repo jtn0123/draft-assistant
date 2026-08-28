@@ -5,7 +5,10 @@
 //! and the model can see.
 
 use crate::board::{build_board, BoardPlayer};
+use crate::mock_league::synthesize_league;
+use crate::roster::RosterRules;
 use crate::sleeper::{Draft, League, Pick, PlayerMeta, ProjectionRow, SleeperClient};
+use crate::valuation::ReplacementModel;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -16,7 +19,10 @@ const PROJECTIONS_TTL_SECS: u64 = 6 * 3600;
 const WEEKS: u32 = 18;
 
 pub(crate) fn now_secs() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 // ---------- persisted config ----------
@@ -53,8 +59,13 @@ pub struct LoadedLeague {
     pub user_names: HashMap<String, String>,
     pub board: Vec<BoardPlayer>,
     pub board_index: HashMap<String, usize>,
+    pub replacement_model: ReplacementModel,
+    pub roster_rules: RosterRules,
     pub api_picks: Vec<Pick>,
     pub manual_picks: Vec<Pick>,
+    pub poll_last_success_at: Option<u64>,
+    pub poll_consecutive_failures: u32,
+    pub poll_last_error: Option<String>,
     pub players_fetched_at: u64,
     pub projections_fetched_at: u64,
     pub weekly_fetched_at: u64,
@@ -70,7 +81,10 @@ pub struct Engine {
 impl Engine {
     pub fn new(data_dir: PathBuf) -> Self {
         std::fs::create_dir_all(&data_dir).ok();
-        Self { client: SleeperClient::new(), data_dir }
+        Self {
+            client: SleeperClient::new(),
+            data_dir,
+        }
     }
 
     fn cache_path(&self, name: &str) -> PathBuf {
@@ -78,11 +92,16 @@ impl Engine {
     }
 
     fn read_cache<T: serde::de::DeserializeOwned>(&self, name: &str, ttl: u64) -> Option<(u64, T)> {
-        let raw = std::fs::read_to_string(self.cache_path(name)).ok()?;
-        let cached: Cached<T> = serde_json::from_str(&raw).ok()?;
-        if now_secs().saturating_sub(cached.fetched_at) > ttl {
+        let (fetched_at, data) = self.read_cache_any(name)?;
+        if now_secs().saturating_sub(fetched_at) > ttl {
             return None;
         }
+        Some((fetched_at, data))
+    }
+
+    fn read_cache_any<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<(u64, T)> {
+        let raw = std::fs::read_to_string(self.cache_path(name)).ok()?;
+        let cached: Cached<T> = serde_json::from_str(&raw).ok()?;
         Some((cached.fetched_at, cached.data))
     }
 
@@ -98,6 +117,35 @@ impl Engine {
         fetched_at
     }
 
+    fn write_cache_checked<T: Serialize>(&self, name: &str, data: &T) -> Result<u64, String> {
+        let fetched_at = now_secs();
+        let env = Cached { fetched_at, data };
+        let json = serde_json::to_string(&env).map_err(|e| format!("serialize {name}: {e}"))?;
+        let tmp = self.cache_path(&format!("{name}.tmp"));
+        std::fs::write(&tmp, json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+        std::fs::rename(&tmp, self.cache_path(name)).map_err(|e| format!("replace {name}: {e}"))?;
+        Ok(fetched_at)
+    }
+
+    fn manual_picks_cache_name(draft_id: &str) -> String {
+        let safe_id: String = draft_id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        format!("manual_picks_{safe_id}.json")
+    }
+
+    pub fn load_manual_picks(&self, draft_id: &str) -> Vec<Pick> {
+        self.read_cache_any(&Self::manual_picks_cache_name(draft_id))
+            .map(|(_, picks)| picks)
+            .unwrap_or_default()
+    }
+
+    pub fn save_manual_picks(&self, draft_id: &str, picks: &[Pick]) -> Result<(), String> {
+        self.write_cache_checked(&Self::manual_picks_cache_name(draft_id), &picks)?;
+        Ok(())
+    }
+
     pub fn load_config(&self) -> AppConfig {
         std::fs::read_to_string(self.cache_path("config.json"))
             .ok()
@@ -111,45 +159,84 @@ impl Engine {
         }
     }
 
-    async fn players(&self, force: bool) -> Result<(u64, HashMap<String, PlayerMeta>), String> {
+    async fn players(
+        &self,
+        force: bool,
+    ) -> Result<(u64, HashMap<String, PlayerMeta>, Option<String>), String> {
         if !force {
             if let Some(hit) = self.read_cache("players.json", PLAYERS_TTL_SECS) {
-                return Ok(hit);
+                return Ok((hit.0, hit.1, None));
             }
         }
-        let data = self.client.players().await?;
-        let at = self.write_cache("players.json", &data);
-        Ok((at, data))
+        let stale = self.read_cache_any("players.json");
+        match self.client.players().await {
+            Ok(data) => {
+                let at = self.write_cache("players.json", &data);
+                Ok((at, data, None))
+            }
+            Err(error) => stale
+                .map(|(at, data)| {
+                    let age = now_secs().saturating_sub(at);
+                    (
+                        at,
+                        data,
+                        Some(format!(
+                            "players refresh failed; using cache aged {}h ({error})",
+                            age / 3600
+                        )),
+                    )
+                })
+                .ok_or(error),
+        }
     }
 
     async fn season_projections(
         &self,
         season: u32,
         force: bool,
-    ) -> Result<(u64, Vec<ProjectionRow>), String> {
+    ) -> Result<(u64, Vec<ProjectionRow>, Option<String>), String> {
         let name = format!("projections_{season}.json");
         if !force {
             if let Some(hit) = self.read_cache(&name, PROJECTIONS_TTL_SECS) {
-                return Ok(hit);
+                return Ok((hit.0, hit.1, None));
             }
         }
-        let data = self.client.season_projections(season).await?;
-        let at = self.write_cache(&name, &data);
-        Ok((at, data))
+        let stale = self.read_cache_any(&name);
+        match self.client.season_projections(season).await {
+            Ok(data) => {
+                let at = self.write_cache(&name, &data);
+                Ok((at, data, None))
+            }
+            Err(error) => stale
+                .map(|(at, data)| {
+                    let age = now_secs().saturating_sub(at);
+                    (
+                        at,
+                        data,
+                        Some(format!(
+                            "projections refresh failed; using cache aged {}h ({error})",
+                            age / 3600
+                        )),
+                    )
+                })
+                .ok_or(error),
+        }
     }
 
     async fn weekly_projections(
         &self,
         season: u32,
         force: bool,
-    ) -> Result<(u64, Vec<ProjectionRow>), String> {
+    ) -> Result<(u64, Vec<ProjectionRow>, Option<String>), String> {
         let name = format!("weekly_{season}.json");
         if !force {
             if let Some(hit) = self.read_cache(&name, PROJECTIONS_TTL_SECS) {
-                return Ok(hit);
+                return Ok((hit.0, hit.1, None));
             }
         }
+        let stale = self.read_cache_any(&name);
         let mut all = Vec::new();
+        let mut failures = Vec::new();
         for week in 1..=WEEKS {
             match self.client.weekly_projections(season, week).await {
                 Ok(mut rows) => {
@@ -161,11 +248,40 @@ impl Engine {
                 Err(e) => {
                     // A missing week degrades bonus precision, not correctness.
                     eprintln!("weekly projections week {week} failed: {e}");
+                    failures.push(week);
                 }
             }
         }
+        if failures.len() == WEEKS as usize {
+            let error = "all weekly projection requests failed".to_string();
+            return stale
+                .map(|(at, data)| {
+                    let age = now_secs().saturating_sub(at);
+                    (
+                        at,
+                        data,
+                        Some(format!(
+                            "weekly projections refresh failed; using cache aged {}h",
+                            age / 3600
+                        )),
+                    )
+                })
+                .ok_or(error);
+        }
         let at = self.write_cache(&name, &all);
-        Ok((at, all))
+        let warning = if failures.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "weekly projections unavailable for weeks {}",
+                failures
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        };
+        Ok((at, all, warning))
     }
 
     /// Load a league end-to-end and build its scored board.
@@ -189,7 +305,11 @@ impl Engine {
 
     /// Load a bare draft ID (mock drafts have no league): synthesize the
     /// league settings from the draft's own settings + scoring_type.
-    pub async fn load_draft_only(&self, draft_id: &str, force: bool) -> Result<LoadedLeague, String> {
+    pub async fn load_draft_only(
+        &self,
+        draft_id: &str,
+        force: bool,
+    ) -> Result<LoadedLeague, String> {
         let draft = self.client.draft(draft_id).await?;
         let league = synthesize_league(&draft);
         let mut loaded = self.assemble(league, draft, HashMap::new(), force).await?;
@@ -203,10 +323,9 @@ impl Engine {
     pub async fn load_any(&self, id: &str, force: bool) -> Result<LoadedLeague, String> {
         match self.load_league(id, force).await {
             Ok(l) => Ok(l),
-            Err(league_err) => self
-                .load_draft_only(id, force)
-                .await
-                .map_err(|draft_err| format!("not a league ({league_err}); not a draft ({draft_err})")),
+            Err(league_err) => self.load_draft_only(id, force).await.map_err(|draft_err| {
+                format!("not a league ({league_err}); not a draft ({draft_err})")
+            }),
         }
     }
 
@@ -217,21 +336,43 @@ impl Engine {
         user_names: HashMap<String, String>,
         force: bool,
     ) -> Result<LoadedLeague, String> {
-        let api_picks = self.client.picks(&draft.draft_id).await.unwrap_or_default();
-        let season: u32 = league.season.parse().map_err(|_| "bad season".to_string())?;
-        let (players_at, player_meta) = self.players(force).await?;
-        let (proj_at, season_rows) = self.season_projections(season, force).await?;
-        let (weekly_at, weekly_rows) = self.weekly_projections(season, force).await?;
+        let (api_picks, poll_last_success_at, poll_consecutive_failures, poll_last_error) =
+            match self.client.picks(&draft.draft_id).await {
+                Ok(picks) => (picks, Some(now_secs()), 0, None),
+                Err(error) => (Vec::new(), None, 1, Some(error)),
+            };
+        let mut manual_picks = self.load_manual_picks(&draft.draft_id);
+        if reconcile_manual_picks(&api_picks, &mut manual_picks) {
+            self.save_manual_picks(&draft.draft_id, &manual_picks)?;
+        }
+        let season: u32 = league
+            .season
+            .parse()
+            .map_err(|_| "bad season".to_string())?;
+        let (players_at, player_meta, players_warning) = self.players(force).await?;
+        let (proj_at, season_rows, projections_warning) =
+            self.season_projections(season, force).await?;
+        let (weekly_at, weekly_rows, weekly_warning) =
+            self.weekly_projections(season, force).await?;
 
         let mut warnings = Vec::new();
-        let board = build_board(
+        warnings.extend(players_warning);
+        warnings.extend(projections_warning);
+        warnings.extend(weekly_warning);
+        if let Some(error) = &poll_last_error {
+            warnings.push(format!("initial picks refresh failed: {error}"));
+        }
+        let roster_rules = RosterRules::new(&league.roster_positions);
+        let board_build = build_board(
             &league,
             &draft,
             &player_meta,
             &season_rows,
             &weekly_rows,
+            &roster_rules,
             &mut warnings,
         );
+        let board = board_build.players;
         if board.len() < 200 {
             warnings.push(format!(
                 "board unusually small ({} players) — projections may be incomplete",
@@ -250,8 +391,13 @@ impl Engine {
             user_names,
             board,
             board_index,
+            replacement_model: board_build.replacement,
+            roster_rules,
             api_picks,
-            manual_picks: Vec::new(),
+            manual_picks,
+            poll_last_success_at,
+            poll_consecutive_failures,
+            poll_last_error,
             players_fetched_at: players_at,
             projections_fetched_at: proj_at,
             weekly_fetched_at: weekly_at,
@@ -261,71 +407,78 @@ impl Engine {
     }
 }
 
-
-/// Build a stand-in League for a leagueless (mock) draft: roster shape from
-/// the draft's slot counts, scoring from Sleeper's default std/half/full PPR.
-fn synthesize_league(draft: &Draft) -> League {
-    let s = &draft.settings;
-    let mut roster_positions: Vec<String> = Vec::new();
-    let mut push = |pos: &str, n: Option<u32>| {
-        for _ in 0..n.unwrap_or(0) {
-            roster_positions.push(pos.to_string());
-        }
-    };
-    push("QB", s.slots_qb);
-    push("RB", s.slots_rb);
-    push("WR", s.slots_wr);
-    push("TE", s.slots_te);
-    push("FLEX", s.slots_flex);
-    push("SUPER_FLEX", s.slots_super_flex);
-    push("K", s.slots_k);
-    push("DEF", s.slots_def);
-    let starters = roster_positions.len() as u32;
-    for _ in 0..s.rounds.saturating_sub(starters) {
-        roster_positions.push("BN".to_string());
-    }
-
-    let scoring_type = draft
-        .metadata
-        .as_ref()
-        .and_then(|m| m.scoring_type.clone())
-        .unwrap_or_else(|| "ppr".into());
-    let ppr = match scoring_type.as_str() {
-        "ppr" => 1.0,
-        "half_ppr" => 0.5,
-        _ => 0.0,
-    };
-    let scoring_settings: HashMap<String, f64> = [
-        ("pass_yd", 0.04), ("pass_td", 4.0), ("pass_int", -1.0), ("pass_2pt", 2.0),
-        ("rush_yd", 0.1), ("rush_td", 6.0), ("rush_2pt", 2.0),
-        ("rec_yd", 0.1), ("rec_td", 6.0), ("rec_2pt", 2.0), ("rec", ppr),
-        ("fum_lost", -2.0),
-        ("sack", 1.0), ("int", 2.0), ("fum_rec", 2.0), ("def_td", 6.0),
-        ("safe", 2.0), ("blk_kick", 2.0), ("def_st_td", 6.0),
-        ("pts_allow_0", 10.0), ("pts_allow_1_6", 7.0), ("pts_allow_7_13", 4.0),
-        ("pts_allow_14_20", 1.0), ("pts_allow_21_27", 0.0),
-        ("pts_allow_28_34", -1.0), ("pts_allow_35p", -4.0),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_string(), v))
-    .collect();
-
-    let name = draft
-        .metadata
-        .as_ref()
-        .and_then(|m| m.name.clone())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| format!("Mock draft ({scoring_type})"));
-    League {
-        league_id: draft.draft_id.clone(),
-        name,
-        season: draft.season.clone().unwrap_or_else(|| "2026".into()),
-        status: draft.status.clone(),
-        total_rosters: s.teams,
-        roster_positions,
-        scoring_settings,
-        draft_id: Some(draft.draft_id.clone()),
-    }
+pub(crate) fn reconcile_manual_picks(api: &[Pick], manual: &mut Vec<Pick>) -> bool {
+    let before = manual.len();
+    let api_max = api.iter().map(|pick| pick.pick_no).max().unwrap_or(0);
+    let api_players: std::collections::HashSet<&str> =
+        api.iter().map(|pick| pick.player_id.as_str()).collect();
+    manual.retain(|pick| pick.pick_no > api_max && !api_players.contains(pick.player_id.as_str()));
+    manual.len() != before
 }
 
-pub use crate::view::{build_view, merged_picks, DraftView};
+#[cfg(test)]
+mod reliability_tests {
+    use super::*;
+    use crate::sleeper::Pick;
+
+    fn test_dir(label: &str) -> PathBuf {
+        let unique = format!(
+            "draft-assistant-{label}-{}-{}",
+            std::process::id(),
+            now_secs()
+        );
+        std::env::temp_dir().join(unique)
+    }
+
+    fn pick(pick_no: u32, player_id: &str) -> Pick {
+        Pick {
+            round: 1,
+            pick_no,
+            draft_slot: pick_no,
+            player_id: player_id.into(),
+            picked_by: None,
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn expired_cache_is_still_available_for_outage_fallback() {
+        let dir = test_dir("stale-cache");
+        let engine = Engine::new(dir.clone());
+        let cached = Cached {
+            fetched_at: 1,
+            data: vec![10_u32, 20_u32],
+        };
+        std::fs::write(
+            engine.cache_path("test.json"),
+            serde_json::to_string(&cached).unwrap(),
+        )
+        .unwrap();
+
+        assert!(engine.read_cache::<Vec<u32>>("test.json", 1).is_none());
+        assert_eq!(
+            engine.read_cache_any::<Vec<u32>>("test.json"),
+            Some((1, vec![10, 20]))
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn manual_picks_survive_reload_and_reconcile_with_api_progress() {
+        let dir = test_dir("manual-picks");
+        let engine = Engine::new(dir.clone());
+        let manual = vec![pick(1, "manual-1"), pick(2, "manual-2")];
+
+        engine.save_manual_picks("draft-123", &manual).unwrap();
+        let mut reloaded = engine.load_manual_picks("draft-123");
+        assert_eq!(reloaded.len(), 2);
+
+        let api = vec![pick(1, "api-1")];
+        assert!(reconcile_manual_picks(&api, &mut reloaded));
+        assert_eq!(reloaded.len(), 1);
+        assert_eq!(reloaded[0].pick_no, 2);
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

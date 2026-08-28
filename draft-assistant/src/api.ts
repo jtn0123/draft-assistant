@@ -1,6 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AppConfig, DraftView } from "./types";
+import type { AppConfig, DraftView, PollHealth } from "./types";
+
+const DRAFT_VIEW_SCHEMA_VERSION = "1.1";
+
+export function validateDraftView(value: DraftView): DraftView {
+  if (value.schema_version !== DRAFT_VIEW_SCHEMA_VERSION) {
+    throw new Error(
+      `Incompatible draft data: expected schema ${DRAFT_VIEW_SCHEMA_VERSION}, received ${value.schema_version || "missing"}. Update and restart the app.`,
+    );
+  }
+  return value;
+}
+
+async function invokeView(command: string, args?: Record<string, unknown>): Promise<DraftView> {
+  return validateDraftView(await invoke<DraftView>(command, args));
+}
 
 /** True when running inside the Tauri shell (vs a plain browser tab). */
 const inTauri = "__TAURI_INTERNALS__" in window;
@@ -18,25 +33,28 @@ interface Api {
   startPolling(intervalSecs?: number): Promise<void>;
   stopPolling(): Promise<void>;
   onDraftUpdated(handler: (view: DraftView) => void): Promise<UnlistenFn>;
+  onPollHealth(handler: (health: PollHealth) => void): Promise<UnlistenFn>;
 }
 
 const tauriApi: Api = {
   addLeague: (leagueId, force = false) =>
-    invoke<DraftView>("add_league", { leagueId, force }),
+    invokeView("add_league", { leagueId, force }),
   setMyUsername: (username) => invoke<string>("set_my_username", { username }),
   getConfig: () => invoke<AppConfig>("get_config"),
-  getState: () => invoke<DraftView>("get_state"),
-  refreshPicks: () => invoke<DraftView>("refresh_picks"),
-  refreshData: () => invoke<DraftView>("refresh_data"),
+  getState: () => invokeView("get_state"),
+  refreshPicks: () => invokeView("refresh_picks"),
+  refreshData: () => invokeView("refresh_data"),
   recordManualPick: (playerId) =>
-    invoke<DraftView>("record_manual_pick", { playerId }),
-  undoManualPick: () => invoke<DraftView>("undo_manual_pick"),
+    invokeView("record_manual_pick", { playerId }),
+  undoManualPick: () => invokeView("undo_manual_pick"),
   exportState: () => invoke<string>("export_state"),
   startPolling: (intervalSecs = 3) =>
     invoke<void>("start_polling", { intervalSecs }),
   stopPolling: () => invoke<void>("stop_polling"),
   onDraftUpdated: (handler) =>
-    listen<DraftView>("draft-updated", (event) => handler(event.payload)),
+    listen<DraftView>("draft-updated", (event) => handler(validateDraftView(event.payload))),
+  onPollHealth: (handler) =>
+    listen<PollHealth>("poll-health", (event) => handler(event.payload)),
 };
 
 /**
@@ -50,7 +68,7 @@ function browserApi(): Api {
     if (cached === null) {
       const resp = await fetch("/dev-fixture.json");
       if (!resp.ok) throw new Error("dev fixture missing (browser preview only works with public/dev-fixture.json)");
-      cached = (await resp.json()) as DraftView;
+      cached = validateDraftView((await resp.json()) as DraftView);
     }
     return cached;
   };
@@ -81,9 +99,12 @@ function browserApi(): Api {
       throw new Error("browser preview is read-only — run the desktop app to draft");
     },
     exportState: async () => "browser preview — no export",
-    startPolling: async () => undefined,
+    startPolling: async () => {
+      throw new Error("browser preview is read-only — live sync requires the desktop app");
+    },
     stopPolling: async () => undefined,
     onDraftUpdated: async () => () => undefined,
+    onPollHealth: async () => () => undefined,
   };
 }
 

@@ -171,6 +171,18 @@ main {
   width: 220px;
 }
 
+.board-count {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.empty-board {
+  padding: 32px 12px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

@@ -6,9 +6,9 @@
 //! --simulate N fakes the first N picks (market drafts by ADP; my own slots
 //! take the engine's balanced recommendation) to exercise mid-draft state.
 
-use draft_assistant_lib::draft::slot_for_pick;
-use draft_assistant_lib::engine::{build_view, AppConfig, Engine};
-use draft_assistant_lib::sleeper::Pick;
+use draft_assistant_lib::engine::{AppConfig, Engine};
+use draft_assistant_lib::simulation::apply_simulated_pick;
+use draft_assistant_lib::view::build_view;
 
 fn parse_args() -> (String, Option<String>, Option<String>, u32) {
     let mut positional: Vec<String> = Vec::new();
@@ -16,13 +16,10 @@ fn parse_args() -> (String, Option<String>, Option<String>, u32) {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--simulate" {
-            simulate = args
-                .next()
-                .and_then(|n| n.parse().ok())
-                .unwrap_or_else(|| {
-                    eprintln!("--simulate needs a number");
-                    std::process::exit(2);
-                });
+            simulate = args.next().and_then(|n| n.parse().ok()).unwrap_or_else(|| {
+                eprintln!("--simulate needs a number");
+                std::process::exit(2);
+            });
         } else {
             positional.push(arg);
         }
@@ -70,39 +67,10 @@ async fn main() {
         }
     };
 
-    // Simulated picks: market takes best remaining ADP; my slot takes the
-    // engine's balanced recommendation at that moment.
-    let teams = loaded.draft.settings.teams;
     for pick_no in 1..=simulate {
-        let view = build_view(&loaded, &config);
-        let slot = slot_for_pick(pick_no, teams);
-        let is_me = view.draft.my_slot == Some(slot);
-        let choice = if is_me {
-            view.recommendations
-                .iter()
-                .find(|r| r.mode == "balanced")
-                .map(|r| r.player_id.clone())
-        } else {
-            view.available
-                .iter()
-                .filter(|p| p.player.adp.is_some())
-                .min_by(|a, b| {
-                    a.player
-                        .adp
-                        .partial_cmp(&b.player.adp)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .map(|p| p.player.player_id.clone())
-        };
-        let Some(player_id) = choice else { break };
-        loaded.manual_picks.push(Pick {
-            round: (pick_no - 1) / teams + 1,
-            pick_no,
-            draft_slot: slot,
-            player_id,
-            picked_by: None,
-            metadata: None,
-        });
+        if apply_simulated_pick(&mut loaded, &config, pick_no).is_none() {
+            break;
+        }
     }
 
     let view = build_view(&loaded, &config);

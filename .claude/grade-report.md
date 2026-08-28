@@ -43,21 +43,21 @@ Corrections to that report (detail in its appended addendum): its `glib` RustSec
 
 The module split is genuinely good: scoring is a data-driven dot product over the league's own `scoring_settings` key space (`scoring.rs:73-82`), which makes exact custom-league scoring nearly free; one `DraftView` serves the UI and the AI export identically. What holds it back is that the dependency graph has **two cycles** and that roster-slot semantics are re-implemented in four places.
 
-#### A1 — Break the two circular module dependencies
+#### ~~A1~~ ✓ done 2026-08-27 — Break the two circular module dependencies
 - **Where:** `engine.rs:331` ↔ `view.rs:5`; `recommend.rs:4` ↔ `view.rs:7`; type defined at `view.rs:33`
 - **What's wrong:** `engine.rs:331` re-exports `build_view`/`merged_picks`/`DraftView` from `view`, while `view.rs:5` imports `LoadedLeague`/`AppConfig`/`now_secs` from `engine` — a cycle. Second cycle: `recommend.rs:4` imports `AvailablePlayer` from `view`, while `view.rs:7` imports `recommend`. Root cause is layering inversion — `AvailablePlayer` is a domain type (a board player plus survival odds) but lives in the top presentation layer, and `engine` re-exports `view`'s API purely as a convenience façade.
 - **Fix:** Move `AvailablePlayer` from `view.rs:33` to `board.rs` beside `BoardPlayer`. Delete the `pub use` at `engine.rs:331` and import from `crate::view` at the three call sites (`lib.rs:10`, `lib.rs:26`, `lib.rs:137`, `bin/dump_state.rs:10`). Both cycles disappear.
 - **Effort:** S
 - **Grade lift:** B− → B (restores a strict one-way dependency graph)
 
-#### A2 — Make roster-slot semantics one shared domain model
+#### ~~A2~~ ✓ done 2026-08-27 — Make roster-slot semantics one shared domain model
 - **Where:** `valuation.rs:27-36` and `:80`, `draft.rs:44-94`, `recommend.rs:90`, `board.rs:43-64`, `src/components/Board.tsx:5`
 - **What's wrong:** Four independent interpretations of slot eligibility that disagree. `valuation.rs` understands `FLEX`/`WRRB_FLEX`/`REC_FLEX`/`SUPER_FLEX` but then uses only `flex_slots[0]` for *all* flex demand (`valuation.rs:80`, with an in-code comment admitting it). `recommend.rs:90` hardcodes `RB|WR|TE`, so superflex QBs never score as flex-eligible. `Board.tsx:5` omits `K` from the filter list.
 - **Fix:** Introduce a `RosterRules`/`SlotKind` type owning eligibility and per-slot demand. Allocate each flex slot type against its own eligible pool. Serialize the league's actual positions into `DraftView` so the frontend builds its filter from state instead of a literal.
 - **Effort:** L
 - **Grade lift:** B− → B+ (removes the largest source of divergent business rules)
 
-#### A3 — Enforce the Rust↔TypeScript contract that already has a version field
+#### ~~A3~~ ✓ done 2026-08-27 — Enforce the Rust↔TypeScript contract that already has a version field
 - **Where:** `view.rs:60-61` and `:285-286`, `src/types.ts`, `src/api.ts:24-39` and `:53`
 - **What's wrong:** `types.ts` hand-mirrors the Rust structs; `invoke<DraftView>` and the fixture `as DraftView` cast are assertions with no runtime validation. A renamed Rust field compiles cleanly on both sides and fails at render. `schema_version` is emitted at `view.rs:285` and **never read anywhere** — the one field designed to catch this is dead weight.
 - **Fix:** Either generate the TS types from the Rust structs, or minimally: check `schema_version` in `api.ts` before accepting a view and throw a legible error on mismatch. The second is 10 lines and closes most of the risk.
@@ -70,7 +70,7 @@ The module split is genuinely good: scoring is a data-driven dot product over th
 
 The pure logic is the strongest part of this codebase — `valuation.rs:100-104` constructs its baseline window so `lo < hi` holds for every pool size including 1; `board.rs:70-104` infers bye weeks by *counting* opponent coverage so one stale row can't poison a team; `view.rs:184-197` has a three-tier name fallback so an unknown `player_id` can never break the view. But the concurrency and failure handling around that logic have a reachable deadlock, no timeouts anywhere, and a poller that lies when it fails. Those are draft-night-fatal, and they set the grade.
 
-#### B1 — Fix the lock-order inversion that can permanently freeze the app
+#### ~~B1~~ ✓ done 2026-08-27 — Fix the lock-order inversion that can permanently freeze the app
 - **Where:** `lib.rs:236-237` vs `lib.rs:51/62` and `lib.rs:121/123`
 - **What's wrong:** Two opposite lock orders exist. The poll loop takes **`loaded` → `config`**: it holds `loaded` (`lib.rs:236`) and then awaits `config` (`:237`). Two commands take **`config` → `loaded`**: `refresh_data` holds `config` from `:121` across `view_from` and then awaits `loaded` at `:123`; `add_league` holds `config` from `:51` across a synchronous config file write (`:60`) *and* a full `view_from` (`:61`) before awaiting `loaded` at `:62`. That is a textbook cycle, and Tokio's fair mutex does not break it. When it hits, the app wedges permanently — no picks, no recommendations, no recovery but a restart.
 - **Impact:** **Critical.** Reachable with one click. "Refresh data" (`App.tsx:105-115`) and re-adding a league are exactly what a user reaches for when the board looks stale — i.e. precisely when the poll loop is also running. `add_league` has the wider window because it holds `config` across a file write.
@@ -78,28 +78,28 @@ The pure logic is the strongest part of this codebase — `valuation.rs:100-104`
 - **Effort:** S
 - **Grade lift:** C → C+ (removes the single most likely way the app dies mid-draft)
 
-#### B2 — Add HTTP timeouts and stop holding a lock across network awaits
+#### ~~B2~~ ✓ done 2026-08-27 — Add HTTP timeouts and stop holding a lock across network awaits
 - **Where:** `sleeper.rs:174-178`; `lib.rs:101-110`; `lib.rs:213-214`
 - **What's wrong:** The client sets only `user_agent` and `gzip` — reqwest applies **no default timeout**, and the only `Duration` in the whole crate is the poll sleep. Two consequences: (a) `refresh_picks` acquires `loaded` at `lib.rs:101` and holds it across **two** HTTP awaits (`:104`, `:106`), so a stalled socket freezes `get_state`, the poll loop, manual picks, undo, and export — indefinitely; (b) the poll loop itself never reaches its sleep, so it stops re-checking the stop/generation flags, meaning live sync dies silently and even `stop_polling` has no effect.
 - **Fix:** `.connect_timeout(3s).timeout(8s)` on the client builder. In `refresh_picks`, fetch into locals *before* acquiring `loaded`. Optionally `tokio::join!` the two poll requests.
 - **Effort:** S
 - **Grade lift:** C → C+ (bounds every failure mode that currently has no bound)
 
-#### B3 — Fall back to stale cache instead of failing the load
+#### ~~B3~~ ✓ done 2026-08-27 — Fall back to stale cache instead of failing the load
 - **Where:** `engine.rs:80-87`, `engine.rs:222-224`
 - **What's wrong:** `read_cache` returns `None` past TTL (players 24h, projections 6h), and `assemble` then propagates fetch failure with `?`. There is **no stale-cache fallback**. If the undocumented projections endpoint is unavailable once the cache has expired, `load_league` fails outright — no board, no recommendations, no app. That endpoint is undocumented, unversioned, carries the entire valuation model, and has no fallback and no schema-drift detection. With a 6h TTL, an outage at 4 PM against a 9 AM cache produces exactly this at exactly the wrong moment.
 - **Fix:** On fetch failure, retry `read_cache` with an effectively infinite TTL, use it, and push a `warnings` entry naming the age. Fail only when there is no cache at all.
 - **Effort:** S
 - **Grade lift:** C → C+ (removes a single point of failure on the critical path)
 
-#### B4 — Report poll failures instead of swallowing them
+#### ~~B4~~ ✓ done 2026-08-27 — Report poll failures instead of swallowing them
 - **Where:** `lib.rs:219`, `lib.rs:226`, `lib.rs:240`; `view.rs:87-94`
 - **What's wrong:** Both fetches use `if let Ok(...)` with no error arm, and the emit result is discarded with `.ok()`. `DataHealth` has no `last_poll_ok`/`last_poll_at`/`last_error`. So a 500, a rate-limit, or a dead network leaves the board frozen while the UI keeps showing "● Live sync on". During a draft, "nobody has picked in 90 seconds" and "we lost the API 90 seconds ago" demand opposite reactions and are currently indistinguishable.
 - **Fix:** Track consecutive failures and last success in `DataHealth`; emit a typed status event on failure and recovery; flip the banner after ~2 consecutive failures. Preserve the last good view — make the staleness unmistakable, don't blank the screen.
 - **Effort:** M
 - **Grade lift:** C → C+ (a stale board can no longer masquerade as a live one)
 
-#### B5 — Persist manual picks across refresh and restart
+#### ~~B5~~ ✓ done 2026-08-27 — Persist manual picks across refresh and restart
 - **Where:** `engine.rs:254`, `lib.rs:62`, `lib.rs:123`
 - **What's wrong:** `assemble` always sets `manual_picks: Vec::new()`, and both `add_league` and `refresh_data` replace the whole `LoadedLeague`. Clicking "Refresh data" silently erases every manual fallback pick. The failure is self-reinforcing: you only *have* manual picks because the API was lagging, and "Refresh data" is the next thing you'd click.
 - **Fix:** Persist manual picks per draft ID via the existing atomic `write_cache` path; reload in `assemble` and reconcile against authoritative API picks, dropping only those the API has caught up on.
@@ -120,7 +120,7 @@ The pure logic is the strongest part of this codebase — `valuation.rs:100-104`
 - **Effort:** M
 - **Grade lift:** C → C+ (stops silently-wrong output in ordinary league configs)
 
-#### B8 — Guard the one unchecked index on the live path
+#### ~~B8~~ ✓ done 2026-08-27 — Guard the one unchecked index on the live path
 - **Where:** `view.rs:200`
 - **What's wrong:** `rosters[(slot - 1) as usize].clone()` — `my_slot` comes from `draft_order` values and is never validated against `settings.teams`. Slot `0` underflows to `u32::MAX` in release (no overflow checks configured) and panics on index; slot > teams panics directly. Notably, `draft.rs:126-129` **already guards exactly this** for pick slots — the check exists, `my_slot` just bypasses it.
 - **Fix:** `rosters.get((slot.saturating_sub(1)) as usize).cloned()`, and add a warning when a slot falls outside `1..=teams`.
@@ -133,7 +133,7 @@ The pure logic is the strongest part of this codebase — `valuation.rs:100-104`
 
 The type discipline is genuinely uncommon: `strict` plus `noUnusedLocals`/`noUnusedParameters`, and **zero** `any`, `as unknown`, non-null assertions, or `@ts-ignore` anywhere in `src/`. Semantic landmarks and a real `<table>` are used correctly, effect dependencies are honest with no suppression comments, and the Tauri unlisten teardown resolves the promise inside cleanup — the thing most codebases get wrong. Against that: there is not a single `aria-*`, `role=`, or `htmlFor` in the entire application source, and the live-sync indicator can lie.
 
-#### C1 — Make the "Live sync on" indicator falsifiable
+#### ~~C1~~ ✓ done 2026-08-27 — Make the "Live sync on" indicator falsifiable
 - **Where:** `App.tsx:144-146`, `App.tsx:15`, `api.ts:20`, `types.ts:109`
 - **What's wrong:** `polling` is pure local UI state, set once when the user clicks and never reconciled with reality. There is no error channel from the backend (`api.ts` defines only `draft-updated`), and `generated_at` is emitted by Rust but never rendered. A dead poller looks identical to "nobody has picked yet" — the exact failure this app most needs to surface. Pairs with **B4**; both halves are required.
 - **Fix:** Consume the poll-health event from B4; show "last updated Ns ago" from `generated_at`; turn the pill amber/red past a failure threshold.
@@ -154,14 +154,14 @@ The type discipline is genuinely uncommon: `strict` plus `noUnusedLocals`/`noUnu
 - **Effort:** S
 - **Grade lift:** C+ → B− (critical live state stops being vision-only)
 
-#### C4 — Complete board control semantics and the empty state
+#### ~~C4~~ ✓ done 2026-08-27 — Complete board control semantics and the empty state
 - **Where:** `Board.tsx:32-46`, `Board.tsx:64-94`, `Board.tsx:24`
 - **What's wrong:** Position filters convey selection by CSS class only — no `aria-pressed`, no group label. Search relies solely on `placeholder` for its name (the Setup screen does this correctly with real `<label>`s at `Panels.tsx:37-53` — the Board is the inconsistent one). A filter matching nothing renders a header above an empty void. `.slice(0, 200)` truncates with no "showing 200 of N".
 - **Fix:** `aria-pressed` + a labeled group on the filters, `aria-label` on search, a single full-width "No matching players" row, and a truncation count.
 - **Effort:** S
 - **Grade lift:** C+ → B− (completes the primary interaction surface)
 
-#### C5 — Stop the Setup screen flashing on every launch
+#### ~~C5~~ ✓ done 2026-08-27 — Stop the Setup screen flashing on every launch
 - **Where:** `App.tsx:14`, `App.tsx:18`, `App.tsx:41-42`
 - **What's wrong:** Initial state is `view: null, busy: false`, and `setBusy(true)` only runs *after* `await api.getConfig()` resolves. Every launch with a saved league paints the Setup form first — including firing `autoFocus` on the username input — then swaps to "Loading…". Anything typed in that window is discarded.
 - **Fix:** Initialize `busy` to `true`; clear it in the branch that decides no league is configured.
@@ -181,28 +181,29 @@ The type discipline is genuinely uncommon: `strict` plus `noUnusedLocals`/`noUnu
 
 13 tests pass and they are well-chosen — `draft.rs` checks `picks_for_slot` against the real league document, `recommend.rs` pins the disqualification rules that a simulation caught failing. A genuine 210-pick autopilot simulation with an invariant validator exists and passes. But **every one of the 13 tests covers pure math**: there are zero tests in `board.rs`, `view.rs`, `engine.rs`, `sleeper.rs`, and `lib.rs` — the entire ingestion, assembly, and state-transition surface, which is where all eight B-items live. Not one of B1–B8 would be caught by the current suite.
 
-#### D1 — Wire the existing simulation into `cargo test`
+#### ~~D1~~ ✓ done 2026-08-27 — Wire the existing simulation into `cargo test`
 - **Where:** `bin/dump_state.rs:76-106`; create `src-tauri/tests/`
 - **What's wrong:** The strongest verification asset in the project is a CLI binary, so it only runs when someone remembers to run it. It is not a regression gate.
 - **Fix:** Move the simulation loop and invariant checks into `tests/simulation.rs` against a checked-in fixture (no network). Assert the invariants already validated manually: no duplicate picks, drafted ∉ available, survival ∈ [0,1], roster counts, recommendations non-empty mid-draft.
 - **Effort:** M
 - **Grade lift:** C → C+ (converts existing work into an automatic gate — best ratio in this category)
 
-#### D2 — Add fixture-driven tests for the data path
+#### D2 ◐ partial 2026-08-27 — Add fixture-driven tests for the data path
 - **Where:** `board.rs`, `engine.rs`, `sleeper.rs`, `view.rs`; create `src-tauri/tests/fixtures/`
 - **What's wrong:** No test covers Sleeper response parsing, cache TTL/refresh behavior, board assembly, bye inference, or `merged_picks`. Upstream payload drift breaks draft night with all 13 tests green.
 - **Fix:** Check in sanitized fixtures — standard league, mock draft, partial weekly data, API outage, manual-pick catch-up. Snapshot `DraftView`. Test the cache against a temp dir, including the B3 stale-fallback path.
 - **Effort:** L
 - **Grade lift:** C → C+ (covers the surface where the real bugs are)
+- **Progress:** Added a sanitized Sleeper-shaped board fixture plus cache-expiry, manual-pick reconciliation, full `DraftView`, and 210-pick simulation coverage. Mock-draft and partial-week/mock-HTTP outage fixtures remain.
 
-#### D3 — Add a frontend test runner and cover the live path
+#### ~~D3~~ ✓ done 2026-08-27 — Add a frontend test runner and cover the live path
 - **Where:** no runner configured; `package.json:6-10`
 - **What's wrong:** Zero frontend tests and no runner. Filtering, modal actions, poll handling, and error states are entirely unverified.
 - **Fix:** Vitest + React Testing Library + user-event, mocking the `api` boundary. Cover setup success/failure, live update handling, filters, manual-pick confirm/undo, and the C1 staleness indicator.
 - **Effort:** L
 - **Grade lift:** C → C+ (first coverage of the visible product)
 
-#### D4 — Add CI once a repository exists
+#### ~~D4~~ ✓ done 2026-08-27 — Add CI once a repository exists
 - **Where:** blocked on **I1**; create `.github/workflows/`
 - **What's wrong:** No automation gates build, tests, clippy, fmt, or audit. Genuinely blocked — there is no repo and no remote for CI to attach to.
 - **Fix:** After I1, add a macOS workflow running the I2 verify script.
@@ -269,19 +270,20 @@ Healthier than the Codex report concluded. Both lockfiles are present, Tauri res
 
 Measured, not assumed: cold load **9.9s**, warm **2.6s**, bundle 65 kB gzipped, ~133 kB per IPC emit. The `changed` gate is the right design — the view is rebuilt ~210 times over three hours rather than 3,600. The Codex report's "first load takes about a minute" premise doesn't hold; the real defect there is that the *UI says* a minute.
 
-#### G1 — Cache the replacement model instead of recomputing it every view
+#### ~~G1~~ ✓ done 2026-08-27 — Cache the replacement model instead of recomputing it every view
 - **Where:** `view.rs:270-282`, `board.rs:178-187`
 - **What's wrong:** `build_view` allocates a fresh `Vec<ScoredPlayer>` (~370 String clones) and re-runs `compute_replacement`, re-bucketing and re-sorting every position pool — on **every** emit. It operates on the full board including drafted players, so the result is byte-identical every time and identical to what `build_board` already computed at load. Beyond the waste, it's a correctness hazard: two independent sites computing the baselines means the numbers behind `vorp` and those reported in `replacement_baselines` can silently drift apart if either is edited.
 - **Fix:** Store the `ReplacementModel` in `LoadedLeague` at build time; copy it into `DraftView`.
 - **Effort:** S
 - **Grade lift:** B− → B (removes duplicate work *and* a drift hazard)
 
-#### G2 — Fetch the 18 weekly endpoints concurrently, and fix the load message
+#### G2 ◐ partial 2026-08-27 — Fetch the 18 weekly endpoints concurrently, and fix the load message
 - **Where:** `engine.rs:152-166`, `src/components/Panels.tsx:21`
 - **What's wrong:** 18 requests run strictly sequentially; one slow week delays all the rest. Measured at 9.9s total — real but far from the "~a minute" the UI promises, which is its own defect: the app overstates its own slowness by 6×.
 - **Fix:** Bounded concurrency (semaphore of ~6), preserving per-week degradation warnings; sort deterministically after collection. Correct the message to "~10 seconds".
 - **Effort:** M
 - **Grade lift:** B− → B (cuts load to ~2s and stops misinforming the user)
+- **Progress:** The misleading “~a minute” copy now says “~10 seconds.” Bounded-concurrency fetching remains intentionally deferred from the pre-draft batch.
 
 #### G3 — Precompute tier counts and stop cloning the whole board per emit
 - **Where:** `recommend.rs:156-159`, `view.rs:203-212`
@@ -335,21 +337,21 @@ The declared foundations are good — TypeScript strict with unused-locals/param
 - **Effort:** S (about 30 seconds)
 - **Grade lift:** C− → C+ (makes every other change reversible)
 
-#### I2 — Add one all-up verification command
+#### ~~I2~~ ✓ done 2026-08-27 — Add one all-up verification command
 - **Where:** `package.json:6-10`
 - **What's wrong:** Only `dev`/`build`/`preview`/`tauri` exist. Verification means remembering four commands across two toolchains, so checks get skipped — `cargo fmt` already has.
 - **Fix:** Add `typecheck`, `test`, `test:rust`, `lint`, and a `verify` that chains fmt check → tsc → frontend build → cargo test → clippy, failing loudly.
 - **Effort:** S
 - **Grade lift:** C− → C (one repeatable gate)
 
-#### I3 — Enforce formatting and add a frontend linter
+#### ~~I3~~ ✓ done 2026-08-27 — Enforce formatting and add a frontend linter
 - **Where:** 39 files fail `cargo fmt --check`; no ESLint/Prettier config
 - **What's wrong:** Formatting drift across most of the Rust source obscures real diffs, and React/TS has no semantic linter — no exhaustive-deps rule, no hooks rules. The effect dependencies are currently correct by hand, with nothing enforcing that.
 - **Fix:** Run `cargo fmt --all` as one isolated commit (after I1), then add ESLint with `react-hooks` and TypeScript rules, exposed via I2's scripts.
 - **Effort:** M
 - **Grade lift:** C− → C (consistency stops being manual)
 
-#### I4 — Configure a release profile with overflow checks on the live path
+#### ~~I4~~ ✓ done 2026-08-27 — Configure a release profile with overflow checks on the live path
 - **Where:** `Cargo.toml` — no `[profile.release]`
 - **What's wrong:** Release builds run with `overflow-checks = false`, so the underflows noted in B8 and `view.rs:119-122` wrap silently into garbage numbers rather than failing loudly. For a tool whose entire output is derived arithmetic, silent wrong numbers are worse than a crash.
 - **Fix:** Add `[profile.release]` with `overflow-checks = true` (negligible cost at this workload), plus `lto = "thin"` and `strip = true` to offset the 12 MB binary.

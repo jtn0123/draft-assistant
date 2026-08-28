@@ -1,0 +1,157 @@
+//! One authoritative interpretation of Sleeper roster slots.
+
+use std::collections::HashMap;
+
+const FLEX: &[&str] = &["RB", "WR", "TE"];
+const WR_RB_FLEX: &[&str] = &["RB", "WR"];
+const REC_FLEX: &[&str] = &["WR", "TE"];
+const SUPER_FLEX: &[&str] = &["QB", "RB", "WR", "TE"];
+const DRAFTABLE: &[&str] = &["QB", "RB", "WR", "TE", "K", "DEF"];
+
+#[derive(Debug, Clone)]
+pub struct RosterRules {
+    slots: Vec<String>,
+}
+
+impl RosterRules {
+    pub fn new(slots: &[String]) -> Self {
+        Self {
+            slots: slots.to_vec(),
+        }
+    }
+
+    pub fn slots(&self) -> &[String] {
+        &self.slots
+    }
+
+    pub fn flex_eligible(slot: &str) -> Option<&'static [&'static str]> {
+        match slot {
+            "FLEX" => Some(FLEX),
+            "WRRB_FLEX" => Some(WR_RB_FLEX),
+            "REC_FLEX" => Some(REC_FLEX),
+            "SUPER_FLEX" => Some(SUPER_FLEX),
+            _ => None,
+        }
+    }
+
+    pub fn is_non_starting(slot: &str) -> bool {
+        matches!(slot, "BN" | "IR" | "TAXI")
+    }
+
+    pub fn can_fill(slot: &str, position: &str) -> bool {
+        Self::flex_eligible(slot)
+            .map(|eligible| eligible.contains(&position))
+            .unwrap_or_else(|| !Self::is_non_starting(slot) && slot == position)
+    }
+
+    pub fn draftable_positions(&self) -> Vec<String> {
+        DRAFTABLE
+            .iter()
+            .filter(|position| self.slots.iter().any(|slot| Self::can_fill(slot, position)))
+            .map(|position| (*position).to_string())
+            .collect()
+    }
+
+    pub fn open_starting_slots<'a>(
+        &self,
+        player_positions: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<(String, u32)> {
+        let mut remaining: HashMap<&str, u32> = HashMap::new();
+        for position in player_positions {
+            *remaining.entry(position).or_insert(0) += 1;
+        }
+        let mut open: HashMap<String, u32> = HashMap::new();
+
+        for slot in &self.slots {
+            if Self::is_non_starting(slot) || Self::flex_eligible(slot).is_some() {
+                continue;
+            }
+            let count = remaining.entry(slot.as_str()).or_insert(0);
+            if *count > 0 {
+                *count -= 1;
+            } else {
+                *open.entry(slot.clone()).or_insert(0) += 1;
+            }
+        }
+
+        let mut flex_slots = self
+            .slots
+            .iter()
+            .filter(|slot| Self::flex_eligible(slot).is_some())
+            .collect::<Vec<_>>();
+        flex_slots.sort_by_key(|slot| Self::flex_eligible(slot).map_or(0, <[&str]>::len));
+        for slot in flex_slots {
+            let eligible = Self::flex_eligible(slot).expect("filtered flex slot");
+            let best = eligible
+                .iter()
+                .filter(|position| remaining.get(**position).copied().unwrap_or(0) > 0)
+                .max_by_key(|position| remaining.get(**position).copied().unwrap_or(0));
+            if let Some(position) = best {
+                *remaining.entry(position).or_insert(0) -= 1;
+            } else {
+                *open.entry(slot.clone()).or_insert(0) += 1;
+            }
+        }
+
+        let mut result = Vec::new();
+        for slot in &self.slots {
+            if let Some(count) = open.remove(slot) {
+                result.push((slot.clone(), count));
+            }
+        }
+        result
+    }
+
+    pub fn first_open_slot_for(
+        &self,
+        open_slots: &HashMap<String, u32>,
+        position: &str,
+    ) -> Option<&str> {
+        self.slots
+            .iter()
+            .find(|slot| {
+                open_slots.get(*slot).copied().unwrap_or(0) > 0 && Self::can_fill(slot, position)
+            })
+            .map(String::as_str)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rules(slots: &[&str]) -> RosterRules {
+        RosterRules::new(
+            &slots
+                .iter()
+                .map(|slot| (*slot).to_string())
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    #[test]
+    fn superflex_and_mixed_flex_have_distinct_eligibility() {
+        assert!(RosterRules::can_fill("SUPER_FLEX", "QB"));
+        assert!(!RosterRules::can_fill("REC_FLEX", "QB"));
+        assert!(!RosterRules::can_fill("WRRB_FLEX", "TE"));
+        assert!(RosterRules::can_fill("REC_FLEX", "TE"));
+    }
+
+    #[test]
+    fn draftable_positions_include_kicker_only_when_rostered() {
+        assert_eq!(
+            rules(&["QB", "SUPER_FLEX", "K", "BN"]).draftable_positions(),
+            vec!["QB", "RB", "WR", "TE", "K"]
+        );
+        assert!(!rules(&["QB", "FLEX", "BN"])
+            .draftable_positions()
+            .contains(&"K".to_string()));
+    }
+
+    #[test]
+    fn constrained_flex_fills_before_superflex_regardless_of_slot_order() {
+        let rules = rules(&["SUPER_FLEX", "REC_FLEX"]);
+        let open = rules.open_starting_slots(["QB", "WR"]);
+        assert!(open.is_empty(), "{open:?}");
+    }
+}
