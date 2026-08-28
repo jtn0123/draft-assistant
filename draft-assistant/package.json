@@ -9,15 +9,17 @@
     "check:loc": "node scripts/check-loc.mjs",
     "typecheck": "tsc --noEmit",
     "format:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
-    "test": "npm run test:frontend && npm run test:rust",
+    "test": "bun run test:frontend && bun run test:rust",
     "test:frontend": "vitest run",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --all-targets",
-    "lint": "npm run lint:frontend && npm run lint:rust",
+    "lint": "bun run lint:frontend && bun run lint:rust",
     "lint:frontend": "eslint . --max-warnings=0",
     "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings",
-    "verify": "npm run check:loc && npm run format:check && npm run typecheck && npm run build && npm run test && npm run lint",
+    "verify": "bun run check:loc && bun run format:check && bun run typecheck && bun run build && bun run test && bun run test:e2e && bun run lint",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:e2e": "playwright test",
+    "fuzz:build": "cargo +nightly fuzz build --manifest-path src-tauri/fuzz/Cargo.toml"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -27,6 +29,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

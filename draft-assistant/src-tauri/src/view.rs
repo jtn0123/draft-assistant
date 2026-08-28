@@ -142,8 +142,11 @@ pub fn merged_picks(api: &[Pick], manual: &[Pick]) -> Vec<Pick> {
 pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let league = &loaded.league;
     let draft = &loaded.draft;
-    let teams = draft.settings.teams;
-    let rounds = draft.settings.rounds;
+    // Clamped: `teams`/`rounds` come straight off the Sleeper payload with no
+    // schema guarantee, and zero would underflow `current_pick - 1` below.
+    let teams = draft.settings.teams.max(1);
+    let rounds = draft.settings.rounds.max(1);
+    let degenerate_settings = draft.settings.teams == 0 || draft.settings.rounds == 0;
 
     let picks = merged_picks(&loaded.api_picks, &loaded.manual_picks);
     let total_picks = picks.len();
@@ -317,6 +320,12 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
     let mut warnings = loaded.warnings.clone();
     warnings.extend(slot_warning);
+    if degenerate_settings {
+        warnings.push(format!(
+            "draft reports {} teams and {} rounds; treating both as at least 1",
+            draft.settings.teams, draft.settings.rounds
+        ));
+    }
 
     DraftView {
         schema_version: "1.2".into(),

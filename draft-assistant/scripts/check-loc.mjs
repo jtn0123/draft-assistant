@@ -11,10 +11,15 @@ const excludedDirectories = new Set([
   "node_modules",
   "research",
   "target",
+  "corpus",
+  "artifacts",
+  "playwright-report",
+  "test-results",
 ]);
 const excludedFiles = new Set([
   "Cargo.lock",
   "package-lock.json",
+  "bun.lock",
   `draft-assistant${sep}public${sep}dev-fixture.json`,
 ]);
 

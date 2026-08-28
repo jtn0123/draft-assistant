@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# cargo-fuzz: generated corpus and crash artifacts
+src-tauri/fuzz/corpus/
+src-tauri/fuzz/artifacts/
+src-tauri/fuzz/target/

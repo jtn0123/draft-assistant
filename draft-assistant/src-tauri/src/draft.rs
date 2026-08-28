@@ -6,7 +6,14 @@ use crate::sleeper::Pick;
 use serde::Serialize;
 
 /// Which slot (1-based) is on the clock at a given overall pick (1-based)?
+///
+/// Total by construction: a malformed or mock draft payload reporting zero
+/// teams would otherwise divide by zero and underflow, and `overflow-checks`
+/// is on in release, so that is a live-path panic rather than a wrong number.
 pub fn slot_for_pick(pick_no: u32, teams: u32) -> u32 {
+    if teams == 0 || pick_no == 0 {
+        return 1;
+    }
     let round = (pick_no - 1) / teams; // 0-based round
     let idx = (pick_no - 1) % teams; // 0-based index within round
     if round % 2 == 0 {

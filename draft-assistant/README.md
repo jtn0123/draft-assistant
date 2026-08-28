@@ -37,16 +37,42 @@ server anywhere.
 ## Run (dev)
 
 ```bash
-npm install
-npm run tauri dev
+bun install
+bun run tauri dev
 ```
+
+The project uses **Bun** as the package manager and script runner (Vite and
+Vitest run under it unchanged). `npm` still works if you prefer it, but the
+lockfile checked in is `bun.lock`.
 
 ## Build (release .app)
 
 ```bash
-npm run tauri build
+bun run tauri build
 # → src-tauri/target/release/bundle/macos/Draft Assistant.app
 ```
+
+## Testing
+
+```bash
+bun run verify        # everything: LOC cap, fmt, typecheck, build, tests, e2e, lint
+bun run test          # Vitest (frontend) + cargo test (Rust)
+bun run test:e2e      # Playwright against the browser preview
+```
+
+- **Rust — 55 tests.** Unit tests per module, fixture-driven integration tests
+  (`src-tauri/tests/`), a 210-pick draft simulation with invariant checks,
+  Sleeper wire-format parsing tests, and **property-based tests** (`proptest`)
+  over the draft math and every deserializer.
+- **Frontend — 15 Vitest tests** in jsdom, plus **7 Playwright tests** driving a
+  real Chromium against the browser-preview fixture.
+- **Fuzzing** — three `cargo-fuzz` targets in `src-tauri/fuzz/`. They build but
+  do not currently run on macOS 27; see `src-tauri/fuzz/README.md` for why and
+  what covers the gap.
+
+Playwright covers the rendered UI, not the Tauri IPC boundary (the browser
+fallback stubs it). A true desktop E2E on macOS would need WebdriverIO's
+embedded WebDriver server — `tauri-driver` has no macOS WKWebView driver.
 
 ## Headless state dump / simulation
 
