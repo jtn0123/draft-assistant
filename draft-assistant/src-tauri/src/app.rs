@@ -131,18 +131,22 @@ impl AppCore {
     /// is an error here: the user asked and deserves the answer.
     pub async fn refresh_picks(&self) -> Result<DraftView, String> {
         let draft_id = self.draft_id().await?;
+        let started = std::time::Instant::now();
         let (picks, draft) = tokio::join!(
             self.engine.client.picks(&draft_id),
             self.engine.client.draft(&draft_id)
         );
-        let picks = picks?;
+        let picks = picks.inspect_err(|error| {
+            log::warn(format!("refresh_picks failed: {error}"));
+        })?;
 
         let mut loaded = self.loaded.lock().await;
         let loaded = loaded.as_mut().ok_or("no league loaded")?;
         loaded.api_picks = picks;
         note_keepers(loaded);
         log::info(format!(
-            "refresh_picks: {} picks, status {}",
+            "refresh_picks in {:.1}s: {} picks, status {}",
+            started.elapsed().as_secs_f64(),
             loaded.api_picks.len(),
             loaded.draft.status
         ));
@@ -168,14 +172,25 @@ impl AppCore {
             config.active_league_id.clone().ok_or("no active league")?
         };
         log::info(format!("refresh_data {league_id} (forced refetch)"));
+        let started = std::time::Instant::now();
         let new_loaded = self
             .engine
             .load_any(&league_id, true)
             .await
             .inspect_err(|error| {
-                log::warn(format!("refresh_data failed: {error}"));
+                log::warn(format!(
+                    "refresh_data failed after {:.1}s: {error}",
+                    started.elapsed().as_secs_f64()
+                ));
             })?;
         log::warnings("refresh_data", &new_loaded.warnings);
+        log::info(format!(
+            "refresh_data done in {:.1}s: {} on the board, {} api picks, {} warnings",
+            started.elapsed().as_secs_f64(),
+            new_loaded.board.len(),
+            new_loaded.api_picks.len(),
+            new_loaded.warnings.len()
+        ));
         let config = self.config.lock().await.clone();
         let view = build_view(&new_loaded, &config);
         *self.loaded.lock().await = Some(new_loaded);
@@ -237,7 +252,12 @@ impl AppCore {
         let view = self.get_state().await?;
         let path = self.engine.data_dir.join("draft-state.json");
         let json = serde_json::to_string_pretty(&view).map_err(|e| e.to_string())?;
-        std::fs::write(&path, json).map_err(|e| e.to_string())?;
+        let bytes = json.len();
+        std::fs::write(&path, json).map_err(|e| {
+            log::warn(format!("export_state failed: {e}"));
+            e.to_string()
+        })?;
+        log::info(format!("export_state: {bytes} bytes to {}", path.display()));
         Ok(path.to_string_lossy().to_string())
     }
 
@@ -282,13 +302,35 @@ impl AppCore {
         history: &[ChatTurn],
         options: &ChatOptions,
     ) -> Result<ChatReply, String> {
-        chat::compact(history, options).await
+        log::info(format!("chat compact: {} turns", history.len()));
+        let started = std::time::Instant::now();
+        let reply = chat::compact(history, options).await;
+        match &reply {
+            Ok(reply) => log::info(format!(
+                "chat compacted in {:.1}s to {} chars, ${:.2}",
+                started.elapsed().as_secs_f64(),
+                reply.answer.len(),
+                reply.usage.cost_usd.unwrap_or(0.0)
+            )),
+            Err(error) => log::warn(format!("chat compact failed: {error}")),
+        }
+        reply
     }
 
     /// Save a conversation; returns the file it went to. Plain file I/O on
     /// the data dir, so no lock is needed and the poll loop is never waited on.
     pub fn save_chat_session(&self, session: &ChatSession) -> Result<String, String> {
-        self.engine.save_chat_session(session)
+        self.engine
+            .save_chat_session(session)
+            .inspect(|path| {
+                log::info(format!(
+                    "chat session {} saved: {} turns, ${:.2} -> {path}",
+                    session.id,
+                    session.turns.len(),
+                    session.cost_usd
+                ));
+            })
+            .inspect_err(|error| log::warn(format!("chat session save failed: {error}")))
     }
 
     pub fn list_chat_sessions(&self, draft_id: &str) -> Result<Vec<SessionSummary>, String> {

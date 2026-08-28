@@ -148,6 +148,7 @@ async fn start_polling(
     interval_secs: Option<u64>,
 ) -> Result<(), String> {
     let interval = Duration::from_secs(interval_secs.unwrap_or(3).clamp(2, 60));
+    log::info(format!("start_polling requested ({interval:?})"));
     let generation = state.core.begin_polling();
     let core = state.core.clone();
     tauri::async_runtime::spawn(async move {
@@ -172,6 +173,7 @@ async fn start_polling(
 
 #[tauri::command]
 async fn stop_polling(state: State<'_, AppState>) -> Result<(), String> {
+    log::info("stop_polling requested (live sync off)");
     state.core.stop_polling();
     Ok(())
 }
