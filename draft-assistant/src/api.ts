@@ -114,7 +114,18 @@ function browserApi(): Api {
           : "dev fixture missing (browser preview only works with public/dev-fixture.json)",
       );
     }
-    return validateDraftView((await resp.json()) as DraftView);
+    // A missing path under the dev server answers 200 with index.html, so the
+    // parse failure is the common case here. Its raw message ("Unexpected
+    // token '<'") means nothing to whoever is looking at the screen.
+    let body: unknown;
+    try {
+      body = await resp.json();
+    } catch {
+      throw new Error(
+        `could not read draft state from ${source} — it is not a state dump (check the path, and that the replay server is writing it)`,
+      );
+    }
+    return validateDraftView(body as DraftView);
   };
   // Replay mode: poll the source and push newer dumps through the same
   // listener the desktop poller uses. Each `dump_state` run restarts `seq` at
@@ -166,14 +177,27 @@ function browserApi(): Api {
     },
     getState: fixture,
     refreshPicks: fixture,
-    refreshData: fixture,
+    // Only the replay dump can actually be re-read here; projections are
+    // refetched by the engine, which the preview does not have.
+    refreshData: async () => {
+      if (!replay) {
+        throw new Error(
+          "browser preview is read-only — run the desktop app to refresh projections",
+        );
+      }
+      cached = await load();
+      lastGeneratedAt = cached.generated_at;
+      return cached;
+    },
     recordManualPick: async () => {
       throw new Error("browser preview is read-only — run the desktop app to draft");
     },
     undoManualPick: async () => {
       throw new Error("browser preview is read-only — run the desktop app to draft");
     },
-    exportState: async () => "browser preview — no export",
+    exportState: async () => {
+      throw new Error("browser preview is read-only — run the desktop app to export state");
+    },
     chat: async () => {
       throw new Error("browser preview cannot reach the Claude CLI — run the desktop app");
     },

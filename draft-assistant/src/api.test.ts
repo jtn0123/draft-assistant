@@ -63,6 +63,46 @@ describe("browser preview replay mode", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
+  // Dogfood ISSUE-002/003: both reported success in a preview that cannot
+  // refresh or write anything.
+  it("refuses export and data refresh in the fixture preview", async () => {
+    window.history.pushState({}, "", "/");
+    vi.resetModules();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => dump(1) });
+    vi.stubGlobal("fetch", fetchMock);
+    const { api } = await import("./api");
+    await expect(api.exportState()).rejects.toThrow(/read-only/);
+    await expect(api.refreshData()).rejects.toThrow(/read-only/);
+  });
+
+  it("reloads the replay dump when asked to refresh", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => dump(100) })
+      .mockResolvedValueOnce({ ok: true, json: async () => dump(140) });
+    vi.stubGlobal("fetch", fetchMock);
+    const { api } = await import("./api");
+    expect((await api.getState()).generated_at).toBe(100);
+    expect((await api.refreshData()).generated_at).toBe(140);
+  });
+
+  // Dogfood ISSUE-005: a source that is not JSON surfaced the raw
+  // "Unexpected token '<'" parser message on the Setup screen.
+  it("explains a state source that is not draft state", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => {
+        throw new SyntaxError(`Unexpected token '<', "<!doctype "... is not valid JSON`);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { api } = await import("./api");
+    await expect(api.getState()).rejects.toThrow(
+      /could not read draft state from \/live-state\.json/,
+    );
+    await expect(api.getState()).rejects.not.toThrow(/Unexpected token/);
+  });
+
   it("still refuses live sync when no replay source is given", async () => {
     window.history.pushState({}, "", "/");
     vi.resetModules();

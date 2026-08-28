@@ -85,10 +85,13 @@ export function Board({
   players,
   positions,
   onDraft,
+  draftOver = false,
 }: {
   players: AvailablePlayer[];
   positions: Position[];
   onDraft: (id: string, name: string) => void;
+  /** Once every pick is in there is nothing left to draft: don't offer it. */
+  draftOver?: boolean;
 }) {
   const [pos, setPos] = useState<Position>("ALL");
   const [query, setQuery] = useState("");
@@ -198,7 +201,12 @@ export function Board({
               <td className="muted">{fmt(p.adp)}</td>
               <td className={surClass(p.survival_next)}>{pct(p.survival_next)}</td>
               <td>
-                <button className="ghost small" onClick={() => onDraft(p.player_id, p.name)}>
+                <button
+                  className="ghost small"
+                  onClick={() => onDraft(p.player_id, p.name)}
+                  disabled={draftOver}
+                  title={draftOver ? "The draft is complete" : `Mark ${p.name} as drafted`}
+                >
                   Draft
                 </button>
               </td>

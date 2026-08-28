@@ -37,6 +37,22 @@ const rowNames = () =>
     .map((row) => within(row).getAllByRole("cell")[1].textContent);
 
 describe("Board", () => {
+  // Dogfood ISSUE-011.
+  it("offers no draft action once the draft is complete", () => {
+    render(
+      <Board
+        players={[player("a", "Alpha", "WR"), player("b", "Bravo", "RB")]}
+        positions={["WR", "RB"]}
+        onDraft={vi.fn()}
+        draftOver
+      />,
+    );
+    const buttons = screen.getAllByRole("button", { name: "Draft" });
+    expect(buttons).toHaveLength(2);
+    for (const button of buttons) expect(button).toBeDisabled();
+    expect(buttons[0]).toHaveAttribute("title", "The draft is complete");
+  });
+
   it("builds position filters from league data, including kicker", async () => {
     const user = userEvent.setup();
     render(

@@ -85,12 +85,17 @@ export default function App() {
     });
   }, [setConfirm, fail]);
 
-  const startLive = useCallback(async () => {
+  // Returns whether sync actually started: the caller must not announce
+  // success on a failed start, which is how "Live sync on" once came to
+  // overwrite the very error explaining that it was off.
+  const startLive = useCallback(async (): Promise<boolean> => {
     try {
       await api.startPolling(3);
       setPolling(true);
+      return true;
     } catch (e) {
       fail(errorMessage(e));
+      return false;
     }
   }, [fail]);
 
@@ -141,8 +146,7 @@ export default function App() {
       if (polling) {
         await api.stopPolling();
         setPolling(false);
-      } else {
-        await startLive();
+      } else if (await startLive()) {
         notify("Live sync on — polling Sleeper every 3s");
       }
     } catch (e) {
@@ -183,13 +187,29 @@ export default function App() {
     setBusy(true);
     try {
       applyView(await api.refreshData());
-      notify("Projections refreshed and board rebuilt");
+      notify(
+        api.replay
+          ? "Replay state reloaded — projections are only refetched in the desktop app"
+          : "Projections refreshed and board rebuilt",
+      );
     } catch (e) {
       fail(errorMessage(e));
     } finally {
       setBusy(false);
     }
   };
+
+  // A launch failure must be visible on the screen the user actually lands on.
+  // The bar used to live only on the main screen, so a failed restore showed
+  // Setup with no hint that anything had gone wrong.
+  const alertBar = toast?.sticky ? (
+    <div className="alert-bar" role="alert">
+      <span>{toast.text}</span>
+      <button className="ghost small" onClick={dismissToast} aria-label="Dismiss message">
+        ✕
+      </button>
+    </div>
+  ) : null;
 
   if (view === null) {
     return busy ? (
@@ -198,12 +218,15 @@ export default function App() {
         <p className="muted">Loading your league…</p>
       </div>
     ) : (
-      <Setup
-        onReady={(v) => {
-          applyView(v);
-          if (!api.preview || api.replay) void startLive();
-        }}
-      />
+      <>
+        {alertBar}
+        <Setup
+          onReady={(v) => {
+            applyView(v);
+            if (!api.preview || api.replay) void startLive();
+          }}
+        />
+      </>
     );
   }
 
@@ -268,14 +291,7 @@ export default function App() {
         </div>
       </header>
 
-      {toast?.sticky && (
-        <div className="alert-bar" role="alert">
-          <span>{toast.text}</span>
-          <button className="ghost small" onClick={dismissToast} aria-label="Dismiss message">
-            ✕
-          </button>
-        </div>
-      )}
+      {alertBar}
 
       <ClockBanner view={view} />
 
@@ -300,6 +316,7 @@ export default function App() {
           players={view.available}
           positions={view.league.draftable_positions}
           onDraft={(id, name) => setConfirm({ playerId: id, name })}
+          draftOver={view.draft.status === "complete"}
         />
       </main>
 

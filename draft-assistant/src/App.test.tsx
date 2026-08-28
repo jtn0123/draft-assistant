@@ -259,6 +259,65 @@ describe("App live workflow", () => {
     expect(testState.api.addLeague).toHaveBeenCalledWith("1389710366300200960");
   });
 
+  // Dogfood ISSUE-001: the success notice fired even when starting the poller
+  // had just failed, so the toast said sync was on while the pill said off and
+  // the real error was overwritten.
+  it("reports a failed live-sync start instead of claiming sync is on", async () => {
+    const user = userEvent.setup();
+    const initial = fixture();
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+    testState.api.startPolling.mockRejectedValue(new Error("live sync is unavailable here"));
+
+    render(<App />);
+    expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Dismiss message" }));
+
+    await user.click(screen.getByRole("button", { name: "○ Live sync off" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("live sync is unavailable here");
+    expect(screen.queryByText(/Live sync on — polling Sleeper/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "○ Live sync off" })).toBeInTheDocument();
+  });
+
+  // Dogfood ISSUE-004: the launch failure was prepared but never rendered,
+  // because the failure bar only existed on the main screen.
+  it("says why the saved league failed to load instead of a bare setup screen", async () => {
+    const initial = fixture();
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: null,
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockRejectedValue(new Error("Sleeper is unreachable"));
+
+    render(<App />);
+    expect(await screen.findByLabelText("League ID")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Sleeper is unreachable");
+  });
+
+  // Dogfood ISSUE-011: every row still offered an enabled Draft button once
+  // the draft was over, and the pick was only refused after Confirm.
+  it("disables drafting once the draft is complete", async () => {
+    const initial = fixture();
+    initial.draft.status = "complete";
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+
+    render(<App />);
+    expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+    for (const button of screen.getAllByRole("button", { name: /^Draft$/ })) {
+      expect(button).toBeDisabled();
+    }
+  });
+
   it("shows a setup error when a league cannot be loaded", async () => {
     const user = userEvent.setup();
     testState.api.getConfig.mockResolvedValue({
