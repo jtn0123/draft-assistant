@@ -100,6 +100,8 @@ test("a chat failure is reported in the panel", async ({ page }) => {
   await page.getByRole("button", { name: "Ask Claude" }).click();
   await page.getByRole("button", { name: "Who should I take next?" }).click();
 
-  // Browser preview cannot reach the CLI — the panel must say so.
-  await expect(page.getByRole("alert")).toContainText(/desktop app/i);
+  // Browser preview cannot reach the CLI — the panel itself must say so
+  // (the header toast about read-only preview is a separate alert).
+  const panel = page.getByRole("complementary", { name: /Ask Claude about this draft/ });
+  await expect(panel.getByRole("alert")).toContainText(/desktop app/i);
 });

@@ -195,6 +195,31 @@ describe("App live workflow", () => {
     expect(testState.api.recordManualPick).not.toHaveBeenCalled();
   });
 
+  it("keeps a failed action on screen until it is dismissed", async () => {
+    const user = userEvent.setup();
+    const initial = fixture();
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+    testState.api.recordManualPick.mockRejectedValue(new Error("player already drafted"));
+
+    render(<App />);
+    expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("button", { name: "Draft" })[0]);
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("player already drafted");
+    expect(alert).not.toHaveTextContent("Error:");
+
+    await user.click(screen.getByRole("button", { name: "Dismiss message" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("shows a setup error when a league cannot be loaded", async () => {
     const user = userEvent.setup();
     testState.api.getConfig.mockResolvedValue({
@@ -207,6 +232,6 @@ describe("App live workflow", () => {
     render(<App />);
     await user.type(await screen.findByLabelText("League ID"), "123456789012345");
     await user.click(screen.getByRole("button", { name: "Load league" }));
-    expect(await screen.findByText("Error: league unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("league unavailable")).toBeInTheDocument();
   });
 });

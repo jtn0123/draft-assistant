@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import type { DraftView, Recommendation } from "../types";
-import { fmt, pct } from "../format";
+import { errorMessage, fmt, pct } from "../format";
 
 // ---------- setup screen ----------
 
@@ -22,7 +22,7 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
       const view = await api.addLeague(leagueId.trim());
       onReady(view);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
       setBusy(null);
     }
   };

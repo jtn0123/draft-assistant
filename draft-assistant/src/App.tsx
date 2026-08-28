@@ -12,12 +12,17 @@ import "./components.css";
 
 type Confirm = { playerId: string; name: string } | null;
 
+// Confirmations auto-dismiss. Failures and cancelled picks stay until
+// dismissed: at four seconds they vanished before anyone watching the board
+// looked up.
+type Toast = { text: string; sticky: boolean } | null;
+
 export default function App() {
   const [view, setView] = useState<DraftView | null>(null);
   const [polling, setPolling] = useState(false);
   const [pollHealth, setPollHealth] = useState<PollHealth | null>(null);
   const [confirm, setConfirmState] = useState<Confirm>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast>(null);
   const [busy, setBusy] = useState(true);
   const [chatOpen, setChatOpen] = useState(false);
   const toastTimer = useRef<number | undefined>(undefined);
@@ -34,11 +39,21 @@ export default function App() {
     setConfirmState(next);
   }, []);
 
-  const showToast = useCallback((message: string) => {
-    setToast(message);
+  const notify = useCallback((text: string) => {
     window.clearTimeout(toastTimer.current);
+    setToast({ text, sticky: false });
     toastTimer.current = window.setTimeout(() => setToast(null), 4000);
   }, []);
+
+  const fail = useCallback((text: string) => {
+    window.clearTimeout(toastTimer.current);
+    setToast({ text, sticky: true });
+  }, []);
+
+  const dismissToast = () => {
+    window.clearTimeout(toastTimer.current);
+    setToast(null);
+  };
 
   const applyView = useCallback((next: DraftView) => {
     if (next.seq <= appliedSeq.current) return;
@@ -53,7 +68,7 @@ export default function App() {
       !next.available.some((p) => p.player_id === pending.playerId)
     ) {
       setConfirm(null);
-      showToast(`${pending.name} was drafted by another team — pick cancelled`);
+      fail(`${pending.name} was drafted by another team — pick cancelled`);
     }
     setPollHealth({
       last_success_at:
@@ -62,16 +77,16 @@ export default function App() {
         next.data_health.poll_consecutive_failures ?? 0,
       last_error: next.data_health.poll_last_error ?? null,
     });
-  }, [setConfirm, showToast]);
+  }, [setConfirm, fail]);
 
   const startLive = useCallback(async () => {
     try {
       await api.startPolling(3);
       setPolling(true);
     } catch (e) {
-      showToast(String(e));
+      fail(errorMessage(e));
     }
-  }, [showToast]);
+  }, [fail]);
 
   // Restore last league on launch; live sync starts automatically.
   useEffect(() => {
@@ -85,24 +100,24 @@ export default function App() {
           await startLive();
         }
       } catch (e) {
-        showToast(String(e));
+        fail(errorMessage(e));
       } finally {
         setBusy(false);
       }
     })();
-  }, [showToast, startLive, applyView]);
+  }, [fail, startLive, applyView]);
 
   // Live updates from the poller. A rejected payload is surfaced rather than
   // dropped: updates silently stopping is the one failure this app must never
   // have while the pill still says "Live sync on".
   useEffect(() => {
     const un = api.onDraftUpdated(applyView, (e) =>
-      showToast(`Live update rejected: ${errorMessage(e)}`),
+      fail(`Live update rejected: ${errorMessage(e)}`),
     );
     return () => {
       un.then((f) => f()).catch(() => undefined);
     };
-  }, [applyView, showToast]);
+  }, [applyView, fail]);
 
   useEffect(() => {
     const un = api.onPollHealth(setPollHealth);
@@ -119,10 +134,10 @@ export default function App() {
         setPolling(false);
       } else {
         await startLive();
-        showToast("Live sync on — polling Sleeper every 3s");
+        notify("Live sync on — polling Sleeper every 3s");
       }
     } catch (e) {
-      showToast(String(e));
+      fail(errorMessage(e));
     }
   };
 
@@ -133,7 +148,7 @@ export default function App() {
       setConfirm(null);
       applyView(v);
     } catch (e) {
-      showToast(String(e));
+      fail(errorMessage(e));
       setConfirm(null);
     }
   };
@@ -142,16 +157,16 @@ export default function App() {
     try {
       applyView(await api.undoManualPick());
     } catch (e) {
-      showToast(String(e));
+      fail(errorMessage(e));
     }
   };
 
   const doExport = async () => {
     try {
       const path = await api.exportState();
-      showToast(`State exported: ${path}`);
+      notify(`State exported: ${path}`);
     } catch (e) {
-      showToast(String(e));
+      fail(errorMessage(e));
     }
   };
 
@@ -159,9 +174,9 @@ export default function App() {
     setBusy(true);
     try {
       applyView(await api.refreshData());
-      showToast("Projections refreshed and board rebuilt");
+      notify("Projections refreshed and board rebuilt");
     } catch (e) {
-      showToast(String(e));
+      fail(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -273,7 +288,19 @@ export default function App() {
         </div>
       )}
 
-      {toast && <div className="toast">{toast}</div>}
+      {toast && (
+        <div
+          className={toast.sticky ? "toast sticky" : "toast"}
+          role={toast.sticky ? "alert" : "status"}
+        >
+          <span>{toast.text}</span>
+          {toast.sticky && (
+            <button className="ghost small" onClick={dismissToast} aria-label="Dismiss message">
+              ✕
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

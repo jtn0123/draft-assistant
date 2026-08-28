@@ -434,3 +434,13 @@ tbody tr:hover {
   font-size: 12px;
   font-style: italic;
 }
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.toast.sticky {
+  border-color: var(--danger);
+}
