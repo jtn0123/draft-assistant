@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AvailablePlayer, Position } from "../types";
 import { fmt, pct } from "../format";
 
@@ -35,6 +35,9 @@ const COLUMNS: Column[] = [
 ];
 
 const DEFAULT_SORT: Sort = { key: "rank", dir: "asc" };
+
+/** Rows rendered before the board asks whether you really want all of them. */
+const DEFAULT_ROWS = 200;
 
 function value(p: AvailablePlayer, key: SortKey): number | string | null {
   switch (key) {
@@ -96,6 +99,25 @@ export function Board({
   const [pos, setPos] = useState<Position>("ALL");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
+  const [showAll, setShowAll] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // "/" jumps to the search box from anywhere — the pick clock does not wait
+  // for you to find the mouse. Ignored while you are typing somewhere else or
+  // while the confirm dialog owns the keyboard.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (document.querySelector("dialog[open]")) return;
+      event.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -104,7 +126,7 @@ export function Board({
       .filter((p) => !q || p.name.toLowerCase().includes(q))
       .sort((a, b) => compare(a, b, sort));
   }, [players, pos, query, sort]);
-  const filtered = matching.slice(0, 200);
+  const filtered = showAll ? matching : matching.slice(0, DEFAULT_ROWS);
 
   const toggleSort = (column: Column) =>
     setSort((current) =>
@@ -130,16 +152,23 @@ export function Board({
         </div>
         <input
           className="search"
+          ref={searchRef}
           placeholder="Search players…"
+          title="Press / to jump here"
           aria-label="Search players"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
         <span className="board-count" aria-live="polite">
-          {matching.length > 200
-            ? `Showing 200 of ${matching.length}`
+          {matching.length > DEFAULT_ROWS
+            ? `Showing ${filtered.length} of ${matching.length}`
             : `${matching.length} player${matching.length === 1 ? "" : "s"}`}
         </span>
+        {matching.length > DEFAULT_ROWS && (
+          <button className="ghost small" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? `Show top ${DEFAULT_ROWS}` : `Show all ${matching.length}`}
+          </button>
+        )}
       </div>
       <table>
         <caption className="sr-only">

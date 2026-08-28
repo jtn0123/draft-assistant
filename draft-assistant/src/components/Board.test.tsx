@@ -37,6 +37,50 @@ const rowNames = () =>
     .map((row) => within(row).getAllByRole("cell")[1].textContent);
 
 describe("Board", () => {
+  // Grade item C5: finding a player by name is the most common thing you do
+  // with 90 seconds on the clock, and it needed a mouse.
+  it("focuses the search box when / is pressed", async () => {
+    const user = userEvent.setup();
+    render(
+      <Board players={[player("a", "Alpha", "WR")]} positions={["WR"]} onDraft={vi.fn()} />,
+    );
+    const search = screen.getByLabelText("Search players");
+    expect(search).not.toHaveFocus();
+
+    await user.keyboard("/");
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+  });
+
+  it("does not hijack / while you are typing in a field", async () => {
+    const user = userEvent.setup();
+    render(
+      <Board players={[player("a", "Alpha", "WR")]} positions={["WR"]} onDraft={vi.fn()} />,
+    );
+    const search = screen.getByLabelText("Search players");
+    await user.click(search);
+    await user.keyboard("a/b");
+    expect(search).toHaveValue("a/b");
+  });
+
+  // Grade item C2: with 394 players available, a third of the board was
+  // unreachable except by search, and the list just stopped at 200.
+  it("can show every matching player, not just the first 200", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 250 }, (_, i) =>
+      player(`p${i}`, `Player ${i}`, "WR", { overall_rank: i + 1 }),
+    );
+    render(<Board players={many} positions={["WR"]} onDraft={vi.fn()} />);
+
+    expect(screen.getAllByRole("row")).toHaveLength(201); // header + 200
+    const showAll = screen.getByRole("button", { name: "Show all 250" });
+    await user.click(showAll);
+
+    expect(screen.getAllByRole("row")).toHaveLength(251);
+    await user.click(screen.getByRole("button", { name: "Show top 200" }));
+    expect(screen.getAllByRole("row")).toHaveLength(201);
+  });
+
   // Dogfood pass 2, ISSUE-P2-003: rows carried an `injured` class with no rule
   // behind it — markup that promises styling and delivers none.
   it("marks a flagged player with a badge and nothing else", () => {
