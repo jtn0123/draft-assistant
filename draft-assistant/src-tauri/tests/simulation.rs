@@ -90,6 +90,7 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
             teams: fixture.draft.teams,
             rounds: fixture.draft.rounds,
             pick_timer: fixture.draft.pick_timer,
+            reversal_round: None,
             slots_qb: None,
             slots_rb: None,
             slots_wr: None,

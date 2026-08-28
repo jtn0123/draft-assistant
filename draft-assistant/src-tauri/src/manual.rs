@@ -13,6 +13,7 @@ use crate::view::merged_picks;
 /// taken (by the API or manually), one not on the board, and a full draft.
 pub fn apply_manual_pick(loaded: &mut LoadedLeague, player_id: String) -> Result<(), String> {
     let teams = loaded.draft.settings.teams;
+    let (order, _) = draft::DraftOrder::from_draft(&loaded.draft);
     let picks = merged_picks(&loaded.api_picks, &loaded.manual_picks);
     if picks.iter().any(|p| p.player_id == player_id) {
         return Err("player already drafted".into());
@@ -27,7 +28,7 @@ pub fn apply_manual_pick(loaded: &mut LoadedLeague, player_id: String) -> Result
     loaded.manual_picks.push(Pick {
         round: (pick_no - 1) / teams + 1,
         pick_no,
-        draft_slot: draft::slot_for_pick(pick_no, teams),
+        draft_slot: draft::slot_for_pick(pick_no, teams, order),
         player_id,
         picked_by: None,
         metadata: None,

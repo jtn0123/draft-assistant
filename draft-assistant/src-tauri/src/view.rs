@@ -153,7 +153,8 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let current_pick = (total_picks as u32 + 1).min(teams * rounds);
     let draft_over = total_picks as u32 >= teams * rounds;
     let current_round = (current_pick - 1) / teams + 1;
-    let on_clock_slot = draft::slot_for_pick(current_pick, teams);
+    let (order, order_warning) = draft::DraftOrder::from_draft(draft);
+    let on_clock_slot = draft::slot_for_pick(current_pick, teams, order);
 
     // Slot display names: draft_order user ids resolved via league users.
     let mut slot_names: HashMap<u32, String> = HashMap::new();
@@ -197,7 +198,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
     let my_next_picks: Vec<u32> = my_slot
         .map(|slot| {
-            draft::picks_for_slot(slot, teams, rounds)
+            draft::picks_for_slot(slot, teams, rounds, order)
                 .into_iter()
                 .filter(|&p| p >= current_pick)
                 .collect()
@@ -328,6 +329,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
     let mut warnings = loaded.warnings.clone();
     warnings.extend(slot_warning);
+    warnings.extend(order_warning);
     if degenerate_settings {
         warnings.push(format!(
             "draft reports {} teams and {} rounds; treating both as at least 1",

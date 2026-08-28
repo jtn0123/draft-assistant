@@ -28,6 +28,10 @@ pub struct DraftSettings {
     pub rounds: u32,
     #[serde(default)]
     pub pick_timer: Option<u32>,
+    /// Snake drafts only: the round from which the order reverses a second
+    /// time ("third-round reversal" = 3). 0 or absent = plain snake.
+    #[serde(default)]
+    pub reversal_round: Option<u32>,
     // Roster shape, present on mock drafts (which have no league to read it
     // from). All optional: league drafts carry it too but we prefer the league.
     #[serde(default)]

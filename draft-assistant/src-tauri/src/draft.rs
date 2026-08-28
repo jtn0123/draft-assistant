@@ -2,21 +2,74 @@
 //! and ADP-based survival probabilities.
 
 use crate::roster::RosterRules;
-use crate::sleeper::Pick;
+use crate::sleeper::{Draft, Pick};
 use serde::Serialize;
+
+/// How pick numbers map to slots. Sleeper reports the type on the draft
+/// (`snake` / `linear` / `auction`) and, for snake drafts, an optional
+/// `reversal_round` from which the order reverses a second time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DraftOrder {
+    pub linear: bool,
+    /// 0 = plain snake.
+    pub reversal_round: u32,
+}
+
+impl DraftOrder {
+    pub const SNAKE: DraftOrder = DraftOrder {
+        linear: false,
+        reversal_round: 0,
+    };
+
+    pub const LINEAR: DraftOrder = DraftOrder {
+        linear: true,
+        reversal_round: 0,
+    };
+
+    /// The order a Sleeper draft payload describes, plus a warning when the
+    /// type is one this app cannot model (auction) and snake math is used.
+    pub fn from_draft(draft: &Draft) -> (DraftOrder, Option<String>) {
+        match draft.draft_type.as_str() {
+            "snake" => (
+                DraftOrder {
+                    linear: false,
+                    reversal_round: draft.settings.reversal_round.unwrap_or(0),
+                },
+                None,
+            ),
+            "linear" => (DraftOrder::LINEAR, None),
+            other => (
+                DraftOrder::SNAKE,
+                Some(format!(
+                    "draft type '{other}' is not supported; pick order is modelled as a snake"
+                )),
+            ),
+        }
+    }
+}
 
 /// Which slot (1-based) is on the clock at a given overall pick (1-based)?
 ///
 /// Total by construction: a malformed or mock draft payload reporting zero
 /// teams would otherwise divide by zero and underflow, and `overflow-checks`
 /// is on in release, so that is a live-path panic rather than a wrong number.
-pub fn slot_for_pick(pick_no: u32, teams: u32) -> u32 {
+pub fn slot_for_pick(pick_no: u32, teams: u32, order: DraftOrder) -> u32 {
     if teams == 0 || pick_no == 0 {
         return 1;
     }
     let round = (pick_no - 1) / teams; // 0-based round
     let idx = (pick_no - 1) % teams; // 0-based index within round
-    if round % 2 == 0 {
+    if order.linear {
+        return idx + 1;
+    }
+    let mut forward = round % 2 == 0;
+    // Third-round reversal: from that round on, every direction is flipped
+    // relative to a plain snake, so the reversal round repeats the previous
+    // round's direction and the snake resumes from there.
+    if order.reversal_round > 0 && round + 1 >= order.reversal_round {
+        forward = !forward;
+    }
+    if forward {
         idx + 1
     } else {
         teams - idx
@@ -24,9 +77,9 @@ pub fn slot_for_pick(pick_no: u32, teams: u32) -> u32 {
 }
 
 /// All overall pick numbers (1-based) belonging to a slot.
-pub fn picks_for_slot(slot: u32, teams: u32, rounds: u32) -> Vec<u32> {
+pub fn picks_for_slot(slot: u32, teams: u32, rounds: u32, order: DraftOrder) -> Vec<u32> {
     (1..=teams * rounds)
-        .filter(|&p| slot_for_pick(p, teams) == slot)
+        .filter(|&p| slot_for_pick(p, teams, order) == slot)
         .collect()
 }
 
@@ -118,20 +171,66 @@ mod tests {
 
     #[test]
     fn snake_order_14_teams() {
-        assert_eq!(slot_for_pick(1, 14), 1);
-        assert_eq!(slot_for_pick(2, 14), 2);
-        assert_eq!(slot_for_pick(14, 14), 14);
-        assert_eq!(slot_for_pick(15, 14), 14); // snake turn
-        assert_eq!(slot_for_pick(27, 14), 2);
-        assert_eq!(slot_for_pick(28, 14), 1);
-        assert_eq!(slot_for_pick(29, 14), 1); // next turn
-        assert_eq!(slot_for_pick(30, 14), 2);
+        let snake = DraftOrder::SNAKE;
+        assert_eq!(slot_for_pick(1, 14, snake), 1);
+        assert_eq!(slot_for_pick(2, 14, snake), 2);
+        assert_eq!(slot_for_pick(14, 14, snake), 14);
+        assert_eq!(slot_for_pick(15, 14, snake), 14); // snake turn
+        assert_eq!(slot_for_pick(27, 14, snake), 2);
+        assert_eq!(slot_for_pick(28, 14, snake), 1);
+        assert_eq!(slot_for_pick(29, 14, snake), 1); // next turn
+        assert_eq!(slot_for_pick(30, 14, snake), 2);
+    }
+
+    #[test]
+    fn linear_drafts_keep_the_same_slot_every_round() {
+        let linear = DraftOrder::LINEAR;
+        assert_eq!(slot_for_pick(15, 14, linear), 1);
+        assert_eq!(slot_for_pick(28, 14, linear), 14);
+        assert_eq!(picks_for_slot(2, 14, 4, linear), vec![2, 16, 30, 44]);
+    }
+
+    #[test]
+    fn third_round_reversal_flips_the_order_from_round_three() {
+        let order = DraftOrder {
+            linear: false,
+            reversal_round: 3,
+        };
+        // Rounds 1–2 as a snake; round 3 repeats round 2's direction; then
+        // the snake resumes from there.
+        assert_eq!(slot_for_pick(1, 14, order), 1);
+        assert_eq!(slot_for_pick(15, 14, order), 14);
+        assert_eq!(slot_for_pick(29, 14, order), 14);
+        assert_eq!(slot_for_pick(42, 14, order), 1);
+        assert_eq!(slot_for_pick(43, 14, order), 1);
+        assert_eq!(slot_for_pick(57, 14, order), 14);
+        assert_eq!(picks_for_slot(2, 14, 4, order), vec![2, 27, 41, 44]);
+    }
+
+    #[test]
+    fn the_draft_payload_selects_the_order_and_flags_auctions() {
+        let mut draft: Draft = serde_json::from_value(serde_json::json!({
+            "draft_id": "d", "status": "pre_draft", "type": "linear",
+            "settings": {"teams": 12, "rounds": 15}
+        }))
+        .unwrap();
+        assert_eq!(DraftOrder::from_draft(&draft), (DraftOrder::LINEAR, None));
+        draft.draft_type = "snake".into();
+        draft.settings.reversal_round = Some(3);
+        let (order, warning) = DraftOrder::from_draft(&draft);
+        assert_eq!(order.reversal_round, 3);
+        assert!(!order.linear);
+        assert!(warning.is_none());
+        draft.draft_type = "auction".into();
+        let (order, warning) = DraftOrder::from_draft(&draft);
+        assert_eq!(order, DraftOrder::SNAKE);
+        assert!(warning.unwrap().contains("auction"));
     }
 
     #[test]
     fn slot2_pick_numbers_match_league_doc() {
         // From the spec: slot 2 in a 14-team snake.
-        let picks = picks_for_slot(2, 14, 15);
+        let picks = picks_for_slot(2, 14, 15, DraftOrder::SNAKE);
         assert_eq!(
             picks,
             vec![2, 27, 30, 55, 58, 83, 86, 111, 114, 139, 142, 167, 170, 195, 198]

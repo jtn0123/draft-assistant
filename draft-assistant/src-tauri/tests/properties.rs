@@ -5,7 +5,7 @@
 //! including shapes nobody has drafted yet. Written after a degenerate
 //! `teams: 0` payload was found to panic `build_view`.
 
-use draft_assistant_lib::draft::{picks_for_slot, slot_for_pick, survival_probability};
+use draft_assistant_lib::draft::{picks_for_slot, slot_for_pick, survival_probability, DraftOrder};
 use draft_assistant_lib::roster::RosterRules;
 use draft_assistant_lib::scoring::{base_points, norm_cdf};
 use proptest::prelude::*;
@@ -18,6 +18,13 @@ fn teams() -> impl Strategy<Value = u32> {
 fn rounds() -> impl Strategy<Value = u32> {
     1u32..=30
 }
+/// Snake, linear, and snake with a reversal in any early round.
+fn order() -> impl Strategy<Value = DraftOrder> {
+    (any::<bool>(), 0u32..8).prop_map(|(linear, reversal_round)| DraftOrder {
+        linear,
+        reversal_round,
+    })
+}
 
 proptest! {
     /// The clock must always land on a real team.
@@ -26,9 +33,10 @@ proptest! {
         teams in teams(),
         rounds in rounds(),
         offset in 0u32..1200,
+        order in order(),
     ) {
         let pick = (offset % (teams * rounds)) + 1;
-        let slot = slot_for_pick(pick, teams);
+        let slot = slot_for_pick(pick, teams, order);
         prop_assert!((1..=teams).contains(&slot), "slot {slot} outside 1..={teams}");
     }
 
@@ -36,19 +44,24 @@ proptest! {
     /// mirrored, so the two slot numbers sum to teams + 1.
     #[test]
     fn snake_rounds_mirror_each_other(teams in 2u32..=40, idx in 0u32..40) {
+        let order = DraftOrder::SNAKE;
         let idx = idx % teams;
-        let first = slot_for_pick(idx + 1, teams);
-        let second = slot_for_pick(teams + idx + 1, teams);
+        let first = slot_for_pick(idx + 1, teams, order);
+        let second = slot_for_pick(teams + idx + 1, teams, order);
         prop_assert_eq!(first + second, teams + 1);
     }
 
     /// Every slot drafts exactly once per round, and the per-slot pick lists
     /// partition the whole draft with no gaps or overlaps.
     #[test]
-    fn picks_for_slot_partitions_the_draft(teams in teams(), rounds in rounds()) {
+    fn picks_for_slot_partitions_the_draft(
+        teams in teams(),
+        rounds in rounds(),
+        order in order(),
+    ) {
         let mut all = Vec::new();
         for slot in 1..=teams {
-            let picks = picks_for_slot(slot, teams, rounds);
+            let picks = picks_for_slot(slot, teams, rounds, order);
             prop_assert_eq!(
                 picks.len(),
                 rounds as usize,
@@ -56,7 +69,7 @@ proptest! {
             );
             // Every pick this slot owns must map back to this slot.
             for &pick in &picks {
-                prop_assert_eq!(slot_for_pick(pick, teams), slot);
+                prop_assert_eq!(slot_for_pick(pick, teams, order), slot);
             }
             all.extend(picks);
         }
@@ -68,8 +81,12 @@ proptest! {
     /// Degenerate settings must return a number, not panic. `overflow-checks`
     /// is on in release, so an underflow here would kill the app mid-draft.
     #[test]
-    fn slot_for_pick_survives_degenerate_settings(pick in 0u32..100, teams in 0u32..3) {
-        let slot = slot_for_pick(pick, teams);
+    fn slot_for_pick_survives_degenerate_settings(
+        pick in 0u32..100,
+        teams in 0u32..3,
+        order in order(),
+    ) {
+        let slot = slot_for_pick(pick, teams, order);
         prop_assert!(slot >= 1);
     }
 
