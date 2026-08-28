@@ -4,12 +4,11 @@
 //! Split out of `lib.rs` so the domain library compiles without Tauri at all
 //! (`--no-default-features`), which is what the fuzz targets link against.
 
+use crate::chat::{ChatOptions, ChatReply, ChatTurn};
 use crate::engine::{AppConfig, Engine, LoadedLeague, StoredLeague};
-// Module paths used inline below; `chat` is spelled out at its call site
-// because the Tauri command in this file is also named `chat`.
-use crate::sleeper::Pick;
+use crate::sleeper::extract_id;
 use crate::view::{build_view, DraftView};
-use crate::{draft, engine, view};
+use crate::{engine, manual, view};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
@@ -25,17 +24,6 @@ struct AppState {
 
 fn view_from(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     build_view(loaded, config)
-}
-
-/// Pull the Sleeper ID out of whatever the user pasted — a bare ID or a full
-/// URL like https://sleeper.com/draft/nfl/139888...?ftue=commish.
-fn extract_id(input: &str) -> String {
-    input
-        .split(|c: char| !c.is_ascii_digit())
-        .max_by_key(|run| run.len())
-        .filter(|run| run.len() >= 15)
-        .unwrap_or(input.trim())
-        .to_string()
 }
 
 /// Add (or re-sync) a league by ID, make it active, and build its board.
@@ -158,23 +146,7 @@ async fn record_manual_pick(
 ) -> Result<DraftView, String> {
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
-    let teams = loaded.draft.settings.teams;
-    let picks = view::merged_picks(&loaded.api_picks, &loaded.manual_picks);
-    if picks.iter().any(|p| p.player_id == player_id) {
-        return Err("player already drafted".into());
-    }
-    let pick_no = picks.len() as u32 + 1;
-    if pick_no > teams * loaded.draft.settings.rounds {
-        return Err("draft is complete".into());
-    }
-    loaded.manual_picks.push(Pick {
-        round: (pick_no - 1) / teams + 1,
-        pick_no,
-        draft_slot: draft::slot_for_pick(pick_no, teams),
-        player_id,
-        picked_by: None,
-        metadata: None,
-    });
+    manual::apply_manual_pick(loaded, player_id)?;
     if let Err(error) = state
         .engine
         .save_manual_picks(&loaded.draft.draft_id, &loaded.manual_picks)
@@ -190,10 +162,7 @@ async fn record_manual_pick(
 async fn undo_manual_pick(state: State<'_, AppState>) -> Result<DraftView, String> {
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
-    let removed = loaded
-        .manual_picks
-        .pop()
-        .ok_or("no manual picks to undo (API picks cannot be undone locally)")?;
+    let removed = manual::undo_manual_pick(loaded)?;
     if let Err(error) = state
         .engine
         .save_manual_picks(&loaded.draft.draft_id, &loaded.manual_picks)
@@ -218,10 +187,16 @@ async fn export_state(state: State<'_, AppState>) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Ask Claude about the current draft. The answer comes from the local
-/// `claude` CLI, so this can take ~10s.
+/// Ask Claude about the current draft, with the panel's conversation so far
+/// and its model/effort/search choices. The answer comes from the local
+/// `claude` CLI, so this can take 10–20s.
 #[tauri::command]
-async fn chat(state: State<'_, AppState>, question: String) -> Result<String, String> {
+async fn chat(
+    state: State<'_, AppState>,
+    question: String,
+    history: Vec<ChatTurn>,
+    options: ChatOptions,
+) -> Result<ChatReply, String> {
     // Snapshot the view and release both locks before the CLI call: the poll
     // task takes `loaded` every few seconds and must not wait on a model.
     let view = {
@@ -230,7 +205,14 @@ async fn chat(state: State<'_, AppState>, question: String) -> Result<String, St
         let config = state.config.lock().await;
         view_from(loaded, &config)
     };
-    crate::chat::ask(&view, &question).await
+    // `chat` here is the command; the module is spelled out to disambiguate.
+    crate::chat::ask(&view, &question, &history, &options).await
+}
+
+/// Fold the conversation into one summary turn. Needs no draft state.
+#[tauri::command]
+async fn chat_compact(history: Vec<ChatTurn>, options: ChatOptions) -> Result<ChatReply, String> {
+    crate::chat::compact(&history, &options).await
 }
 
 /// Start polling Sleeper picks every `interval_secs` (default 3). Emits a
@@ -369,6 +351,7 @@ pub fn run() {
             undo_manual_pick,
             export_state,
             chat,
+            chat_compact,
             start_polling,
             stop_polling,
         ])

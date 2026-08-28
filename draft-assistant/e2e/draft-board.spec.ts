@@ -81,7 +81,7 @@ test("browser preview refuses to mutate and says why", async ({ page }) => {
   await page.getByRole("button", { name: "Confirm" }).click();
 
   // The preview API rejects writes; that must surface, not fail silently.
-  await expect(page.getByText(/read-only/i)).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(/read-only/i);
   await expect(page.getByRole("button", { name: "Confirm" })).toHaveCount(0);
 });
 
@@ -104,4 +104,66 @@ test("a chat failure is reported in the panel", async ({ page }) => {
   // (the header toast about read-only preview is a separate alert).
   const panel = page.getByRole("complementary", { name: /Ask Claude about this draft/ });
   await expect(panel.getByRole("alert")).toContainText(/desktop app/i);
+});
+
+test("Escape cancels the draft confirmation and focus returns to the row", async ({ page }) => {
+  const draft = page.getByRole("button", { name: "Draft", exact: true }).first();
+  await draft.click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  // Focus moves into the dialog, onto the primary action.
+  await expect(dialog.getByRole("button", { name: "Confirm" })).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(draft).toBeFocused();
+});
+
+test("column headers sort the board and a second click flips it", async ({ page }) => {
+  const adpColumn = () => page.locator("tbody tr td:nth-child(9)").allTextContents();
+  const numbers = (cells: string[]) => cells.map(Number).filter((n) => !Number.isNaN(n));
+
+  await page.getByRole("button", { name: "ADP" }).click();
+  await expect(page.getByRole("columnheader", { name: "ADP" })).toHaveAttribute(
+    "aria-sort",
+    "ascending",
+  );
+  const ascending = numbers(await adpColumn());
+  expect(ascending.length).toBeGreaterThan(10);
+  expect(ascending).toEqual([...ascending].sort((a, b) => a - b));
+
+  await page.getByRole("button", { name: "ADP" }).click();
+  await expect(page.getByRole("columnheader", { name: "ADP" })).toHaveAttribute(
+    "aria-sort",
+    "descending",
+  );
+  const descending = numbers(await adpColumn());
+  expect(descending).toEqual([...descending].sort((a, b) => b - a));
+
+  // The rank column restores the default order (ranks count drafted players
+  // too, so they start above 1 mid-draft — but they climb).
+  await page.getByRole("button", { name: "#" }).click();
+  const ranks = numbers(await page.locator("tbody tr td:nth-child(1)").allTextContents());
+  expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+  expect(ranks[0]).toBeLessThan(ranks[ranks.length - 1]);
+});
+
+test("the preview says it is read-only without raising an alarm", async ({ page }) => {
+  await expect(page.getByRole("note")).toContainText(/Browser preview/);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("the Ask Claude panel sits beside the page instead of over it", async ({ page }) => {
+  await page.getByRole("button", { name: "Ask Claude" }).click();
+  const panel = page.getByRole("complementary", { name: /Ask Claude about this draft/ });
+  await expect(panel).toBeVisible();
+
+  const panelBox = await panel.boundingBox();
+  const refresh = await page.getByRole("button", { name: "Refresh data" }).boundingBox();
+  const draft = await page.getByRole("button", { name: "Draft" }).first().boundingBox();
+  expect(panelBox).not.toBeNull();
+  // Nothing the user acts on is underneath the panel.
+  expect(refresh!.x + refresh!.width).toBeLessThanOrEqual(panelBox!.x + 1);
+  expect(draft!.x + draft!.width).toBeLessThanOrEqual(panelBox!.x + 1);
 });

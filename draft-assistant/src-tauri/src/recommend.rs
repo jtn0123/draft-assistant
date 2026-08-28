@@ -200,9 +200,10 @@ pub fn recommend(
             }
 
             if mode == "safe" {
-                // Safe mode: penalize injury flags and volatile bonus-heavy value.
+                // Safe mode: penalize real injury flags and volatile
+                // bonus-heavy value.
                 if let Some(status) = &p.injury_status {
-                    if !status.is_empty() {
+                    if serious_injury(status) {
                         score -= 15.0;
                         reasons.push(format!("injury flag: {status}"));
                     }
@@ -244,6 +245,16 @@ pub fn recommend(
         }
     }
     recs
+}
+
+/// Statuses that mean a player may actually miss games. Through August Sleeper
+/// tags a large share of healthy starters `Questionable` (rest days, minor
+/// preseason knocks) — on draft night that flag alone is noise, not a signal.
+pub fn serious_injury(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "out" | "ir" | "pup" | "sus" | "doubtful" | "na" | "cov"
+    )
 }
 
 #[cfg(test)]
@@ -417,5 +428,39 @@ mod tests {
         assert!(recs
             .iter()
             .all(|recommendation| recommendation.position != "K"));
+    }
+
+    fn flagged(id: &str, vorp: f64, status: &str) -> AvailablePlayer {
+        let mut p = player(id, "WR", vorp);
+        p.player.injury_status = Some(status.into());
+        p
+    }
+
+    #[test]
+    fn safe_mode_ignores_a_preseason_questionable_tag_but_not_out() {
+        let rules = RosterRules::new(&slots());
+        let mine = roster(&["QB", "RB"]);
+        let questionable = vec![flagged("q", 30.0, "Questionable"), player("h", "WR", 25.0)];
+        let recs = recommend(&questionable, Some(&mine), &rules, 14, 15, 30);
+        let safe = recs.iter().find(|r| r.mode == "safe").unwrap();
+        assert_eq!(safe.player_id, "q", "{recs:?}");
+        assert!(
+            safe.reasons.iter().all(|r| !r.starts_with("injury flag")),
+            "{recs:?}"
+        );
+
+        let out = vec![flagged("o", 30.0, "Out"), player("h", "WR", 25.0)];
+        let recs = recommend(&out, Some(&mine), &rules, 14, 15, 30);
+        let safe = recs.iter().find(|r| r.mode == "safe").unwrap();
+        assert_eq!(safe.player_id, "h", "{recs:?}");
+    }
+
+    #[test]
+    fn serious_statuses_are_case_insensitive() {
+        assert!(serious_injury("IR"));
+        assert!(serious_injury("out"));
+        assert!(serious_injury("Doubtful"));
+        assert!(!serious_injury("Questionable"));
+        assert!(!serious_injury(""));
     }
 }

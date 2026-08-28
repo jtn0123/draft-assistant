@@ -10,10 +10,22 @@ use crate::engine::{AppConfig, Cached, Engine};
 use crate::sleeper::Pick;
 use serde::Serialize;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Per-process counter so every write gets its own scratch file. Two loads can
+/// overlap — React's dev-mode double mount, or Refresh data clicked during
+/// launch — and with one shared `name.tmp` the loser's rename found nothing to
+/// move and the weekly file was reported as "could not be cached".
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 impl Engine {
     pub(crate) fn cache_path(&self, name: &str) -> PathBuf {
         self.data_dir.join(name)
+    }
+
+    fn tmp_path(&self, name: &str) -> PathBuf {
+        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        self.cache_path(&format!("{name}.{}.{seq}.tmp", std::process::id()))
     }
 
     pub(crate) fn read_cache<T: serde::de::DeserializeOwned>(
@@ -58,7 +70,7 @@ impl Engine {
         let fetched_at = now_secs();
         let env = Cached { fetched_at, data };
         let json = serde_json::to_string(&env).map_err(|e| format!("serialize {name}: {e}"))?;
-        let tmp = self.cache_path(&format!("{name}.tmp"));
+        let tmp = self.tmp_path(name);
         std::fs::write(&tmp, json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
         std::fs::rename(&tmp, self.cache_path(name)).map_err(|e| format!("replace {name}: {e}"))?;
         Ok(fetched_at)
@@ -97,7 +109,7 @@ impl Engine {
     pub fn save_config(&self, config: &AppConfig) -> Result<(), String> {
         let json =
             serde_json::to_string_pretty(config).map_err(|e| format!("serialize config: {e}"))?;
-        let tmp = self.cache_path("config.json.tmp");
+        let tmp = self.tmp_path("config.json");
         std::fs::write(&tmp, json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
         std::fs::rename(&tmp, self.cache_path("config.json"))
             .map_err(|e| format!("replace config.json: {e}"))?;
@@ -162,5 +174,43 @@ mod tests {
             .save_config(&config)
             .expect_err("missing data dir must surface as an error");
         assert!(err.contains("config"), "{err}");
+    }
+
+    #[test]
+    fn overlapping_writes_of_one_cache_all_succeed() {
+        // The bug this guards: two loads racing on `weekly_2026.json` shared a
+        // single `.tmp`, so the second rename failed with "No such file".
+        let dir = test_dir("cache-race");
+        let engine = std::sync::Arc::new(Engine::new(dir.clone()).expect("temp data dir"));
+        let workers: Vec<_> = (0..8)
+            .map(|worker| {
+                let engine = engine.clone();
+                std::thread::spawn(move || {
+                    for round in 0..25 {
+                        engine
+                            .write_cache_checked("shared.json", &vec![worker, round])
+                            .unwrap_or_else(|e| panic!("worker {worker} round {round}: {e}"));
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        let (_, data): (u64, Vec<u32>) = engine.read_cache_any("shared.json").expect("readable");
+        assert_eq!(data.len(), 2);
+        // No scratch files left behind.
+        let leftovers = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tmp")
+            })
+            .count();
+        assert_eq!(leftovers, 0);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

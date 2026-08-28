@@ -4,17 +4,20 @@ import type { DraftView, PollHealth } from "./types";
 import { errorMessage } from "./format";
 import { Board } from "./components/Board";
 import { Chat } from "./components/Chat";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ClockBanner, RecCard, SidePanel, Setup } from "./components/Panels";
 import "./App.css";
 import "./components.css";
+import "./chat.css";
 
 // ---------- app ----------
 
 type Confirm = { playerId: string; name: string } | null;
 
-// Confirmations auto-dismiss. Failures and cancelled picks stay until
-// dismissed: at four seconds they vanished before anyone watching the board
-// looked up.
+// Confirmations auto-dismiss as a corner toast that never intercepts a click.
+// Failures and cancelled picks stay until dismissed, as a bar in the page flow
+// under the header: a floating one covered the header buttons the moment they
+// wrapped onto a second row.
 type Toast = { text: string; sticky: boolean } | null;
 
 export default function App() {
@@ -33,6 +36,9 @@ export default function App() {
   // Mirrors `confirm` so the update callback below can read the pending pick
   // without re-subscribing to the poller on every open/close.
   const confirmRef = useRef<Confirm>(null);
+  // React's dev-mode double mount ran the launch effect twice, and two full
+  // league loads then raced on the same cache files. Load once per mount.
+  const booted = useRef(false);
 
   const setConfirm = useCallback((next: Confirm) => {
     confirmRef.current = next;
@@ -88,8 +94,11 @@ export default function App() {
     }
   }, [fail]);
 
-  // Restore last league on launch; live sync starts automatically.
+  // Restore last league on launch; live sync starts automatically (except in
+  // the browser preview, where there is nothing to sync).
   useEffect(() => {
+    if (booted.current) return;
+    booted.current = true;
     (async () => {
       try {
         const config = await api.getConfig();
@@ -97,7 +106,7 @@ export default function App() {
           setBusy(true);
           const v = await api.addLeague(config.active_league_id);
           applyView(v);
-          await startLive();
+          if (!api.preview || api.replay) await startLive();
         }
       } catch (e) {
         fail(errorMessage(e));
@@ -192,14 +201,24 @@ export default function App() {
       <Setup
         onReady={(v) => {
           applyView(v);
-          void startLive();
+          if (!api.preview || api.replay) void startLive();
         }}
       />
     );
   }
 
+  // The chat is a column beside the page, not an overlay: the numbers being
+  // asked about stay visible next to the answer.
   return (
+    <div className={chatOpen ? "shell with-chat" : "shell"}>
     <div className="app">
+      {api.preview && (
+        <div className="notice" role="note">
+          {api.replay
+            ? `Browser preview — replaying ${api.replay}, read-only. Run the desktop app to draft.`
+            : "Browser preview — fixture data, read-only. Run the desktop app to draft."}
+        </div>
+      )}
       <header>
         <div className="brand">
           <h1>{view.league.name}</h1>
@@ -240,6 +259,15 @@ export default function App() {
         </div>
       </header>
 
+      {toast?.sticky && (
+        <div className="alert-bar" role="alert">
+          <span>{toast.text}</span>
+          <button className="ghost small" onClick={dismissToast} aria-label="Dismiss message">
+            ✕
+          </button>
+        </div>
+      )}
+
       <ClockBanner view={view} />
 
       {view.data_health.warnings.length > 0 && (
@@ -266,41 +294,23 @@ export default function App() {
         />
       </main>
 
-      <Chat open={chatOpen} onClose={() => setChatOpen(false)} />
-
       {confirm && (
-        <div className="modal-backdrop" onClick={() => setConfirm(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <p>
-              Mark <strong>{confirm.name}</strong> as drafted at pick{" "}
-              {view.draft.current_pick} (slot {view.draft.on_clock_slot})?
-            </p>
-            <p className="muted small-text">
-              Manual picks are a fallback — live sync from Sleeper overrides them.
-            </p>
-            <div className="modal-actions">
-              <button onClick={() => doDraft(confirm.playerId)}>Confirm</button>
-              <button className="ghost" onClick={() => setConfirm(null)}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          name={confirm.name}
+          pick={view.draft.current_pick}
+          slot={view.draft.on_clock_slot}
+          onConfirm={() => void doDraft(confirm.playerId)}
+          onCancel={() => setConfirm(null)}
+        />
       )}
 
-      {toast && (
-        <div
-          className={toast.sticky ? "toast sticky" : "toast"}
-          role={toast.sticky ? "alert" : "status"}
-        >
+      {toast && !toast.sticky && (
+        <div className="toast" role="status">
           <span>{toast.text}</span>
-          {toast.sticky && (
-            <button className="ghost small" onClick={dismissToast} aria-label="Dismiss message">
-              ✕
-            </button>
-          )}
         </div>
       )}
+    </div>
+    <Chat open={chatOpen} onClose={() => setChatOpen(false)} />
     </div>
   );
 }

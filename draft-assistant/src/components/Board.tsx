@@ -4,6 +4,83 @@ import { fmt, pct } from "../format";
 
 // ---------- board table ----------
 
+type SortKey =
+  | "rank"
+  | "name"
+  | "position"
+  | "team"
+  | "bye"
+  | "points"
+  | "vorp"
+  | "tier"
+  | "adp"
+  | "survival";
+type Dir = "asc" | "desc";
+type Sort = { key: SortKey; dir: Dir };
+
+type Column = { key: SortKey; label: string; title?: string; left?: boolean; first: Dir };
+
+// `first` is the direction a fresh click gives: the useful end of each column.
+const COLUMNS: Column[] = [
+  { key: "rank", label: "#", title: "Overall rank — the default order", first: "asc" },
+  { key: "name", label: "Player", left: true, first: "asc" },
+  { key: "position", label: "Pos", first: "asc" },
+  { key: "team", label: "Team", first: "asc" },
+  { key: "bye", label: "Bye", first: "asc" },
+  { key: "points", label: "Pts", title: "Season points under your league's exact scoring", first: "desc" },
+  { key: "vorp", label: "VORP", title: "Value over replacement", first: "desc" },
+  { key: "tier", label: "Tier", first: "asc" },
+  { key: "adp", label: "ADP", title: "Average draft position across Sleeper drafts", first: "asc" },
+  { key: "survival", label: "Surv", title: "Chance they survive to your next pick", first: "desc" },
+];
+
+const DEFAULT_SORT: Sort = { key: "rank", dir: "asc" };
+
+function value(p: AvailablePlayer, key: SortKey): number | string | null {
+  switch (key) {
+    case "rank":
+      return p.overall_rank;
+    case "name":
+      return p.name;
+    case "position":
+      return p.position;
+    case "team":
+      return p.team;
+    case "bye":
+      return p.bye_week;
+    case "points":
+      return p.points;
+    case "vorp":
+      return p.vorp;
+    case "tier":
+      return p.tier;
+    case "adp":
+      return p.adp;
+    case "survival":
+      return p.survival_next;
+  }
+}
+
+/** Missing values sort last whichever way; ties fall back to overall rank. */
+function compare(a: AvailablePlayer, b: AvailablePlayer, sort: Sort): number {
+  const av = value(a, sort.key);
+  const bv = value(b, sort.key);
+  if (av === null && bv === null) return a.overall_rank - b.overall_rank;
+  if (av === null) return 1;
+  if (bv === null) return -1;
+  let c =
+    typeof av === "string" && typeof bv === "string"
+      ? av.localeCompare(bv)
+      : (av as number) - (bv as number);
+  if (sort.dir === "desc") c = -c;
+  return c || a.overall_rank - b.overall_rank;
+}
+
+// Statuses that mean a player may miss games. Sleeper tags a large share of
+// healthy starters `Questionable` through August, so that one is shown muted
+// (mirrors `serious_injury` in recommend.rs).
+const SERIOUS = new Set(["out", "ir", "pup", "sus", "doubtful", "na", "cov"]);
+
 export function Board({
   players,
   positions,
@@ -15,14 +92,23 @@ export function Board({
 }) {
   const [pos, setPos] = useState<Position>("ALL");
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
 
   const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
     return players
       .filter((p) => pos === "ALL" || p.position === pos)
-      .filter((p) => !q || p.name.toLowerCase().includes(q));
-  }, [players, pos, query]);
+      .filter((p) => !q || p.name.toLowerCase().includes(q))
+      .sort((a, b) => compare(a, b, sort));
+  }, [players, pos, query, sort]);
   const filtered = matching.slice(0, 200);
+
+  const toggleSort = (column: Column) =>
+    setSort((current) =>
+      current.key === column.key
+        ? { key: column.key, dir: current.dir === "asc" ? "desc" : "asc" }
+        : { key: column.key, dir: column.first },
+    );
 
   return (
     <div className="board">
@@ -55,16 +141,25 @@ export function Board({
       <table>
         <thead>
           <tr>
-            <th>#</th>
-            <th className="left">Player</th>
-            <th>Pos</th>
-            <th>Team</th>
-            <th>Bye</th>
-            <th title="Season points under your league's exact scoring">Pts</th>
-            <th title="Value over replacement">VORP</th>
-            <th>Tier</th>
-            <th>ADP</th>
-            <th title="Chance they survive to your next pick">Surv</th>
+            {COLUMNS.map((c) => {
+              const active = sort.key === c.key;
+              return (
+                <th
+                  key={c.key}
+                  className={c.left ? "left" : undefined}
+                  aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
+                >
+                  <button
+                    className="sort"
+                    title={c.title ?? `Sort by ${c.label}`}
+                    onClick={() => toggleSort(c)}
+                  >
+                    {c.label}
+                    {active && <span aria-hidden="true">{sort.dir === "asc" ? " ▲" : " ▼"}</span>}
+                  </button>
+                </th>
+              );
+            })}
             <th></th>
           </tr>
         </thead>
@@ -74,7 +169,18 @@ export function Board({
               <td className="muted">{p.overall_rank}</td>
               <td className="left name-cell">
                 {p.name}
-                {p.injury_status && <span className="injury">{p.injury_status}</span>}
+                {p.injury_status && (
+                  <span
+                    className={SERIOUS.has(p.injury_status.toLowerCase()) ? "injury" : "injury mild"}
+                    title={
+                      SERIOUS.has(p.injury_status.toLowerCase())
+                        ? "May miss games"
+                        : "Preseason tag — usually rest days or a minor knock"
+                    }
+                  >
+                    {p.injury_status}
+                  </span>
+                )}
               </td>
               <td>
                 <span className={`pos-badge pos-${p.position}`}>

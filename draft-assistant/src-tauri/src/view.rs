@@ -291,14 +291,20 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             .next()
     };
 
-    let recommendations = recommend(
-        &available,
-        my_roster.as_ref(),
-        &loaded.roster_rules,
-        current_round,
-        rounds,
-        current_pick,
-    );
+    // Nothing to recommend once every pick is in; a card would name a player
+    // the user can no longer take.
+    let recommendations = if draft_over {
+        Vec::new()
+    } else {
+        recommend(
+            &available,
+            my_roster.as_ref(),
+            &loaded.roster_rules,
+            current_round,
+            rounds,
+            current_pick,
+        )
+    };
 
     let recent_picks: Vec<RecentPick> = picks
         .iter()

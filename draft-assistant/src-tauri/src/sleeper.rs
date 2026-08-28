@@ -8,8 +8,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-const BASE: &str = "https://api.sleeper.app/v1";
-const BASE_UNDOC: &str = "https://api.sleeper.app";
+const DEFAULT_BASE: &str = "https://api.sleeper.app";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct League {
@@ -161,6 +160,9 @@ pub struct LeagueUser {
 
 pub struct SleeperClient {
     http: reqwest::Client,
+    /// Host every request goes to. Overridable so a replay server
+    /// (`scripts/replay-sleeper.mjs`) or a test double can stand in for Sleeper.
+    base: String,
 }
 
 impl Default for SleeperClient {
@@ -170,7 +172,16 @@ impl Default for SleeperClient {
 }
 
 impl SleeperClient {
+    /// Real Sleeper, unless `DRAFT_ASSISTANT_SLEEPER_BASE` points elsewhere.
     pub fn new() -> Self {
+        let base = std::env::var("DRAFT_ASSISTANT_SLEEPER_BASE")
+            .ok()
+            .filter(|b| !b.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_BASE.to_string());
+        Self::with_base_url(&base)
+    }
+
+    pub fn with_base_url(base: &str) -> Self {
         let http = reqwest::Client::builder()
             .user_agent("draft-assistant/0.1 (local second-screen tool)")
             .gzip(true)
@@ -178,7 +189,14 @@ impl SleeperClient {
             .timeout(std::time::Duration::from_secs(8))
             .build()
             .expect("failed to build http client");
-        Self { http }
+        Self {
+            http,
+            base: base.trim().trim_end_matches('/').to_string(),
+        }
+    }
+
+    fn v1(&self, path: &str) -> String {
+        format!("{}/v1/{path}", self.base)
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, String> {
@@ -197,18 +215,22 @@ impl SleeperClient {
     }
 
     pub async fn league(&self, league_id: &str) -> Result<League, String> {
-        let v: Option<League> = self.get_json(&format!("{BASE}/league/{league_id}")).await?;
+        let v: Option<League> = self
+            .get_json(&self.v1(&format!("league/{league_id}")))
+            .await?;
         v.ok_or_else(|| format!("league {league_id} not found (Sleeper returned null)"))
     }
 
     pub async fn draft(&self, draft_id: &str) -> Result<Draft, String> {
-        let v: Option<Draft> = self.get_json(&format!("{BASE}/draft/{draft_id}")).await?;
+        let v: Option<Draft> = self
+            .get_json(&self.v1(&format!("draft/{draft_id}")))
+            .await?;
         v.ok_or_else(|| format!("draft {draft_id} not found (Sleeper returned null)"))
     }
 
     pub async fn picks(&self, draft_id: &str) -> Result<Vec<Pick>, String> {
         let v: Option<Vec<Pick>> = self
-            .get_json(&format!("{BASE}/draft/{draft_id}/picks"))
+            .get_json(&self.v1(&format!("draft/{draft_id}/picks")))
             .await?;
         Ok(v.unwrap_or_default())
     }
@@ -216,20 +238,21 @@ impl SleeperClient {
     /// All members of a league (for slot display names). One call.
     pub async fn league_users(&self, league_id: &str) -> Result<Vec<LeagueUser>, String> {
         let v: Option<Vec<LeagueUser>> = self
-            .get_json(&format!("{BASE}/league/{league_id}/users"))
+            .get_json(&self.v1(&format!("league/{league_id}/users")))
             .await?;
         Ok(v.unwrap_or_default())
     }
 
     /// Full player dictionary: player_id -> meta. ~14.6MB, cache on disk.
     pub async fn players(&self) -> Result<HashMap<String, PlayerMeta>, String> {
-        self.get_json(&format!("{BASE}/players/nfl")).await
+        self.get_json(&self.v1("players/nfl")).await
     }
 
     /// Undocumented: full-season raw-stat projections for one season.
     pub async fn season_projections(&self, season: u32) -> Result<Vec<ProjectionRow>, String> {
         let url = format!(
-            "{BASE_UNDOC}/projections/nfl/{season}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF&order_by=adp_ppr"
+            "{}/projections/nfl/{season}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF&order_by=adp_ppr",
+            self.base
         );
         self.get_json(&url).await
     }
@@ -241,8 +264,84 @@ impl SleeperClient {
         week: u32,
     ) -> Result<Vec<ProjectionRow>, String> {
         let url = format!(
-            "{BASE_UNDOC}/projections/nfl/{season}/{week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF"
+            "{}/projections/nfl/{season}/{week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF",
+            self.base
         );
         self.get_json(&url).await
+    }
+}
+
+/// Pull the Sleeper ID out of whatever the user pasted — a bare ID or a full
+/// URL like https://sleeper.com/draft/nfl/139888...?ftue=commish. Sleeper IDs
+/// are 18–19 digit snowflakes; anything shorter is handed back untouched so
+/// the API can reject it with its own message.
+pub fn extract_id(input: &str) -> String {
+    input
+        .split(|c: char| !c.is_ascii_digit())
+        .max_by_key(|run| run.len())
+        .filter(|run| run.len() >= 15)
+        .unwrap_or(input.trim())
+        .to_string()
+}
+
+#[cfg(test)]
+mod extract_id_tests {
+    use super::extract_id;
+
+    #[test]
+    fn a_bare_id_passes_through() {
+        assert_eq!(extract_id("1389710366300200961"), "1389710366300200961");
+        assert_eq!(extract_id("  1389710366300200961\n"), "1389710366300200961");
+    }
+
+    #[test]
+    fn a_draft_url_with_query_yields_the_draft_id() {
+        assert_eq!(
+            extract_id("https://sleeper.com/draft/nfl/1389710366300200961?ftue=commish"),
+            "1389710366300200961"
+        );
+    }
+
+    #[test]
+    fn a_league_url_yields_the_league_id() {
+        assert_eq!(
+            extract_id("https://sleeper.com/leagues/1389710366300200960/team"),
+            "1389710366300200960"
+        );
+    }
+
+    #[test]
+    fn the_longest_digit_run_wins_over_short_ones() {
+        // `nfl` sits between a year-ish number and the real ID.
+        assert_eq!(
+            extract_id("2026/nfl/1389710366300200961/1"),
+            "1389710366300200961"
+        );
+    }
+
+    #[test]
+    fn a_short_string_is_returned_trimmed_for_the_api_to_reject() {
+        assert_eq!(extract_id(" abc123 "), "abc123");
+    }
+}
+
+#[cfg(test)]
+mod base_url_tests {
+    use super::SleeperClient;
+
+    #[test]
+    fn a_custom_base_is_used_for_every_endpoint_family() {
+        let client = SleeperClient::with_base_url("http://localhost:8787/");
+        assert_eq!(
+            client.v1("draft/1/picks"),
+            "http://localhost:8787/v1/draft/1/picks"
+        );
+        assert_eq!(client.base, "http://localhost:8787");
+    }
+
+    #[test]
+    fn the_default_is_real_sleeper() {
+        let client = SleeperClient::with_base_url(super::DEFAULT_BASE);
+        assert_eq!(client.v1("league/1"), "https://api.sleeper.app/v1/league/1");
     }
 }

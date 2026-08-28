@@ -21,6 +21,8 @@ const excludedFiles = new Set([
   "package-lock.json",
   "bun.lock",
   `draft-assistant${sep}public${sep}dev-fixture.json`,
+  // Written by scripts/replay-sleeper.mjs --dump; git-ignored.
+  `draft-assistant${sep}public${sep}live-state.json`,
 ]);
 
 async function filesUnder(directory) {

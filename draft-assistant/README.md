@@ -31,6 +31,12 @@ server anywhere.
 - **AI-readable by design.** One call (`get_state` command, "Export state"
   button, or the `dump_state` CLI) emits the entire draft state as JSON — the
   same struct the UI renders. Point an LLM at it; nothing needs to scrape the UI.
+- **Ask Claude, in context.** A chat panel that sees the whole board, every
+  roster, recent picks and the app's recommendation, remembers the
+  conversation, and lets you pick model, thinking effort, speed, and whether
+  it may search the web. See [Ask Claude](#ask-claude).
+- **Sortable board.** Click any column header — Bye, Pos, Pts, VORP, Tier,
+  ADP, Surv — to sort; click again to flip; `#` restores value order.
 - **Multi-league.** Leagues are stored in config; switching is a config value,
   never a code change.
 
@@ -86,17 +92,43 @@ the balanced recommendation) to exercise mid-draft state without a live draft.
 
 ## Ask Claude
 
-The **Ask Claude** button opens a chat panel that answers questions about the
-live draft — "who should I take next?", "who is likely gone before my next
-pick?". It sends the current state (your roster, the top 40 of the board with
-VORP/survival/tier, tier alerts, and the app's own recommendation) and returns
-a short answer. Expect ~5-10 seconds per question.
+The **Ask Claude** button opens a panel beside the board that answers
+questions about the live draft — "who should I take next?", "who is likely
+gone before my next pick?", "why?". Each question is sent with:
+
+- the current draft state (clock, your roster, all rosters, tier alerts,
+  recent picks, the app's own recommendations, replacement baselines);
+- the **entire** available board as a compact table — rank, name, position,
+  team, bye, points, VORP, tier, ADP, survival odds, injury tag — so it can
+  answer about QB2s, TE4s and every DEF, not just the top 40;
+- the conversation so far (the last six exchanges, plus any summary), so
+  follow-ups like "what about the RB instead?" mean something.
+
+Expect 15–40 seconds per answer with Opus (a measured example: 36 s and
+~42k context tokens for a three-position plan); the panel offers **Cancel**
+while it waits and never blocks the board.
+
+**Settings** (folded at the top of the panel, remembered between launches):
+
+| Setting | Choices | Notes |
+|---|---|---|
+| Model | Opus (default), Sonnet, Fable | Sonnet is quicker and cheaper; Fable is the strongest and slowest. `DRAFT_ASSISTANT_CLAUDE_MODEL` sets the default. |
+| Thinking effort | Default, Low … Max | Passed as `--effort`. Low is enough for lookups; Max for "plan my next three picks". |
+| Fast mode | off / on | Asks for the CLI's fast mode. If the account cannot serve it the panel says so once (e.g. `extra_usage_disabled`) and answers at standard speed. |
+| Web search | off (default) / on | Lets the model search for injury details, holdouts or depth-chart news. It says when an answer relies on the web; rankings still come from the board. Slower. |
+
+Under the thread a usage line shows the last answer's context size in
+tokens, its duration, the model, the question count and the session cost as
+the CLI reports it. **New chat** starts an empty thread. **Compact** folds a
+long thread into a short summary that then stands in for the earlier turns —
+it is one extra model call and can take a minute or two, so it is only
+enabled once there are at least two questions.
 
 It works by shelling out to the locally installed [Claude
 Code](https://claude.com/claude-code) CLI, so it needs no API key — it uses
 whatever that CLI is already logged in as. The panel is read-only advice: it
-cannot draft, and `--restricted` strips the CLI's command- and code-running
-tools.
+cannot draft. The CLI runs with `--restricted` and `--tools ""` (or `--tools
+WebSearch` when web search is on), so it has no command, code or file tools.
 
 If the CLI is not on `PATH` (notably inside a packaged `.app`, which gets a
 minimal environment), the app looks in `~/.local/bin`, `/opt/homebrew/bin`, and
@@ -109,18 +141,54 @@ export DRAFT_ASSISTANT_CLAUDE_BIN=/full/path/to/claude
 Errors surface in the panel rather than being swallowed — a missing CLI names
 the env var above, and a login failure shows the CLI's own stderr.
 
+## Demo / replay mode
+
+`scripts/replay-sleeper.mjs` stands in for `api.sleeper.app` on a local port
+and replays a **completed** draft as if it were live: the league, draft, and
+picks endpoints for that draft come from a recording, with one pick released
+every few seconds; players, projections, and users are proxied to the real
+API. Any completed draft works — last season's draft of your own league is the
+most realistic, since the team count, rounds, and users match.
+
+```bash
+# 1. build the headless engine once
+cargo build --manifest-path src-tauri/Cargo.toml --bin dump_state
+
+# 2. replay last year's draft with you at slot 2, one pick every 8 s, and
+#    write a fresh state dump for the browser preview every 4 s
+bun scripts/replay-sleeper.mjs --league <last_season_league_id> --draft <its_draft_id> \
+  --season 2026 --my-user <your_user_id> --my-slot 2 --interval 8 \
+  --dump public/live-state.json --username <your_username>
+
+# 3a. watch the real UI follow it in a browser
+bun run dev            # then open http://localhost:1420/?replay=/live-state.json
+
+# 3b. or run the desktop app against it
+DRAFT_ASSISTANT_SLEEPER_BASE=http://localhost:8787 bun run tauri dev
+```
+
+While it runs: `curl localhost:8787/replay/status`, `/replay/step`,
+`/replay/pause`, `/replay/resume`, `/replay/set?n=27`. The server log shows
+every poll the app makes, so sync cadence is visible. `public/live-state.json`
+is git-ignored.
+
+`DRAFT_ASSISTANT_SLEEPER_BASE` redirects every request the engine makes, so
+it also serves as the seam for offline tests against a recorded API.
+
 ## Browser preview
 
 The UI degrades to a read-only preview when opened in a plain browser (vite dev
 server on :1420): it renders `public/dev-fixture.json`, a captured state dump.
-Regenerate the fixture with `dump_state`.
+Regenerate the fixture with `dump_state`. Add `?replay=<url>` to poll a state
+dump that keeps changing — see [Demo / replay mode](#demo--replay-mode).
 
 ## Draft-day troubleshooting
 
 Every failure the app can detect is shown on screen. This is what each one
 means and what to do about it. "Pill" is the live-sync button in the header;
-"warning" is the amber banner under the clock; "toast" is the message at the
-bottom of the window — failures stay until dismissed, confirmations fade.
+"warning" is the amber banner under the clock; "toast" is a message —
+failures stay as a red bar under the header until dismissed, confirmations
+fade from the top-right corner.
 
 | You see | What it means | What to do |
 |---|---|---|
@@ -129,17 +197,21 @@ bottom of the window — failures stay until dismissed, confirmations fade.
 | Pill **○ Live sync off** | Polling is switched off. | Click the pill. |
 | Warning `players refresh failed; using cache aged Nh` / `projections refresh failed; using cache aged Nh` / `weekly projections refresh failed; using cache aged Nh` | Sleeper did not answer; the app is running on its last download. Rankings are as good as that download. | Keep drafting. Click **Refresh data** once the network is back. |
 | Warning `weekly projections unavailable for weeks …` | Some per-week projections were missing. Only the yardage-bonus estimate loses a little precision. | Ignore. |
-| Warning `<file> could not be cached (…); will refetch` | The download worked but could not be saved — usually disk space or permissions. | Free disk space. The app works; it re-downloads on next launch. |
+| Warning `<file> could not be cached (…); will refetch` | The download worked but could not be saved — usually disk space or permissions. (Before 2026-08-28 two overlapping loads could also trigger this on `weekly_*.json`; that race is fixed.) | Free disk space. The app works; it re-downloads on next launch. |
 | Warning `board unusually small (N players) — projections may be incomplete` | Sleeper's projections endpoint returned a partial list. | **Refresh data**. If it persists the endpoint is degraded: rankings below the top ~100 are unreliable, lean on ADP and survival. |
 | Warning `initial picks refresh failed: …` | The pick list did not load at startup. | Live sync retries every 3 s and clears it. |
 | Warning `your draft slot N is outside the valid range …` / `draft reports 0 teams …` | Sleeper sent malformed draft settings; the app clamped them. | **Refresh data**. If it persists, the draft page in Sleeper is the source of truth. |
 | Warning `mock draft: league settings synthesized …` | You loaded a mock draft by its draft ID; scoring is Sleeper's default for that mock type. | Informational. |
 | Toast `player already drafted` / `draft is complete` / `no manual picks to undo` | A manual pick or undo was refused because the state already says so. | Dismiss it. |
 | Toast `Live update rejected: Incompatible draft data …` | The backend and the UI disagree on the state format — a stale build. | Quit and relaunch. In dev, rebuild with `bun run tauri dev`. |
-| Toast `write …/config.json.tmp: …` / `replace config.json: …` | Your league and username could not be saved. | Free disk space or fix permissions. This session keeps working; the next launch would show Setup. |
+| Toast `write …/config.json.<pid>.<n>.tmp: …` / `replace config.json: …` | Your league and username could not be saved. | Free disk space or fix permissions. This session keeps working; the next launch would show Setup. |
 | Ask Claude `could not run the Claude CLI at … set DRAFT_ASSISTANT_CLAUDE_BIN` | The `claude` binary was not found. | `which claude`, then `export DRAFT_ASSISTANT_CLAUDE_BIN=<that path>` and relaunch. |
 | Ask Claude `Claude CLI error: …` | The CLI ran and failed — usually not logged in. | Run `claude` in a terminal and complete the login. |
-| Ask Claude `Claude did not answer within 45s` / `returned an empty answer` | Slow or hung model call. | Ask again, or **Cancel** and carry on — the board never waits on the chat. |
+| Ask Claude `Claude did not answer within 90s` (150 s with web search, 180 s for Compact) / `returned an empty answer` | Slow or hung model call. | Ask again — lower the thinking effort or switch to Sonnet if it keeps happening — or **Cancel** and carry on; the board never waits on the chat. |
+| Ask Claude `unexpected Claude CLI output (…)` | The CLI printed something other than its JSON result — usually a CLI update changed the format. | Run `claude --version`; report it. Answers are unavailable until the format is handled. |
+| Ask Claude `unknown model '…'` / `unknown effort '…'` | `DRAFT_ASSISTANT_CLAUDE_MODEL` names something the panel does not know. | Use `opus`, `sonnet`, `fable`, or `haiku`, or unset it. |
+| Ask Claude note `Fast mode unavailable (extra_usage_disabled) — answered at standard speed.` | Fast mode was requested but the account cannot serve it. | Answers still arrive; turn the setting off to silence the note, or enable extra usage on the account. |
+| Ask Claude `Nothing to compact yet` | Compact was pressed on a thread that is already just a summary. | Ask more questions first. |
 | A page saying **Draft Assistant hit a display error** | The screen crashed rendering the state. The engine is still polling. | **Reload state**. If it recurs, **Restart app** — API picks and manual picks are all on disk. |
 
 ### Resetting local state

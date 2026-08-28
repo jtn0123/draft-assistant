@@ -1,0 +1,27 @@
+4 slot 4 Saquon Barkley RB | id 4866
+5 slot 5 Derrick Henry RB | id 3198
+6 slot 6 Ashton Jeanty RB | id 12527
+7 slot 7 Christian McCaffrey RB | id 4034
+8 slot 8 Josh Jacobs RB | id 5850
+9 slot 9 James Cook RB | id 8138
+10 slot 10 Drake London WR | id 8112
+11 slot 11 Brock Bowers TE | id 11604
+12 slot 12 George Kittle TE | id 4217
+13 slot 13 Amon-Ra St. Brown WR | id 7547
+14 slot 14 Tyreek Hill WR | id 3321
+15 slot 14 Lamar Jackson QB | id 4881
+16 slot 13 Josh Allen QB | id 4984
+17 slot 12 Marvin Harrison WR | id 11628
+18 slot 11 Breece Hall RB | id 8155
+19 slot 10 Omarion Hampton RB | id 12507
+20 slot 9 TreVeyon Henderson RB | id 12529
+21 slot 8 Tee Higgins WR | id 6801
+22 slot 7 Malik Nabers WR | id 11632
+23 slot 6 Mike Evans WR | id 2216
+24 slot 5 Jaxon Smith-Njigba WR | id 9488
+25 slot 4 James Conner RB | id 4137
+26 slot 3 Jaylen Waddle WR | id 7526
+27 slot 2 Kenneth Walker RB | id 8151
+28 slot 1 Terry McLaurin WR | id 5927
+29 slot 1 Davante Adams WR | id 2133
+30 slot 2 Courtland Sutton WR | id 5045

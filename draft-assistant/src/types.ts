@@ -146,3 +146,39 @@ export interface AppConfig {
 }
 
 export type Position = string;
+
+// ---------- Ask Claude ----------
+
+/** A conversation line as sent to the backend. Panel-only notes are not sent. */
+export interface ChatTurn {
+  role: "you" | "claude" | "summary";
+  text: string;
+}
+
+export interface ChatOptions {
+  model: string;
+  /** null = the CLI's default. */
+  effort: string | null;
+  fast: boolean;
+  web_search: boolean;
+}
+
+export interface ChatUsage {
+  model: string;
+  input_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  output_tokens: number;
+  /** Everything the model read on this call — the size of the thread. */
+  context_tokens: number;
+  web_searches: number;
+  duration_ms: number;
+  cost_usd: number | null;
+  fast_mode: string | null;
+  fast_mode_reason: string | null;
+}
+
+export interface ChatReply {
+  answer: string;
+  usage: ChatUsage;
+}

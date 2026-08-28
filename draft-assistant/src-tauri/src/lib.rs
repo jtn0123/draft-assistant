@@ -6,6 +6,7 @@ pub mod chat;
 pub mod desktop;
 pub mod draft;
 pub mod engine;
+pub mod manual;
 mod mock_league;
 pub mod recommend;
 pub mod roster;

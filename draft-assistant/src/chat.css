@@ -1,0 +1,223 @@
+/* The Ask Claude panel: layout column, settings, thread, usage line. */
+
+/* ---------- chat panel ---------- */
+
+/* A column beside the page, not an overlay: the header buttons and the
+   board's decision columns stay visible while the answer is read. */
+.shell {
+  display: flex;
+  align-items: flex-start;
+  min-height: 100vh;
+}
+
+.shell > .app {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  width: 380px;
+  flex: 0 0 380px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border-left: 1px solid var(--border);
+  z-index: 20;
+}
+
+.chat-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-settings {
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.chat-settings summary {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.chat-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-settings-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.chat-settings[open] .chat-settings-label {
+  color: var(--text);
+}
+
+.chat-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 14px 12px;
+}
+
+.chat-settings-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text);
+}
+
+.chat-settings-body label.chat-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: center;
+}
+
+.chat-settings-body label.chat-check .small-text {
+  grid-column: 2;
+}
+
+.chat-settings-body select {
+  font: inherit;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+.chat-usage {
+  margin: 0;
+  padding: 6px 14px;
+  font-size: 11px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-turn.summary p {
+  border-left: 2px solid var(--accent-dim);
+  padding-left: 10px;
+  color: var(--text-muted);
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-head h3 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-suggestion {
+  text-align: left;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chat-suggestion:hover {
+  border-color: var(--accent-dim);
+}
+
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-turn p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.chat-turn.you p {
+  background: var(--bg-hover);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.chat-role {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.chat-turn.claude .chat-role {
+  color: var(--accent);
+}
+
+.chat-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chat-input {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-input textarea {
+  flex: 1;
+  resize: none;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 8px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.chat-input textarea:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+
+.chat-note {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+}
