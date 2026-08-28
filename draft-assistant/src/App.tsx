@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import type { DraftView, PollHealth } from "./types";
+import type { DraftView, PollHealth, StoredLeague } from "./types";
 import { errorMessage } from "./format";
 import { Board } from "./components/Board";
 import { Chat } from "./components/Chat";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ClockBanner, RecCard, SidePanel, Setup } from "./components/Panels";
 import { SnakeStrip } from "./components/SnakeStrip";
+import { LeaguePicker } from "./components/LeaguePicker";
 import "./App.css";
 import "./components.css";
 import "./snake.css";
@@ -33,6 +34,9 @@ export default function App() {
   // freezing at whatever it said when the last one arrived.
   const [now, setNow] = useState(() => Date.now());
   const [chatOpen, setChatOpen] = useState(false);
+  // Every league loaded so far, so switching to a mock and back is two clicks.
+  const [leagues, setLeagues] = useState<StoredLeague[]>([]);
+  const [activeLeagueId, setActiveLeagueId] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
   // Highest view seq already rendered. The 3s poll and the awaited click
   // handlers both push views with no ordering guarantee, so without this a
@@ -112,6 +116,8 @@ export default function App() {
     (async () => {
       try {
         const config = await api.getConfig();
+        setLeagues(config.leagues);
+        setActiveLeagueId(config.active_league_id);
         if (config.active_league_id) {
           setBusy(true);
           const v = await api.addLeague(config.active_league_id);
@@ -194,6 +200,23 @@ export default function App() {
     }
   };
 
+  /// Load another league (or a bare draft ID) and make it the active one.
+  const doSwitchLeague = async (leagueId: string) => {
+    setBusy(true);
+    try {
+      applyView(await api.addLeague(leagueId));
+      const config = await api.getConfig();
+      setLeagues(config.leagues);
+      setActiveLeagueId(config.active_league_id);
+      if (!api.preview) await startLive();
+      notify("Loaded — the previous league is still in the list");
+    } catch (e) {
+      fail(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const doRefreshData = async () => {
     setBusy(true);
     try {
@@ -260,6 +283,14 @@ export default function App() {
             {view.league.season} · {view.draft.teams} teams · {view.draft.rounds} rounds
             {view.draft.manual_picks_active && " · manual picks active"}
           </span>
+          {!api.preview && (
+            <LeaguePicker
+              leagues={leagues}
+              activeId={activeLeagueId}
+              disabled={busy}
+              onSwitch={(id) => void doSwitchLeague(id)}
+            />
+          )}
         </div>
         <div className="actions">
           <button

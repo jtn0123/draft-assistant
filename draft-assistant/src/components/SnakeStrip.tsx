@@ -52,26 +52,28 @@ export function SnakeStrip({ view }: { view: DraftView }) {
   };
 
   // Early in a round your pick can be twenty away. Rather than run off the
-  // end, keep the near stretch, mark the gap, and keep your own picks and
-  // the turn between them — the whole point is seeing yourself coming.
-  const span = last - d.current_pick + 1;
-  let cells;
-  let gap = 0;
-  if (span <= MAX_CELLS) {
-    cells = Array.from({ length: span }, (_, i) => cell(d.current_pick + i));
-  } else {
-    // The tail is your turn: your first pick through your next one.
-    const tailStart = upcoming[0] ?? last;
-    const tail = Array.from({ length: last - tailStart + 1 }, (_, i) => cell(tailStart + i));
-    const headLength = Math.max(1, MAX_CELLS - tail.length - 1);
-    const head = Array.from({ length: headLength }, (_, i) => cell(d.current_pick + i));
-    gap = tailStart - (d.current_pick + headLength);
-    cells = gap > 0 ? [...head, ...tail] : [...head, ...tail].slice(0, MAX_CELLS);
-    if (gap <= 0) gap = 0;
+  // end, keep the near stretch and your own turn, and mark the jump between.
+  // Built as a set of pick numbers: the near stretch and the turn overlap
+  // whenever it is already your pick, and a duplicated chip means duplicated
+  // React keys, which is how a chip from the previous league survived a
+  // league switch.
+  const wanted = new Set<number>();
+  const turnStart = Math.max(d.current_pick, upcoming[0] ?? d.current_pick);
+  const turnLength = last - turnStart + 1;
+  const headLength = Math.max(1, MAX_CELLS - Math.min(turnLength, MAX_CELLS - 1) - 1);
+  for (let p = d.current_pick; p < d.current_pick + headLength && p <= last; p += 1) {
+    wanted.add(p);
   }
+  for (let p = Math.max(turnStart, last - (MAX_CELLS - 2)); p <= last; p += 1) {
+    wanted.add(p);
+  }
+  const picks = [...wanted].sort((a, b) => a - b).slice(0, MAX_CELLS);
+  const cells = picks.map(cell);
+  // The one jump in the run, if the middle was skipped.
+  const jump = picks.findIndex((p, i) => i > 0 && p - picks[i - 1] > 1);
+  const gap = jump > 0 ? picks[jump] - picks[jump - 1] - 1 : 0;
   if (cells.length === 0) return null;
-  // Which chip the "+N" sits in front of: the first of your turn.
-  const gapBefore = gap > 0 ? (upcoming[0] ?? last) : null;
+  const gapBefore = gap > 0 ? picks[jump] : null;
 
   const ahead = d.picks_until_mine;
   const waiting = d.status === "pre_draft" && d.current_pick === 1;

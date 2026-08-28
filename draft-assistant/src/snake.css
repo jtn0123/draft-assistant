@@ -116,3 +116,27 @@
   border: 1px dashed var(--border);
   border-radius: 999px;
 }
+
+/* League switcher in the header: mocks and the real thing, two clicks apart. */
+.league-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.league-picker select,
+.league-picker .league-add {
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 7px;
+  max-width: 340px;
+}
+
+.league-picker .league-add {
+  min-width: 260px;
+}

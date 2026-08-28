@@ -127,3 +127,79 @@ describe("SnakeStrip", () => {
     expect(unknown).toBeEmptyDOMElement();
   });
 });
+
+describe("SnakeStrip — no duplicate chips", () => {
+  it("never repeats a pick when it is already your turn and your next is far", () => {
+    // The live bug: with pick 62 on the clock and your next at 79, the near
+    // stretch and the turn both began at 62. Two chips, one key — React
+    // reused a node from the previous league and a stale YOU chip survived.
+    render(<SnakeStrip view={live(62, 2, [62, 79])} />);
+    const picks = cells()
+      .filter((c) => c.className.includes("snake-cell"))
+      .map((c) => c.querySelector(".snake-pick")?.textContent);
+    expect(new Set(picks).size).toBe(picks.length);
+    expect(picks[0]).toBe("62");
+    expect(picks[picks.length - 1]).toBe("79");
+  });
+
+  it("keeps chips unique across every shape the strip can take", () => {
+    for (const [pick, slot, next] of [
+      [1, 1, [1, 28]],
+      [3, 8, [8, 21]],
+      [25, 2, [27, 30]],
+      [59, 2, [59, 62]],
+      [40, 14, [42, 43]],
+    ] as [number, number, number[]][]) {
+      const { unmount } = render(<SnakeStrip view={live(pick, slot, next)} />);
+      const picks = cells()
+        .filter((c) => c.className.includes("snake-cell"))
+        .map((c) => c.querySelector(".snake-pick")?.textContent);
+      expect(new Set(picks).size, `pick ${pick} slot ${slot}`).toBe(picks.length);
+      expect(picks.length).toBeLessThanOrEqual(16);
+      unmount();
+    }
+  });
+});
+
+describe("SnakeStrip — the live mock draft", () => {
+  // Exact states pulled from the running 10-team mock while dry-running it.
+  it.each([
+    { pick: 79, next: [79, 82, 99], expected: ["79", "80", "81", "82"] },
+    { pick: 62, next: [62, 79, 82], expected: null },
+    { pick: 82, next: [82, 99, 102], expected: null },
+  ])("renders $pick with no stray chips", ({ pick, next, expected }) => {
+    const v = live(pick, 2, next);
+    v.draft.teams = 10;
+    v.draft.rounds = 15;
+    const index = (pick - 1) % 10;
+    const round = Math.floor((pick - 1) / 10) + 1;
+    v.draft.on_clock_slot = round % 2 === 1 ? index + 1 : 10 - index;
+    v.rosters = Array.from({ length: 10 }, (_, i) => ({
+      slot: i + 1,
+      display_name: `Slot ${i + 1}`,
+      players: [],
+      open_starters: [],
+    }));
+    // My earlier picks are on my roster, exactly as the live feed reports them.
+    v.rosters[1].players = [2, 19, 22, 39, 42, 59, 62, 79]
+      .filter((p) => p < pick)
+      .map((p) => ({
+        player_id: `p${p}`,
+        name: `P${p}`,
+        position: "RB",
+        team: null,
+        pick_no: p,
+        round: 1,
+        is_keeper: false,
+      }));
+    render(<SnakeStrip view={v} />);
+    const picks = cells()
+      .filter((c) => c.className.includes("snake-cell"))
+      .map((c) => c.querySelector(".snake-pick")?.textContent);
+    // Whatever the shape, a pick already on my roster is never "up next".
+    expect(picks).not.toContain("2");
+    expect(new Set(picks).size).toBe(picks.length);
+    expect(Number(picks[0])).toBe(pick);
+    if (expected) expect(picks).toEqual(expected);
+  });
+});
