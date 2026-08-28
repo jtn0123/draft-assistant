@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { DraftView, PollHealth } from "./types";
+import { errorMessage } from "./format";
 import { Board } from "./components/Board";
 import { Chat } from "./components/Chat";
 import { ClockBanner, RecCard, SidePanel, Setup } from "./components/Panels";
@@ -91,13 +92,17 @@ export default function App() {
     })();
   }, [showToast, startLive, applyView]);
 
-  // Live updates from the poller.
+  // Live updates from the poller. A rejected payload is surfaced rather than
+  // dropped: updates silently stopping is the one failure this app must never
+  // have while the pill still says "Live sync on".
   useEffect(() => {
-    const un = api.onDraftUpdated(applyView);
+    const un = api.onDraftUpdated(applyView, (e) =>
+      showToast(`Live update rejected: ${errorMessage(e)}`),
+    );
     return () => {
       un.then((f) => f()).catch(() => undefined);
     };
-  }, [applyView]);
+  }, [applyView, showToast]);
 
   useEffect(() => {
     const un = api.onPollHealth(setPollHealth);

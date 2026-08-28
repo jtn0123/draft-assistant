@@ -6,6 +6,7 @@ import type { DraftView, PollHealth } from "./types";
 
 const testState = vi.hoisted(() => ({
   draftHandler: null as ((view: DraftView) => void) | null,
+  errorHandler: null as ((error: unknown) => void) | null,
   healthHandler: null as ((health: PollHealth) => void) | null,
   api: {
     addLeague: vi.fn(),
@@ -42,13 +43,15 @@ function fixture(): DraftView {
 beforeEach(() => {
   vi.clearAllMocks();
   testState.draftHandler = null;
+  testState.errorHandler = null;
   testState.healthHandler = null;
   nextSeq = 0;
   testState.api.startPolling.mockResolvedValue(undefined);
   testState.api.stopPolling.mockResolvedValue(undefined);
   testState.api.exportState.mockResolvedValue("/tmp/draft-state.json");
-  testState.api.onDraftUpdated.mockImplementation(async (handler) => {
+  testState.api.onDraftUpdated.mockImplementation(async (handler, onError) => {
     testState.draftHandler = handler;
+    testState.errorHandler = onError ?? null;
     return () => undefined;
   });
   testState.api.onPollHealth.mockImplementation(async (handler) => {
@@ -136,6 +139,31 @@ describe("App live workflow", () => {
     act(() => testState.draftHandler?.(stale));
     expect(screen.queryByText("Stale poll result")).not.toBeInTheDocument();
     expect(screen.getByText("Newer")).toBeInTheDocument();
+  });
+
+  it("reports a rejected live update instead of dropping it silently", async () => {
+    const initial = fixture();
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+
+    render(<App />);
+    expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+
+    // The schema guard threw inside the event callback. Thrown there it would
+    // vanish; routed here it must reach the user.
+    act(() => {
+      testState.errorHandler?.(
+        new Error("Incompatible draft data: expected schema 1.2, received 1.1"),
+      );
+    });
+    expect(
+      screen.getByText(/Live update rejected: Incompatible draft data/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(initial.league.name)).toBeInTheDocument();
   });
 
   it("cancels a pending pick when that player is drafted by someone else", async () => {

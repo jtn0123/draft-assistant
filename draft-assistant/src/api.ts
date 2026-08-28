@@ -33,7 +33,15 @@ interface Api {
   chat(question: string): Promise<string>;
   startPolling(intervalSecs?: number): Promise<void>;
   stopPolling(): Promise<void>;
-  onDraftUpdated(handler: (view: DraftView) => void): Promise<UnlistenFn>;
+  /**
+   * Live views from the poller. A payload that fails the schema check is
+   * reported through `onError` — thrown inside an event callback it would be
+   * swallowed, and live updates would silently stop.
+   */
+  onDraftUpdated(
+    handler: (view: DraftView) => void,
+    onError?: (error: unknown) => void,
+  ): Promise<UnlistenFn>;
   onPollHealth(handler: (health: PollHealth) => void): Promise<UnlistenFn>;
 }
 
@@ -53,8 +61,14 @@ const tauriApi: Api = {
   startPolling: (intervalSecs = 3) =>
     invoke<void>("start_polling", { intervalSecs }),
   stopPolling: () => invoke<void>("stop_polling"),
-  onDraftUpdated: (handler) =>
-    listen<DraftView>("draft-updated", (event) => handler(validateDraftView(event.payload))),
+  onDraftUpdated: (handler, onError) =>
+    listen<DraftView>("draft-updated", (event) => {
+      try {
+        handler(validateDraftView(event.payload));
+      } catch (error) {
+        onError?.(error);
+      }
+    }),
   onPollHealth: (handler) =>
     listen<PollHealth>("poll-health", (event) => handler(event.payload)),
 };
