@@ -9,13 +9,16 @@ import { describeSession } from "./chatSession";
 export function ChatSessions({
   sessions,
   currentId,
+  saved,
   savedTo,
   disabled,
   onSelect,
 }: {
   sessions: ChatSessionSummary[];
   currentId: string;
-  /** Where the current session was last written, or null before its first save. */
+  /** True once this conversation is on disk — saved here, or opened from there. */
+  saved: boolean;
+  /** Where it was last written, when this panel is what wrote it. */
   savedTo: string | null;
   disabled: boolean;
   onSelect: (id: string) => void;
@@ -29,7 +32,7 @@ export function ChatSessions({
           aria-label="Saved sessions"
           value={currentId}
           disabled={disabled}
-          title={savedTo ? `Saved to ${savedTo}` : "Saved after the first answer"}
+          title={savedTo ? `Saved to ${savedTo}` : saved ? "Saved" : "Saved after the first answer"}
           onChange={(e) => {
             if (e.target.value !== currentId) onSelect(e.target.value);
           }}
@@ -43,7 +46,7 @@ export function ChatSessions({
         </select>
       </label>
       <span className="muted small-text">
-        {savedTo ? "saved" : sessions.length === 0 ? "nothing saved for this draft yet" : "not saved yet"}
+        {saved ? "saved" : sessions.length === 0 ? "nothing saved for this draft yet" : "not saved yet"}
       </span>
     </div>
   );

@@ -248,11 +248,17 @@ impl AppCore {
         let mut loaded = self.loaded.lock().await;
         let loaded = loaded.as_mut()?;
         let mut errors = Vec::new();
+        // A poll that retires a manual pick has changed what the board shows
+        // even when the feed itself is unchanged, and the fingerprint below
+        // only covers the feed. Without this the UI keeps rendering a pick
+        // the backend has already dropped, and Undo answers "nothing to undo".
+        let mut manual_changed = false;
         match picks {
             Ok(picks) => {
                 loaded.api_picks = picks;
                 note_keepers(loaded);
                 if engine::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
+                    manual_changed = true;
                     if let Err(error) = self
                         .engine
                         .save_manual_picks(&draft_id, &loaded.manual_picks)
@@ -268,7 +274,7 @@ impl AppCore {
             Err(error) => errors.push(error),
         }
         let fingerprint = view::poll_fingerprint(&loaded.api_picks, &loaded.draft);
-        let changed = *last_fingerprint != Some(fingerprint);
+        let changed = *last_fingerprint != Some(fingerprint) || manual_changed;
         *last_fingerprint = Some(fingerprint);
         if errors.is_empty() {
             loaded.poll_last_success_at = Some(engine::now_secs());

@@ -39,6 +39,30 @@
 
 ---
 
+## Post-report addendum — 16:15, driving the real window
+
+Accessibility and screen-recording permission arrived, so the real Tauri
+window was driven directly (CGEvent clicks + screenshots) rather than
+through the browser preview. That found what no test had:
+
+- **`reconcile_manual_picks` silently deleted every manual pick within 3 s**
+  (`engine.rs`). It kept only picks *beyond the highest* API pick, a rule
+  `view::merged_picks` was fixed away from months ago; this league's feed
+  opens with keepers up to pick 195, so the entire offline fallback was
+  dead in exactly the league it was written for. **Fixed** — keyed on pick
+  number and player, with a regression test naming the live shape.
+- **The poll never told the UI**, because the fingerprint covers only the
+  feed (`app.rs`). The board rendered a pick the backend had dropped and
+  Undo said "no manual picks to undo". **Fixed** — a reconcile that changes
+  anything forces an emit.
+- A reopened chat session's label read "not saved yet". **Fixed.**
+
+This is the strongest argument yet for D3 (a smoke test that boots the
+shell): both bugs sat behind the one seam the 92 %/91 % suites do not
+cross, and one of them would have cost picks tonight.
+
+---
+
 ## Draft-day readiness
 
 **Verdict: still yes. Green, with one new yellow that is operational, not code.**

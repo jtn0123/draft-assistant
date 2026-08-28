@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { errorMessage } from "../format";
-import type { ChatOptions, ChatSessionSummary, ChatUsage } from "../types";
+import type { ChatOptions, ChatUsage } from "../types";
 import { ChatSessions } from "./ChatSessions";
-import { fromSession, newSessionId, nowSecs, toSession } from "./chatSession";
+import { fromSession } from "./chatSession";
+import { useChatSessions } from "./useChatSessions";
 import { ChatSettings, UsageLine } from "./ChatSettings";
 import {
   AUTO_QUESTION,
@@ -60,15 +61,6 @@ export function Chat({
   const [prefs, setPrefs] = useState<ChatPrefs>(loadPrefs);
   const [usage, setUsage] = useState<ChatUsage | null>(null);
   const [session, setSession] = useState({ questions: 0, cost: 0 });
-  // The saved-session bookkeeping: which file this conversation is, the
-  // others on disk for this draft, and where the last save went.
-  const [sessionId, setSessionId] = useState(newSessionId);
-  const startedAt = useRef(nowSecs());
-  const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
-  const [savedTo, setSavedTo] = useState<string | null>(null);
-  // True once something happened that is not on disk yet. Loading a saved
-  // session must not count, or every reopen would rewrite its file.
-  const dirty = useRef(false);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Bumped on every ask, compact, cancel, and new chat. A result whose
@@ -78,6 +70,29 @@ export function Chat({
   const fastNoted = useRef(false);
   // The pick auto-ask last fired for, so one turn gets one question.
   const autoAsked = useRef<number | null>(null);
+
+  // Saved conversations for this draft: the file this thread is, the others
+  // on disk, and when to write. Reopening one lands back here via onRestore.
+  const { sessions, sessionId, saved, savedTo, openSession, startNew, markDirty } =
+    useChatSessions({
+      draftId,
+      leagueName,
+      busy: busy !== null,
+      turns,
+      questions: session.questions,
+      cost: session.cost,
+      onRestore: (stored) => {
+        generation.current += 1;
+        fastNoted.current = false;
+        setTurns(fromSession(stored));
+        setSession({ questions: stored.questions, cost: stored.cost_usd });
+        setUsage(null);
+        setError(null);
+        setPartial(null);
+        setBusy(null);
+      },
+      onError: setError,
+    });
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
@@ -103,89 +118,6 @@ export function Chat({
     const log = logRef.current;
     if (log) log.scrollTop = log.scrollHeight;
   }, [turns, busy, partial]);
-
-  const refreshSessions = async (id: string) => {
-    try {
-      setSessions(await api.listChatSessions(id));
-    } catch {
-      // Listing failing means saving will too; the save reports it.
-    }
-  };
-
-  const openSession = async (id: string) => {
-    if (!draftId || busy) return;
-    try {
-      const saved = await api.loadChatSession(draftId, id);
-      generation.current += 1;
-      fastNoted.current = false;
-      dirty.current = false;
-      setTurns(fromSession(saved));
-      setSession({ questions: saved.questions, cost: saved.cost_usd });
-      setSessionId(saved.id);
-      startedAt.current = saved.started_at;
-      setSavedTo(null);
-      setUsage(null);
-      setError(null);
-      setPartial(null);
-      setBusy(null);
-    } catch (e) {
-      setError(errorMessage(e));
-    }
-  };
-
-  // The latest `openSession` for the restore effect, which runs once per
-  // draft and must not re-run as the function closes over fresh state.
-  const openSessionRef = useRef(openSession);
-  useEffect(() => {
-    openSessionRef.current = openSession;
-  });
-
-  // When a draft is loaded, pick up where the last conversation left off —
-  // a reload or a relaunch should not cost the evening's answers. Runs once
-  // per draft; StrictMode's dev-only double mount cancels the first run and
-  // the second completes, which is why there is no "already restored" flag.
-  useEffect(() => {
-    if (!draftId) return;
-    let cancelled = false;
-    void (async () => {
-      let list: ChatSessionSummary[];
-      try {
-        list = await api.listChatSessions(draftId);
-      } catch {
-        return;
-      }
-      if (cancelled) return;
-      setSessions(list);
-      if (list.length > 0 && !dirty.current) void openSessionRef.current(list[0].id);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [draftId]);
-
-  // Save after every completed answer, compaction or cancel: the file on
-  // disk is whatever the panel shows once it has stopped moving.
-  useEffect(() => {
-    if (!draftId || busy !== null || !dirty.current) return;
-    if (!turns.some((t) => t.role === "you" || t.role === "summary")) return;
-    dirty.current = false;
-    const snapshot = toSession({
-      id: sessionId,
-      draftId,
-      leagueName,
-      startedAt: startedAt.current,
-      turns,
-      questions: session.questions,
-      cost: session.cost,
-    });
-    void api
-      .saveChatSession(snapshot)
-      .then((path) => {
-        setSavedTo(path);
-        return refreshSessions(draftId);
-      })
-      .catch((e: unknown) => setError(`Could not save this chat: ${errorMessage(e)}`));
-  }, [turns, busy, draftId, leagueName, sessionId, session]);
 
   const updateOptions = (next: ChatOptions) => {
     if (next.fast !== options.fast) fastNoted.current = false;
@@ -243,7 +175,7 @@ export function Chat({
         setPartial((sofar) => (sofar ?? "") + piece);
       });
       if (mine !== generation.current) return;
-      dirty.current = true;
+      markDirty();
       setTurns((prev) => [
         ...prev,
         { role: "claude", text: reply.answer, asOfPick: reply.as_of?.pick },
@@ -284,7 +216,7 @@ export function Chat({
     try {
       const reply = await api.chatCompact(toHistory(turns), options);
       if (mine !== generation.current) return;
-      dirty.current = true;
+      markDirty();
       setTurns([
         { role: "summary", text: reply.answer },
         { role: "note", text: "Earlier conversation folded into the summary above." },
@@ -303,7 +235,7 @@ export function Chat({
     generation.current += 1;
     // Keep whatever had been written: a half answer beats none on the clock.
     const kept = partial?.trim();
-    dirty.current = true;
+    markDirty();
     setTurns((prev) => [
       ...prev,
       ...(kept ? [{ role: "claude", text: kept, asOfPick: currentPick } as Turn] : []),
@@ -317,10 +249,7 @@ export function Chat({
   const newChat = () => {
     generation.current += 1;
     fastNoted.current = false;
-    dirty.current = false;
-    setSessionId(newSessionId());
-    startedAt.current = nowSecs();
-    setSavedTo(null);
+    startNew();
     setTurns([]);
     setUsage(null);
     setSession({ questions: 0, cost: 0 });
@@ -386,6 +315,7 @@ export function Chat({
         <ChatSessions
           sessions={sessions}
           currentId={sessionId}
+          saved={saved}
           savedTo={savedTo}
           disabled={busy !== null}
           onSelect={(id) => void openSession(id)}

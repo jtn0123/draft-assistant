@@ -273,3 +273,34 @@ pub fn stub_claude(dir: &std::path::Path, answer: &str) -> PathBuf {
     }
     path
 }
+
+/// A stub Sleeper plus an `AppCore` over a scratch data dir: what every
+/// command-level test starts from.
+pub struct Rig {
+    pub stub: StubSleeper,
+    pub fixture: Fixture,
+    pub core: std::sync::Arc<draft_assistant_lib::app::AppCore>,
+}
+
+pub fn make_rig(label: &str) -> Rig {
+    let stub = StubSleeper::start();
+    let fixture = Fixture::load();
+    fixture.install(&stub);
+    let engine = draft_assistant_lib::engine::Engine {
+        client: draft_assistant_lib::sleeper::SleeperClient::with_base_url(&stub.base),
+        data_dir: scratch_dir(label),
+    };
+    Rig {
+        stub,
+        fixture,
+        core: std::sync::Arc::new(draft_assistant_lib::app::AppCore::new(engine)),
+    }
+}
+
+/// A rig with the fixture league loaded and the username resolved.
+pub async fn loaded_rig(label: &str) -> Rig {
+    let rig = make_rig(label);
+    rig.core.add_league(LEAGUE_ID, false).await.unwrap();
+    rig.core.set_my_username(MY_USERNAME).await.unwrap();
+    rig
+}

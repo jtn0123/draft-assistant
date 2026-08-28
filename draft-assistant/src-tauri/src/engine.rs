@@ -355,12 +355,23 @@ impl Engine {
     }
 }
 
+/// Drop the manual picks Sleeper has caught up with: the ones whose pick
+/// number the API has now filled, and the ones whose player the API records
+/// anywhere. Returns whether anything was dropped.
+///
+/// Keyed on the pick number, exactly like [`crate::view::merged_picks`] — an
+/// earlier rule kept only picks *beyond the highest* API pick, which in a
+/// keeper league (this one opens with keepers at 11, 14, 20 … 195) threw away
+/// every manual pick below the last keeper within three seconds of making it.
+/// That is the whole offline fallback, and it failed silently.
 pub(crate) fn reconcile_manual_picks(api: &[Pick], manual: &mut Vec<Pick>) -> bool {
     let before = manual.len();
-    let api_max = api.iter().map(|pick| pick.pick_no).max().unwrap_or(0);
+    let api_numbers: std::collections::HashSet<u32> = api.iter().map(|pick| pick.pick_no).collect();
     let api_players: std::collections::HashSet<&str> =
         api.iter().map(|pick| pick.player_id.as_str()).collect();
-    manual.retain(|pick| pick.pick_no > api_max && !api_players.contains(pick.player_id.as_str()));
+    manual.retain(|pick| {
+        !api_numbers.contains(&pick.pick_no) && !api_players.contains(pick.player_id.as_str())
+    });
     manual.len() != before
 }
 
@@ -420,5 +431,32 @@ mod reliability_tests {
         assert_eq!(reloaded[0].pick_no, 2);
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The live bug, 2026-08-28: the real league's feed opens with keepers up
+    /// to pick 195, so a manual pick at pick 1 was retired by the very next
+    /// poll — three seconds after it was made — and Undo then said there was
+    /// nothing to undo.
+    #[test]
+    fn a_manual_pick_below_a_keeper_is_not_retired_by_the_feed() {
+        let api = vec![pick(11, "keeper-a"), pick(195, "keeper-b")];
+        let mut manual = vec![pick(1, "mine")];
+        assert!(
+            !reconcile_manual_picks(&api, &mut manual),
+            "nothing to reconcile: the API has neither pick 1 nor that player"
+        );
+        assert_eq!(manual.len(), 1);
+
+        // Sleeper catches up on that number: now it goes.
+        let api = vec![pick(1, "someone-else"), pick(11, "keeper-a")];
+        assert!(reconcile_manual_picks(&api, &mut manual));
+        assert!(manual.is_empty());
+
+        // And it goes when the API records the same player at a different
+        // number, which is what a slow feed actually does.
+        let mut manual = vec![pick(3, "mine")];
+        let api = vec![pick(7, "mine")];
+        assert!(reconcile_manual_picks(&api, &mut manual));
+        assert!(manual.is_empty());
     }
 }

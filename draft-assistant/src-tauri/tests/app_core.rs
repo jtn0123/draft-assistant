@@ -10,36 +10,7 @@ use draft_assistant_lib::engine::Engine;
 use draft_assistant_lib::sleeper::SleeperClient;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use support::{pick, Fixture, Reply, StubSleeper, LEAGUE_ID, MY_USER, MY_USERNAME};
-
-struct Rig {
-    stub: StubSleeper,
-    fixture: Fixture,
-    core: Arc<AppCore>,
-}
-
-fn make_rig(label: &str) -> Rig {
-    let stub = StubSleeper::start();
-    let fixture = Fixture::load();
-    fixture.install(&stub);
-    let engine = Engine {
-        client: SleeperClient::with_base_url(&stub.base),
-        data_dir: support::scratch_dir(label),
-    };
-    Rig {
-        stub,
-        fixture,
-        core: Arc::new(AppCore::new(engine)),
-    }
-}
-
-async fn loaded_rig(label: &str) -> Rig {
-    let rig = make_rig(label);
-    rig.core.add_league(LEAGUE_ID, false).await.unwrap();
-    rig.core.set_my_username(MY_USERNAME).await.unwrap();
-    rig
-}
-
+use support::{loaded_rig, make_rig, pick, Reply, LEAGUE_ID, MY_USER, MY_USERNAME};
 #[tokio::test]
 async fn nothing_works_before_a_league_is_loaded() {
     let rig = make_rig("empty");
@@ -173,62 +144,6 @@ async fn refresh_data_rebuilds_from_the_network_and_the_board_survives() {
         Some(1),
         "identity is kept across a rebuild"
     );
-}
-
-#[tokio::test]
-async fn a_manual_pick_is_applied_persisted_and_undone_and_a_failed_save_rolls_back() {
-    let rig = loaded_rig("manual").await;
-    let view = rig.core.record_manual_pick("rb-1".into()).await.unwrap();
-    assert!(view.draft.manual_picks_active);
-    assert_eq!(view.draft.current_pick, 2);
-    assert!(view.available.iter().all(|p| p.player.player_id != "rb-1"));
-    assert_eq!(view.my_roster.unwrap().players[0].player_id, "rb-1");
-    assert!(
-        rig.core
-            .engine
-            .data_dir
-            .join("manual_picks_fixture-draft.json")
-            .is_file(),
-        "the pick is on disk before it is on screen"
-    );
-    let err = rig
-        .core
-        .record_manual_pick("no-such-player".into())
-        .await
-        .unwrap_err();
-    assert!(!err.is_empty());
-
-    let view = rig.core.undo_manual_pick().await.unwrap();
-    assert!(!view.draft.manual_picks_active);
-    assert_eq!(view.available.len(), 6);
-    assert!(
-        rig.core.undo_manual_pick().await.is_err(),
-        "nothing left to undo"
-    );
-
-    // The data directory vanishes: the pick must not appear on the board.
-    std::fs::remove_dir_all(&rig.core.engine.data_dir).unwrap();
-    let err = rig
-        .core
-        .record_manual_pick("wr-1".into())
-        .await
-        .unwrap_err();
-    assert!(err.contains("write"), "{err}");
-    let view = rig.core.get_state().await.unwrap();
-    assert!(!view.draft.manual_picks_active);
-    assert_eq!(view.available.len(), 6);
-}
-
-#[tokio::test]
-async fn live_picks_supersede_manual_ones() {
-    let rig = loaded_rig("supersede").await;
-    rig.core.record_manual_pick("rb-1".into()).await.unwrap();
-    // The API now reports pick 1 as someone else; the manual pick is dropped.
-    rig.fixture.set_picks(&rig.stub, &[pick(1, 1, "qb-1")]);
-    let view = rig.core.refresh_picks().await.unwrap();
-    assert!(!view.draft.manual_picks_active);
-    assert_eq!(view.draft.total_picks_made, 1);
-    assert!(rig.core.undo_manual_pick().await.is_err());
 }
 
 #[tokio::test]

@@ -184,3 +184,24 @@ describe("Chat panel — saved sessions", () => {
     expect(testState.api.saveChatSession).not.toHaveBeenCalled();
   });
 });
+
+describe("Chat panel — the saved label", () => {
+  it("says a reopened session is saved, not 'not saved yet'", async () => {
+    // Found by driving the real window: reopening a session from disk left
+    // the label claiming it had never been written.
+    const stored = saved("s-1", "Earlier", 1000);
+    testState.api.listChatSessions.mockResolvedValue([summary(stored)]);
+    testState.api.loadChatSession.mockResolvedValue(stored);
+    render(<Chat open onClose={() => undefined} draftId="d1" />);
+
+    await within(panel()).findByText("Answer to: Earlier");
+    expect(within(panel()).getByText("saved")).toBeInTheDocument();
+    expect(within(panel()).queryByText("not saved yet")).toBeNull();
+    expect(sessionSelect()).toHaveAttribute("title", "Saved");
+
+    // New chat has nothing on disk yet, and says so.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "New chat" }));
+    expect(within(panel()).getByText("not saved yet")).toBeInTheDocument();
+  });
+});
