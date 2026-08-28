@@ -20,14 +20,20 @@ server anywhere.
   positions that actually hold the best remaining players; replacement level
   falls out of roster shape × team count (this league: 98 RB/WR/TE startable).
 - **Live draft tracking.** Polls `GET /draft/{id}/picks` every 3s; on-the-clock
-  banner, all 14 rosters, tier alerts, position-run detection, recent picks.
-- **Survival odds.** P(player lasts to your next pick) from ADP with a widening
-  sigma — built for snake gaps like 27→30 and 55→58.
+  banner with the pick clock (`last_picked + pick_timer`), all 14 rosters,
+  tier alerts, position-run detection, recent picks by manager name. Snake,
+  linear, and third-round-reversal orders are modelled from the draft payload.
+- **Survival odds.** P(player lasts to your next pick) from ADP, *conditioned
+  on the player still being on the board now* — a faller 30 picks past his
+  ADP is judged from this pick, not from pick 1 — with a sigma that widens the
+  further the market has already been wrong. The ADP column follows the
+  league: PPR / half / standard, or the 2-QB market for superflex leagues.
 - **Recommendations with reasons.** Deterministic `balanced` and `safe` modes;
   every suggestion lists its auditable reasons (VORP, roster need, tier
   scarcity, survival, ADP value).
 - **Manual pick fallback + undo** if the API lags or the draft is offline.
-  API picks always win over manual ones.
+  API picks always win over manual ones; Undo is only enabled while a manual
+  pick exists.
 - **AI-readable by design.** One call (`get_state` command, "Export state"
   button, or the `dump_state` CLI) emits the entire draft state as JSON — the
   same struct the UI renders. Point an LLM at it; nothing needs to scrape the UI.
@@ -202,7 +208,11 @@ fade from the top-right corner.
 | Warning `initial picks refresh failed: …` | The pick list did not load at startup. | Live sync retries every 3 s and clears it. |
 | Warning `your draft slot N is outside the valid range …` / `draft reports 0 teams …` | Sleeper sent malformed draft settings; the app clamped them. | **Refresh data**. If it persists, the draft page in Sleeper is the source of truth. |
 | Warning `mock draft: league settings synthesized …` | You loaded a mock draft by its draft ID; scoring is Sleeper's default for that mock type. | Informational. |
-| Toast `player already drafted` / `draft is complete` / `no manual picks to undo` | A manual pick or undo was refused because the state already says so. | Dismiss it. |
+| Warning `draft type 'auction' is not supported; pick order is modelled as a snake` | Sleeper reports a draft type the app cannot model. Snake, linear, and third-round-reversal are handled. | The board and rosters are still right; ignore the on-clock slot and "your picks". |
+| No **CLOCK** cell in the banner | The draft has no pick timer, has not started, or is complete. It appears once the draft is `drafting` and Sleeper has stamped `last_picked`. | Nothing. If Sleeper shows a timer and the app does not, the poll is stale — check the pill. |
+| **Undo** greyed out | There is no manual pick to undo. Sleeper's own picks cannot be undone here. | Nothing. |
+| Toast `player already drafted` / `draft is complete` | A manual pick was refused because the state already says so. | Dismiss it. |
+| Setup `request failed: …/v1/user/<name>: … operation timed out` / `connection refused` | The username lookup could not reach Sleeper (8 s limit). | Check the network and try again, or leave the username blank and add it later. |
 | Toast `Live update rejected: Incompatible draft data …` | The backend and the UI disagree on the state format — a stale build. | Quit and relaunch. In dev, rebuild with `bun run tauri dev`. |
 | Toast `write …/config.json.<pid>.<n>.tmp: …` / `replace config.json: …` | Your league and username could not be saved. | Free disk space or fix permissions. This session keeps working; the next launch would show Setup. |
 | Ask Claude `could not run the Claude CLI at … set DRAFT_ASSISTANT_CLAUDE_BIN` | The `claude` binary was not found. | `which claude`, then `export DRAFT_ASSISTANT_CLAUDE_BIN=<that path>` and relaunch. |

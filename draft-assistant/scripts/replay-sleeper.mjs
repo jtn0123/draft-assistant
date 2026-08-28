@@ -103,9 +103,12 @@ function describe(pick) {
   return `${m.first_name ?? ""} ${m.last_name ?? pick.player_id} ${m.position ?? ""}`.trim();
 }
 
+let lastPickedAt = null;
+
 function release(n) {
   const before = released;
   released = Math.max(0, Math.min(n, total));
+  if (released !== before) lastPickedAt = Date.now();
   for (let i = before; i < released; i += 1) {
     const p = picks[i];
     log(`pick ${p.pick_no} (R${p.round} slot ${p.draft_slot}): ${describe(p)}`);
@@ -122,7 +125,9 @@ function currentDraft() {
     ...draft,
     status: released >= total ? "complete" : released > 0 ? "drafting" : "pre_draft",
     start_time: serverStart,
-    last_picked: released > 0 ? serverStart + released * interval * 1000 : null,
+    // Stamped when the pick was actually released, so the app's pick clock
+    // (last_picked + pick_timer) counts down like a real draft.
+    last_picked: released > 0 ? (lastPickedAt ?? serverStart) : null,
   };
 }
 
