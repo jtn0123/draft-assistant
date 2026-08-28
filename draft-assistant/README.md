@@ -21,8 +21,11 @@ server anywhere.
   falls out of roster shape × team count (this league: 98 RB/WR/TE startable).
 - **Keeper leagues.** Keepers arrive as picks already in the book at scattered
   pick numbers, before the draft starts. The clock follows the lowest *unfilled*
-  pick, your remaining picks skip the ones a keeper used, and keepers the draft
-  has not reached stay out of "recent picks".
+  pick, your remaining picks skip the ones a keeper used, and keepers stay out
+  of "recent picks" even once the draft has passed their slot. Roster entries
+  carry a **keeper** tag. Keeper-ness is judged by position — a pick already
+  in the book ahead of the draft's progress — not by Sleeper's `is_keeper`
+  flag, which the 2026 feed left `null` on three of 27 keepers.
 - **Live draft tracking.** Polls `GET /draft/{id}/picks` every 3s; on-the-clock
   banner with the pick clock (`last_picked + pick_timer`), all 14 rosters,
   tier alerts, position-run detection, recent picks by manager name. Snake,
@@ -88,15 +91,20 @@ bun run coverage      # line coverage for both halves (needs cargo-llvm-cov)
   run as a real process (`dump_state_cli.rs`), keeper handling, the chat
   stream parser and a stub `claude` CLI, and a 210-pick draft simulation with
   invariant checks.
-- **Frontend — 73 Vitest tests** in jsdom (components, the chat panel's
-  streaming/markdown/budget/auto-ask behaviour, and both halves of `api.ts`:
-  the Tauri channel bridge and the browser preview's replay and recording
-  playback), plus **16 Playwright tests** driving a real Chromium against the
-  browser-preview fixture and a recorded chat session.
-- **Coverage** (2026-08-28): Rust **92 %** of lines, frontend **93 %**.
-  `bun run coverage:rust` needs `cargo install cargo-llvm-cov` and
-  `rustup component add llvm-tools-preview` once. The two files at 0 % are
-  `desktop.rs` and `main.rs` — the Tauri glue, ~150 lines with no logic in it.
+- **Frontend — 81 Vitest tests** in jsdom (components, the chat panel's
+  streaming/markdown/budget/auto-ask/saved-session behaviour, and both halves
+  of `api.ts`: the Tauri channel bridge and the browser preview's replay,
+  recording playback and localStorage session store), plus **17 Playwright
+  tests** driving a real Chromium against the browser-preview fixture and a
+  recorded chat session, including a reload that restores the conversation.
+- **Coverage** (2026-08-28, 13:30): Rust **92.5 %** of lines, frontend
+  **91.4 %**. `bun run coverage:rust` needs `cargo install cargo-llvm-cov`
+  and `rustup component add llvm-tools-preview` once. The two Rust files at
+  0 % are `desktop.rs` and `main.rs` — the Tauri glue, ~190 lines with no
+  logic in it. `vitest.config.ts` names every source file explicitly so the
+  number is over all of them; before that the v8 provider silently dropped
+  `api.ts` (re-imported after `vi.resetModules()`) and reported 93 % over a
+  subset.
 - **Fuzzing** — three `cargo-fuzz` targets in `src-tauri/fuzz/`. They build but
   do not currently run on macOS 27; see `src-tauri/fuzz/README.md` for why and
   what covers the gap.
@@ -152,7 +160,21 @@ never waits on the chat.
 
 Under the thread a usage line shows the last answer's context size in
 tokens, its duration, the model, the question count and the session cost as
-the CLI reports it. **New chat** starts an empty thread. **Compact** folds a
+the CLI reports it.
+
+**Saved sessions.** Every conversation is written to disk after each answer,
+compaction or cancel — one JSON file per session under the app's data
+directory, `chats/<draft_id>/<id>.json` (macOS: `~/Library/Application
+Support/com.justin.draft-assistant/chats/…`), holding the turns, the pick each
+answer was written against, the question count and the cost. When the app
+opens a draft, the panel reopens that draft's most recent session, so a
+reload or a relaunch does not cost the evening's answers. The **Sessions**
+row under Settings lists every saved session for the draft (time, first
+question, questions, cost); picking one reopens it in place and its context
+carries on. **New chat** starts a fresh, separate session; the previous one
+stays in the list. The files are plain pretty-printed JSON in the same shape
+`dump_state --chat-out` writes, so `?chat=<url>` can replay one. In the
+browser preview the same three operations run over `localStorage`. **Compact** folds a
 long thread into a short summary that then stands in for the earlier turns —
 it is one extra model call and can take a minute or two, so it is only
 enabled once there are at least two questions.
@@ -287,6 +309,7 @@ fade from the top-right corner.
 | Ask Claude `Claude CLI error: …` | The CLI ran and failed — usually not logged in. | Run `claude` in a terminal and complete the login. |
 | Ask Claude `Claude did not answer within 90s` (150 s with web search, 180 s for Compact) / `returned an empty answer` | Slow or hung model call. | Ask again — lower the thinking effort or switch to Sonnet if it keeps happening — or **Cancel** and carry on; the board never waits on the chat. |
 | Ask Claude `unexpected Claude CLI output: …` / `Claude stopped before finishing` | The CLI printed something other than its streamed JSON, or ended without a result — usually a CLI update changed the format, or the process was killed. | Run `claude --version`; ask again. Whatever had streamed is kept. |
+| Ask Claude alert `Could not save this chat: …` | The session file could not be written (disk space, permissions, a data dir that vanished). The answer is still on screen; it is just not on disk. | Free disk space or fix permissions; the next answer retries the save. |
 | Ask Claude note `Session budget of $5.00 reached` | The session has cost what the budget allows. | Raise **Session budget** in Settings (0 = no limit) or start a **New chat**. |
 | Ask Claude `unknown model '…'` / `unknown effort '…'` | `DRAFT_ASSISTANT_CLAUDE_MODEL` names something the panel does not know. | Use `opus`, `sonnet`, `fable`, or `haiku`, or unset it. |
 | Ask Claude note `Fast mode unavailable (extra_usage_disabled) — answered at standard speed.` | Fast mode was requested but the account cannot serve it. | Answers still arrive; turn the setting off to silence the note, or enable extra usage on the account. |

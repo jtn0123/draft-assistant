@@ -416,3 +416,43 @@ async fn starting_polling_again_supersedes_the_running_loop() {
         .poll_loop(Duration::from_millis(1), generation, &|_| {})
         .await;
 }
+
+#[tokio::test]
+async fn a_keeper_is_remembered_once_the_draft_passes_it() {
+    // Pick 5 is in the book before pick 1 is made: a keeper, flag or no flag.
+    let rig = make_rig("keeper-memory");
+    rig.fixture.set_picks(&rig.stub, &[pick(5, 1, "qb-1")]);
+    rig.core.add_league(LEAGUE_ID, false).await.unwrap();
+    rig.core.set_my_username(MY_USERNAME).await.unwrap();
+    let view = rig.core.get_state().await.unwrap();
+    assert!(view.my_roster.unwrap().players[0].is_keeper);
+    assert!(view.recent_picks.is_empty());
+
+    // The draft catches up and passes it; the flag never arrives.
+    rig.fixture.set_picks(
+        &rig.stub,
+        &[
+            pick(1, 1, "rb-1"),
+            pick(2, 2, "wr-1"),
+            pick(3, 2, "te-1"),
+            pick(4, 1, "k-1"),
+            pick(5, 1, "qb-1"),
+            pick(6, 2, "def-1"),
+        ],
+    );
+    let view = rig.core.refresh_picks().await.unwrap();
+    assert_eq!(view.draft.current_pick, 7);
+    let mine = view.my_roster.unwrap();
+    let kept: Vec<(u32, bool)> = mine
+        .players
+        .iter()
+        .map(|p| (p.pick_no, p.is_keeper))
+        .collect();
+    assert_eq!(kept, vec![(1, false), (4, false), (5, true)]);
+    let recent: Vec<u32> = view.recent_picks.iter().map(|p| p.pick_no).collect();
+    assert_eq!(
+        recent,
+        vec![6, 4, 3, 2, 1],
+        "the keeper is not a recent pick"
+    );
+}

@@ -10,7 +10,7 @@ use crate::roster::RosterRules;
 use crate::sleeper::{Draft, League, Pick, PlayerMeta, ProjectionRow, SleeperClient};
 use crate::valuation::ReplacementModel;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -63,6 +63,11 @@ pub struct LoadedLeague {
     pub roster_rules: RosterRules,
     pub api_picks: Vec<Pick>,
     pub manual_picks: Vec<Pick>,
+    /// Pick numbers known to be keepers: flagged by Sleeper, or sitting in
+    /// the book ahead of the draft's progress when first seen. Remembered so
+    /// a keeper stays a keeper once the draft passes its slot — the flag
+    /// alone cannot be trusted (`Pick::is_keeper`).
+    pub keeper_pick_nos: HashSet<u32>,
     pub poll_last_success_at: Option<u64>,
     pub poll_consecutive_failures: u32,
     pub poll_last_error: Option<String>,
@@ -322,6 +327,11 @@ impl Engine {
             .map(|(i, p)| (p.player_id.clone(), i))
             .collect();
 
+        let keeper_pick_nos = crate::view::keeper_pick_nos(
+            &api_picks,
+            draft.settings.teams.max(1),
+            draft.settings.rounds.max(1),
+        );
         Ok(LoadedLeague {
             league,
             draft,
@@ -332,6 +342,7 @@ impl Engine {
             roster_rules,
             api_picks,
             manual_picks,
+            keeper_pick_nos,
             poll_last_success_at,
             poll_consecutive_failures,
             poll_last_error,
@@ -375,6 +386,7 @@ mod reliability_tests {
             player_id: player_id.into(),
             picked_by: None,
             metadata: None,
+            is_keeper: None,
         }
     }
 

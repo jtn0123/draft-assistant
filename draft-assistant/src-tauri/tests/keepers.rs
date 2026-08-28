@@ -21,6 +21,7 @@ fn keeper(pick_no: u32, slot: u32, player_id: &str) -> Pick {
         player_id: player_id.into(),
         picked_by: None,
         metadata: None,
+        is_keeper: None,
     }
 }
 
@@ -72,6 +73,7 @@ fn league_with(api_picks: Vec<Pick>) -> (LoadedLeague, AppConfig) {
         roster_rules: RosterRules::new(&["WR".into(), "BN".into()]),
         api_picks,
         manual_picks: Vec::new(),
+        keeper_pick_nos: Default::default(),
         poll_last_success_at: None,
         poll_consecutive_failures: 0,
         poll_last_error: None,
@@ -169,4 +171,54 @@ fn recent_picks_and_runs_ignore_keepers_the_draft_has_not_reached() {
         vec![1],
         "keepers ahead of the clock are not recent picks"
     );
+}
+
+#[test]
+fn keepers_are_tagged_on_rosters_whether_or_not_sleeper_flags_them() {
+    // The 2026 feed carried 27 keepers and flagged 24: position, not the
+    // flag, decides. Pick 1 is open, so anything already in the book is kept.
+    let mut flagged = keeper(5, 1, "e");
+    flagged.is_keeper = Some(true);
+    let (loaded, config) = league_with(vec![flagged, keeper(6, 2, "f")]);
+    let view = build_view(&loaded, &config);
+    let mine = view.my_roster.as_ref().unwrap();
+    assert_eq!(mine.players.len(), 1);
+    assert!(mine.players[0].is_keeper, "unflagged keeper at pick 6");
+    assert!(
+        view.rosters[0].players[0].is_keeper,
+        "flagged keeper at pick 5"
+    );
+    assert!(
+        view.recent_picks.is_empty(),
+        "keepers are not picks made tonight"
+    );
+}
+
+#[test]
+fn a_keeper_stays_a_keeper_after_the_draft_passes_its_slot() {
+    // Picks 1-3 have been made and the unflagged keeper sat at 3 all along;
+    // the league remembers it as one, so it is neither "recent" nor drafted.
+    let (mut loaded, config) = league_with(vec![
+        keeper(1, 1, "a"),
+        keeper(2, 2, "b"),
+        keeper(3, 2, "c"),
+    ]);
+    loaded.keeper_pick_nos.insert(3);
+    let view = build_view(&loaded, &config);
+    assert_eq!(view.draft.current_pick, 4);
+    let mine = view.my_roster.as_ref().unwrap();
+    let kept: Vec<(u32, bool)> = mine
+        .players
+        .iter()
+        .map(|p| (p.pick_no, p.is_keeper))
+        .collect();
+    assert_eq!(kept, vec![(2, false), (3, true)]);
+    let recent: Vec<u32> = view.recent_picks.iter().map(|p| p.pick_no).collect();
+    assert_eq!(recent, vec![2, 1], "newest first, keeper left out");
+
+    // Without the memory the same feed reads as three ordinary picks.
+    loaded.keeper_pick_nos.clear();
+    let view = build_view(&loaded, &config);
+    assert!(view.my_roster.unwrap().players.iter().all(|p| !p.is_keeper));
+    assert_eq!(view.recent_picks.len(), 3);
 }

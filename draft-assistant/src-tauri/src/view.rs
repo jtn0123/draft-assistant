@@ -7,7 +7,7 @@ use crate::engine::{now_secs, AppConfig, LoadedLeague};
 use crate::recommend::{recommend, Recommendation};
 use crate::sleeper::Pick;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Monotonic build counter. `generated_at` is only second-resolution, which is
@@ -171,6 +171,20 @@ pub fn next_open_pick(picks: &[Pick], teams: u32, rounds: u32) -> Option<u32> {
     (1..=teams.saturating_mul(rounds)).find(|pick| !made.contains(pick))
 }
 
+/// Which picks are keepers, judged by position rather than by Sleeper's
+/// flag: anything flagged, plus anything already in the book at or beyond
+/// the next open pick — a pick the draft has not reached can only be a
+/// keeper. Union this into `LoadedLeague::keeper_pick_nos` whenever picks
+/// arrive so the judgement survives the draft passing the slot.
+pub fn keeper_pick_nos(picks: &[Pick], teams: u32, rounds: u32) -> HashSet<u32> {
+    let open = next_open_pick(picks, teams, rounds).unwrap_or(u32::MAX);
+    picks
+        .iter()
+        .filter(|p| p.is_keeper == Some(true) || p.pick_no >= open)
+        .map(|p| p.pick_no)
+        .collect()
+}
+
 pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let league = &loaded.league;
     let draft = &loaded.draft;
@@ -183,6 +197,8 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let picks = merged_picks(&loaded.api_picks, &loaded.manual_picks);
     let total_picks = picks.len();
     let open_pick = next_open_pick(&picks, teams, rounds);
+    let mut keepers = loaded.keeper_pick_nos.clone();
+    keepers.extend(keeper_pick_nos(&loaded.api_picks, teams, rounds));
     let current_pick = open_pick.unwrap_or(teams * rounds);
     let draft_over = open_pick.is_none();
     let current_round = (current_pick - 1) / teams + 1;
@@ -272,7 +288,14 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         }
     };
 
-    let rosters = draft::build_rosters(&picks, teams, &loaded.roster_rules, &slot_names, name_of);
+    let rosters = draft::build_rosters(
+        &picks,
+        teams,
+        &loaded.roster_rules,
+        &slot_names,
+        &keepers,
+        name_of,
+    );
     let my_roster = my_slot.and_then(|slot| rosters.get((slot - 1) as usize).cloned());
 
     // Available players with survival probabilities.
@@ -315,10 +338,14 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         }
     }
 
-    // What has actually happened, newest first. A keeper sitting at pick 177
-    // is in the book but the draft has not reached it, so it is neither a
-    // recent pick nor part of a positional run.
-    let played: Vec<&Pick> = picks.iter().filter(|p| p.pick_no < current_pick).collect();
+    // What has actually happened, newest first. A keeper is in the book but
+    // was never picked tonight — at 177 the draft has not reached it, and at
+    // 139 once the draft has passed it, it is still not news — so keepers are
+    // neither recent picks nor part of a positional run.
+    let played: Vec<&Pick> = picks
+        .iter()
+        .filter(|p| p.pick_no < current_pick && !keepers.contains(&p.pick_no))
+        .collect();
 
     // Position run: 4+ of the same position in the last 6 picks.
     let position_run = {

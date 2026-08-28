@@ -105,6 +105,11 @@ pub struct Pick {
     pub picked_by: Option<String>,
     #[serde(default)]
     pub metadata: Option<PickMeta>,
+    /// Sleeper's keeper flag. Not reliable: on the 2026 live feed three of
+    /// 27 keeper picks carried `null`, so keeper-ness is derived from where
+    /// a pick sits (see `view::keeper_pick_nos`) and this is only a hint.
+    #[serde(default)]
+    pub is_keeper: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

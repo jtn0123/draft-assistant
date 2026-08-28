@@ -236,6 +236,7 @@ pub fn pick(pick_no: u32, slot: u32, player_id: &str) -> Pick {
         player_id: player_id.into(),
         picked_by: Some(if slot == 1 { MY_USER } else { RIVAL_USER }.into()),
         metadata: None,
+        is_keeper: None,
     }
 }
 

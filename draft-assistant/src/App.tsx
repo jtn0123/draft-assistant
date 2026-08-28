@@ -349,6 +349,8 @@ export default function App() {
       open={chatOpen}
       onClose={() => setChatOpen(false)}
       currentPick={view.draft.current_pick}
+      draftId={view.draft.draft_id}
+      leagueName={view.league.name}
       onClock={view.draft.is_my_pick && view.draft.status === "drafting"}
       onAutoAsk={() => setChatOpen(true)}
     />

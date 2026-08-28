@@ -91,6 +91,8 @@ pub struct RosterEntry {
     pub team: Option<String>,
     pub pick_no: u32,
     pub round: u32,
+    /// Kept from last season rather than drafted tonight.
+    pub is_keeper: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -133,6 +135,7 @@ pub fn build_rosters(
     teams: u32,
     rules: &RosterRules,
     slot_names: &std::collections::HashMap<u32, String>,
+    keepers: &std::collections::HashSet<u32>,
     name_of: impl Fn(&str) -> (String, String, Option<String>),
 ) -> Vec<TeamRoster> {
     let mut rosters: Vec<TeamRoster> = (1..=teams)
@@ -156,6 +159,7 @@ pub fn build_rosters(
             team,
             pick_no: pick.pick_no,
             round: pick.round,
+            is_keeper: keepers.contains(&pick.pick_no),
         });
     }
     for roster in &mut rosters {
@@ -301,6 +305,7 @@ mod tests {
                 team: None,
                 pick_no: 2,
                 round: 1,
+                is_keeper: false,
             },
             RosterEntry {
                 player_id: "b".into(),
@@ -309,6 +314,7 @@ mod tests {
                 team: None,
                 pick_no: 27,
                 round: 2,
+                is_keeper: false,
             },
             RosterEntry {
                 player_id: "c".into(),
@@ -317,6 +323,7 @@ mod tests {
                 team: None,
                 pick_no: 30,
                 round: 3,
+                is_keeper: false,
             },
         ];
         let open = RosterRules::new(&roster)

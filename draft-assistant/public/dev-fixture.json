@@ -130,7 +130,8 @@
         "position": "RB",
         "team": "ATL",
         "pick_no": 2,
-        "round": 1
+        "round": 1,
+        "is_keeper": false
       },
       {
         "player_id": "9997",
@@ -138,7 +139,8 @@
         "position": "WR",
         "team": "BAL",
         "pick_no": 27,
-        "round": 2
+        "round": 2,
+        "is_keeper": false
       }
     ],
     "open_starters": [
@@ -171,7 +173,8 @@
           "position": "RB",
           "team": "DET",
           "pick_no": 1,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "7525",
@@ -179,7 +182,8 @@
           "position": "WR",
           "team": "PHI",
           "pick_no": 28,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "7588",
@@ -187,7 +191,8 @@
           "position": "RB",
           "team": "DAL",
           "pick_no": 29,
-          "round": 3
+          "round": 3,
+          "is_keeper": false
         },
         {
           "player_id": "11564",
@@ -195,7 +200,8 @@
           "position": "QB",
           "team": "NE",
           "pick_no": 85,
-          "round": 7
+          "round": 7,
+          "is_keeper": false
         },
         {
           "player_id": "8150",
@@ -203,7 +209,8 @@
           "position": "RB",
           "team": "LAR",
           "pick_no": 112,
-          "round": 8
+          "round": 8,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -231,7 +238,8 @@
           "position": "RB",
           "team": "ATL",
           "pick_no": 2,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "9997",
@@ -239,7 +247,8 @@
           "position": "WR",
           "team": "BAL",
           "pick_no": 27,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -271,7 +280,8 @@
           "position": "WR",
           "team": "CIN",
           "pick_no": 3,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "6801",
@@ -279,7 +289,8 @@
           "position": "WR",
           "team": "CIN",
           "pick_no": 26,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "5859",
@@ -287,7 +298,8 @@
           "position": "WR",
           "team": "NE",
           "pick_no": 54,
-          "round": 4
+          "round": 4,
+          "is_keeper": false
         },
         {
           "player_id": "12512",
@@ -295,7 +307,8 @@
           "position": "RB",
           "team": "CLE",
           "pick_no": 59,
-          "round": 5
+          "round": 5,
+          "is_keeper": false
         },
         {
           "player_id": "9226",
@@ -303,7 +316,8 @@
           "position": "RB",
           "team": "MIA",
           "pick_no": 82,
-          "round": 6
+          "round": 6,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -335,7 +349,8 @@
           "position": "RB",
           "team": "SF",
           "pick_no": 4,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "8155",
@@ -343,7 +358,8 @@
           "position": "RB",
           "team": "NYJ",
           "pick_no": 25,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "11584",
@@ -351,7 +367,8 @@
           "position": "RB",
           "team": "TB",
           "pick_no": 165,
-          "round": 12
+          "round": 12,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -387,7 +404,8 @@
           "position": "WR",
           "team": "DET",
           "pick_no": 5,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "4881",
@@ -395,7 +413,8 @@
           "position": "QB",
           "team": "BAL",
           "pick_no": 24,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "12517",
@@ -403,7 +422,8 @@
           "position": "TE",
           "team": "CHI",
           "pick_no": 80,
-          "round": 6
+          "round": 6,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -431,7 +451,8 @@
           "position": "RB",
           "team": "BUF",
           "pick_no": 6,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "5850",
@@ -439,7 +460,8 @@
           "position": "RB",
           "team": "GB",
           "pick_no": 23,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "11631",
@@ -447,7 +469,8 @@
           "position": "WR",
           "team": "JAX",
           "pick_no": 79,
-          "round": 6
+          "round": 6,
+          "is_keeper": false
         },
         {
           "player_id": "10222",
@@ -455,7 +478,8 @@
           "position": "WR",
           "team": "GB",
           "pick_no": 163,
-          "round": 12
+          "round": 12,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -487,7 +511,8 @@
           "position": "RB",
           "team": "PHI",
           "pick_no": 7,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "8144",
@@ -495,7 +520,8 @@
           "position": "WR",
           "team": "NO",
           "pick_no": 22,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -527,7 +553,8 @@
           "position": "RB",
           "team": "LV",
           "pick_no": 8,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "10229",
@@ -535,7 +562,8 @@
           "position": "WR",
           "team": "KC",
           "pick_no": 21,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "8146",
@@ -543,7 +571,8 @@
           "position": "WR",
           "team": "NYJ",
           "pick_no": 36,
-          "round": 3
+          "round": 3,
+          "is_keeper": false
         },
         {
           "player_id": "9480",
@@ -551,7 +580,8 @@
           "position": "TE",
           "team": "JAX",
           "pick_no": 133,
-          "round": 10
+          "round": 10,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -579,7 +609,8 @@
           "position": "RB",
           "team": "LAC",
           "pick_no": 9,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "6813",
@@ -587,7 +618,8 @@
           "position": "RB",
           "team": "IND",
           "pick_no": 20,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "7569",
@@ -595,7 +627,8 @@
           "position": "WR",
           "team": "HOU",
           "pick_no": 149,
-          "round": 11
+          "round": 11,
+          "is_keeper": false
         },
         {
           "player_id": "12508",
@@ -603,7 +636,8 @@
           "position": "QB",
           "team": "NYG",
           "pick_no": 177,
-          "round": 13
+          "round": 13,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -631,7 +665,8 @@
           "position": "RB",
           "team": "CIN",
           "pick_no": 10,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "11632",
@@ -639,7 +674,8 @@
           "position": "WR",
           "team": "NYG",
           "pick_no": 19,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "9493",
@@ -647,7 +683,8 @@
           "position": "WR",
           "team": "LAR",
           "pick_no": 103,
-          "round": 8
+          "round": 8,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -679,7 +716,8 @@
           "position": "QB",
           "team": "BUF",
           "pick_no": 11,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "13287",
@@ -687,7 +725,8 @@
           "position": "RB",
           "team": "ARI",
           "pick_no": 18,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "6786",
@@ -695,7 +734,8 @@
           "position": "WR",
           "team": "DAL",
           "pick_no": 39,
-          "round": 3
+          "round": 3,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -723,7 +763,8 @@
           "position": "WR",
           "team": "ATL",
           "pick_no": 12,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "11604",
@@ -731,7 +772,8 @@
           "position": "TE",
           "team": "LV",
           "pick_no": 17,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "6794",
@@ -739,7 +781,8 @@
           "position": "WR",
           "team": "MIN",
           "pick_no": 45,
-          "round": 4
+          "round": 4,
+          "is_keeper": false
         },
         {
           "player_id": "12518",
@@ -747,7 +790,8 @@
           "position": "TE",
           "team": "IND",
           "pick_no": 68,
-          "round": 5
+          "round": 5,
+          "is_keeper": false
         },
         {
           "player_id": "12519",
@@ -755,7 +799,8 @@
           "position": "WR",
           "team": "CHI",
           "pick_no": 152,
-          "round": 11
+          "round": 11,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -787,7 +832,8 @@
           "position": "RB",
           "team": "KC",
           "pick_no": 13,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "8137",
@@ -795,7 +841,8 @@
           "position": "WR",
           "team": "DAL",
           "pick_no": 16,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "12481",
@@ -803,7 +850,8 @@
           "position": "RB",
           "team": "NYG",
           "pick_no": 97,
-          "round": 7
+          "round": 7,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -835,7 +883,8 @@
           "position": "WR",
           "team": "SEA",
           "pick_no": 14,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "3198",
@@ -843,7 +892,8 @@
           "position": "RB",
           "team": "BAL",
           "pick_no": 15,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         },
         {
           "player_id": "8130",
@@ -851,7 +901,8 @@
           "position": "TE",
           "team": "ARI",
           "pick_no": 99,
-          "round": 8
+          "round": 8,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -3530,7 +3581,7 @@
       "team": "LV",
       "bye_week": 13,
       "points": 97.5000014028939,
-      "bonus_points": 5.46077135177292e-7,
+      "bonus_points": 5.46077135177292e-07,
       "vorp": -59.443930099261195,
       "tier": 13,
       "position_rank": 45,
@@ -3632,7 +3683,7 @@
       "team": "MIA",
       "bye_week": 6,
       "points": 94.80004245733107,
-      "bonus_points": 0.000041819561377831604,
+      "bonus_points": 4.1819561377831604e-05,
       "vorp": -63.05925329035992,
       "tier": 12,
       "position_rank": 79,
@@ -4618,7 +4669,7 @@
       "team": "KC",
       "bye_week": 5,
       "points": 62.600057826076934,
-      "bonus_points": 0.00005737010140183241,
+      "bonus_points": 5.737010140183241e-05,
       "vorp": -95.25923792161406,
       "tier": 14,
       "position_rank": 109,

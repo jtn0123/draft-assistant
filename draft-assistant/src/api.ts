@@ -1,9 +1,12 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { browserListSessions, browserLoadSession, browserSaveSession } from "./sessionStore";
 import type {
   AppConfig,
   ChatOptions,
   ChatReply,
+  ChatSession,
+  ChatSessionSummary,
   ChatTurn,
   DraftView,
   PollHealth,
@@ -62,6 +65,11 @@ interface Api {
     onText?: (text: string) => void,
   ): Promise<ChatReply>;
   chatCompact(history: ChatTurn[], options: ChatOptions): Promise<ChatReply>;
+  /** Save a conversation whole; resolves to the file it went to. */
+  saveChatSession(session: ChatSession): Promise<string>;
+  /** Saved conversations for a draft, newest activity first. */
+  listChatSessions(draftId: string): Promise<ChatSessionSummary[]>;
+  loadChatSession(draftId: string, id: string): Promise<ChatSession>;
   startPolling(intervalSecs?: number): Promise<void>;
   stopPolling(): Promise<void>;
   /**
@@ -98,6 +106,11 @@ const tauriApi: Api = {
   },
   chatCompact: (history, options) =>
     invoke<ChatReply>("chat_compact", { history, options }),
+  saveChatSession: (session) => invoke<string>("save_chat_session", { session }),
+  listChatSessions: (draftId) =>
+    invoke<ChatSessionSummary[]>("list_chat_sessions", { draftId }),
+  loadChatSession: (draftId, id) =>
+    invoke<ChatSession>("load_chat_session", { draftId, id }),
   startPolling: (intervalSecs = 3) =>
     invoke<void>("start_polling", { intervalSecs }),
   stopPolling: () => invoke<void>("stop_polling"),
@@ -257,6 +270,9 @@ function browserApi(): Api {
     chatCompact: async () => {
       throw new Error("browser preview cannot reach the Claude CLI — run the desktop app");
     },
+    saveChatSession: async (session) => browserSaveSession(session),
+    listChatSessions: async (draftId) => browserListSessions(draftId),
+    loadChatSession: async (draftId, id) => browserLoadSession(draftId, id),
     startPolling: async () => {
       if (!replay) {
         throw new Error("browser preview is read-only — live sync requires the desktop app");

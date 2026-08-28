@@ -5,7 +5,7 @@
 //! whole command surface, including the poll state machine, is testable
 //! against a stub Sleeper server.
 
-use crate::chat::{self, ChatOptions, ChatReply, ChatTurn};
+use crate::chat::{self, ChatOptions, ChatReply, ChatSession, ChatTurn, SessionSummary};
 use crate::engine::{self, AppConfig, Engine, LoadedLeague, StoredLeague};
 use crate::sleeper::extract_id;
 use crate::view::{self, build_view, DraftView, PollHealth};
@@ -21,6 +21,15 @@ use tokio::sync::Mutex;
 pub enum PollEvent {
     Health(PollHealth),
     View(Box<DraftView>),
+}
+
+/// Fold newly seen keepers into the league's memory of them: judged from
+/// where each pick sits now, and never forgotten once judged.
+fn note_keepers(loaded: &mut LoadedLeague) {
+    let teams = loaded.draft.settings.teams.max(1);
+    let rounds = loaded.draft.settings.rounds.max(1);
+    let seen = view::keeper_pick_nos(&loaded.api_picks, teams, rounds);
+    loaded.keeper_pick_nos.extend(seen);
 }
 
 pub struct AppCore {
@@ -115,6 +124,7 @@ impl AppCore {
         let mut loaded = self.loaded.lock().await;
         let loaded = loaded.as_mut().ok_or("no league loaded")?;
         loaded.api_picks = picks;
+        note_keepers(loaded);
         if engine::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
             self.engine
                 .save_manual_picks(&draft_id, &loaded.manual_picks)?;
@@ -208,6 +218,20 @@ impl AppCore {
         chat::compact(history, options).await
     }
 
+    /// Save a conversation; returns the file it went to. Plain file I/O on
+    /// the data dir, so no lock is needed and the poll loop is never waited on.
+    pub fn save_chat_session(&self, session: &ChatSession) -> Result<String, String> {
+        self.engine.save_chat_session(session)
+    }
+
+    pub fn list_chat_sessions(&self, draft_id: &str) -> Result<Vec<SessionSummary>, String> {
+        self.engine.list_chat_sessions(draft_id)
+    }
+
+    pub fn load_chat_session(&self, draft_id: &str, id: &str) -> Result<ChatSession, String> {
+        self.engine.load_chat_session(draft_id, id)
+    }
+
     /// One poll: fetch picks and draft, fold them in, account for health, and
     /// say whether the feed changed since `last_fingerprint`. `None` when no
     /// league is loaded. Errors are accumulated into the health record rather
@@ -227,6 +251,7 @@ impl AppCore {
         match picks {
             Ok(picks) => {
                 loaded.api_picks = picks;
+                note_keepers(loaded);
                 if engine::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
                     if let Err(error) = self
                         .engine

@@ -32,6 +32,7 @@ pub fn apply_manual_pick(loaded: &mut LoadedLeague, player_id: String) -> Result
         player_id,
         picked_by: None,
         metadata: None,
+        is_keeper: None,
     });
     Ok(())
 }
@@ -109,6 +110,7 @@ mod tests {
             roster_rules: RosterRules::new(&["WR".into(), "BN".into()]),
             api_picks: Vec::new(),
             manual_picks: Vec::new(),
+            keeper_pick_nos: Default::default(),
             poll_last_success_at: None,
             poll_consecutive_failures: 0,
             poll_last_error: None,
@@ -128,6 +130,7 @@ mod tests {
             player_id: player_id.into(),
             picked_by: None,
             metadata: None,
+            is_keeper: None,
         }
     }
 

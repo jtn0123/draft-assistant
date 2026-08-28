@@ -188,3 +188,20 @@ describe("ClockBanner start time", () => {
     expect(screen.getByText(/Draft has not started/)).toHaveTextContent(/starts /);
   });
 });
+
+describe("SidePanel keepers", () => {
+  // The 2026 feed flagged only 24 of 27 keepers, so the backend decides
+  // keeper-ness by position and sends `is_keeper`; the panel just says so.
+  it("tags kept players on the roster and leaves drafted ones alone", () => {
+    const v = view();
+    const roster = v.my_roster!;
+    roster.players = roster.players.slice(0, 2);
+    roster.players[0].is_keeper = true;
+    roster.players[1].is_keeper = false;
+    render(<SidePanel view={v} />);
+    const list = screen.getByRole("list", { name: "My roster" });
+    const tags = within(list).getAllByText("keeper");
+    expect(tags).toHaveLength(1);
+    expect(tags[0].closest("li")).toHaveTextContent(roster.players[0].name);
+  });
+});

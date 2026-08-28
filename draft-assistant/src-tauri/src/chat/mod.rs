@@ -11,12 +11,14 @@
 
 mod cli;
 mod prompt;
+pub mod session;
 mod stream;
 
 use crate::view::DraftView;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+pub use session::{ChatSession, SessionSummary, SessionTurn};
 pub use stream::ChatUsage;
 
 /// One line of the conversation as the panel shows it: `you`, `claude`, or

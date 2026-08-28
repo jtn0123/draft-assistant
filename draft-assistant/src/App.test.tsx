@@ -18,6 +18,9 @@ const testState = vi.hoisted(() => ({
     recordManualPick: vi.fn(),
     undoManualPick: vi.fn(),
     exportState: vi.fn(),
+    saveChatSession: vi.fn(),
+    listChatSessions: vi.fn(),
+    loadChatSession: vi.fn(),
     startPolling: vi.fn(),
     stopPolling: vi.fn(),
     onDraftUpdated: vi.fn(),
@@ -51,6 +54,8 @@ beforeEach(() => {
   testState.healthHandler = null;
   nextSeq = 0;
   testState.api.startPolling.mockResolvedValue(undefined);
+  testState.api.listChatSessions.mockResolvedValue([]);
+  testState.api.saveChatSession.mockResolvedValue("");
   testState.api.stopPolling.mockResolvedValue(undefined);
   testState.api.exportState.mockResolvedValue("/tmp/draft-state.json");
   testState.api.onDraftUpdated.mockImplementation(async (handler, onError) => {

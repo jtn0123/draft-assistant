@@ -197,11 +197,18 @@ export function SidePanel({ view }: { view: DraftView }) {
         ) : roster.players.length === 0 ? (
           <p className="muted">No picks yet.</p>
         ) : (
-          <ul className="roster">
+          <ul className="roster" aria-label="My roster">
             {roster.players.map((p) => (
               <li key={p.player_id}>
                 <span className={`pos-badge pos-${p.position}`}>{p.position}</span>
-                <span>{p.name}</span>
+                <span>
+                  {p.name}
+                  {p.is_keeper && (
+                    <span className="keeper-tag" title="Kept from last season, not drafted tonight">
+                      keeper
+                    </span>
+                  )}
+                </span>
                 <span className="muted">R{p.round}</span>
               </li>
             ))}

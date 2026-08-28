@@ -20,7 +20,7 @@
 | I | Developer Experience & Tooling | B *(down from B+: `verify` fails after `coverage`, and the dev watcher reloads the live window — I1, I2)* | 4 |
 | **Overall** | | **B+** | **31** |
 
-**Top 5 highest-leverage fixes:** I2, I1, D1, D2, C1
+**Top 5 highest-leverage fixes:** I2, I1, D1, D2, C1 — **all five plus B2 executed at 13:30** (TRACKER rows 38–43). Remaining highest-leverage: B1, D3, A1, E1, D5.
 
 ---
 
@@ -78,7 +78,7 @@ Re-sampled: clippy is clean with `-D warnings` across all targets and features, 
 - **Effort:** S
 - **Grade lift:** B+ → A− (post-mortems become possible)
 
-#### B2 — Surface keepers in the view — by pick presence, not by the `is_keeper` flag
+#### ~~B2 — Surface keepers in the view — by pick presence, not by the `is_keeper` flag~~ ✓ done 2026-08-28 13:30 (`view::keeper_pick_nos`, `LoadedLeague.keeper_pick_nos`, `RosterEntry.is_keeper`, keeper tag in the roster)
 - **Where:** `src-tauri/src/sleeper.rs` (`Pick` has no `is_keeper`), `view.rs` (`RecentPick`, roster entries), `draft.rs` (`RosterEntry`)
 - **What's wrong:** The app handles keepers correctly but never says "keeper". **New today:** the live feed carries 27 keeper picks and only 24 have `is_keeper: true` — both of yours are `null` — so a fix that reads the flag would label your own keepers wrong.
 - **Fix:** Deserialize `is_keeper` as `Option<bool>`, but derive `keeper = is_keeper == Some(true) || pick was present while status == "pre_draft"` (record the pre-draft pick set at load). Carry through `RosterEntry` and `RecentPick`, render a "keeper" tag; it reaches the prompt for free via the state JSON.
@@ -112,7 +112,7 @@ Re-sampled: clippy is clean with `-D warnings` across all targets and features, 
 
 Re-sampled. The code reads well: `format.ts` is three honest helpers with a comment explaining the `String(error)` prefix problem; `ConfirmDialog` uses a real `<dialog>` with `onCancel`, Escape and backdrop-click all routed to one handler and focus restored to the opener on close (`ConfirmDialog.tsx:40-60`); `loadPrefs` validates every field it reads from `localStorage` and falls back on any throw (`chatOptions.ts:28-41`). `App.tsx` is at 393 lines with the wiring for Board, Confirm, toast and Chat in one return (`:322-353`) — the least-covered file in the frontend (83 % lines, 72 % branches) precisely because that composition is only exercised end-to-end. New this run: the chat conversation does not survive a reload, which today's watcher finding turned from theoretical into observed.
 
-#### C1 — Persist the chat conversation across a reload
+#### ~~C1 — Persist the chat conversation across a reload~~ ✓ done 2026-08-28 13:30 (saved sessions: `chat/session.rs`, `ChatSessions.tsx`, restore on open, New chat)
 - **Where:** `src/components/Chat.tsx:46` (`const [turns, setTurns] = useState<Turn[]>([])`); `chatOptions.ts:26-48` persists only `ChatPrefs`
 - **What's wrong:** A window reload — dev watcher, error-boundary recovery, or a deliberate relaunch to pick up fresh projections — wipes every answer Claude has given tonight while the board comes straight back from the Rust side. Observed twice today at 12:37 and 12:38.
 - **Fix:** Persist `turns` (and `session` cost) to `localStorage` under the draft ID, restore on mount, clear on "New chat". The `asOfPick` stamps already make restored answers self-describing.
@@ -153,14 +153,14 @@ Re-sampled. The code reads well: `format.ts` is three honest helpers with a comm
 
 The suite is real and it is green: 140 Rust (7 unit modules + 12 integration files including the stub-Sleeper `engine_cache`, `app_core`, `dump_state_cli` suites and a proptest file), 73 Vitest, 16 Playwright, zero skipped/ignored, CI green five times today. Rust line coverage is a measured **92.0 %** with only the Tauri adapter at zero. Why this run takes the provisional A− back to B+: (1) the frontend headline **omits `api.ts`** — the entire IPC/browser bridge, 274 lines, with two test files — and `Markdown.tsx`, because the v8 provider drops modules re-imported after `vi.resetModules()`; the "93.4 %" is over 12 files, not 14, and the earlier "`api.ts` 100 %" claim had no tooling behind it; (2) `board.rs` is at 84.6 % because **the bye-week inference and per-game bonus grouping (`board.rs:93-121`) have never executed under a test** — `tests/fixtures/board_input.json` has zero weekly rows — and neither has the "no scored players" degradation (`:197-201`); (3) `verify` is not green on a laptop that has just run `coverage` (I1). The poll-loop tests are timing-based (25 ms interval, 120 ms settle, 5 s cap — `tests/app_core.rs:289-340`); acceptable, not flake-proof on a loaded runner.
 
-#### D1 — Make the frontend coverage number honest `[FE]`
+#### ~~D1 — Make the frontend coverage number honest `[FE]`~~ ✓ done 2026-08-28 13:30 (`vitest.config.ts` coverage.include; true figure 91.4 %)
 - **Where:** `vitest.config.ts` (no `coverage` block); `src/api.test.ts:16,46,78` and `src/components/Markdown.test.tsx` (`await import()` after `vi.resetModules()`)
 - **What's wrong:** `api.ts` and `Markdown.tsx` are absent from the report, so the 93.4 % line is over a subset. A future regression in the bridge would not move the number at all.
 - **Fix:** Add `coverage: { include: ["src/**/*.{ts,tsx}"], exclude: ["src/**/*.test.*", "src/test/**", "src/main.tsx", "src/types.ts", "src/vite-env.d.ts"], reportsDirectory: "coverage" }` so every source file is listed (at 0 % if untouched); then either import `./api` statically in the tests that can (the browser-branch tests) or accept the dynamic-import cases as instrumented-by-Playwright and say so in the README's Testing section. Re-run and record the true number.
 - **Effort:** S
 - **Grade lift:** B+ → B+ (the metric stops lying; the grade moves when D2 lands)
 
-#### D2 — Cover the weekly-projection path: bye inference and per-game bonuses `[BE]`
+#### ~~D2 — Cover the weekly-projection path: bye inference and per-game bonuses `[BE]`~~ ✓ done 2026-08-28 13:30 (three tests in `tests/board_fixture.rs`; `board.rs` 94.6 %)
 - **Where:** `src-tauri/src/board.rs:86-121` (uncovered), `:132-138`, `:197-201`; `src-tauri/tests/fixtures/board_input.json` (`season_rows` only, no weekly rows); `tests/board_fixture.rs`
 - **What's wrong:** The code that decides each player's bye week — by counting opponent rows per team and taking the week with ≤ ¼ of the max — and that groups weekly stats for the bonus model runs only on live data. A stray traded-player row, a team with 17 games, or a weekly feed that arrives empty are all untested branches on the path that builds tonight's board.
 - **Fix:** Add ~40 weekly rows to the fixture (two teams × 17 weeks, one with a stray row in the bye week, one player with `stats`), assert the bye for each team and the bonus expectation for the one player; a second case with all weekly rows missing asserts the "no scored players" warning and an empty board rather than a panic.
@@ -246,14 +246,14 @@ One correction owed: the README's Testing section quotes the frontend coverage f
 
 Down from B+ on two things this run observed rather than inferred. `bun run verify` — the one gate the README tells everyone to run — **fails on any machine that has run `bun run coverage:frontend` first**, because `eslint.config.js` ignores only `dist` and `src-tauri/target` and the v8 HTML report ships three `.js` files with stale `eslint-disable` directives. That is a defect introduced with this morning's coverage work and it makes the local gate and CI disagree. And `vite.config.ts`'s watcher ignores only `src-tauri/**`, so with the app open under `tauri dev`, every test artefact written into the worktree reloads the live window — observed twice, and tonight that means a wiped chat panel. Everything else holds: CI green in ~5 min, 500-line cap enforced, clippy `-D warnings` clean, the recorder/replay tooling, `cargo llvm-cov` wired up.
 
-#### I1 — Stop ESLint from linting generated output
+#### ~~I1 — Stop ESLint from linting generated output~~ ✓ done 2026-08-28 13:30 (`eslint.config.js` + `scripts/check-loc.mjs` ignore lists)
 - **Where:** `draft-assistant/eslint.config.js:8` (`ignores: ["dist", "src-tauri/target"]`)
 - **What's wrong:** `coverage/` (and any future `playwright-report/` script) is linted by `eslint .`; three warnings under `--max-warnings=0` fail `verify` after a coverage run. Reproduced this run; CI is green only by ordering.
 - **Fix:** `ignores: ["dist", "coverage", "playwright-report", "test-results", "src-tauri/target", "dogfood-output"]`. One line; then `bun run coverage && bun run verify` must pass back-to-back — add that order to CI so it stays true.
 - **Effort:** S
 - **Grade lift:** B → B+ (the gate stops depending on what you ran before it)
 
-#### I2 — Keep the dev watcher off test and report output
+#### ~~I2 — Keep the dev watcher off test and report output~~ ✓ done 2026-08-28 13:30 (`vite.config.ts` watch.ignored; needs a relaunch)
 - **Where:** `draft-assistant/vite.config.ts:26-29` (`watch.ignored: ["**/src-tauri/**"]`)
 - **What's wrong:** Writes to `coverage/`, `playwright-report/`, `test-results/`, `public/ai-*.json` (the dogfood scripts) and `dogfood-output/` all trigger a full reload of the live window. Tonight's app is a dev instance.
 - **Fix:** Add those globs to `watch.ignored`; relaunch once before 17:00 so the running instance has them. Longer term, run draft night on a `tauri build` binary — no watcher, no Vite, and the same code.

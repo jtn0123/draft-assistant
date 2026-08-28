@@ -23,7 +23,7 @@ impl Engine {
         self.data_dir.join(name)
     }
 
-    fn tmp_path(&self, name: &str) -> PathBuf {
+    pub(crate) fn tmp_path(&self, name: &str) -> PathBuf {
         let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
         self.cache_path(&format!("{name}.{}.{seq}.tmp", std::process::id()))
     }

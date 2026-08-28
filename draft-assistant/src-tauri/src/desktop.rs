@@ -7,7 +7,7 @@
 //! (`--no-default-features`), which is what the fuzz targets link against.
 
 use crate::app::{AppCore, PollEvent};
-use crate::chat::{ChatOptions, ChatReply, ChatTurn};
+use crate::chat::{ChatOptions, ChatReply, ChatSession, ChatTurn, SessionSummary};
 use crate::engine::{AppConfig, Engine};
 use crate::view::DraftView;
 use std::sync::Arc;
@@ -104,6 +104,28 @@ async fn chat_compact(
     state.core.compact(&history, &options).await
 }
 
+#[tauri::command]
+fn save_chat_session(state: State<'_, AppState>, session: ChatSession) -> Result<String, String> {
+    state.core.save_chat_session(&session)
+}
+
+#[tauri::command]
+fn list_chat_sessions(
+    state: State<'_, AppState>,
+    draft_id: String,
+) -> Result<Vec<SessionSummary>, String> {
+    state.core.list_chat_sessions(&draft_id)
+}
+
+#[tauri::command]
+fn load_chat_session(
+    state: State<'_, AppState>,
+    draft_id: String,
+    id: String,
+) -> Result<ChatSession, String> {
+    state.core.load_chat_session(&draft_id, &id)
+}
+
 /// Start polling Sleeper every `interval_secs` (default 3). Emits
 /// "poll-health" after every poll and "draft-updated" with the fresh view
 /// whenever the feed changed.
@@ -160,6 +182,9 @@ pub fn run() {
             export_state,
             chat,
             chat_compact,
+            save_chat_session,
+            list_chat_sessions,
+            load_chat_session,
             start_polling,
             stop_polling,
         ])

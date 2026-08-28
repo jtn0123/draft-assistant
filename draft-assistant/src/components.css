@@ -378,3 +378,16 @@ dialog.modal::backdrop {
   white-space: nowrap;
   border: 0;
 }
+
+/* "keeper" beside a roster name: kept from last season, not drafted tonight. */
+.keeper-tag {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  vertical-align: 1px;
+}

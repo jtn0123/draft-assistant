@@ -29,6 +29,8 @@ export interface RosterEntry {
   team: string | null;
   pick_no: number;
   round: number;
+  /** Kept from last season rather than drafted tonight. */
+  is_keeper: boolean;
 }
 
 export interface TeamRoster {
@@ -193,4 +195,35 @@ export interface ChatReply {
   usage: ChatUsage;
   /** null for a compaction, which is about the conversation, not a pick. */
   as_of: ChatAsOf | null;
+}
+
+/** A line of a saved Ask Claude conversation (`chat/session.rs`). */
+export interface ChatSessionTurn {
+  role: "you" | "claude" | "summary" | "note";
+  text: string;
+  as_of_pick: number | null;
+}
+
+/** A saved conversation: one JSON file per session in the app's data dir. */
+export interface ChatSession {
+  id: string;
+  draft_id: string;
+  league_name: string;
+  /** Unix seconds. */
+  started_at: number;
+  updated_at: number;
+  /** The first question, clipped. */
+  title: string;
+  turns: ChatSessionTurn[];
+  questions: number;
+  cost_usd: number;
+}
+
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  started_at: number;
+  updated_at: number;
+  questions: number;
+  cost_usd: number;
 }

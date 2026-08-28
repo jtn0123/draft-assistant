@@ -248,3 +248,32 @@ test.describe("board stays usable with the chat open", () => {
     });
   }
 });
+
+test("the conversation survives a reload and a new chat starts a separate session", async ({ page }) => {
+  // The browser preview files sessions in localStorage the way the desktop
+  // app files them on disk; the panel's behaviour is the same on both.
+  await page.goto("/?chat=/chat-fixture.json");
+  await page.getByRole("button", { name: "Ask Claude" }).click();
+  await page.getByRole("button", { name: "Who should I take next?" }).click();
+  const panel = page.getByRole("complementary", { name: /Ask Claude about this draft/ });
+  await expect(panel.locator(".chat-turn.claude")).toHaveCount(1);
+  await expect(panel.getByText("saved", { exact: true })).toBeVisible();
+  const sessions = panel.getByLabel("Saved sessions");
+  await expect(sessions.locator("option")).toHaveCount(1);
+  await expect(sessions.locator("option")).toContainText("Who should I take next? · 1 question · $0.11");
+
+  // Reload: the answer comes back from the saved session, nothing re-asked.
+  await page.reload();
+  await page.getByRole("button", { name: "Ask Claude" }).click();
+  await expect(panel.locator(".chat-turn.claude")).toHaveCount(1);
+  await expect(panel.locator(".chat-turn.claude strong").first()).toHaveText("Ladd McConkey");
+  await expect(panel.getByLabel("Saved sessions")).toHaveValue(/^\d+-[0-9a-f]{4}$/);
+
+  // New chat: an empty panel, and the old session still one click away.
+  await page.getByRole("button", { name: "New chat" }).click();
+  await expect(panel.locator(".chat-turn.claude")).toHaveCount(0);
+  await expect(panel.getByLabel("Saved sessions")).toHaveValue(/^\d+-[0-9a-f]{4}$/);
+  await expect(panel.getByLabel("Saved sessions").locator("option")).toHaveCount(2);
+  await panel.getByLabel("Saved sessions").selectOption({ index: 1 });
+  await expect(panel.locator(".chat-turn.claude")).toHaveCount(1);
+});

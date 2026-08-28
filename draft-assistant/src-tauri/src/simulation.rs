@@ -42,6 +42,7 @@ pub fn apply_simulated_pick(loaded: &mut LoadedLeague, config: &AppConfig) -> Op
         player_id: player_id.clone(),
         picked_by: None,
         metadata: None,
+        is_keeper: None,
     });
     Some(player_id)
 }
