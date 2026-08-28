@@ -103,16 +103,22 @@ pub fn compute_replacement(
     ReplacementModel { demand, baseline }
 }
 
-/// Assign tiers within a position by point-gap clustering: a new tier starts
-/// wherever the drop from the previous player exceeds the threshold.
+/// Assign tiers within a position. A new tier starts wherever the drop from
+/// the previous player exceeds `gap_threshold`, *or* where the player sits
+/// more than 1.5× that far below the top of the current tier — a smooth ramp
+/// with no single big gap (every defense, the WR3–WR6 band) is still banded
+/// rather than lumped into one 50-point "tier".
 pub fn assign_tiers(sorted_points: &[f64], gap_threshold: f64) -> Vec<u32> {
+    let spread_cap = gap_threshold * 1.5;
     let mut tiers = Vec::with_capacity(sorted_points.len());
     let mut tier = 1u32;
-    for (i, pts) in sorted_points.iter().enumerate() {
+    let mut tier_top = sorted_points.first().copied().unwrap_or(0.0);
+    for (i, &pts) in sorted_points.iter().enumerate() {
         if i > 0 {
             let gap = sorted_points[i - 1] - pts;
-            if gap > gap_threshold {
+            if gap > gap_threshold || tier_top - pts > spread_cap {
                 tier += 1;
+                tier_top = pts;
             }
         }
         tiers.push(tier);
@@ -187,6 +193,44 @@ mod tests {
 
         assert_eq!(model.demand.get("QB"), Some(&2));
         assert_eq!(model.demand.get("WR"), Some(&1));
+    }
+
+    // Gap-only clustering never breaks a smooth ramp: all 32 defenses (124 →
+    // 74 points, no 8-point gap anywhere) landed in tier 1, and 149 WRs in
+    // tier 4. A tier whose top and bottom are 50 points apart is not a tier.
+    #[test]
+    fn a_smooth_ramp_is_still_split_into_bands() {
+        let pts: Vec<f64> = (0..32).map(|i| 124.0 - 1.6 * i as f64).collect();
+        let tiers = assign_tiers(&pts, 8.0);
+        assert!(
+            tiers.last().copied().unwrap_or(1) > 1,
+            "one tier for 32 DEF: {tiers:?}"
+        );
+        for tier in 1..=tiers[tiers.len() - 1] {
+            let members: Vec<f64> = pts
+                .iter()
+                .zip(&tiers)
+                .filter(|(_, &t)| t == tier)
+                .map(|(&p, _)| p)
+                .collect();
+            let spread = members[0] - members[members.len() - 1];
+            assert!(
+                spread <= 12.0,
+                "tier {tier} spans {spread} points: {members:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tiers_never_decrease_and_start_at_one() {
+        let pts: Vec<f64> = (0..150).map(|i| 300.0 - 1.9 * i as f64).collect();
+        let tiers = assign_tiers(&pts, 12.0);
+        assert_eq!(tiers[0], 1);
+        assert!(tiers.windows(2).all(|w| w[1] == w[0] || w[1] == w[0] + 1));
+        assert!(
+            *tiers.last().unwrap() >= 8,
+            "150 WRs over 285 points: {tiers:?}"
+        );
     }
 
     #[test]
