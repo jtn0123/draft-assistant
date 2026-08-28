@@ -91,7 +91,7 @@ export function ClockBanner({ view }: { view: DraftView }) {
   const now = useNow(d.pick_deadline !== null);
   const remaining = d.pick_deadline === null ? null : d.pick_deadline - now;
   return (
-    <div className={cls}>
+    <div className={cls} role="status" aria-live="polite">
       <div className="clock-cell">
         <span className="clock-label">Round</span>
         <span className="clock-big">{d.current_round}</span>

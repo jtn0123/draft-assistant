@@ -60,3 +60,15 @@ describe("SidePanel recent picks", () => {
     expect(items.find((t) => t?.includes("Nico Collins"))).toContain("slot 4");
   });
 });
+
+describe("ClockBanner accessibility", () => {
+  it("is a polite live region so 'on the clock' is announced", () => {
+    const v = view();
+    v.draft.is_my_pick = true;
+    const { container } = render(<ClockBanner view={v} />);
+    const banner = container.querySelector(".clock");
+    expect(banner).toHaveAttribute("role", "status");
+    expect(banner).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByRole("status")).toHaveTextContent("YOU ARE ON THE CLOCK");
+  });
+});
