@@ -226,7 +226,9 @@ export function SidePanel({ view }: { view: DraftView }) {
           {view.recent_picks.map((p) => (
             <li key={p.pick_no}>
               <span className="muted">{p.pick_no}.</span> {p.name}
-              <span className="muted"> · {p.position} · slot {p.slot}</span>
+              <span className="muted">
+                {" "}· {p.position} · {p.slot_name ?? `slot ${p.slot}`}
+              </span>
             </li>
           ))}
           {view.recent_picks.length === 0 && <li className="muted">None yet.</li>}
