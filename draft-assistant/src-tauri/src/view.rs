@@ -176,15 +176,15 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let on_clock_slot = draft::slot_for_pick(current_pick, teams, order);
 
     // Slot display names: draft_order user ids resolved via league users.
+    // Only real names go in here. A user id that resolves to nothing is not a
+    // name: passing it on printed a 19-digit number where a manager belongs,
+    // and stopped the UI's own "slot N" fallback from ever running.
     let mut slot_names: HashMap<u32, String> = HashMap::new();
     if let Some(order) = &draft.draft_order {
         for (user_id, slot) in order {
-            let name = loaded
-                .user_names
-                .get(user_id)
-                .cloned()
-                .unwrap_or_else(|| user_id.clone());
-            slot_names.insert(*slot, name);
+            if let Some(name) = loaded.user_names.get(user_id) {
+                slot_names.insert(*slot, name.clone());
+            }
         }
     }
     let my_slot = config.my_user_id.as_ref().and_then(|uid| {
