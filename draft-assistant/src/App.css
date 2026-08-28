@@ -244,6 +244,10 @@ button.live.stale {
   color: var(--text-muted);
 }
 
+.clock-big.urgent {
+  color: #ff5c5c;
+}
+
 .clock-big {
   font-size: 26px;
   font-weight: 800;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { DraftView, Recommendation } from "../types";
 import { errorMessage, fmt, pct } from "../format";
@@ -61,11 +61,35 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
 
 // ---------- clock banner ----------
 
+/** Wall-clock time, re-read every second while `active`. */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatStart(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 export function ClockBanner({ view }: { view: DraftView }) {
   const d = view.draft;
   const preDraft = d.status === "pre_draft" && d.total_picks_made === 0;
   const complete = d.status === "complete";
   const cls = d.is_my_pick ? "clock mine" : "clock";
+  const now = useNow(d.pick_deadline !== null);
+  const remaining = d.pick_deadline === null ? null : d.pick_deadline - now;
   return (
     <div className={cls}>
       <div className="clock-cell">
@@ -80,7 +104,10 @@ export function ClockBanner({ view }: { view: DraftView }) {
         {complete ? (
           <span className="clock-status">Draft complete</span>
         ) : preDraft ? (
-          <span className="clock-status">Draft has not started</span>
+          <span className="clock-status">
+            Draft has not started
+            {d.start_time !== null && ` · starts ${formatStart(d.start_time)}`}
+          </span>
         ) : d.is_my_pick ? (
           <span className="clock-status you">YOU ARE ON THE CLOCK</span>
         ) : (
@@ -96,6 +123,17 @@ export function ClockBanner({ view }: { view: DraftView }) {
           </>
         )}
       </div>
+      {remaining !== null && (
+        <div className="clock-cell">
+          <span className="clock-label">Clock</span>
+          <span
+            className={`clock-big${remaining <= 10_000 ? " urgent" : ""}`}
+            aria-label="Pick clock"
+          >
+            {formatCountdown(remaining)}
+          </span>
+        </div>
+      )}
       <div className="clock-cell next-picks">
         <span className="clock-label">Your picks</span>
         <span className="next-pick-list">
