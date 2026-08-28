@@ -6,8 +6,10 @@ import { Board } from "./components/Board";
 import { Chat } from "./components/Chat";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ClockBanner, RecCard, SidePanel, Setup } from "./components/Panels";
+import { SnakeStrip } from "./components/SnakeStrip";
 import "./App.css";
 import "./components.css";
+import "./snake.css";
 import "./chat.css";
 
 // ---------- app ----------
@@ -303,6 +305,7 @@ export default function App() {
       {alertBar}
 
       <ClockBanner view={view} />
+      <SnakeStrip view={view} />
 
       {view.data_health.warnings.length > 0 && (
         <div className="warnings">{view.data_health.warnings.join(" · ")}</div>

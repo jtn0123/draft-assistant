@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../api";
 import type { DraftView, Recommendation } from "../types";
 import { errorMessage, fmt, pct } from "../format";
+import { useCountdown } from "./useCountdown";
 
 // ---------- setup screen ----------
 
@@ -97,8 +98,10 @@ export function ClockBanner({ view }: { view: DraftView }) {
   const preDraft = d.status === "pre_draft" && d.current_pick === 1;
   const complete = d.status === "complete";
   const cls = d.is_my_pick ? "clock mine" : "clock";
-  const now = useNow(d.pick_deadline !== null || preDraft);
-  const remaining = d.pick_deadline === null ? null : d.pick_deadline - now;
+  // Two clocks, never both live: the countdown while a pick is on the clock,
+  // the wall clock only to phrase "starts 5:00 PM" before the draft begins.
+  const remaining = useCountdown(d.pick_deadline);
+  const now = useNow(preDraft);
   return (
     <div className={cls}>
       <div className="clock-cell">
