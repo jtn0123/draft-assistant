@@ -37,6 +37,7 @@ what it could not see.
 | 25 | R-2 recommendation card shown after draft complete | done 86c42e3 | `build_view` returns no recommendations once `draft_over` |
 | 26 | Bug hunt (asked 06:00) — 12 validated items H1–H12 | done, all 12 | each item: failing test → fix → passing → own commit. H1 3c83f8c · H2 7115c33 · H8 a6f5e98 · H9 e5d53c7 · H6 693383b · H7 ec52755 · H3 5cefda4 + 6901d95 · H4 d76d6a5 · H5 d2d8359 · H10 9f9dccb · H11 a257c0f · H12 c6c9731. Results table in `dogfood-output/bug-hunt-2026-08-28.md` |
 | 27 | Replay server stamps `last_picked` at real release time | done | so the new pick clock counts down in replay mode like a live draft |
+| 29 | Dogfood pass, all areas (asked 07:00) | done, 13 issues | `dogfood-output/full-2026-08-28/report.md` — 1 high (live-sync false success), 7 medium (false success toasts ×2, silent launch failure, raw parser error, clock live-region chatter, board clipped with chat open), 5 low. Verified-working table covers sorting/search/dialog/clock/live sync/chat. Desktop-only paths untestable (WKWebView has no CDP) |
 | 28 | Full `bun run verify` after the bug-hunt fixes | done, exit 0 | Rust 98 tests (69 lib + 29 integration), Vitest 41, Playwright 11, clippy/eslint/LOC clean; replay preview screenshot `dogfood-output/replay/13-bug-hunt-fixes-pick-58.png` |
 
 ## Data the chat could not see (from the in-app Claude)
