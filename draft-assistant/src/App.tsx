@@ -27,6 +27,9 @@ export default function App() {
   const [confirm, setConfirmState] = useState<Confirm>(null);
   const [toast, setToast] = useState<Toast>(null);
   const [busy, setBusy] = useState(true);
+  // Re-read while polling so "Last sync" counts up between updates instead of
+  // freezing at whatever it said when the last one arrived.
+  const [now, setNow] = useState(() => Date.now());
   const [chatOpen, setChatOpen] = useState(false);
   const toastTimer = useRef<number | undefined>(undefined);
   // Highest view seq already rendered. The 3s poll and the awaited click
@@ -132,6 +135,12 @@ export default function App() {
       un.then((f) => f()).catch(() => undefined);
     };
   }, [applyView, fail]);
+
+  useEffect(() => {
+    if (!polling) return;
+    const timer = window.setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [polling]);
 
   useEffect(() => {
     const un = api.onPollHealth(setPollHealth);
@@ -252,15 +261,15 @@ export default function App() {
         </div>
         <div className="actions">
           <button
-            className={`live ${syncClass(polling, pollHealth)}`}
+            className={`live ${syncClass(polling, pollHealth, now)}`}
             onClick={togglePolling}
             title={pollHealth?.last_error ?? undefined}
           >
-            {syncLabel(polling, pollHealth)}
+            {syncLabel(polling, pollHealth, now)}
           </button>
           {polling && pollHealth?.last_success_at && (
             <span className="sync-age">
-              Last sync {formatAge(pollHealth.last_success_at)}
+              Last sync {formatAge(pollHealth.last_success_at, now)} ago
             </span>
           )}
           <button
@@ -341,23 +350,38 @@ export default function App() {
   );
 }
 
-function syncClass(polling: boolean, health: PollHealth | null): string {
+// Polls run every 3s, so nothing at all for this long means the feed has
+// stopped even when no single poll reported an error — the case a green pill
+// used to hide.
+const QUIET_SECS = 30;
+const TICK_MS = 5000;
+
+function ageSeconds(timestamp: number | null | undefined, now: number): number | null {
+  if (!timestamp) return null;
+  return Math.max(0, Math.floor(now / 1000 - timestamp));
+}
+
+function syncClass(polling: boolean, health: PollHealth | null, now: number): string {
   if (!polling) return "";
   if ((health?.consecutive_failures ?? 0) >= 2) return "stale";
   if ((health?.consecutive_failures ?? 0) === 1) return "retrying";
-  return "on";
+  return (ageSeconds(health?.last_success_at, now) ?? 0) >= QUIET_SECS ? "stale" : "on";
 }
 
-function syncLabel(polling: boolean, health: PollHealth | null): string {
+function syncLabel(polling: boolean, health: PollHealth | null, now: number): string {
   if (!polling) return "○ Live sync off";
   const failures = health?.consecutive_failures ?? 0;
   if (failures >= 2) return `● Sync stale · ${failures} failures`;
   if (failures === 1) return "● Sync retrying";
+  const age = ageSeconds(health?.last_success_at, now);
+  if (age !== null && age >= QUIET_SECS) {
+    return `● Sync stale · nothing for ${formatAge(health?.last_success_at ?? 0, now)}`;
+  }
   return "● Live sync on";
 }
 
-function formatAge(timestamp: number): string {
-  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
-  if (seconds < 60) return `${seconds}s ago`;
-  return `${Math.floor(seconds / 60)}m ago`;
+function formatAge(timestamp: number, now: number): string {
+  const seconds = ageSeconds(timestamp, now) ?? 0;
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m`;
 }

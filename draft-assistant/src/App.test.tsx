@@ -90,6 +90,16 @@ describe("App live workflow", () => {
 
     render(<App />);
     expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+    // The fixture's own timestamps are old, so the pill starts out honest
+    // about that; a fresh poll is what makes it green.
+    expect(screen.getByRole("button", { name: /Sync stale · nothing for/ })).toBeInTheDocument();
+    act(() => {
+      testState.healthHandler?.({
+        last_success_at: Math.floor(Date.now() / 1000),
+        consecutive_failures: 0,
+        last_error: null,
+      });
+    });
     expect(screen.getByRole("button", { name: "● Live sync on" })).toBeInTheDocument();
 
     const liveUpdate = fixture();
@@ -315,6 +325,44 @@ describe("App live workflow", () => {
     expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
     for (const button of screen.getAllByRole("button", { name: /^Draft$/ })) {
       expect(button).toBeDisabled();
+    }
+  });
+
+  // Dogfood ISSUE-008: with the feed dead the pill stayed green and the age
+  // froze at whatever it said when the last update arrived — the one number
+  // that reports staleness stopped moving exactly when data went stale.
+  it("keeps the sync age moving and flags a feed that has gone quiet", async () => {
+    vi.useFakeTimers();
+    try {
+      const initial = fixture();
+      testState.api.getConfig.mockResolvedValue({
+        my_user_id: "browser-preview",
+        active_league_id: initial.league.league_id,
+        leagues: [],
+      });
+      testState.api.addLeague.mockResolvedValue(initial);
+
+      render(<App />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      act(() => {
+        testState.healthHandler?.({
+          last_success_at: Math.floor(Date.now() / 1000),
+          consecutive_failures: 0,
+          last_error: null,
+        });
+      });
+      expect(screen.getByText("Last sync 0s ago")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "● Live sync on" })).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(45_000);
+      });
+      expect(screen.getByText("Last sync 45s ago")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Sync stale/ })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
     }
   });
 
