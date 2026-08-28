@@ -1,0 +1,42 @@
+# ---- Build output ----
+node_modules/
+dist/
+dist-ssr/
+draft-assistant/src-tauri/target/
+draft-assistant/src-tauri/gen/schemas/
+
+# ---- Third-party research clones ----
+# Seven upstream repos cloned for evaluation (~814MB, each with its own .git).
+# Not ours to redistribute; re-clone from source if needed.
+research/
+
+# ---- macOS ----
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ---- Editors ----
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- Logs / temp ----
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.local
+*.tmp
+
+# ---- Local runtime state ----
+# App caches + config live in ~/Library/Application Support and are never
+# in-tree, but guard against a stray copy or an exported draft state.
+draft-state.json
+players.json
+projections_*.json
+weekly_*.json
