@@ -19,9 +19,9 @@ use tokio::process::Command;
 /// plus all the roster, tier, and recommendation context.
 const AVAILABLE_LIMIT: usize = 40;
 
-/// Generous: a cold call measured ~10s, but a hung process must not wedge the
-/// panel for the rest of the draft.
-const TIMEOUT: Duration = Duration::from_secs(120);
+/// A cold call measured ~10s. The panel promises "about 10 seconds" and offers
+/// Cancel, so 45s bounds a hung process without pinning the UI for minutes.
+const TIMEOUT: Duration = Duration::from_secs(45);
 
 const SYSTEM_PROMPT: &str =
     "You are a fantasy football draft assistant embedded in a live draft app. \

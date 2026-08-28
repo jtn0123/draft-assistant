@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { errorMessage } from "../format";
 
-type Turn = { role: "you" | "claude"; text: string };
+type Turn = { role: "you" | "claude" | "note"; text: string };
 
-// Answers take ~10s, so the panel has to make "still working" obvious.
+// Answers take ~10s, so the panel has to make "still working" obvious — and
+// offer a way out, because a slow model call must never pin the panel while
+// the pick clock is running.
 const SUGGESTIONS = [
   "Who should I take next?",
   "What position am I weakest at?",
@@ -17,6 +20,9 @@ export function Chat({ open, onClose }: { open: boolean; onClose: () => void }) 
   const [error, setError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Bumped on every ask and on cancel. A result whose generation no longer
+  // matches was cancelled while in flight and is discarded on arrival.
+  const generation = useRef(0);
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
@@ -31,27 +37,43 @@ export function Chat({ open, onClose }: { open: boolean; onClose: () => void }) 
   const ask = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
+    const mine = ++generation.current;
     setError(null);
     setQuestion("");
     setTurns((prev) => [...prev, { role: "you", text: trimmed }]);
     setBusy(true);
     try {
       const answer = await api.chat(trimmed);
+      if (mine !== generation.current) return;
       setTurns((prev) => [...prev, { role: "claude", text: answer }]);
     } catch (e) {
-      setError(String(e));
+      if (mine !== generation.current) return;
+      setError(errorMessage(e));
     } finally {
-      setBusy(false);
+      if (mine === generation.current) setBusy(false);
     }
+  };
+
+  const cancel = () => {
+    generation.current += 1;
+    setBusy(false);
+    setTurns((prev) => [...prev, { role: "note", text: "Cancelled — ask again whenever." }]);
+    inputRef.current?.focus();
   };
 
   if (!open) return null;
 
   return (
-    <aside className="chat" aria-label="Ask Claude about this draft">
+    <aside
+      className="chat"
+      aria-label="Ask Claude about this draft"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
+    >
       <header className="chat-head">
         <h3>Ask Claude</h3>
-        <button className="ghost" onClick={onClose} aria-label="Close chat">
+        <button className="ghost" onClick={onClose} aria-label="Close chat" title="Close (Esc)">
           ✕
         </button>
       </header>
@@ -70,16 +92,22 @@ export function Chat({ open, onClose }: { open: boolean; onClose: () => void }) 
             ))}
           </div>
         )}
-        {turns.map((turn, i) => (
-          <div key={i} className={`chat-turn ${turn.role}`}>
-            <span className="chat-role">{turn.role === "you" ? "You" : "Claude"}</span>
-            <p>{turn.text}</p>
-          </div>
-        ))}
+        {turns.map((turn, i) =>
+          turn.role === "note" ? (
+            <p key={i} className="chat-note muted">
+              {turn.text}
+            </p>
+          ) : (
+            <div key={i} className={`chat-turn ${turn.role}`}>
+              <span className="chat-role">{turn.role === "you" ? "You" : "Claude"}</span>
+              <p>{turn.text}</p>
+            </div>
+          ),
+        )}
         {busy && (
           <div className="chat-turn claude pending" aria-live="polite">
             <span className="chat-role">Claude</span>
-            <p className="muted">Thinking… (about 10 seconds)</p>
+            <p className="muted">Thinking… (usually about 10 seconds)</p>
           </div>
         )}
         {error && (
@@ -105,9 +133,15 @@ export function Chat({ open, onClose }: { open: boolean; onClose: () => void }) 
             }
           }}
         />
-        <button onClick={() => void ask(question)} disabled={busy || !question.trim()}>
-          {busy ? "Asking…" : "Ask"}
-        </button>
+        {busy ? (
+          <button className="ghost" onClick={cancel}>
+            Cancel
+          </button>
+        ) : (
+          <button onClick={() => void ask(question)} disabled={!question.trim()}>
+            Ask
+          </button>
+        )}
       </div>
     </aside>
   );

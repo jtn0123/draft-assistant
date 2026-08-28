@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +9,17 @@ const testState = vi.hoisted(() => ({
 vi.mock("../api", () => ({ api: testState.api }));
 
 import { Chat } from "./Chat";
+
+/** A chat call that stays pending until the test releases it. */
+function pendingAnswer(): (value: string) => void {
+  let release: (value: string) => void = () => undefined;
+  testState.api.chat.mockReturnValue(
+    new Promise<string>((resolve) => {
+      release = resolve;
+    }),
+  );
+  return (value) => release(value);
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -42,28 +53,65 @@ describe("Chat panel", () => {
     await user.type(screen.getByLabelText("Your question"), "Who?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("not logged in");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Claude CLI error: not logged in");
+    // No "Error: " prefix leaking from String(error).
+    expect(alert).not.toHaveTextContent("Error: Claude");
   });
 
   it("blocks a second question while one is in flight", async () => {
     const user = userEvent.setup();
-    let release: (value: string) => void = () => undefined;
-    testState.api.chat.mockReturnValue(
-      new Promise<string>((resolve) => {
-        release = resolve;
-      }),
-    );
+    const release = pendingAnswer();
 
     render(<Chat open onClose={() => undefined} />);
     await user.type(screen.getByLabelText("Your question"), "Who?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     expect(await screen.findByText(/Thinking/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Asking…" })).toBeDisabled();
+    // Ask is replaced by Cancel, and Enter in the box does not send.
+    expect(screen.queryByRole("button", { name: "Ask" })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Your question"), "Another?{Enter}");
 
     release("Take Olave.");
     await waitFor(() => expect(screen.getByText("Take Olave.")).toBeInTheDocument());
     expect(testState.api.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancel frees the panel and discards the late answer", async () => {
+    const user = userEvent.setup();
+    const release = pendingAnswer();
+
+    render(<Chat open onClose={() => undefined} />);
+    await user.type(screen.getByLabelText("Your question"), "Who?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByText(/Cancelled/)).toBeInTheDocument();
+    expect(screen.queryByText(/Thinking/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask" })).toBeInTheDocument();
+
+    // The model finishes after the cancel; its answer must not appear.
+    await act(async () => {
+      release("Too late.");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText("Too late.")).not.toBeInTheDocument();
+
+    // And the panel is usable again immediately.
+    testState.api.chat.mockResolvedValue("Take Olave.");
+    await user.type(screen.getByLabelText("Your question"), "Who now?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByText("Take Olave.")).toBeInTheDocument();
+  });
+
+  it("Escape closes the panel", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    render(<Chat open onClose={onClose} />);
+    expect(screen.getByLabelText("Your question")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("asks a suggested question on click", async () => {

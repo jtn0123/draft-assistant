@@ -428,3 +428,9 @@ tbody tr:hover {
   outline: none;
   border-color: var(--accent-dim);
 }
+
+.chat-note {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+}
