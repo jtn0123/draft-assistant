@@ -10,6 +10,12 @@ use std::collections::HashMap;
 
 const DEFAULT_BASE: &str = "https://api.sleeper.app";
 
+/// reqwest's `timeout` is *total transfer* time, not idle time, so the 8 s that
+/// keeps a stalled poll honest would also cut off the 14 MB player dictionary
+/// and the 18 MB weekly projections on a slow connection — the venue-wifi
+/// case. Those two get their own, much longer cap.
+const LARGE_TRANSFER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct League {
     pub league_id: String,
@@ -169,6 +175,9 @@ pub struct LeagueUser {
 
 pub struct SleeperClient {
     http: reqwest::Client,
+    /// Cap for the player dictionary and the weekly projections — the only two
+    /// responses big enough for the ordinary timeout to be a size limit.
+    large_transfer: std::time::Duration,
     /// Host every request goes to. Overridable so a replay server
     /// (`scripts/replay-sleeper.mjs`) or a test double can stand in for Sleeper.
     base: String,
@@ -195,15 +204,18 @@ impl SleeperClient {
             base,
             std::time::Duration::from_secs(3),
             std::time::Duration::from_secs(8),
+            LARGE_TRANSFER_TIMEOUT,
         )
     }
 
     /// Every request gives up after `connect` to connect and `total` overall:
-    /// a stalled socket must fail loudly, never hang a screen.
+    /// a stalled socket must fail loudly, never hang a screen. `large` applies
+    /// instead of `total` to the two multi-megabyte downloads.
     pub fn with_base_url_and_timeouts(
         base: &str,
         connect: std::time::Duration,
         total: std::time::Duration,
+        large: std::time::Duration,
     ) -> Self {
         let http = reqwest::Client::builder()
             .user_agent("draft-assistant/0.1 (local second-screen tool)")
@@ -215,6 +227,7 @@ impl SleeperClient {
         Self {
             http,
             base: base.trim().trim_end_matches('/').to_string(),
+            large_transfer: large,
         }
     }
 
@@ -223,9 +236,24 @@ impl SleeperClient {
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, String> {
-        let resp = self
-            .http
-            .get(url)
+        self.fetch_json(url, None).await
+    }
+
+    /// For responses measured in megabytes: see [`LARGE_TRANSFER_TIMEOUT`].
+    async fn get_json_large<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, String> {
+        self.fetch_json(url, Some(self.large_transfer)).await
+    }
+
+    async fn fetch_json<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<T, String> {
+        let mut request = self.http.get(url);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
+        let resp = request
             .send()
             .await
             .map_err(|e| format!("request failed: {url}: {}", describe(&e)))?;
@@ -278,7 +306,7 @@ impl SleeperClient {
 
     /// Full player dictionary: player_id -> meta. ~14.6MB, cache on disk.
     pub async fn players(&self) -> Result<HashMap<String, PlayerMeta>, String> {
-        self.get_json(&self.v1("players/nfl")).await
+        self.get_json_large(&self.v1("players/nfl")).await
     }
 
     /// Undocumented: full-season raw-stat projections for one season.
@@ -300,7 +328,7 @@ impl SleeperClient {
             "{}/projections/nfl/{season}/{week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF",
             self.base
         );
-        self.get_json(&url).await
+        self.get_json_large(&url).await
     }
 }
 
@@ -399,6 +427,7 @@ mod timeout_tests {
             &format!("http://{addr}"),
             Duration::from_millis(300),
             Duration::from_millis(300),
+            Duration::from_millis(300),
         );
         let started = Instant::now();
         let result = tokio::time::timeout(Duration::from_secs(2), client.user_id("mcsleeper26"))
@@ -410,6 +439,91 @@ mod timeout_tests {
             "unexpected error text: {error}"
         );
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+}
+
+#[cfg(test)]
+mod large_transfer_tests {
+    use super::SleeperClient;
+    use std::time::{Duration, Instant};
+
+    fn silent_server() -> (
+        std::net::SocketAddr,
+        std::sync::Arc<std::sync::Mutex<Vec<std::net::TcpStream>>>,
+    ) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let held = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = held.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                sink.lock().unwrap().push(stream);
+            }
+        });
+        (addr, held)
+    }
+
+    // The player dictionary and the weekly projections are ~14 MB and ~18 MB.
+    // reqwest's timeout is total transfer time, so the 8 s that keeps a poll
+    // honest would cut them off on slow wifi — the one network the app is
+    // guaranteed to meet on draft night.
+    #[tokio::test]
+    async fn the_big_downloads_outlive_the_ordinary_request_timeout() {
+        let (addr, _held) = silent_server();
+        let client = SleeperClient::with_base_url_and_timeouts(
+            &format!("http://{addr}"),
+            Duration::from_millis(200),
+            Duration::from_millis(200),
+            Duration::from_millis(1200),
+        );
+
+        let started = Instant::now();
+        let error = client
+            .players()
+            .await
+            .expect_err("a silent server must fail");
+        let waited = started.elapsed();
+        assert!(
+            waited >= Duration::from_millis(600),
+            "players() gave up after {waited:?} — it is still on the 200 ms cap"
+        );
+        assert!(
+            waited < Duration::from_secs(3),
+            "players() waited {waited:?}"
+        );
+        assert!(
+            error.contains("timed out") || error.contains("timeout"),
+            "{error}"
+        );
+
+        let started = Instant::now();
+        client
+            .weekly_projections(2026, 1)
+            .await
+            .expect_err("a silent server must fail");
+        assert!(started.elapsed() >= Duration::from_millis(600));
+    }
+
+    #[tokio::test]
+    async fn ordinary_requests_keep_the_short_cap() {
+        let (addr, _held) = silent_server();
+        let client = SleeperClient::with_base_url_and_timeouts(
+            &format!("http://{addr}"),
+            Duration::from_millis(200),
+            Duration::from_millis(200),
+            Duration::from_secs(30),
+        );
+
+        let started = Instant::now();
+        client
+            .picks("d1")
+            .await
+            .expect_err("a silent server must fail");
+        let waited = started.elapsed();
+        assert!(
+            waited < Duration::from_millis(900),
+            "a poll waited {waited:?} — it picked up the large-transfer cap"
+        );
     }
 }
 
