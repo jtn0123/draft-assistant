@@ -167,3 +167,34 @@ test("the Ask Claude panel sits beside the page instead of over it", async ({ pa
   expect(refresh!.x + refresh!.width).toBeLessThanOrEqual(panelBox!.x + 1);
   expect(draft!.x + draft!.width).toBeLessThanOrEqual(panelBox!.x + 1);
 });
+
+// Dogfood ISSUE-007: the chat took a fixed column and the board was not
+// re-flowed, so on any laptop screen the table was cut off — at 1440 the
+// Draft button itself was unreachable without scrolling the table sideways.
+test.describe("board stays usable with the chat open", () => {
+  for (const width of [1440, 1280, 1024]) {
+    test(`no clipped columns at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.getByRole("button", { name: "Ask Claude" }).click();
+      await expect(page.locator(".chat")).toBeVisible();
+
+      const clipped = await page.evaluate(() => {
+        const wrap = document.querySelector(".board");
+        const table = wrap?.querySelector("table");
+        if (!wrap || !table) return null;
+        return {
+          overflow: Math.round(table.getBoundingClientRect().width - wrap.getBoundingClientRect().width),
+          wrapRight: Math.round(wrap.getBoundingClientRect().right),
+          viewport: window.innerWidth,
+        };
+      });
+      expect(clipped, "board measurements").not.toBeNull();
+      expect(clipped!.overflow, "table wider than its column").toBeLessThanOrEqual(1);
+      expect(clipped!.wrapRight).toBeLessThanOrEqual(clipped!.viewport + 1);
+
+      // The action that matters most must be on screen, not off the right edge.
+      const draft = page.getByRole("button", { name: "Draft" }).first();
+      await expect(draft).toBeInViewport();
+    });
+  }
+});

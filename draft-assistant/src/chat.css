@@ -28,6 +28,40 @@
   z-index: 20;
 }
 
+/* The board is the point of the app: it keeps the width it needs, and the
+   chat gives way rather than clipping it. Under 1500px the side panel drops
+   below the board (its numbers are all repeated there anyway); under 1200px
+   there is no room for both, so the chat floats over the page instead of
+   squeezing it. */
+@media (max-width: 1499px) {
+  .shell.with-chat main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shell.with-chat .side {
+    position: static;
+    order: 2;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+
+  .shell.with-chat .chat {
+    width: 340px;
+    flex-basis: 340px;
+  }
+}
+
+@media (max-width: 1199px) {
+  .shell.with-chat .chat {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: min(360px, 92vw);
+    flex-basis: auto;
+    box-shadow: -12px 0 32px rgb(0 0 0 / 45%);
+  }
+}
+
 .chat-head-actions {
   display: flex;
   align-items: center;
