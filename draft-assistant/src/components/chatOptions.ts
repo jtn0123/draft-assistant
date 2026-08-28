@@ -116,14 +116,24 @@ export function formatSeconds(ms: number): string {
   return `${Math.max(1, Math.round(ms / 1000))} s`;
 }
 
-/** One-line summary for the settings header, e.g. "Opus · high effort · web on". */
-export function describeOptions(o: ChatOptions): string {
+/**
+ * One-line summary for the folded settings header, e.g.
+ * "Opus · high effort · standard speed · web on · auto-ask · $5 budget".
+ *
+ * `prefs` is included because the two settings that change what the panel
+ * does on its own — whether it asks unprompted, and what it will spend
+ * before it stops — were invisible with the fold closed.
+ */
+export function describeOptions(o: ChatOptions, prefs?: ChatPrefs): string {
   const model = MODELS.find((m) => m.id === o.model)?.label ?? o.model;
   const effort = EFFORTS.find((e) => e.id === (o.effort ?? ""))?.label ?? "Default";
-  return [
+  const parts = [
     model,
     `${effort.toLowerCase()} effort`,
     o.fast ? "fast" : "standard speed",
     o.web_search ? "web on" : "web off",
-  ].join(" · ");
+  ];
+  if (prefs?.auto_ask) parts.push("auto-ask");
+  if (prefs) parts.push(prefs.budget_usd > 0 ? `$${prefs.budget_usd} budget` : "no budget");
+  return parts.join(" · ");
 }

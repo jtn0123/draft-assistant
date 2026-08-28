@@ -29,7 +29,7 @@ export function ChatSettings({
     <details className="chat-settings">
       <summary>
         <span className="chat-settings-label">Settings</span>
-        <span className="muted">{describeOptions(options)}</span>
+        <span className="muted">{describeOptions(options, prefs)}</span>
       </summary>
       <div className="chat-settings-body">
         <label>

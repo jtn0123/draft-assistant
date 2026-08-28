@@ -102,6 +102,11 @@ export function Chat({
   // itself stops working the moment focus leaves it — clicking a suggestion
   // removes that button from the DOM and focus falls to <body>. While a
   // confirm dialog is open, Escape belongs to the dialog alone.
+  //
+  // Listened for in the capture phase, which is the whole point: the dialog
+  // closes itself on Escape, and React flushes that removal before a
+  // bubble-phase listener here would run — so the guard below saw no dialog
+  // and cancelling a draft confirmation took the panel down with it.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -109,8 +114,8 @@ export function Chat({
       if (document.querySelector("dialog[open]")) return;
       onClose();
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
 
   // Keep the newest turn in view as answers land and as they stream.

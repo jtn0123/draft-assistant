@@ -194,6 +194,27 @@ describe("Chat panel", () => {
     }
   });
 
+  it("the Escape that dismisses a confirm dialog does not also close the panel", async () => {
+    // The real ordering, which the test above does not reproduce: the dialog
+    // removes itself during the same keypress, so a bubble-phase guard looks
+    // for it after it is already gone. Found by pressing Escape on the draft
+    // confirmation in the running app and watching the panel vanish.
+    const onClose = vi.fn();
+    render(<Chat open onClose={onClose} />);
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    dialog.addEventListener("keydown", (e) => {
+      if ((e as KeyboardEvent).key === "Escape") dialog.remove();
+    });
+    document.body.appendChild(dialog);
+
+    await act(async () => {
+      dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(dialog.isConnected).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("Escape still closes the panel after focus has left it", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
@@ -323,7 +344,9 @@ describe("Chat panel", () => {
 
     const { unmount } = render(<Chat open onClose={() => undefined} />);
     const settings = screen.getByText("Settings").closest("details") as HTMLDetailsElement;
-    expect(settings).toHaveTextContent("Opus · default effort · standard speed · web off");
+    expect(settings).toHaveTextContent(
+      "Opus · default effort · standard speed · web off · $5 budget",
+    );
     await user.selectOptions(within(settings).getByLabelText("Model"), "sonnet");
     await user.selectOptions(within(settings).getByLabelText("Thinking effort"), "low");
     await user.click(within(settings).getByLabelText(/Web search/));

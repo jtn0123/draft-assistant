@@ -205,3 +205,20 @@ describe("Chat panel — the saved label", () => {
     expect(within(panel()).getByText("not saved yet")).toBeInTheDocument();
   });
 });
+
+describe("Chat panel — the folded settings summary", () => {
+  it("names auto-ask and the budget, the two settings that spend on their own", async () => {
+    const user = userEvent.setup();
+    render(<Chat open onClose={() => undefined} draftId="d1" />);
+    const settings = screen.getByText(/Opus · default effort/);
+    expect(settings).toHaveTextContent("standard speed · web off · $5 budget");
+    expect(settings).not.toHaveTextContent("auto-ask");
+
+    await user.click(screen.getByLabelText("Ask when I'm on the clock"));
+    expect(screen.getByText(/Opus · default effort/)).toHaveTextContent("web off · auto-ask · $5 budget");
+
+    await user.clear(screen.getByLabelText(/Session budget/));
+    await user.type(screen.getByLabelText(/Session budget/), "0");
+    expect(screen.getByText(/Opus · default effort/)).toHaveTextContent("auto-ask · no budget");
+  });
+});
