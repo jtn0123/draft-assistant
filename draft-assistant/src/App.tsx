@@ -240,7 +240,16 @@ export default function App() {
               Last sync {formatAge(pollHealth.last_success_at)}
             </span>
           )}
-          <button className="ghost" onClick={doUndo} title="Undo last manual pick">
+          <button
+            className="ghost"
+            onClick={doUndo}
+            disabled={!view.draft.manual_picks_active}
+            title={
+              view.draft.manual_picks_active
+                ? "Undo last manual pick"
+                : "No manual picks to undo"
+            }
+          >
             Undo
           </button>
           <button

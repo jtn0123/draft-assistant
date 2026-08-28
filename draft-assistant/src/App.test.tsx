@@ -115,6 +115,26 @@ describe("App live workflow", () => {
     expect(testState.api.undoManualPick).toHaveBeenCalledTimes(1);
   });
 
+  it("disables Undo until there is a manual pick to undo", async () => {
+    const initial = fixture();
+    initial.draft.manual_picks_active = false;
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+
+    render(<App />);
+    expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+
+    const withManual = fixture();
+    withManual.draft.manual_picks_active = true;
+    act(() => testState.draftHandler?.(withManual));
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+  });
+
   it("ignores a view that is older than what is already rendered", async () => {
     const initial = fixture();
     testState.api.getConfig.mockResolvedValue({
