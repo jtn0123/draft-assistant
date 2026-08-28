@@ -242,8 +242,10 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         .iter()
         .filter(|p| !taken.contains(p.player_id.as_str()))
         .map(|p| AvailablePlayer {
-            survival_next: survival_pick
-                .and_then(|pick| p.adp.map(|adp| draft::survival_probability(adp, pick))),
+            survival_next: survival_pick.and_then(|pick| {
+                p.adp
+                    .map(|adp| draft::survival_probability(adp, current_pick, pick))
+            }),
             player: p.clone(),
         })
         .collect();

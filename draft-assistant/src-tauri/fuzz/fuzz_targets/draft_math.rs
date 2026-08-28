@@ -32,7 +32,7 @@ fuzz_target!(|data: &[u8]| {
     // range Sleeper actually reports rather than fuzzing NaN bit patterns that
     // no payload can express.
     let adp = f64::from(u32_at(0) % 100_000) / 100.0;
-    let p = survival_probability(adp, pick % 1000);
+    let p = survival_probability(adp, u32_at(4) % 1000, pick % 1000);
     assert!(p.is_finite(), "survival({adp}) was {p}");
     assert!((0.0..=1.0).contains(&p), "survival({adp}) = {p} outside [0,1]");
 });

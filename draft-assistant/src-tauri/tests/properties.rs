@@ -77,18 +77,23 @@ proptest! {
     #[test]
     fn survival_is_always_a_probability(
         adp in -50.0f64..2000.0,
+        now_pick in 0u32..1000,
         at_pick in 0u32..1000,
     ) {
-        let p = survival_probability(adp, at_pick);
+        let p = survival_probability(adp, now_pick, at_pick);
         prop_assert!(p.is_finite(), "survival was {p}");
         prop_assert!((0.0..=1.0).contains(&p), "survival {p} outside [0,1]");
     }
 
     /// Later picks can only make a player less likely to still be there.
     #[test]
-    fn survival_never_increases_with_later_picks(adp in 1.0f64..300.0, a in 1u32..300) {
-        let earlier = survival_probability(adp, a);
-        let later = survival_probability(adp, a + 1);
+    fn survival_never_increases_with_later_picks(
+        adp in 1.0f64..300.0,
+        now in 1u32..300,
+        ahead in 0u32..100,
+    ) {
+        let earlier = survival_probability(adp, now, now + ahead);
+        let later = survival_probability(adp, now, now + ahead + 1);
         prop_assert!(
             later <= earlier + f64::EPSILON,
             "survival rose from {earlier} to {later}"

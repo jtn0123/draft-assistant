@@ -51,6 +51,15 @@ pub fn norm_cdf(z: f64) -> f64 {
     }
 }
 
+/// Upper tail P(Z > z), computed directly so small tails do not cancel to 0.
+pub fn norm_sf(z: f64) -> f64 {
+    if z > 0.0 {
+        norm_cdf(-z)
+    } else {
+        1.0 - norm_cdf(z)
+    }
+}
+
 /// P(lo <= Y < hi) for a game where Y ~ Normal(mean, cv*mean).
 fn band_probability(mean: f64, lo: f64, hi: f64, cv: f64) -> f64 {
     // Below this a bonus game is effectively impossible and the normal
