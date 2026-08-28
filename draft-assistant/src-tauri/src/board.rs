@@ -38,6 +38,28 @@ pub struct AvailablePlayer {
     pub survival_next: Option<f64>,
 }
 
+/// Which Sleeper ADP column matches this league's market: two-QB leagues draft
+/// off `adp_2qb`, otherwise the reception value picks PPR / half / standard.
+/// Falls back to `adp_ppr` when a row lacks the chosen column.
+pub fn adp_key(scoring: &HashMap<String, f64>, rules: &RosterRules) -> &'static str {
+    let qb_slots = rules
+        .slots()
+        .iter()
+        .filter(|slot| slot.as_str() == "QB" || slot.as_str() == "SUPER_FLEX")
+        .count();
+    if qb_slots >= 2 {
+        return "adp_2qb";
+    }
+    let rec = scoring.get("rec").copied().unwrap_or(0.0);
+    if rec >= 0.75 {
+        "adp_ppr"
+    } else if rec > 0.0 {
+        "adp_half_ppr"
+    } else {
+        "adp_std"
+    }
+}
+
 pub struct BoardBuild {
     pub players: Vec<BoardPlayer>,
     pub replacement: ReplacementModel,
@@ -53,6 +75,7 @@ pub fn build_board(
     warnings: &mut Vec<String>,
 ) -> BoardBuild {
     let scoring_map = &league.scoring_settings;
+    let adp_column = adp_key(scoring_map, rules);
 
     // Positions this league actually rosters (K excluded automatically for
     // this league because there is no K slot).
@@ -159,7 +182,10 @@ pub fn build_board(
             tier: 0,
             position_rank: 0,
             overall_rank: 0,
-            adp: row.stat("adp_ppr").filter(|&a| a > 0.0 && a < 500.0),
+            adp: row
+                .stat(adp_column)
+                .or_else(|| row.stat("adp_ppr"))
+                .filter(|&a| a > 0.0 && a < 500.0),
             injury_status: player_meta
                 .get(&row.player_id)
                 .and_then(|m| m.injury_status.clone()),
@@ -223,5 +249,93 @@ pub fn build_board(
     BoardBuild {
         players: scored,
         replacement: model,
+    }
+}
+
+#[cfg(test)]
+mod adp_tests {
+    use super::*;
+
+    fn rules(slots: &[&str]) -> RosterRules {
+        RosterRules::new(&slots.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+    }
+
+    fn scoring(rec: f64) -> HashMap<String, f64> {
+        HashMap::from([("rec".to_string(), rec), ("pass_td".to_string(), 4.0)])
+    }
+
+    #[test]
+    fn the_adp_column_follows_the_league_scoring() {
+        let std = rules(&["QB", "RB", "WR", "FLEX", "BN"]);
+        assert_eq!(adp_key(&scoring(1.0), &std), "adp_ppr");
+        assert_eq!(adp_key(&scoring(0.5), &std), "adp_half_ppr");
+        assert_eq!(adp_key(&scoring(0.0), &std), "adp_std");
+        assert_eq!(adp_key(&HashMap::new(), &std), "adp_std");
+    }
+
+    #[test]
+    fn two_quarterback_leagues_use_the_2qb_market() {
+        assert_eq!(
+            adp_key(&scoring(1.0), &rules(&["QB", "SUPER_FLEX", "BN"])),
+            "adp_2qb"
+        );
+        assert_eq!(
+            adp_key(&scoring(0.5), &rules(&["QB", "QB", "RB", "BN"])),
+            "adp_2qb"
+        );
+    }
+
+    #[test]
+    fn a_half_ppr_board_reads_half_ppr_adp_and_falls_back_to_ppr() {
+        let league: League = serde_json::from_value(serde_json::json!({
+            "league_id": "l", "name": "Half", "season": "2026", "status": "pre_draft",
+            "total_rosters": 2, "roster_positions": ["WR", "BN"],
+            "scoring_settings": {"rec": 0.5, "rec_yd": 0.1}
+        }))
+        .unwrap();
+        let draft: Draft = serde_json::from_value(serde_json::json!({
+            "draft_id": "d", "status": "pre_draft", "type": "snake",
+            "settings": {"teams": 2, "rounds": 2}
+        }))
+        .unwrap();
+        let row = |id: &str, stats: serde_json::Value| -> ProjectionRow {
+            serde_json::from_value(serde_json::json!({
+                "player_id": id,
+                "player": {"first_name": id, "last_name": "X", "position": "WR", "team": "KC"},
+                "stats": stats
+            }))
+            .unwrap()
+        };
+        let rows = vec![
+            row(
+                "a",
+                serde_json::json!({"rec": 100, "rec_yd": 1200, "adp_ppr": 5.0, "adp_half_ppr": 9.0}),
+            ),
+            row(
+                "b",
+                serde_json::json!({"rec": 90, "rec_yd": 1100, "adp_ppr": 12.0}),
+            ),
+        ];
+        let rules = RosterRules::new(&league.roster_positions);
+        let mut warnings = Vec::new();
+        let built = build_board(
+            &league,
+            &draft,
+            &HashMap::new(),
+            &rows,
+            &[],
+            &rules,
+            &mut warnings,
+        );
+        let adp_of = |id: &str| {
+            built
+                .players
+                .iter()
+                .find(|p| p.player_id == id)
+                .unwrap()
+                .adp
+        };
+        assert_eq!(adp_of("a"), Some(9.0));
+        assert_eq!(adp_of("b"), Some(12.0));
     }
 }
