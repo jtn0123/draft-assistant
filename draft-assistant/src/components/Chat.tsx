@@ -39,11 +39,14 @@ export function Chat({ open, onClose }: { open: boolean; onClose: () => void }) 
 
   // Escape closes the panel from anywhere on the page. A handler on the panel
   // itself stops working the moment focus leaves it — clicking a suggestion
-  // removes that button from the DOM and focus falls to <body>.
+  // removes that button from the DOM and focus falls to <body>. While a
+  // confirm dialog is open, Escape belongs to the dialog alone.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (document.querySelector("dialog[open]")) return;
+      onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

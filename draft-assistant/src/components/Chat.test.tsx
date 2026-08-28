@@ -173,6 +173,26 @@ describe("Chat panel", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("Escape leaves the panel alone while a confirm dialog is open", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    // The confirm dialog is a native <dialog>; its own Escape handling closes
+    // it, and that one keypress must not also take the chat away.
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    document.body.appendChild(dialog);
+    try {
+      render(<Chat open onClose={onClose} />);
+      await user.keyboard("{Escape}");
+      expect(onClose).not.toHaveBeenCalled();
+      dialog.removeAttribute("open");
+      await user.keyboard("{Escape}");
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      dialog.remove();
+    }
+  });
+
   it("Escape still closes the panel after focus has left it", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
