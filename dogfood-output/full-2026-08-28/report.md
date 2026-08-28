@@ -455,3 +455,44 @@ Tested and correct — worth recording so the next pass need not redo it:
 - The Setup screen could only be reached through a failed load (ISSUE-004);
   in preview it cannot complete, so validation of a real league id was not
   exercised end to end.
+
+---
+
+## Results — all 13 fixed (2026-08-28, 07:00–08:15 PDT)
+
+Each issue got a test that failed against the old behaviour, then the fix, then
+the test green, then the whole suite. `bun run verify` (LOC cap, fmt, tsc,
+build, Rust 104 tests, Vitest 54, Playwright 14, clippy, eslint) exits 0 at
+`fdbdbfa`.
+
+| # | Commit | Test written first (red → green) | Verified in the app |
+|---|--------|----------------------------------|---------------------|
+| 001 | `5c7d672` | `App › reports a failed live-sync start instead of claiming sync is on` | Pill stays "○ Live sync off", bar reads "browser preview is read-only — live sync requires the desktop app", no success toast (`verify-02-live-sync.png`) |
+| 002 | `5c7d672` | `api › refuses export and data refresh in the fixture preview` | "browser preview is read-only — run the desktop app to refresh projections"; in replay mode Refresh reloads the dump and says so |
+| 003 | `5c7d672` | same test, export half | "browser preview is read-only — run the desktop app to export state" (`verify-03-export-refresh.png`) |
+| 004 | `5c7d672` | `App › says why the saved league failed to load instead of a bare setup screen` | The alert now renders above Setup (`verify-04-bad-replay.png`) |
+| 005 | `5c7d672` | `api › explains a state source that is not draft state` | "could not read draft state from /nope.json — it is not a state dump (check the path, and that the replay server is writing it)" (`verify-05-setup-error.png`) |
+| 006 | `6fffbb4` | `ClockBanner › keeps the ticking countdown out of the live region` | The live region is `.clock-main` and reads "YOU ARE ON THE CLOCK" only; the countdown is outside it and still labelled "Pick clock" |
+| 007 | `6232c9d` | E2E `board stays usable with the chat open › no clipped columns at 1440/1280/1024px` | Table fits its column at every width; all 11 columns visible; side panel drops below the board under 1500px, chat floats under 1200px (`fix-007-1280.png`) |
+| 008 | `ec1ff0a` | `App › keeps the sync age moving and flags a feed that has gone quiet` | Feed killed: "Last sync 5s ago" → "40s ago" → "1m ago", pill turns "● Sync stale · nothing for 1m" (`verify-08-feed-stalled.png`) |
+| 009 | `d0c54eb` | `view_feed › an_unresolvable_user_id_is_no_name_at_all` | Recent picks read "29. Javonte Williams · RB · 197lbsleanmeandadbod" |
+| 010 | `6fffbb4` | `Board › names its columns for assistive technology`, `SidePanel › uses second-level headings` | 11× `scope="col"`, caption "Available players, sorted by #", headings h1/h2/h2/h2 |
+| 011 | `5c7d672` | `Board › offers no draft action once the draft is complete`, `App › disables drafting once the draft is complete` | At 210/210 all 200 Draft buttons disabled, title "The draft is complete" (`verify-06-draft-complete.png`) |
+| 012 | `6fffbb4` | `ClockBanner start time › says the draft is late once its start time has passed` | "Draft has not started · scheduled for 7:10 AM — waiting on the commissioner" (`verify-07-pre-draft.png`) |
+| 013 | `fdbdbfa` | E2E now reads the moving values off the page instead of hard-coding a player | Fixture regenerated from the current engine: schema 1.3, banded DEF tiers, conditional survival, real manager names |
+
+## Found while fixing: this league has keepers
+
+Regenerating the fixture from live data (ISSUE-013) turned up something the
+browser pass could not see — **the 2026 draft already holds 23 keepers**, at
+picks 11, 14, 20 … 177, while its status is still `pre_draft`. Three defects
+followed, all fixed and covered by `src-tauri/tests/keepers.rs`:
+
+| # | Severity | Defect | Commit |
+|---|---|---|---|
+| 014 | **critical (tonight)** | `current_pick` was the pick *count* + 1, so with 23 keepers the app said "Round 2, Pick 24" before anyone had picked, and listed "your picks" from 27 instead of 2. It is now the lowest unfilled pick number; `my_next_picks` drops numbers a keeper already used, and `picks_until_mine` counts only picks that still have to happen. | `aedfa8f` |
+| 015 | **critical (tonight)** | The manual-pick fallback was dead in this league: `merged_picks` kept only manual picks numbered above every API pick, and a keeper sits at 177 — so anything marked by hand was silently discarded. Merging is now keyed on the pick number, and a manual pick takes the next open one. | `aedfa8f` |
+| 016 | medium | Recent picks and the positional-run detector were fed by keepers the draft had not reached (the panel led with picks 177, 165, 163 while the draft was on pick 30). Both now consider only picks below the clock. | `467ba44` |
+
+The simulator was made keeper-aware too, so `dump_state --simulate` drafts at
+the real next pick rather than at `n + 1`.

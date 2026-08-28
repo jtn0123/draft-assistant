@@ -19,6 +19,10 @@ server anywhere.
 - **VORP against real league demand.** Flex demand is allocated to the
   positions that actually hold the best remaining players; replacement level
   falls out of roster shape × team count (this league: 98 RB/WR/TE startable).
+- **Keeper leagues.** Keepers arrive as picks already in the book at scattered
+  pick numbers, before the draft starts. The clock follows the lowest *unfilled*
+  pick, your remaining picks skip the ones a keeper used, and keepers the draft
+  has not reached stay out of "recent picks".
 - **Live draft tracking.** Polls `GET /draft/{id}/picks` every 3s; on-the-clock
   banner with the pick clock (`last_picked + pick_timer`), all 14 rosters,
   tier alerts, position-run detection, recent picks by manager name. Snake,
@@ -201,6 +205,7 @@ fade from the top-right corner.
 | Pill **● Sync retrying** | One poll of Sleeper failed. | Nothing yet — the next poll is in 3 s. |
 | Pill **● Sync stale · N failures** (red) | N polls in a row failed; the board is frozen at the last good state. Hover the pill for the error. | Check the network. Picks made in Sleeper meanwhile catch up on the next good poll. If it stays red, record picks by hand with the **Draft** buttons — Sleeper's picks override them the moment sync recovers. |
 | Pill **○ Live sync off** | Polling is switched off. | Click the pill. |
+| Pill **● Sync stale · nothing for Nm** | Polls are not failing, but nothing has arrived for over 30 s. The draft may simply be quiet — or the feed has stopped. | Watch the pick number. If Sleeper has moved on and this has not, toggle the pill off and on. |
 | Warning `players refresh failed; using cache aged Nh` / `projections refresh failed; using cache aged Nh` / `weekly projections refresh failed; using cache aged Nh` | Sleeper did not answer; the app is running on its last download. Rankings are as good as that download. | Keep drafting. Click **Refresh data** once the network is back. |
 | Warning `weekly projections unavailable for weeks …` | Some per-week projections were missing. Only the yardage-bonus estimate loses a little precision. | Ignore. |
 | Warning `<file> could not be cached (…); will refetch` | The download worked but could not be saved — usually disk space or permissions. (Before 2026-08-28 two overlapping loads could also trigger this on `weekly_*.json`; that race is fixed.) | Free disk space. The app works; it re-downloads on next launch. |
