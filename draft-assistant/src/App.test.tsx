@@ -240,6 +240,25 @@ describe("App live workflow", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("submits the setup form with Enter", async () => {
+    const user = userEvent.setup();
+    const initial = fixture();
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: null,
+      active_league_id: null,
+      leagues: [],
+    });
+    testState.api.setMyUsername.mockResolvedValue("872674602265051136");
+    testState.api.addLeague.mockResolvedValue(initial);
+
+    render(<App />);
+    await user.type(await screen.findByLabelText("Sleeper username"), "mcsleeper26");
+    await user.type(screen.getByLabelText("League ID"), "1389710366300200960{Enter}");
+    expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+    expect(testState.api.setMyUsername).toHaveBeenCalledWith("mcsleeper26");
+    expect(testState.api.addLeague).toHaveBeenCalledWith("1389710366300200960");
+  });
+
   it("shows a setup error when a league cannot be loaded", async () => {
     const user = userEvent.setup();
     testState.api.getConfig.mockResolvedValue({

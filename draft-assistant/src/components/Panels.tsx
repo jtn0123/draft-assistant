@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../api";
 import type { DraftView, Recommendation } from "../types";
 import { errorMessage, fmt, pct } from "../format";
@@ -11,7 +11,9 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async () => {
+  const submit = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (!leagueId.trim() || busy !== null) return;
     setError(null);
     try {
       if (username.trim()) {
@@ -28,7 +30,7 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
   };
 
   return (
-    <div className="setup">
+    <form className="setup" onSubmit={submit}>
       <h1>Draft Assistant</h1>
       <p className="muted">
         Read-only Sleeper second screen. You draft in Sleeper; this tracks every
@@ -51,11 +53,11 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
           placeholder="e.g. 1389710366300200960"
         />
       </label>
-      <button disabled={!leagueId.trim() || busy !== null} onClick={submit}>
+      <button type="submit" disabled={!leagueId.trim() || busy !== null}>
         {busy ?? "Load league"}
       </button>
       {error && <div className="error">{error}</div>}
-    </div>
+    </form>
   );
 }
 
