@@ -19,6 +19,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test:e2e": "playwright test",
+    "coverage": "bun run coverage:frontend && bun run coverage:rust",
+    "coverage:frontend": "vitest run --coverage",
+    "coverage:rust": "cargo llvm-cov --manifest-path src-tauri/Cargo.toml --all-targets --summary-only",
     "fuzz:build": "cargo +nightly fuzz build --manifest-path src-tauri/fuzz/Cargo.toml"
   },
   "dependencies": {
@@ -37,6 +40,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.9.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.5",

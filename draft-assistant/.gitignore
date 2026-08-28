@@ -33,3 +33,6 @@ dist-ssr
 src-tauri/fuzz/corpus/
 src-tauri/fuzz/artifacts/
 src-tauri/fuzz/target/
+
+# Vitest coverage output (bun run coverage:frontend)
+coverage/

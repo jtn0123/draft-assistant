@@ -1,3 +1,5 @@
+/// The application behind the desktop commands, Tauri-free and tested.
+pub mod app;
 pub mod board;
 pub mod chat;
 /// The Tauri desktop shell. Optional so the domain library above can be built

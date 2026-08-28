@@ -7,6 +7,9 @@
 //! --simulate N fakes the first N picks (market drafts by ADP; my own slots
 //! take the engine's balanced recommendation) to exercise mid-draft state.
 //!
+//! DRAFT_ASSISTANT_DATA_DIR overrides the cache directory (default: a
+//! `draft-assistant-cli` folder under the system temp dir).
+//!
 //! --ask sends a question through the same Ask Claude path the app uses,
 //! streaming the answer to stderr as it is written. Repeat it for a
 //! conversation: each question sees the answers before it. --chat-out
@@ -118,7 +121,10 @@ async fn converse(view: &DraftView, questions: &[String]) -> Vec<serde_json::Val
 #[tokio::main]
 async fn main() {
     let args = parse_args();
-    let engine = match Engine::new(std::env::temp_dir().join("draft-assistant-cli")) {
+    let data_dir = std::env::var_os("DRAFT_ASSISTANT_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("draft-assistant-cli"));
+    let engine = match Engine::new(data_dir) {
         Ok(engine) => engine,
         Err(e) => {
             eprintln!("error: {e}");

@@ -9,10 +9,10 @@
 
 | ID | Category | Grade | Items |
 |----|----------|-------|-------|
-| A | Architecture & Design | B+ | 3 |
+| A | Architecture & Design | A− *(13:00, poll loop and commands extracted; was B+)* | 3 |
 | B | Backend Quality | B+ | 5 |
 | C | Frontend Quality | B+ | 4 |
-| D | Testing & Reliability | B+ | 4 |
+| D | Testing & Reliability | A− *(13:00, after the coverage work; was B+)* | 4 |
 | E | Security | B+ | 3 |
 | F | Dependencies & Tech Currency | B− | 3 |
 | G | Performance & Scalability | B+ | 3 |
@@ -42,7 +42,7 @@ Since 08:00: **10 of the previous 36 items closed** (B1, C2, C5, D3, E2, E4, F1,
 | **Caches** | 🟡 | Refreshed 09:27. Players TTL 24 h → fine. **Projections TTL 6 h → they expire 15:27.** The app you have open keeps its board in memory, so leave it running and nothing re-downloads; a *relaunch* after 15:27 re-fetches ~20 MB under the new 60 s cap (measured 6.5 s cold) and falls back to the cached copy with a banner if the wifi is bad |
 | **Eyes on the streaming path in the real window** | 🟡 | The Tauri `Channel` that carries streamed text is the one new piece no test can reach (WKWebView has no driver). Everything up to it is covered by a stub CLI; the app boots on it. **Open the panel and ask one throwaway question before 17:00** — 20 seconds, ~$0.20 — and you have seen the whole path |
 
-**Residual risk, ranked:** (1) the IPC layer (`desktop.rs`, 362 lines, zero tests) — a regression there is caught only by launching, which is why the yellow above matters; (2) venue wifi at a relaunch — mitigated by stale-cache fallback and by not relaunching; (3) nothing else known.
+**Residual risk, ranked:** (1) the IPC layer — since 13:00 reduced to `desktop.rs`'s 150 lines of glue; everything it forwards to is tested against a stub Sleeper (`tests/app_core.rs`), so what remains uncovered is the Tauri adapter itself, still caught only by launching; (2) venue wifi at a relaunch — mitigated by stale-cache fallback and by not relaunching; (3) nothing else known.
 
 **Do not execute any item below before the draft.** Every one touches code that is verified green. The only pre-draft actions are operational: leave the app running (or refresh once after 11:00 if you will relaunch), ask Claude one question in the real window, and flip on "Ask when I'm on the clock" in the panel's Settings if you want it.
 
@@ -52,7 +52,9 @@ Since 08:00: **10 of the previous 36 items closed** (B1, C2, C5, D3, E2, E4, F1,
 
 The dependency graph is one-way and got one more clean seam today: `chat/stream.rs` (pure line classifier + `Accumulator`) sits under `chat/cli.rs` (process handling) under `chat/mod.rs` (the two operations), and `ask` takes a `&mut dyn FnMut(&str)` so the domain crate streams without knowing Tauri exists — `desktop.rs` wraps a `Channel` in a closure, `dump_state` wraps stderr. The frontend mirrors it: `chatMarkdown.tsx` (parser) under `Markdown.tsx` (component), `chatOptions.ts` splits the backend contract (`ChatOptions`) from panel preferences (`ChatPrefs`). Every first-party file is ≤500 lines, enforced. What still holds it at B+: the TypeScript contract is transcribed by hand (today's `ChatReply.as_of` was the third lockstep edit of the week), and the poll loop — the app's most important runtime behaviour — is still inlined in a Tauri command with no testable boundary.
 
-#### A1 — Extract the poll loop from `desktop.rs`
+*Update 13:00:* the second half is fixed. `app.rs` holds `AppCore` — every command body and the poll loop (`poll_once` / `poll_loop`, emitting `PollEvent`s through a closure) — with no Tauri types, and `desktop.rs` is 150 lines that adapt `State`, `Channel` and window events to it. Only A2 (generated types) remains between this category and A−.
+
+#### ~~A1 — Extract the poll loop from `desktop.rs`~~ ✓ done 2026-08-28 13:00 (`app.rs`: `AppCore::poll_once`/`poll_loop`, plus every command body; `desktop.rs` is 150 lines of IPC glue)
 - **Where:** `src-tauri/src/desktop.rs:229-320` (`start_polling`; loop body `:246-318`)
 - **What's wrong:** A 90-line command whose body is the entire live-sync state machine — fetch, fingerprint, manual-pick reconciliation, health accounting, two emits — with no unit-testable boundary. D1 is the direct consequence. `poll_fingerprint` and `manual.rs` were extracted precisely so their logic could be tested; the wiring around them still cannot be.
 - **Fix:** Move the body into `poll.rs` as `async fn poll_once(engine, loaded, cursor) -> PollOutcome { changed, health, errors }`; leave the command to spawn, sleep and emit.
@@ -66,7 +68,7 @@ The dependency graph is one-way and got one more clean seam today: `chat/stream.
 - **Effort:** M
 - **Grade lift:** B+ → A− (the Rust↔TS boundary becomes compiler-checked)
 
-#### A3 — Delete the `view_from` alias and the `chat` command/module name clash
+#### ~~A3 — Delete the `view_from` alias and the `chat` command/module name clash~~ ✓ done 2026-08-28 13:00 (both went with the extraction: no alias, and the command forwards to `AppCore::ask`)
 - **Where:** `src-tauri/src/desktop.rs:25-27` (`view_from`), `:192-215` (`chat` command with the "module is spelled out to disambiguate" comment)
 - **What's wrong:** `view_from` is a one-line pass-through to `build_view` used in nine places. The `chat` command shadows the `chat` module, forcing `crate::chat::ask` and a comment explaining why — and today's edit had to preserve both.
 - **Fix:** Delete `view_from`; rename the command to `ask_claude` and update the invoke string in `api.ts:77`.
@@ -160,21 +162,21 @@ Up from B: CI runs now (D3), and the AI work landed with 24 tests written first 
 
 Closed since 08:00: ~~D3 run CI~~ (PR #1, four green runs).
 
-#### D1 — Test the Tauri command layer `[BE]`
+#### ~~D1 — Test the Tauri command layer `[BE]`~~ ✓ done 2026-08-28 13:00 (`tests/app_core.rs`: 11 tests over `AppCore` against a stub Sleeper — commands, rollback, poll state machine, streaming ask through a stub CLI)
 - **Where:** `src-tauri/src/desktop.rs` (362 lines, **zero** `#[test]`); commands at `:32`, `:59`, `:89`, `:126`, `:141`, `:160`, `:177`, `:192` (now with `Channel<String>`), `:229`
 - **What's wrong:** Every IPC entry point is untested: the save-then-roll-back on a failed manual pick, the lock ordering, the poll loop's change detection, the health accounting, and since this morning the closure that forwards streamed text over the channel. `manual.rs`, `poll_fingerprint` and `chat::ask` were all shaped so their logic could be tested — the wiring around them still cannot be.
 - **Fix:** Do A1 first, then test `poll_once` against a `SleeperClient` pointed at a local stub server: no-change → no emit, new pick → emit, fetch error → failure counter, same count different player → emit. For the chat command, a `#[cfg(feature = "desktop")]` test that builds `AppState` and calls the command's inner function with a `Vec`-collecting closure.
 - **Effort:** M
 - **Grade lift:** B+ → A− (the live-sync state machine and the streaming wire get covered)
 
-#### D2 — Test the engine's fetch, cache and fallback path `[BE]`
+#### ~~D2 — Test the engine's fetch, cache and fallback path `[BE]`~~ ✓ done 2026-08-28 13:00 (`tests/engine_cache.rs`: 10 tests — hit/miss/expired/force, stale fallback per cache, no-cache errors, missing weeks, unwritable cache, mock draft, `load_any`)
 - **Where:** `src-tauri/src/engine.rs:94-203` (two tests in the file, both about manual picks)
 - **What's wrong:** Cache-hit, cache-miss, fetch-failure-with-stale-fallback, fetch-failure-with-no-cache and the "could not be cached" warning are reachable only by taking the network away by hand. This is the code that decides what the board is built from, and tonight's 15:27 projections expiry runs straight through it.
 - **Fix:** Point `SleeperClient` at a stub server per case (200 with a fixture, 500, a hang) and assert the returned warnings and the age stamp. Six tests cover the matrix; `tests/sleeper_client.rs` already shows the pattern.
 - **Effort:** M
 - **Grade lift:** B+ → A− (the data path's failure modes stop being untested)
 
-#### D3 — Add a smoke test that the desktop shell actually boots `[both]`
+#### D3 — Add a smoke test that the desktop shell actually boots `[both]` *(narrowed 13:00: everything below the Tauri glue is now covered; what remains is the window itself)*
 - **Where:** no coverage; `src-tauri/src/desktop.rs:325-361` (`run()`), `src/main.tsx`
 - **What's wrong:** The app has been launched by hand four times today and verified only indirectly (it rewrote `config.json`, it polls). Nothing automated would catch "the window opens white" or "the channel never delivers" — the two failure modes that matter most and are invisible to the whole suite.
 - **Fix:** A `cargo test --features desktop` test that builds `AppState`, calls `get_config`/`get_state` against a stub server and asserts a `DraftView` comes back; that covers the IPC types without a window.

@@ -75,14 +75,28 @@ bun run tauri build
 bun run verify        # everything: LOC cap, fmt, typecheck, build, tests, e2e, lint
 bun run test          # Vitest (frontend) + cargo test (Rust)
 bun run test:e2e      # Playwright against the browser preview
+bun run coverage      # line coverage for both halves (needs cargo-llvm-cov)
 ```
 
-- **Rust — 55 tests.** Unit tests per module, fixture-driven integration tests
-  (`src-tauri/tests/`), a 210-pick draft simulation with invariant checks,
-  Sleeper wire-format parsing tests, and **property-based tests** (`proptest`)
-  over the draft math and every deserializer.
-- **Frontend — 15 Vitest tests** in jsdom, plus **7 Playwright tests** driving a
-  real Chromium against the browser-preview fixture.
+- **Rust — 140 tests.** Unit tests per module, property-based tests
+  (`proptest`) over the draft math and every deserializer, and integration
+  tests in `src-tauri/tests/` that run against a **stub Sleeper server**
+  (`tests/support/`): the engine's fetch/cache/fallback matrix
+  (`engine_cache.rs`), every desktop command including manual-pick rollback
+  and the live poll state machine (`app_core.rs` — the commands live in
+  `app::AppCore`, which knows nothing about Tauri), the `dump_state` binary
+  run as a real process (`dump_state_cli.rs`), keeper handling, the chat
+  stream parser and a stub `claude` CLI, and a 210-pick draft simulation with
+  invariant checks.
+- **Frontend — 73 Vitest tests** in jsdom (components, the chat panel's
+  streaming/markdown/budget/auto-ask behaviour, and both halves of `api.ts`:
+  the Tauri channel bridge and the browser preview's replay and recording
+  playback), plus **16 Playwright tests** driving a real Chromium against the
+  browser-preview fixture and a recorded chat session.
+- **Coverage** (2026-08-28): Rust **92 %** of lines, frontend **93 %**.
+  `bun run coverage:rust` needs `cargo install cargo-llvm-cov` and
+  `rustup component add llvm-tools-preview` once. The two files at 0 % are
+  `desktop.rs` and `main.rs` — the Tauri glue, ~150 lines with no logic in it.
 - **Fuzzing** — three `cargo-fuzz` targets in `src-tauri/fuzz/`. They build but
   do not currently run on macOS 27; see `src-tauri/fuzz/README.md` for why and
   what covers the gap.
@@ -90,6 +104,8 @@ bun run test:e2e      # Playwright against the browser preview
 Playwright covers the rendered UI, not the Tauri IPC boundary (the browser
 fallback stubs it). A true desktop E2E on macOS would need WebdriverIO's
 embedded WebDriver server — `tauri-driver` has no macOS WKWebView driver.
+The tests set `DRAFT_ASSISTANT_DATA_DIR` so `dump_state` never touches the
+real CLI cache; the same variable works for anyone who wants a separate one.
 
 ## Headless state dump / simulation
 
