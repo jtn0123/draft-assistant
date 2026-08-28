@@ -46,7 +46,8 @@ server anywhere.
   conversation, and lets you pick model, thinking effort, speed, and whether
   it may search the web. See [Ask Claude](#ask-claude).
 - **Sortable board.** Click any column header — Bye, Pos, Pts, VORP, Tier,
-  ADP, Surv — to sort; click again to flip; `#` restores value order.
+  ADP, Surv — to sort; click again to flip; `#` restores value order. `/` jumps
+  to the search box, and "Show all" lifts the 200-row cap.
 - **Multi-league.** Leagues are stored in config; switching is a config value,
   never a code change.
 
@@ -191,6 +192,33 @@ The UI degrades to a read-only preview when opened in a plain browser (vite dev
 server on :1420): it renders `public/dev-fixture.json`, a captured state dump.
 Regenerate the fixture with `dump_state`. Add `?replay=<url>` to poll a state
 dump that keeps changing — see [Demo / replay mode](#demo--replay-mode).
+
+## Before the draft
+
+Twenty minutes of setup on a good connection saves the two failures most
+likely to bite on draft night.
+
+1. **Launch the app and look at it.** `bun run tauri dev` (or the packaged
+   `.app`). Confirm the league name, your slot, and — in a keeper league — that
+   your keepers are on your roster and missing from "Your picks".
+2. **Click Refresh data while you are still on good wifi.** Projections are
+   cached for 6 hours and the player dictionary for 24, so a draft that starts
+   more than six hours after your last launch will re-download ~20 MB at the
+   worst possible moment. Refreshing beforehand makes the venue's wifi
+   irrelevant. (If it does fail there, the app falls back to the cached copy and
+   says so in an amber banner — you can draft on it.)
+3. **Check the sync pill goes green.** "● Live sync on" with a "Last sync Ns
+   ago" that keeps counting. If it says "Sync stale · nothing for …", nothing is
+   arriving.
+4. **Ask Claude one throwaway question** if you plan to use it, so you find out
+   then — not at pick 27 — whether the CLI is logged in.
+5. **Know the fallback.** If Sleeper's API stalls, the **Draft** button on each
+   row records the pick locally; the board keeps working and Sleeper's own picks
+   override yours the moment sync recovers. **Undo** removes the last manual
+   pick (it is disabled when there is nothing to undo).
+
+Two keystrokes worth remembering: **`/`** jumps to the player search, **Esc**
+closes the confirm dialog or the chat panel.
 
 ## Draft-day troubleshooting
 
