@@ -8,6 +8,13 @@ use crate::recommend::{recommend, Recommendation};
 use crate::sleeper::Pick;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Monotonic build counter. `generated_at` is only second-resolution, which is
+/// far too coarse to order a 3s poll against a click that lands in the same
+/// second — so the frontend orders on this instead and drops anything older
+/// than what it has already rendered.
+static VIEW_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DraftStatus {
@@ -50,6 +57,9 @@ pub struct RecentPick {
 pub struct DraftView {
     pub schema_version: String,
     pub generated_at: u64,
+    /// Strictly increasing per build. Used by the UI to discard out-of-order
+    /// updates; see [`VIEW_SEQ`].
+    pub seq: u64,
     pub league: LeagueSummary,
     pub draft: DraftStatus,
     pub my_roster: Option<TeamRoster>,
@@ -309,8 +319,9 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     warnings.extend(slot_warning);
 
     DraftView {
-        schema_version: "1.1".into(),
+        schema_version: "1.2".into(),
         generated_at: now_secs(),
+        seq: VIEW_SEQ.fetch_add(1, Ordering::Relaxed) + 1,
         league: LeagueSummary {
             league_id: league.league_id.clone(),
             name: league.name.clone(),

@@ -14,10 +14,22 @@ export default function App() {
   const [view, setView] = useState<DraftView | null>(null);
   const [polling, setPolling] = useState(false);
   const [pollHealth, setPollHealth] = useState<PollHealth | null>(null);
-  const [confirm, setConfirm] = useState<Confirm>(null);
+  const [confirm, setConfirmState] = useState<Confirm>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const toastTimer = useRef<number | undefined>(undefined);
+  // Highest view seq already rendered. The 3s poll and the awaited click
+  // handlers both push views with no ordering guarantee, so without this a
+  // poll that started earlier can land later and overwrite a fresher result.
+  const appliedSeq = useRef(0);
+  // Mirrors `confirm` so the update callback below can read the pending pick
+  // without re-subscribing to the poller on every open/close.
+  const confirmRef = useRef<Confirm>(null);
+
+  const setConfirm = useCallback((next: Confirm) => {
+    confirmRef.current = next;
+    setConfirmState(next);
+  }, []);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -26,7 +38,20 @@ export default function App() {
   }, []);
 
   const applyView = useCallback((next: DraftView) => {
+    if (next.seq <= appliedSeq.current) return;
+    appliedSeq.current = next.seq;
     setView(next);
+    // The confirm modal holds a click-time snapshot. Live sync can draft that
+    // player to someone else while it sits open, and confirming would then
+    // record a pick that never happened.
+    const pending = confirmRef.current;
+    if (
+      pending &&
+      !next.available.some((p) => p.player_id === pending.playerId)
+    ) {
+      setConfirm(null);
+      showToast(`${pending.name} was drafted by another team — pick cancelled`);
+    }
     setPollHealth({
       last_success_at:
         next.data_health.poll_last_success_at ?? next.generated_at,
@@ -34,7 +59,7 @@ export default function App() {
         next.data_health.poll_consecutive_failures ?? 0,
       last_error: next.data_health.poll_last_error ?? null,
     });
-  }, []);
+  }, [setConfirm, showToast]);
 
   const startLive = useCallback(async () => {
     try {
@@ -79,6 +104,7 @@ export default function App() {
     };
   }, []);
 
+
   const togglePolling = async () => {
     try {
       if (polling) {
@@ -96,8 +122,9 @@ export default function App() {
   const doDraft = async (playerId: string) => {
     try {
       const v = await api.recordManualPick(playerId);
-      applyView(v);
+      // Clear first so the stale-pick effect above cannot fire on our own pick.
       setConfirm(null);
+      applyView(v);
     } catch (e) {
       showToast(String(e));
       setConfirm(null);

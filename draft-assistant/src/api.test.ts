@@ -4,14 +4,14 @@ import { validateDraftView } from "./api";
 
 describe("DraftView schema guard", () => {
   it("accepts the current schema", () => {
-    const view = { schema_version: "1.1" } as DraftView;
+    const view = { schema_version: "1.2" } as DraftView;
     expect(validateDraftView(view)).toBe(view);
   });
 
   it("rejects stale data with an actionable message", () => {
-    const view = { schema_version: "1.0" } as DraftView;
+    const view = { schema_version: "1.1" } as DraftView;
     expect(() => validateDraftView(view)).toThrow(
-      "expected schema 1.1, received 1.0",
+      "expected schema 1.2, received 1.1",
     );
   });
 });

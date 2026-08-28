@@ -45,9 +45,9 @@ pub struct StoredLeague {
 // ---------- cache envelope ----------
 
 #[derive(Serialize, Deserialize)]
-struct Cached<T> {
-    fetched_at: u64,
-    data: T,
+pub(crate) struct Cached<T> {
+    pub fetched_at: u64,
+    pub data: T,
 }
 
 // ---------- engine ----------
@@ -79,84 +79,16 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(data_dir: PathBuf) -> Self {
-        std::fs::create_dir_all(&data_dir).ok();
-        Self {
+    /// Fails if the data directory cannot be created — without it nothing can
+    /// be cached or saved, so it is better to say so at startup than to report
+    /// success on every later write.
+    pub fn new(data_dir: PathBuf) -> Result<Self, String> {
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|e| format!("create data dir {}: {e}", data_dir.display()))?;
+        Ok(Self {
             client: SleeperClient::new(),
             data_dir,
-        }
-    }
-
-    fn cache_path(&self, name: &str) -> PathBuf {
-        self.data_dir.join(name)
-    }
-
-    fn read_cache<T: serde::de::DeserializeOwned>(&self, name: &str, ttl: u64) -> Option<(u64, T)> {
-        let (fetched_at, data) = self.read_cache_any(name)?;
-        if now_secs().saturating_sub(fetched_at) > ttl {
-            return None;
-        }
-        Some((fetched_at, data))
-    }
-
-    fn read_cache_any<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<(u64, T)> {
-        let raw = std::fs::read_to_string(self.cache_path(name)).ok()?;
-        let cached: Cached<T> = serde_json::from_str(&raw).ok()?;
-        Some((cached.fetched_at, cached.data))
-    }
-
-    fn write_cache<T: Serialize>(&self, name: &str, data: &T) -> u64 {
-        let fetched_at = now_secs();
-        let env = Cached { fetched_at, data };
-        if let Ok(json) = serde_json::to_string(&env) {
-            let tmp = self.cache_path(&format!("{name}.tmp"));
-            if std::fs::write(&tmp, json).is_ok() {
-                std::fs::rename(tmp, self.cache_path(name)).ok();
-            }
-        }
-        fetched_at
-    }
-
-    fn write_cache_checked<T: Serialize>(&self, name: &str, data: &T) -> Result<u64, String> {
-        let fetched_at = now_secs();
-        let env = Cached { fetched_at, data };
-        let json = serde_json::to_string(&env).map_err(|e| format!("serialize {name}: {e}"))?;
-        let tmp = self.cache_path(&format!("{name}.tmp"));
-        std::fs::write(&tmp, json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, self.cache_path(name)).map_err(|e| format!("replace {name}: {e}"))?;
-        Ok(fetched_at)
-    }
-
-    fn manual_picks_cache_name(draft_id: &str) -> String {
-        let safe_id: String = draft_id
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-            .collect();
-        format!("manual_picks_{safe_id}.json")
-    }
-
-    pub fn load_manual_picks(&self, draft_id: &str) -> Vec<Pick> {
-        self.read_cache_any(&Self::manual_picks_cache_name(draft_id))
-            .map(|(_, picks)| picks)
-            .unwrap_or_default()
-    }
-
-    pub fn save_manual_picks(&self, draft_id: &str, picks: &[Pick]) -> Result<(), String> {
-        self.write_cache_checked(&Self::manual_picks_cache_name(draft_id), &picks)?;
-        Ok(())
-    }
-
-    pub fn load_config(&self) -> AppConfig {
-        std::fs::read_to_string(self.cache_path("config.json"))
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
-    }
-
-    pub fn save_config(&self, config: &AppConfig) {
-        if let Ok(json) = serde_json::to_string_pretty(config) {
-            std::fs::write(self.cache_path("config.json"), json).ok();
-        }
+        })
     }
 
     async fn players(
@@ -171,8 +103,8 @@ impl Engine {
         let stale = self.read_cache_any("players.json");
         match self.client.players().await {
             Ok(data) => {
-                let at = self.write_cache("players.json", &data);
-                Ok((at, data, None))
+                let (at, warning) = self.write_cache("players.json", &data);
+                Ok((at, data, warning))
             }
             Err(error) => stale
                 .map(|(at, data)| {
@@ -204,8 +136,8 @@ impl Engine {
         let stale = self.read_cache_any(&name);
         match self.client.season_projections(season).await {
             Ok(data) => {
-                let at = self.write_cache(&name, &data);
-                Ok((at, data, None))
+                let (at, warning) = self.write_cache(&name, &data);
+                Ok((at, data, warning))
             }
             Err(error) => stale
                 .map(|(at, data)| {
@@ -268,8 +200,8 @@ impl Engine {
                 })
                 .ok_or(error);
         }
-        let at = self.write_cache(&name, &all);
-        let warning = if failures.is_empty() {
+        let (at, cache_warning) = self.write_cache(&name, &all);
+        let missing_warning = if failures.is_empty() {
             None
         } else {
             Some(format!(
@@ -280,6 +212,11 @@ impl Engine {
                     .collect::<Vec<_>>()
                     .join(", ")
             ))
+        };
+        // Both can happen at once; keep whichever fired, joined.
+        let warning = match (missing_warning, cache_warning) {
+            (Some(a), Some(b)) => Some(format!("{a}; {b}")),
+            (a, b) => a.or(b),
         };
         Ok((at, all, warning))
     }
@@ -442,32 +379,23 @@ mod reliability_tests {
     }
 
     #[test]
-    fn expired_cache_is_still_available_for_outage_fallback() {
-        let dir = test_dir("stale-cache");
-        let engine = Engine::new(dir.clone());
-        let cached = Cached {
-            fetched_at: 1,
-            data: vec![10_u32, 20_u32],
+    fn engine_new_reports_an_unusable_data_dir() {
+        let dir = test_dir("engine-new-file");
+        std::fs::create_dir_all(dir.parent().unwrap()).ok();
+        // A regular file where the data dir should be: create_dir_all must fail.
+        std::fs::write(&dir, b"not a directory").unwrap();
+        let err = match Engine::new(dir.clone()) {
+            Ok(_) => panic!("file in the way must error"),
+            Err(e) => e,
         };
-        std::fs::write(
-            engine.cache_path("test.json"),
-            serde_json::to_string(&cached).unwrap(),
-        )
-        .unwrap();
-
-        assert!(engine.read_cache::<Vec<u32>>("test.json", 1).is_none());
-        assert_eq!(
-            engine.read_cache_any::<Vec<u32>>("test.json"),
-            Some((1, vec![10, 20]))
-        );
-
-        std::fs::remove_dir_all(dir).unwrap();
+        assert!(err.contains("create data dir"), "{err}");
+        std::fs::remove_file(dir).unwrap();
     }
 
     #[test]
     fn manual_picks_survive_reload_and_reconcile_with_api_progress() {
         let dir = test_dir("manual-picks");
-        let engine = Engine::new(dir.clone());
+        let engine = Engine::new(dir.clone()).expect("temp data dir");
         let manual = vec![pick(1, "manual-1"), pick(2, "manual-2")];
 
         engine.save_manual_picks("draft-123", &manual).unwrap();

@@ -1,6 +1,7 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "generated_at": 1787882005,
+  "seq": 1,
   "league": {
     "league_id": "1389710366300200960",
     "name": "UMass Wrestling Fantasy Football League",

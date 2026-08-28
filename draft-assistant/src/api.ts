@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppConfig, DraftView, PollHealth } from "./types";
 
-const DRAFT_VIEW_SCHEMA_VERSION = "1.1";
+const DRAFT_VIEW_SCHEMA_VERSION = "1.2";
 
 export function validateDraftView(value: DraftView): DraftView {
   if (value.schema_version !== DRAFT_VIEW_SCHEMA_VERSION) {

@@ -117,6 +117,8 @@ export interface PollHealth {
 export interface DraftView {
   schema_version: string;
   generated_at: number;
+  /// Strictly increasing per backend build; used to discard out-of-order updates.
+  seq: number;
   league: LeagueSummary;
   draft: DraftStatus;
   my_roster: TeamRoster | null;

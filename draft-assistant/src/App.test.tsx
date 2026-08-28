@@ -28,14 +28,22 @@ vi.mock("./api", () => ({ api: testState.api }));
 
 import App from "./App";
 
+// The backend stamps every build with a strictly increasing `seq`, and the UI
+// drops anything not newer than what it has rendered. Mirror that here so each
+// synthetic view is genuinely newer than the last.
+let nextSeq = 0;
+
 function fixture(): DraftView {
-  return structuredClone(fixtureJson) as unknown as DraftView;
+  const view = structuredClone(fixtureJson) as unknown as DraftView;
+  view.seq = ++nextSeq;
+  return view;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   testState.draftHandler = null;
   testState.healthHandler = null;
+  nextSeq = 0;
   testState.api.startPolling.mockResolvedValue(undefined);
   testState.api.stopPolling.mockResolvedValue(undefined);
   testState.api.exportState.mockResolvedValue("/tmp/draft-state.json");
@@ -102,6 +110,61 @@ describe("App live workflow", () => {
 
     await user.click(screen.getByRole("button", { name: "Undo" }));
     expect(testState.api.undoManualPick).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a view that is older than what is already rendered", async () => {
+    const initial = fixture();
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+
+    render(<App />);
+    expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+
+    const newer = fixture();
+    newer.league.name = "Newer";
+    act(() => testState.draftHandler?.(newer));
+    expect(screen.getByText("Newer")).toBeInTheDocument();
+
+    // A poll that started earlier but landed later must not win.
+    const stale = fixture();
+    stale.league.name = "Stale poll result";
+    stale.seq = newer.seq - 1;
+    act(() => testState.draftHandler?.(stale));
+    expect(screen.queryByText("Stale poll result")).not.toBeInTheDocument();
+    expect(screen.getByText("Newer")).toBeInTheDocument();
+  });
+
+  it("cancels a pending pick when that player is drafted by someone else", async () => {
+    const user = userEvent.setup();
+    const initial = fixture();
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+
+    render(<App />);
+    expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("button", { name: "Draft" })[0]);
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeInTheDocument();
+
+    // Live sync reports Chris Olave gone while the modal sits open.
+    const taken = fixture();
+    taken.available = taken.available.filter((p) => p.player_id !== "8144");
+    taken.recommendations = [];
+    act(() => testState.draftHandler?.(taken));
+
+    expect(screen.queryByRole("button", { name: "Confirm" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Chris Olave was drafted by another team/),
+    ).toBeInTheDocument();
+    expect(testState.api.recordManualPick).not.toHaveBeenCalled();
   });
 
   it("shows a setup error when a league cannot be loaded", async () => {

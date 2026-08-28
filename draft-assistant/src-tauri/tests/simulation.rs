@@ -178,3 +178,21 @@ fn full_draft_simulation_preserves_view_invariants() {
         .as_ref()
         .is_some_and(|roster| roster.open_starters.is_empty()));
 }
+
+/// The UI orders live updates on `seq` and drops anything not newer, so a
+/// non-increasing `seq` would make the board silently stop updating.
+#[test]
+fn view_seq_strictly_increases_across_builds() {
+    let (mut loaded, config) = loaded_fixture();
+    let mut last = 0;
+    for _ in 0..5 {
+        let view = build_view(&loaded, &config);
+        assert!(
+            view.seq > last,
+            "seq must strictly increase: got {} after {last}",
+            view.seq
+        );
+        last = view.seq;
+        loaded.manual_picks.clear();
+    }
+}

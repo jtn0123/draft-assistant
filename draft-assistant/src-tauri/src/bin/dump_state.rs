@@ -49,7 +49,13 @@ async fn lookup_user(username: &str) -> Option<String> {
 #[tokio::main]
 async fn main() {
     let (league_id, username, out_path, simulate) = parse_args();
-    let engine = Engine::new(std::env::temp_dir().join("draft-assistant-cli"));
+    let engine = match Engine::new(std::env::temp_dir().join("draft-assistant-cli")) {
+        Ok(engine) => engine,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+    };
 
     let mut config = AppConfig::default();
     if let Some(username) = &username {

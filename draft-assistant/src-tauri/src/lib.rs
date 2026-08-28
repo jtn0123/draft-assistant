@@ -7,6 +7,7 @@ pub mod roster;
 pub mod scoring;
 pub mod simulation;
 pub mod sleeper;
+mod store;
 pub mod valuation;
 pub mod view;
 
@@ -61,7 +62,7 @@ async fn add_league(
         });
     }
     config.active_league_id = Some(league_id);
-    state.engine.save_config(&config);
+    state.engine.save_config(&config)?;
     let view = view_from(&new_loaded, &config);
     // Never hold config while waiting for loaded: the live path reads loaded first.
     drop(config);
@@ -82,7 +83,7 @@ async fn set_my_username(state: State<'_, AppState>, username: String) -> Result
     let user = user.ok_or_else(|| format!("Sleeper user '{username}' not found"))?;
     let mut config = state.config.lock().await;
     config.my_user_id = Some(user.user_id.clone());
-    state.engine.save_config(&config);
+    state.engine.save_config(&config)?;
     Ok(user.user_id)
 }
 
@@ -335,7 +336,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir().expect("no app data dir");
-            let engine = Engine::new(data_dir);
+            let engine = Engine::new(data_dir)?;
             let config = engine.load_config();
             app.manage(AppState {
                 engine: Arc::new(engine),
