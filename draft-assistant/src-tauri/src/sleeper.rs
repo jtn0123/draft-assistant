@@ -71,8 +71,13 @@ pub struct Draft {
     /// user_id -> draft slot (1-based)
     #[serde(default)]
     pub draft_order: Option<HashMap<String, u32>>,
+    /// Scheduled start, ms since the epoch.
     #[serde(default)]
     pub start_time: Option<i64>,
+    /// When the most recent pick was made, ms since the epoch. With
+    /// `settings.pick_timer` this is the pick clock.
+    #[serde(default)]
+    pub last_picked: Option<i64>,
     #[serde(default)]
     pub season: Option<String>,
     #[serde(default)]

@@ -125,6 +125,20 @@ fn validated_slot(slot: Option<u32>, teams: u32) -> (Option<u32>, Option<String>
     }
 }
 
+/// What the poll loop compares between polls to decide whether the UI needs
+/// a fresh view. Must change whenever anything the view renders from the
+/// draft feed changes — not just the pick count.
+pub fn poll_fingerprint(picks: &[Pick], draft: &crate::sleeper::Draft) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for pick in picks {
+        (pick.pick_no, pick.draft_slot, pick.player_id.as_str()).hash(&mut hasher);
+    }
+    draft.status.hash(&mut hasher);
+    draft.last_picked.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Merge API picks with manual fallback picks. API picks are authoritative;
 /// manual picks only fill pick numbers beyond what the API has reported.
 pub fn merged_picks(api: &[Pick], manual: &[Pick]) -> Vec<Pick> {
@@ -390,6 +404,62 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             poll_consecutive_failures: loaded.poll_consecutive_failures,
             poll_last_error: loaded.poll_last_error.clone(),
         },
+    }
+}
+
+#[cfg(test)]
+mod poll_fingerprint_tests {
+    use super::poll_fingerprint;
+    use crate::sleeper::{Draft, Pick};
+
+    fn draft(status: &str, last_picked: Option<i64>) -> Draft {
+        serde_json::from_value(serde_json::json!({
+            "draft_id": "d", "status": status, "type": "snake",
+            "settings": {"teams": 2, "rounds": 2}, "last_picked": last_picked
+        }))
+        .unwrap()
+    }
+
+    fn pick(pick_no: u32, player_id: &str) -> Pick {
+        Pick {
+            round: 1,
+            pick_no,
+            draft_slot: pick_no,
+            player_id: player_id.into(),
+            picked_by: None,
+            metadata: None,
+        }
+    }
+
+    // The loop used to emit only when the pick count or status changed, so a
+    // commissioner undo + redo (same count, different player) stayed
+    // invisible until the next pick landed.
+    #[test]
+    fn swapping_a_player_at_the_same_count_changes_the_fingerprint() {
+        let before = poll_fingerprint(&[pick(1, "a"), pick(2, "b")], &draft("drafting", None));
+        let after = poll_fingerprint(&[pick(1, "a"), pick(2, "c")], &draft("drafting", None));
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn a_new_pick_clock_changes_the_fingerprint() {
+        let picks = [pick(1, "a")];
+        let before = poll_fingerprint(&picks, &draft("drafting", Some(1_000)));
+        let after = poll_fingerprint(&picks, &draft("drafting", Some(2_000)));
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn identical_feeds_share_a_fingerprint() {
+        let picks = [pick(1, "a"), pick(2, "b")];
+        assert_eq!(
+            poll_fingerprint(&picks, &draft("drafting", Some(5))),
+            poll_fingerprint(picks.as_ref(), &draft("drafting", Some(5)))
+        );
+        assert_ne!(
+            poll_fingerprint(&picks, &draft("drafting", None)),
+            poll_fingerprint(&picks, &draft("complete", None))
+        );
     }
 }
 

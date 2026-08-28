@@ -102,6 +102,7 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         },
         draft_order: Some(draft_order),
         start_time: None,
+        last_picked: None,
         season: Some(league.season.clone()),
         metadata: None,
         creators: None,

@@ -214,7 +214,9 @@ async fn chat_compact(history: Vec<ChatTurn>, options: ChatOptions) -> Result<Ch
 }
 
 /// Start polling Sleeper picks every `interval_secs` (default 3). Emits a
-/// "draft-updated" event with the fresh DraftView whenever anything changed.
+/// "draft-updated" event with the fresh DraftView whenever the feed changed —
+/// judged on the picks' contents and the draft's status and clock, not the
+/// pick count alone, so an edited pick or a commissioner undo shows up too.
 #[tauri::command]
 async fn start_polling(
     app: tauri::AppHandle,
@@ -232,8 +234,7 @@ async fn start_polling(
     let poll_generation = state.poll_generation.clone();
 
     tauri::async_runtime::spawn(async move {
-        let mut last_count: Option<usize> = None;
-        let mut last_status = String::new();
+        let mut last_fingerprint: Option<u64> = None;
         loop {
             if !polling.load(Ordering::SeqCst)
                 || poll_generation.load(Ordering::SeqCst) != generation
@@ -257,10 +258,6 @@ async fn start_polling(
                     if let Some(loaded) = loaded.as_mut() {
                         match picks {
                             Ok(picks) => {
-                                if last_count != Some(picks.len()) {
-                                    last_count = Some(picks.len());
-                                    changed = true;
-                                }
                                 loaded.api_picks = picks;
                                 if engine::reconcile_manual_picks(
                                     &loaded.api_picks,
@@ -276,14 +273,13 @@ async fn start_polling(
                             Err(error) => errors.push(error),
                         }
                         match draft {
-                            Ok(draft) => {
-                                if draft.status != last_status {
-                                    last_status = draft.status.clone();
-                                    changed = true;
-                                }
-                                loaded.draft = draft;
-                            }
+                            Ok(draft) => loaded.draft = draft,
                             Err(error) => errors.push(error),
+                        }
+                        let fingerprint = view::poll_fingerprint(&loaded.api_picks, &loaded.draft);
+                        if last_fingerprint != Some(fingerprint) {
+                            last_fingerprint = Some(fingerprint);
+                            changed = true;
                         }
                         if errors.is_empty() {
                             loaded.poll_last_success_at = Some(engine::now_secs());
