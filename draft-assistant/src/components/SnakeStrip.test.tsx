@@ -37,7 +37,7 @@ const cells = () => screen.getAllByRole("listitem");
 
 describe("SnakeStrip", () => {
   it("draws every pick from the clock up to yours, and says how many are ahead", () => {
-    render(<SnakeStrip view={live(3, 8, [8, 21])} />);
+    render(<SnakeStrip view={live(3, 8, [8])} />);
     // Picks 3..8 inclusive: five managers, then you.
     expect(cells()).toHaveLength(6);
     expect(cells()[0]).toHaveClass("on-clock");
@@ -71,18 +71,34 @@ describe("SnakeStrip", () => {
     expect(screen.getByText("3 ahead of you")).toBeInTheDocument();
   });
 
+  it("carries on past your pick to your next one, so you can see the turn", () => {
+    // Slot 2 in a 14-team snake picks 2 and 27: at the turn only picks 28
+    // and 29 separate them, which is what decides taking two of a position.
+    render(<SnakeStrip view={live(25, 2, [27, 30])} />);
+    const picks = cells()
+      .filter((c) => c.className.includes("snake-cell"))
+      .map((c) => c.textContent);
+    expect(picks[0]).toContain("25");
+    expect(picks[picks.length - 1]).toContain("30");
+    const mine = cells().filter((c) => c.className.includes("mine"));
+    expect(mine).toHaveLength(2);
+    expect(mine[0]).toHaveTextContent("27");
+    expect(mine[1]).toHaveTextContent("30");
+  });
+
   it("skips the middle and still ends on you when your pick is far off", () => {
     // Pick 3 with yours at 27 is 25 cells; the strip keeps the near stretch,
     // marks the gap, and finishes on you rather than running off the end.
-    render(<SnakeStrip view={live(3, 2, [27])} />);
+    render(<SnakeStrip view={live(3, 2, [27, 30])} />);
     const list = cells().filter((c) => c.className.includes("snake-cell"));
     expect(list.length).toBeLessThanOrEqual(16);
     expect(list[0]).toHaveTextContent("Team3");
-    expect(screen.getByLabelText("10 more picks")).toHaveTextContent("+10");
-    const last = list[list.length - 1];
-    expect(last).toHaveClass("mine");
-    expect(last).toHaveTextContent("27");
-    expect(last).toHaveTextContent("YOU");
+    // The gap sits in front of your turn, and the turn survives intact.
+    expect(screen.getByText(/^\+\d+$/)).toBeInTheDocument();
+    const mine = list.filter((c) => c.className.includes("mine"));
+    expect(mine[0]).toHaveTextContent("27");
+    expect(mine[mine.length - 1]).toHaveTextContent("30");
+    expect(list[list.length - 1]).toHaveTextContent("YOU");
   });
 
   it("celebrates instead of counting when it is your pick", () => {

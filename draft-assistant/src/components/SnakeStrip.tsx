@@ -34,8 +34,11 @@ export function SnakeStrip({ view }: { view: DraftView }) {
 
   const names = new Map(view.rosters.map((r) => [r.slot, r.display_name]));
   const taken = new Set(view.rosters.flatMap((r) => r.players.map((p) => p.pick_no)));
-  const mine = d.my_next_picks.find((p) => p >= d.current_pick) ?? null;
-  const last = mine ?? d.current_pick + MAX_CELLS - 1;
+  // Through your *next* pick, not just your first: at a snake turn the two
+  // are a few apart, and how few is what decides whether you take two of a
+  // position. Stopping at the first one hid exactly that.
+  const upcoming = d.my_next_picks.filter((p) => p >= d.current_pick);
+  const last = upcoming[1] ?? upcoming[0] ?? d.current_pick + MAX_CELLS - 1;
 
   const cell = (pick: number) => {
     const slot = slotForPick(pick, d.teams);
@@ -49,14 +52,26 @@ export function SnakeStrip({ view }: { view: DraftView }) {
   };
 
   // Early in a round your pick can be twenty away. Rather than run off the
-  // end, keep the near stretch, mark the gap, and always finish on you —
-  // the whole point of the strip is that you can see yourself coming.
+  // end, keep the near stretch, mark the gap, and keep your own picks and
+  // the turn between them — the whole point is seeing yourself coming.
   const span = last - d.current_pick + 1;
-  const near = span > MAX_CELLS ? MAX_CELLS - 1 : span;
-  const cells = Array.from({ length: near }, (_, i) => cell(d.current_pick + i));
-  const gap = span > MAX_CELLS ? span - near : 0;
-  if (gap > 0) cells.push(cell(last));
+  let cells;
+  let gap = 0;
+  if (span <= MAX_CELLS) {
+    cells = Array.from({ length: span }, (_, i) => cell(d.current_pick + i));
+  } else {
+    // The tail is your turn: your first pick through your next one.
+    const tailStart = upcoming[0] ?? last;
+    const tail = Array.from({ length: last - tailStart + 1 }, (_, i) => cell(tailStart + i));
+    const headLength = Math.max(1, MAX_CELLS - tail.length - 1);
+    const head = Array.from({ length: headLength }, (_, i) => cell(d.current_pick + i));
+    gap = tailStart - (d.current_pick + headLength);
+    cells = gap > 0 ? [...head, ...tail] : [...head, ...tail].slice(0, MAX_CELLS);
+    if (gap <= 0) gap = 0;
+  }
   if (cells.length === 0) return null;
+  // Which chip the "+N" sits in front of: the first of your turn.
+  const gapBefore = gap > 0 ? (upcoming[0] ?? last) : null;
 
   const ahead = d.picks_until_mine;
   const waiting = d.status === "pre_draft" && d.current_pick === 1;
@@ -76,9 +91,9 @@ export function SnakeStrip({ view }: { view: DraftView }) {
         </span>
       </div>
       <ol className="snake-track">
-        {cells.map((c, i) => (
+        {cells.map((c) => (
           <Fragment key={c.pick}>
-            {gap > 0 && i === cells.length - 1 && (
+            {gap > 0 && c.pick === gapBefore && (
               <li className="snake-gap" aria-label={`${gap} more picks`}>
                 +{gap}
               </li>
