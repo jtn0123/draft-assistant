@@ -14,5 +14,19 @@ export default defineConfig({
     // e2e/ belongs to Playwright, which has its own runner and expect().
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["e2e/**", "node_modules/**"],
+    coverage: {
+      // Name the sources explicitly: by default the v8 provider reports only
+      // files it saw loaded, and it loses ones re-imported after
+      // `vi.resetModules()` (api.ts, Markdown.tsx) — the headline number
+      // then quietly excluded the whole IPC bridge.
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.test.{ts,tsx}",
+        "src/test/**",
+        "src/main.tsx",
+        "src/types.ts",
+        "src/vite-env.d.ts",
+      ],
+    },
   },
 });

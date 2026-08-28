@@ -15,6 +15,8 @@ const excludedDirectories = new Set([
   "artifacts",
   "playwright-report",
   "test-results",
+  // Vitest's v8 HTML report (bun run coverage:frontend); git-ignored.
+  "coverage",
 ]);
 const excludedFiles = new Set([
   "Cargo.lock",
