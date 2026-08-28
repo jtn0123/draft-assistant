@@ -7,7 +7,7 @@
 use crate::draft;
 use crate::engine::LoadedLeague;
 use crate::sleeper::Pick;
-use crate::view::merged_picks;
+use crate::view::{merged_picks, next_open_pick};
 
 /// Record `player_id` at the next open pick number. Rejects a player already
 /// taken (by the API or manually), one not on the board, and a full draft.
@@ -21,10 +21,10 @@ pub fn apply_manual_pick(loaded: &mut LoadedLeague, player_id: String) -> Result
     if !loaded.board_index.contains_key(&player_id) {
         return Err(format!("player {player_id} is not on the board"));
     }
-    let pick_no = picks.len() as u32 + 1;
-    if pick_no > teams * loaded.draft.settings.rounds {
+    let rounds = loaded.draft.settings.rounds;
+    let Some(pick_no) = next_open_pick(&picks, teams, rounds) else {
         return Err("draft is complete".into());
-    }
+    };
     loaded.manual_picks.push(Pick {
         round: (pick_no - 1) / teams + 1,
         pick_no,

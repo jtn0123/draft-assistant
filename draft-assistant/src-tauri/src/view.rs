@@ -145,17 +145,30 @@ pub fn poll_fingerprint(picks: &[Pick], draft: &crate::sleeper::Draft) -> u64 {
 }
 
 /// Merge API picks with manual fallback picks. API picks are authoritative;
-/// manual picks only fill pick numbers beyond what the API has reported.
+/// a manual pick survives only where the API has not filled that pick number.
+///
+/// Keyed on the number rather than "beyond the highest API pick": a keeper
+/// league arrives with picks scattered all over the board (this league opens
+/// with keepers at 11, 14, 20 … 177), and the old rule silently threw away
+/// every manual pick below the last of them.
 pub fn merged_picks(api: &[Pick], manual: &[Pick]) -> Vec<Pick> {
+    let taken: std::collections::HashSet<u32> = api.iter().map(|p| p.pick_no).collect();
     let mut picks = api.to_vec();
-    let api_max = picks.iter().map(|p| p.pick_no).max().unwrap_or(0);
     for m in manual {
-        if m.pick_no > api_max {
+        if !taken.contains(&m.pick_no) {
             picks.push(m.clone());
         }
     }
     picks.sort_by_key(|p| p.pick_no);
     picks
+}
+
+/// The lowest pick number nobody has filled yet, or `None` once the board is
+/// full. Counting picks instead would put a keeper league several rounds ahead
+/// of itself before the draft even starts.
+pub fn next_open_pick(picks: &[Pick], teams: u32, rounds: u32) -> Option<u32> {
+    let made: std::collections::HashSet<u32> = picks.iter().map(|p| p.pick_no).collect();
+    (1..=teams.saturating_mul(rounds)).find(|pick| !made.contains(pick))
 }
 
 pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
@@ -169,8 +182,9 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
     let picks = merged_picks(&loaded.api_picks, &loaded.manual_picks);
     let total_picks = picks.len();
-    let current_pick = (total_picks as u32 + 1).min(teams * rounds);
-    let draft_over = total_picks as u32 >= teams * rounds;
+    let open_pick = next_open_pick(&picks, teams, rounds);
+    let current_pick = open_pick.unwrap_or(teams * rounds);
+    let draft_over = open_pick.is_none();
     let current_round = (current_pick - 1) / teams + 1;
     let (order, order_warning) = draft::DraftOrder::from_draft(draft);
     let on_clock_slot = draft::slot_for_pick(current_pick, teams, order);
@@ -215,16 +229,21 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     });
     let (my_slot, slot_warning) = validated_slot(my_slot, teams);
 
+    let made: std::collections::HashSet<u32> = picks.iter().map(|p| p.pick_no).collect();
     let my_next_picks: Vec<u32> = my_slot
         .map(|slot| {
             draft::picks_for_slot(slot, teams, rounds, order)
                 .into_iter()
-                .filter(|&p| p >= current_pick)
+                .filter(|p| *p >= current_pick && !made.contains(p))
                 .collect()
         })
         .unwrap_or_default();
     let is_my_pick = !draft_over && my_slot == Some(on_clock_slot);
-    let picks_until_mine = my_next_picks.first().map(|&p| p - current_pick);
+    // How many picks actually have to happen before mine — keepers sitting in
+    // between are already in the book and cost no time.
+    let picks_until_mine = my_next_picks
+        .first()
+        .map(|&mine| (current_pick..mine).filter(|p| !made.contains(p)).count() as u32);
     // Survival is judged at my next pick AFTER the one I'm making now (or the
     // upcoming one if I'm not on the clock).
     let survival_pick = if is_my_pick {

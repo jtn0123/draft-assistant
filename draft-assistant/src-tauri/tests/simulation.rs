@@ -150,7 +150,7 @@ fn full_draft_simulation_preserves_view_invariants() {
             .survival_next
             .is_none_or(|probability| (0.0..=1.0).contains(&probability))));
 
-        let selected = apply_simulated_pick(&mut loaded, &config, pick_no)
+        let selected = apply_simulated_pick(&mut loaded, &config)
             .unwrap_or_else(|| panic!("simulation ran out of candidates at pick {pick_no}"));
         let after = build_view(&loaded, &config);
         assert!(after

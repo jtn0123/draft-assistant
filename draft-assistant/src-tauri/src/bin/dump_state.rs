@@ -64,8 +64,8 @@ async fn main() {
         }
     };
 
-    for pick_no in 1..=simulate {
-        if apply_simulated_pick(&mut loaded, &config, pick_no).is_none() {
+    for _ in 0..simulate {
+        if apply_simulated_pick(&mut loaded, &config).is_none() {
             break;
         }
     }

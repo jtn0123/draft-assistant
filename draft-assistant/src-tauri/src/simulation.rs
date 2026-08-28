@@ -5,15 +5,16 @@ use crate::engine::{AppConfig, LoadedLeague};
 use crate::sleeper::Pick;
 use crate::view::build_view;
 
-/// Apply one simulated pick. The user's slot follows the balanced
-/// recommendation; every other slot follows the best remaining ADP.
-pub fn apply_simulated_pick(
-    loaded: &mut LoadedLeague,
-    config: &AppConfig,
-    pick_no: u32,
-) -> Option<String> {
+/// Apply one simulated pick at whatever the next open pick number is — which
+/// in a keeper league is not the pick count. The user's slot follows the
+/// balanced recommendation; every other slot follows the best remaining ADP.
+pub fn apply_simulated_pick(loaded: &mut LoadedLeague, config: &AppConfig) -> Option<String> {
     let teams = loaded.draft.settings.teams;
     let view = build_view(loaded, config);
+    if view.draft.status == "complete" {
+        return None;
+    }
+    let pick_no = view.draft.current_pick;
     let (order, _) = DraftOrder::from_draft(&loaded.draft);
     let slot = slot_for_pick(pick_no, teams, order);
     let player_id = if view.draft.my_slot == Some(slot) {
