@@ -8,6 +8,11 @@ function view(): DraftView {
   return structuredClone(fixtureJson) as unknown as DraftView;
 }
 
+/** The banner renders a local time; CI runs in UTC and this laptop does not. */
+function localTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 describe("ClockBanner pick clock", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -37,11 +42,11 @@ describe("ClockBanner pick clock", () => {
     v.draft.total_picks_made = 25;
     v.draft.is_my_pick = false;
     v.draft.on_clock_name = "197lbsleanmeandadbod";
-    v.draft.start_time = new Date("2026-08-28T17:30:00-07:00").getTime();
+    v.draft.start_time = Date.now() + 20 * 60_000;
     render(<ClockBanner view={v} />);
     const status = screen.getByRole("status");
     expect(status).toHaveTextContent(/Draft has not started/);
-    expect(status).toHaveTextContent(/starts .*5:30/);
+    expect(status).toHaveTextContent(`starts ${localTime(v.draft.start_time)}`);
     expect(status).not.toHaveTextContent(/On the clock/);
     expect(status).not.toHaveTextContent(/pick until you/);
   });
@@ -62,9 +67,11 @@ describe("ClockBanner pick clock", () => {
     v.draft.status = "pre_draft";
     v.draft.total_picks_made = 0;
     v.draft.current_pick = 1;
-    v.draft.start_time = new Date("2026-08-28T17:30:00-07:00").getTime();
+    v.draft.start_time = Date.now() + 20 * 60_000;
     render(<ClockBanner view={v} />);
-    expect(screen.getByText(/Draft has not started/)).toHaveTextContent(/starts .*5:30/);
+    expect(screen.getByText(/Draft has not started/)).toHaveTextContent(
+      `starts ${localTime(v.draft.start_time)}`,
+    );
   });
 
   it("shows no clock when the draft has none", () => {
