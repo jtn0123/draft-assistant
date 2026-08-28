@@ -90,9 +90,8 @@ describe("App live workflow", () => {
 
     render(<App />);
     expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
-    // The fixture's own timestamps are old, so the pill starts out honest
-    // about that; a fresh poll is what makes it green.
-    expect(screen.getByRole("button", { name: /Sync stale · nothing for/ })).toBeInTheDocument();
+    // Pin the sync age rather than relying on how recently the checked-in
+    // fixture was captured.
     act(() => {
       testState.healthHandler?.({
         last_success_at: Math.floor(Date.now() / 1000),
@@ -212,15 +211,16 @@ describe("App live workflow", () => {
     await user.click(screen.getAllByRole("button", { name: "Draft" })[0]);
     expect(screen.getByRole("button", { name: "Confirm" })).toBeInTheDocument();
 
-    // Live sync reports Chris Olave gone while the modal sits open.
+    // Live sync reports the pending player gone while the modal sits open.
     const taken = fixture();
-    taken.available = taken.available.filter((p) => p.player_id !== "8144");
+    const pending = initial.available[0];
+    taken.available = taken.available.filter((p) => p.player_id !== pending.player_id);
     taken.recommendations = [];
     act(() => testState.draftHandler?.(taken));
 
     expect(screen.queryByRole("button", { name: "Confirm" })).not.toBeInTheDocument();
     expect(
-      screen.getByText(/Chris Olave was drafted by another team/),
+      screen.getByText(new RegExp(`${pending.name} was drafted by another team`)),
     ).toBeInTheDocument();
     expect(testState.api.recordManualPick).not.toHaveBeenCalled();
   });

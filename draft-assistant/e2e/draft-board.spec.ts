@@ -3,7 +3,9 @@ import { expect, test } from "@playwright/test";
 /**
  * Browser-preview E2E. The app serves `public/dev-fixture.json` outside Tauri,
  * so these run against a real rendering engine with a real, fixed draft state:
- * a 14-team league, pick 27, our slot on the clock, Chris Olave recommended.
+ * a 14-team keeper league mid-draft, our slot on the clock, with one
+ * recommendation. Values that move when the fixture is regenerated are read
+ * from the page rather than hard-coded.
  */
 
 test.beforeEach(async ({ page }) => {
@@ -17,13 +19,15 @@ test("renders the live draft state from the fixture", async ({ page }) => {
   // Header facts.
   await expect(page.getByText("14 teams", { exact: false })).toBeVisible();
 
-  // Both recommendation modes resolve to Chris Olave here and App.tsx
-  // de-duplicates them, so exactly one recommendation card renders.
+  // Both recommendation modes resolve to the same player in this fixture and
+  // App.tsx de-duplicates them, so exactly one recommendation card renders.
   await expect(page.locator(".recs .rec")).toHaveCount(1);
-  await expect(page.locator(".recs")).toContainText("Chris Olave");
+  const recommended = await page.locator(".recs .rec-name").innerText();
+  expect(recommended.length).toBeGreaterThan(0);
 
-  // The fixture has us on the clock at pick 27.
-  await expect(page.getByText("27", { exact: true }).first()).toBeVisible();
+  // The fixture has us on the clock, and the recommended player is on the board.
+  await expect(page.locator(".clock")).toContainText("YOU ARE ON THE CLOCK");
+  await expect(page.locator(".board tbody")).toContainText(recommended);
 });
 
 test("filters the board by position", async ({ page }) => {
@@ -55,9 +59,9 @@ test("filters the board by position", async ({ page }) => {
 test("search narrows the board and shows an empty state", async ({ page }) => {
   const search = page.getByLabel("Search players");
 
-  await search.fill("Olave");
+  await search.fill("Waddle");
   await expect(page.locator("tbody tr")).toHaveCount(1);
-  await expect(page.locator("tbody")).toContainText("Chris Olave");
+  await expect(page.locator("tbody")).toContainText("Jaylen Waddle");
 
   // A search matching nobody must explain itself, not render a blank table.
   await search.fill("zzzzzznotaplayer");
