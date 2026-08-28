@@ -37,6 +37,10 @@ let nextSeq = 0;
 function fixture(): DraftView {
   const view = structuredClone(fixtureJson) as unknown as DraftView;
   view.seq = ++nextSeq;
+  // These tests are about App's wiring, not the board's size. The real dump
+  // carries ~370 available players, and rendering 200 rows several times per
+  // test pushed the heavier cases past the 5 s timeout on CI's slower runner.
+  view.available = view.available.slice(0, 40);
   return view;
 }
 
