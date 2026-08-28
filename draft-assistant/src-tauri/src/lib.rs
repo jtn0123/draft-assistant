@@ -1,4 +1,5 @@
 pub mod board;
+pub mod chat;
 pub mod draft;
 pub mod engine;
 mod mock_league;
@@ -222,6 +223,21 @@ async fn export_state(state: State<'_, AppState>) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Ask Claude about the current draft. The answer comes from the local
+/// `claude` CLI, so this can take ~10s.
+#[tauri::command]
+async fn chat(state: State<'_, AppState>, question: String) -> Result<String, String> {
+    // Snapshot the view and release both locks before the CLI call: the poll
+    // task takes `loaded` every few seconds and must not wait on a model.
+    let view = {
+        let loaded = state.loaded.lock().await;
+        let loaded = loaded.as_ref().ok_or("no league loaded")?;
+        let config = state.config.lock().await;
+        view_from(loaded, &config)
+    };
+    chat::ask(&view, &question).await
+}
+
 /// Start polling Sleeper picks every `interval_secs` (default 3). Emits a
 /// "draft-updated" event with the fresh DraftView whenever anything changed.
 #[tauri::command]
@@ -357,6 +373,7 @@ pub fn run() {
             record_manual_pick,
             undo_manual_pick,
             export_state,
+            chat,
             start_polling,
             stop_polling,
         ])

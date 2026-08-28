@@ -58,6 +58,31 @@ cargo run --bin dump_state -- <league_id> [sleeper_username] [out.json] [--simul
 `--simulate N` fakes the first N picks (market drafts by ADP, your slots take
 the balanced recommendation) to exercise mid-draft state without a live draft.
 
+## Ask Claude
+
+The **Ask Claude** button opens a chat panel that answers questions about the
+live draft — "who should I take next?", "who is likely gone before my next
+pick?". It sends the current state (your roster, the top 40 of the board with
+VORP/survival/tier, tier alerts, and the app's own recommendation) and returns
+a short answer. Expect ~5-10 seconds per question.
+
+It works by shelling out to the locally installed [Claude
+Code](https://claude.com/claude-code) CLI, so it needs no API key — it uses
+whatever that CLI is already logged in as. The panel is read-only advice: it
+cannot draft, and `--restricted` strips the CLI's command- and code-running
+tools.
+
+If the CLI is not on `PATH` (notably inside a packaged `.app`, which gets a
+minimal environment), the app looks in `~/.local/bin`, `/opt/homebrew/bin`, and
+`/usr/local/bin`. Override with:
+
+```bash
+export DRAFT_ASSISTANT_CLAUDE_BIN=/full/path/to/claude
+```
+
+Errors surface in the panel rather than being swallowed — a missing CLI names
+the env var above, and a login failure shows the CLI's own stderr.
+
 ## Browser preview
 
 The UI degrades to a read-only preview when opened in a plain browser (vite dev

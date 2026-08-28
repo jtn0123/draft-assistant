@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { DraftView, PollHealth } from "./types";
 import { Board } from "./components/Board";
+import { Chat } from "./components/Chat";
 import { ClockBanner, RecCard, SidePanel, Setup } from "./components/Panels";
 import "./App.css";
 import "./components.css";
@@ -17,6 +18,7 @@ export default function App() {
   const [confirm, setConfirmState] = useState<Confirm>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
+  const [chatOpen, setChatOpen] = useState(false);
   const toastTimer = useRef<number | undefined>(undefined);
   // Highest view seq already rendered. The 3s poll and the awaited click
   // handlers both push views with no ordering guarantee, so without this a
@@ -202,6 +204,13 @@ export default function App() {
           <button className="ghost" onClick={doUndo} title="Undo last manual pick">
             Undo
           </button>
+          <button
+            className={`ghost ${chatOpen ? "on" : ""}`}
+            onClick={() => setChatOpen((v) => !v)}
+            title="Ask Claude about the current draft"
+          >
+            Ask Claude
+          </button>
           <button className="ghost" onClick={doExport} title="Write full draft state JSON for the AI">
             Export state
           </button>
@@ -236,6 +245,8 @@ export default function App() {
           onDraft={(id, name) => setConfirm({ playerId: id, name })}
         />
       </main>
+
+      <Chat open={chatOpen} onClose={() => setChatOpen(false)} />
 
       {confirm && (
         <div className="modal-backdrop" onClick={() => setConfirm(null)}>

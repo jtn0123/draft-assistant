@@ -30,6 +30,7 @@ interface Api {
   recordManualPick(playerId: string): Promise<DraftView>;
   undoManualPick(): Promise<DraftView>;
   exportState(): Promise<string>;
+  chat(question: string): Promise<string>;
   startPolling(intervalSecs?: number): Promise<void>;
   stopPolling(): Promise<void>;
   onDraftUpdated(handler: (view: DraftView) => void): Promise<UnlistenFn>;
@@ -48,6 +49,7 @@ const tauriApi: Api = {
     invokeView("record_manual_pick", { playerId }),
   undoManualPick: () => invokeView("undo_manual_pick"),
   exportState: () => invoke<string>("export_state"),
+  chat: (question) => invoke<string>("chat", { question }),
   startPolling: (intervalSecs = 3) =>
     invoke<void>("start_polling", { intervalSecs }),
   stopPolling: () => invoke<void>("stop_polling"),
@@ -99,6 +101,9 @@ function browserApi(): Api {
       throw new Error("browser preview is read-only — run the desktop app to draft");
     },
     exportState: async () => "browser preview — no export",
+    chat: async () => {
+      throw new Error("browser preview cannot reach the Claude CLI — run the desktop app");
+    },
     startPolling: async () => {
       throw new Error("browser preview is read-only — live sync requires the desktop app");
     },
