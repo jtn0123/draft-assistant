@@ -114,6 +114,25 @@ describe("Chat panel", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("Escape still closes the panel after focus has left it", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    testState.api.chat.mockResolvedValue("Take Olave.");
+
+    render(<Chat open onClose={onClose} />);
+    // Clicking a suggestion removes that button from the DOM, so focus falls
+    // to <body>; a handler scoped to the panel would never see the key.
+    await user.click(screen.getByRole("button", { name: "Who should I take next?" }));
+    expect(await screen.findByText("Take Olave.")).toBeInTheDocument();
+    // After the answer lands the question box has focus again.
+    expect(screen.getByLabelText("Your question")).toHaveFocus();
+
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.body).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("asks a suggested question on click", async () => {
     const user = userEvent.setup();
     testState.api.chat.mockResolvedValue("Weakest at WR.");

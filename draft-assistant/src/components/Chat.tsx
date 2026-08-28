@@ -28,6 +28,18 @@ export function Chat({ open, onClose }: { open: boolean; onClose: () => void }) 
     if (open) inputRef.current?.focus();
   }, [open]);
 
+  // Escape closes the panel from anywhere on the page. A handler on the panel
+  // itself stops working the moment focus leaves it — clicking a suggestion
+  // removes that button from the DOM and focus falls to <body>.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   // Keep the newest turn in view as answers land.
   useEffect(() => {
     const log = logRef.current;
@@ -50,7 +62,11 @@ export function Chat({ open, onClose }: { open: boolean; onClose: () => void }) 
       if (mine !== generation.current) return;
       setError(errorMessage(e));
     } finally {
-      if (mine === generation.current) setBusy(false);
+      if (mine === generation.current) {
+        setBusy(false);
+        // Hand focus back so Enter keeps working after a suggestion click.
+        inputRef.current?.focus();
+      }
     }
   };
 
@@ -64,13 +80,7 @@ export function Chat({ open, onClose }: { open: boolean; onClose: () => void }) 
   if (!open) return null;
 
   return (
-    <aside
-      className="chat"
-      aria-label="Ask Claude about this draft"
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
-    >
+    <aside className="chat" aria-label="Ask Claude about this draft">
       <header className="chat-head">
         <h3>Ask Claude</h3>
         <button className="ghost" onClick={onClose} aria-label="Close chat" title="Close (Esc)">
