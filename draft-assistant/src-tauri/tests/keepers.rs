@@ -151,3 +151,22 @@ fn a_manual_pick_takes_the_next_open_number_not_the_pick_count() {
     assert_eq!(view.draft.current_pick, 2);
     assert_eq!(view.draft.total_picks_made, 2);
 }
+
+#[test]
+fn recent_picks_and_runs_ignore_keepers_the_draft_has_not_reached() {
+    // Pick 1 has been made; picks 5 and 6 are keepers sitting in round 3.
+    let (loaded, config) = league_with(vec![
+        keeper(1, 1, "a"),
+        keeper(5, 1, "e"),
+        keeper(6, 2, "f"),
+    ]);
+    let view = build_view(&loaded, &config);
+
+    assert_eq!(view.draft.current_pick, 2);
+    let shown: Vec<u32> = view.recent_picks.iter().map(|p| p.pick_no).collect();
+    assert_eq!(
+        shown,
+        vec![1],
+        "keepers ahead of the clock are not recent picks"
+    );
+}

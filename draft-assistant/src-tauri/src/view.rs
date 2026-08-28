@@ -315,9 +315,14 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         }
     }
 
+    // What has actually happened, newest first. A keeper sitting at pick 177
+    // is in the book but the draft has not reached it, so it is neither a
+    // recent pick nor part of a positional run.
+    let played: Vec<&Pick> = picks.iter().filter(|p| p.pick_no < current_pick).collect();
+
     // Position run: 4+ of the same position in the last 6 picks.
     let position_run = {
-        let recent: Vec<&Pick> = picks.iter().rev().take(6).collect();
+        let recent: Vec<&&Pick> = played.iter().rev().take(6).collect();
         let mut counts: HashMap<String, u32> = HashMap::new();
         for p in &recent {
             let (_, pos, _) = name_of(&p.player_id);
@@ -357,7 +362,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         _ => None,
     };
 
-    let recent_picks: Vec<RecentPick> = picks
+    let recent_picks: Vec<RecentPick> = played
         .iter()
         .rev()
         .take(10)
