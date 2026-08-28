@@ -23,6 +23,11 @@ pub struct DraftStatus {
     pub teams: u32,
     pub rounds: u32,
     pub pick_timer: Option<u32>,
+    /// Scheduled start, ms since the epoch.
+    pub start_time: Option<i64>,
+    /// When the current pick's clock runs out, ms since the epoch. Only while
+    /// the draft is live and has a pick timer.
+    pub pick_deadline: Option<i64>,
     pub current_pick: u32,
     pub current_round: u32,
     pub on_clock_slot: u32,
@@ -323,6 +328,16 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         )
     };
 
+    // The clock on the current pick: Sleeper stamps `last_picked` on every
+    // pick; the first pick's clock runs from the scheduled start.
+    let pick_deadline = match draft.settings.pick_timer {
+        Some(timer) if timer > 0 && draft.status == "drafting" && !draft_over => draft
+            .last_picked
+            .or(draft.start_time)
+            .map(|since| since + i64::from(timer) * 1000),
+        _ => None,
+    };
+
     let recent_picks: Vec<RecentPick> = picks
         .iter()
         .rev()
@@ -352,7 +367,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     }
 
     DraftView {
-        schema_version: "1.2".into(),
+        schema_version: "1.3".into(),
         generated_at: now_secs(),
         seq: VIEW_SEQ.fetch_add(1, Ordering::Relaxed) + 1,
         league: LeagueSummary {
@@ -374,6 +389,8 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             teams,
             rounds,
             pick_timer: draft.settings.pick_timer,
+            start_time: draft.start_time,
+            pick_deadline,
             current_pick,
             current_round,
             on_clock_slot,
@@ -460,6 +477,159 @@ mod poll_fingerprint_tests {
             poll_fingerprint(&picks, &draft("drafting", None)),
             poll_fingerprint(&picks, &draft("complete", None))
         );
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::build_view;
+    use crate::board::BoardPlayer;
+    use crate::engine::{AppConfig, LoadedLeague};
+    use crate::roster::RosterRules;
+    use crate::sleeper::{Draft, League, Pick};
+    use crate::valuation::ReplacementModel;
+    use std::collections::HashMap;
+
+    fn loaded(draft: serde_json::Value, picks: Vec<Pick>) -> LoadedLeague {
+        let league: League = serde_json::from_value(serde_json::json!({
+            "league_id": "l1", "name": "Test", "season": "2026", "status": "drafting",
+            "total_rosters": 2, "roster_positions": ["WR", "BN"], "scoring_settings": {},
+            "draft_id": "d1"
+        }))
+        .unwrap();
+        let draft: Draft = serde_json::from_value(draft).unwrap();
+        let board: Vec<BoardPlayer> = ["a", "b", "c", "d"]
+            .iter()
+            .map(|id| BoardPlayer {
+                player_id: (*id).into(),
+                name: (*id).into(),
+                position: "WR".into(),
+                team: None,
+                bye_week: None,
+                points: 100.0,
+                bonus_points: 0.0,
+                vorp: 10.0,
+                tier: 1,
+                position_rank: 1,
+                overall_rank: 1,
+                adp: None,
+                injury_status: None,
+                sleeper_pts_ppr: None,
+            })
+            .collect();
+        let board_index = board
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.player_id.clone(), i))
+            .collect();
+        LoadedLeague {
+            league,
+            draft,
+            user_names: HashMap::new(),
+            board,
+            board_index,
+            replacement_model: ReplacementModel::default(),
+            roster_rules: RosterRules::new(&["WR".into(), "BN".into()]),
+            api_picks: picks,
+            manual_picks: Vec::new(),
+            poll_last_success_at: None,
+            poll_consecutive_failures: 0,
+            poll_last_error: None,
+            players_fetched_at: 0,
+            projections_fetched_at: 0,
+            weekly_fetched_at: 0,
+            warnings: Vec::new(),
+            player_meta: HashMap::new(),
+        }
+    }
+
+    fn pick(pick_no: u32, player_id: &str) -> Pick {
+        Pick {
+            round: (pick_no - 1) / 2 + 1,
+            pick_no,
+            draft_slot: 1,
+            player_id: player_id.into(),
+            picked_by: None,
+            metadata: None,
+        }
+    }
+
+    // Sleeper sends pick_timer, start_time, and last_picked; the banner showed
+    // none of them, so a draft screen had no clock.
+    #[test]
+    fn a_live_draft_exposes_the_pick_deadline_from_last_picked_and_the_timer() {
+        let view = build_view(
+            &loaded(
+                serde_json::json!({
+                    "draft_id": "d1", "status": "drafting", "type": "snake",
+                    "settings": {"teams": 2, "rounds": 2, "pick_timer": 90},
+                    "start_time": 1_700_000_000_000i64, "last_picked": 1_700_000_100_000i64
+                }),
+                vec![pick(1, "a")],
+            ),
+            &AppConfig::default(),
+        );
+        assert_eq!(view.draft.start_time, Some(1_700_000_000_000));
+        assert_eq!(view.draft.pick_deadline, Some(1_700_000_190_000));
+    }
+
+    #[test]
+    fn the_first_pick_clock_runs_from_the_start_time() {
+        let view = build_view(
+            &loaded(
+                serde_json::json!({
+                    "draft_id": "d1", "status": "drafting", "type": "snake",
+                    "settings": {"teams": 2, "rounds": 2, "pick_timer": 60},
+                    "start_time": 1_700_000_000_000i64
+                }),
+                Vec::new(),
+            ),
+            &AppConfig::default(),
+        );
+        assert_eq!(view.draft.pick_deadline, Some(1_700_000_060_000));
+    }
+
+    #[test]
+    fn no_deadline_before_the_draft_after_it_or_without_a_timer() {
+        let pre = build_view(
+            &loaded(
+                serde_json::json!({
+                    "draft_id": "d1", "status": "pre_draft", "type": "snake",
+                    "settings": {"teams": 2, "rounds": 2, "pick_timer": 90},
+                    "start_time": 1_700_000_000_000i64
+                }),
+                Vec::new(),
+            ),
+            &AppConfig::default(),
+        );
+        assert_eq!(pre.draft.pick_deadline, None);
+        assert_eq!(pre.draft.start_time, Some(1_700_000_000_000));
+
+        let done = build_view(
+            &loaded(
+                serde_json::json!({
+                    "draft_id": "d1", "status": "drafting", "type": "snake",
+                    "settings": {"teams": 2, "rounds": 2, "pick_timer": 90},
+                    "last_picked": 1_700_000_100_000i64
+                }),
+                vec![pick(1, "a"), pick(2, "b"), pick(3, "c"), pick(4, "d")],
+            ),
+            &AppConfig::default(),
+        );
+        assert_eq!(done.draft.pick_deadline, None);
+
+        let untimed = build_view(
+            &loaded(
+                serde_json::json!({
+                    "draft_id": "d1", "status": "drafting", "type": "snake",
+                    "settings": {"teams": 2, "rounds": 2, "pick_timer": 0},
+                    "last_picked": 1_700_000_100_000i64
+                }),
+                vec![pick(1, "a")],
+            ),
+            &AppConfig::default(),
+        );
+        assert_eq!(untimed.draft.pick_deadline, None);
     }
 }
 

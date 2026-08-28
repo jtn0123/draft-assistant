@@ -4,21 +4,21 @@ import { validateDraftView } from "./api";
 
 describe("DraftView schema guard", () => {
   it("accepts the current schema", () => {
-    const view = { schema_version: "1.2" } as DraftView;
+    const view = { schema_version: "1.3" } as DraftView;
     expect(validateDraftView(view)).toBe(view);
   });
 
   it("rejects stale data with an actionable message", () => {
-    const view = { schema_version: "1.1" } as DraftView;
+    const view = { schema_version: "1.2" } as DraftView;
     expect(() => validateDraftView(view)).toThrow(
-      "expected schema 1.2, received 1.1",
+      "expected schema 1.3, received 1.2",
     );
   });
 });
 
 describe("browser preview replay mode", () => {
   const dump = (generatedAt: number): DraftView =>
-    ({ schema_version: "1.2", seq: 1, generated_at: generatedAt }) as DraftView;
+    ({ schema_version: "1.3", seq: 1, generated_at: generatedAt }) as DraftView;
 
   beforeEach(() => {
     vi.useFakeTimers();

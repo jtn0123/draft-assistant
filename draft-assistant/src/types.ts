@@ -44,6 +44,10 @@ export interface DraftStatus {
   teams: number;
   rounds: number;
   pick_timer: number | null;
+  /** Scheduled start, ms since the epoch. */
+  start_time: number | null;
+  /** When the current pick's clock runs out (ms since the epoch); live drafts with a timer only. */
+  pick_deadline: number | null;
   current_pick: number;
   current_round: number;
   on_clock_slot: number;
