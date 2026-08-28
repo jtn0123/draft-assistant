@@ -175,6 +175,23 @@ test("the Ask Claude panel sits beside the page instead of over it", async ({ pa
 // Dogfood ISSUE-007: the chat took a fixed column and the board was not
 // re-flowed, so on any laptop screen the table was cut off — at 1440 the
 // Draft button itself was unreachable without scrolling the table sideways.
+// Dogfood pass 2, ISSUE-P2-004: with the chat closed at 1100px the table was
+// 786px inside a 766px column, so the Draft button was cut off behind macOS's
+// invisible overlay scrollbar.
+test("the board is not clipped at a narrow width with the chat closed", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 850 });
+  await expect(page.locator(".chat")).toHaveCount(0);
+  const fit = await page.evaluate(() => {
+    const wrap = document.querySelector(".board");
+    const table = wrap?.querySelector("table");
+    if (!wrap || !table) return null;
+    return Math.round(table.getBoundingClientRect().width - wrap.getBoundingClientRect().width);
+  });
+  expect(fit).not.toBeNull();
+  expect(fit!).toBeLessThanOrEqual(1);
+  await expect(page.getByRole("button", { name: "Draft" }).first()).toBeInViewport();
+});
+
 test.describe("board stays usable with the chat open", () => {
   for (const width of [1440, 1280, 1024]) {
     test(`no clipped columns at ${width}px`, async ({ page }) => {

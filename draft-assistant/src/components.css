@@ -67,6 +67,22 @@ main {
   align-items: start;
 }
 
+/* Below this the side panel and a full-width board cannot both fit, and the
+   board is what the app is for: the panel drops underneath rather than
+   squeezing the table into a scroll nobody can see. */
+@media (max-width: 1199px) {
+  main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .side {
+    position: static;
+    order: 2;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+}
+
 /* ---------- side panel ---------- */
 
 .side {

@@ -174,7 +174,7 @@ export function Board({
         </thead>
         <tbody>
           {filtered.map((p) => (
-            <tr key={p.player_id} className={p.injury_status ? "injured" : ""}>
+            <tr key={p.player_id}>
               <td className="muted">{p.overall_rank}</td>
               <td className="left name-cell">
                 {p.name}

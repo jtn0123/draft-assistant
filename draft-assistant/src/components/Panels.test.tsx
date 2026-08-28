@@ -28,10 +28,40 @@ describe("ClockBanner pick clock", () => {
     expect(clock).toHaveTextContent("0:00");
   });
 
+  // Dogfood pass 2, ISSUE-P2-001: keepers count as picks made, so a league
+  // that has not started looked like one in progress — ten hours early.
+  it("still says the draft has not started when keepers are already in the book", () => {
+    const v = view();
+    v.draft.status = "pre_draft";
+    v.draft.current_pick = 1;
+    v.draft.total_picks_made = 25;
+    v.draft.is_my_pick = false;
+    v.draft.on_clock_name = "197lbsleanmeandadbod";
+    v.draft.start_time = new Date("2026-08-28T17:30:00-07:00").getTime();
+    render(<ClockBanner view={v} />);
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/Draft has not started/);
+    expect(status).toHaveTextContent(/starts .*5:30/);
+    expect(status).not.toHaveTextContent(/On the clock/);
+    expect(status).not.toHaveTextContent(/pick until you/);
+  });
+
+  it("shows the clock once the draft is genuinely under way", () => {
+    const v = view();
+    v.draft.status = "pre_draft"; // Sleeper lags the status behind the first pick
+    v.draft.current_pick = 4;
+    v.draft.total_picks_made = 28;
+    v.draft.is_my_pick = false;
+    v.draft.on_clock_name = "adaigle";
+    render(<ClockBanner view={v} />);
+    expect(screen.getByRole("status")).toHaveTextContent("On the clock: adaigle");
+  });
+
   it("shows the scheduled start before the draft begins", () => {
     const v = view();
     v.draft.status = "pre_draft";
     v.draft.total_picks_made = 0;
+    v.draft.current_pick = 1;
     v.draft.start_time = new Date("2026-08-28T17:30:00-07:00").getTime();
     render(<ClockBanner view={v} />);
     expect(screen.getByText(/Draft has not started/)).toHaveTextContent(/starts .*5:30/);
@@ -43,6 +73,25 @@ describe("ClockBanner pick clock", () => {
     v.draft.pick_deadline = null;
     render(<ClockBanner view={v} />);
     expect(screen.queryByLabelText("Pick clock")).not.toBeInTheDocument();
+  });
+});
+
+describe("SidePanel tier alerts", () => {
+  // Dogfood pass 2, ISSUE-P2-002: after the tier-banding fix the numbers run
+  // past 14, and a bare "Tier 7" next to "Tier 1" reads like a ranking across
+  // positions rather than "the best band this position has left".
+  it("labels the alert as the top band and keeps the number as detail", () => {
+    const v = view();
+    v.tier_alerts = [
+      { position: "RB", tier: 7, players_left: 2 },
+      { position: "DEF", tier: 1, players_left: 3 },
+    ];
+    render(<SidePanel view={v} />);
+    const rb = screen.getByRole("listitem", { name: /RB/ });
+    expect(rb).toHaveTextContent("Top tier");
+    expect(rb).toHaveTextContent("T7");
+    expect(rb).toHaveTextContent("2 left");
+    expect(rb).toHaveAccessibleDescription(/best RB band still on the board/i);
   });
 });
 
@@ -114,6 +163,7 @@ describe("ClockBanner start time", () => {
     const v = view();
     v.draft.status = "pre_draft";
     v.draft.total_picks_made = 0;
+    v.draft.current_pick = 1;
     v.draft.start_time = Date.now() - 20 * 60_000;
     render(<ClockBanner view={v} />);
     const status = screen.getByText(/Draft has not started/);
@@ -125,6 +175,7 @@ describe("ClockBanner start time", () => {
     const v = view();
     v.draft.status = "pre_draft";
     v.draft.total_picks_made = 0;
+    v.draft.current_pick = 1;
     v.draft.start_time = Date.now() + 30 * 60_000;
     render(<ClockBanner view={v} />);
     expect(screen.getByText(/Draft has not started/)).toHaveTextContent(/starts /);

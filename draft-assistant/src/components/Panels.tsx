@@ -90,7 +90,11 @@ function formatStart(ms: number, now: number): string {
 
 export function ClockBanner({ view }: { view: DraftView }) {
   const d = view.draft;
-  const preDraft = d.status === "pre_draft" && d.total_picks_made === 0;
+  // Not "no picks made": a keeper league starts with picks already in the book
+  // (this one with 25), and counting those had the app announcing someone on
+  // the clock hours before the draft. Nothing has been *played* until the
+  // clock has moved off pick 1.
+  const preDraft = d.status === "pre_draft" && d.current_pick === 1;
   const complete = d.status === "complete";
   const cls = d.is_my_pick ? "clock mine" : "clock";
   const now = useNow(d.pick_deadline !== null || preDraft);
@@ -215,9 +219,19 @@ export function SidePanel({ view }: { view: DraftView }) {
         <h2>Tier alerts</h2>
         <ul className="alerts">
           {view.tier_alerts.map((a) => (
-            <li key={a.position} className={a.players_left <= 2 ? "urgent" : ""}>
+            <li
+              key={a.position}
+              className={a.players_left <= 2 ? "urgent" : ""}
+              aria-label={a.position}
+              // Tier numbers run past 14 now that bands are split by spread, so
+              // say what the number means instead of leaving "Tier 7" to be
+              // read as a ranking against another position's "Tier 1".
+              title={`The best ${a.position} band still on the board is tier ${a.tier}; ${a.players_left} left in it`}
+            >
               <span className={`pos-badge pos-${a.position}`}>{a.position}</span>
-              <span>Tier {a.tier}</span>
+              <span>
+                Top tier <span className="muted">T{a.tier}</span>
+              </span>
               <span className={a.players_left <= 2 ? "strong" : "muted"}>
                 {a.players_left > 25 ? "25+" : a.players_left} left
               </span>

@@ -37,6 +37,20 @@ const rowNames = () =>
     .map((row) => within(row).getAllByRole("cell")[1].textContent);
 
 describe("Board", () => {
+  // Dogfood pass 2, ISSUE-P2-003: rows carried an `injured` class with no rule
+  // behind it — markup that promises styling and delivers none.
+  it("marks a flagged player with a badge and nothing else", () => {
+    render(
+      <Board
+        players={[player("a", "Alpha", "WR", { injury_status: "Out" })]}
+        positions={["WR"]}
+        onDraft={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Out")).toBeInTheDocument();
+    expect(document.querySelectorAll(".board tbody tr.injured")).toHaveLength(0);
+  });
+
   // Dogfood ISSUE-010: 11 columns and 200 rows with no way for a screen
   // reader to tie "T4" to "Tier".
   it("names its columns for assistive technology", () => {
