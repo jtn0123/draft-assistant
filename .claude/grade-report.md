@@ -77,7 +77,7 @@ The dependency graph is still strictly one-way (`sleeper` → `scoring`/`roster`
 
 The model layer had a good day. Survival odds are now conditioned on the player still being available (`draft.rs:126-148`) instead of reading 1 % for every faller; tiers split when a band spans more than 1.5× the gap (`valuation.rs:108-129`); the ADP column follows league scoring and roster shape (`board.rs:41-56`); draft type and third-round reversal are honoured (`draft.rs:33-96`) with a warning for auction; and the keeper model — `next_open_pick`, number-keyed `merged_picks`, keeper-aware `apply_manual_pick` — closed two defects that would have hit live tonight (`view.rs:130-160`, `manual.rs:14-40`). Every request now carries the shared 3 s/8 s bounds including the username lookup (`sleeper.rs:203-219`, `:240-249`), and errors carry their cause chain (`sleeper.rs:376-390`). What keeps it at B+: one timeout is wrong for two specific requests, there is still no log anyone can read, and one silent-wrong-team path survives.
 
-#### B1 — Give the two large downloads their own timeout
+#### ~~B1 — Give the two large downloads their own timeout~~ ✓ done 2026-08-28 (`f1339b0`; 60 s cap on `players` and `weekly_projections`, tested against a silent server)
 - **Where:** `src-tauri/src/sleeper.rs:211-212` (blanket 8 s), `:280` (`players`, ~14 MB raw), `:294-306` (`weekly_projections`, 18 MB on disk); callers `engine.rs:94-123`, `:158-203`
 - **What's wrong:** reqwest's `timeout` is total transfer time, not idle time, and one 8-second cap covers every request including the two biggest. It has never tripped here (cold load measured ~6 s on home wifi today) but venue wifi is the scenario it exists for. Projections carry a 6-hour TTL (`engine.rs:18`) and were last written at 03:13, so tonight's first launch re-fetches them.
 - **Fix:** Keep the client default; add `.timeout(Duration::from_secs(60))` on the `players` and `weekly_projections` request builders only. Add one test that the stale-cache fallback engages on timeout.
@@ -125,7 +125,7 @@ Two dogfood passes today closed seventeen issues in this layer, and the second p
 - **Effort:** M
 - **Grade lift:** B+ → A− (removes the only dead end in the app)
 
-#### C2 — Give the 200-row cap an escape hatch
+#### ~~C2 — Give the 200-row cap an escape hatch~~ ✓ done 2026-08-28 (`82068f8`; "Show all N" / "Show top 200")
 - **Where:** `src/components/Board.tsx:107` (`matching.slice(0, 200)`), `:134-139` (the count)
 - **What's wrong:** With 394 players available, "Showing 200 of 394" is the only sign that a third of the board is unreachable except by search. Scrolling to the bottom just stops. Sorting by ADP descending or Bye ascending — both plausible mid-draft — silently hides the tail.
 - **Fix:** Render a "Show all 394" button in the count slot that lifts the cap for the session; keep the cap as the default.
@@ -146,7 +146,7 @@ Two dogfood passes today closed seventeen issues in this layer, and the second p
 - **Effort:** M
 - **Grade lift:** B+ → A− (closes the last reason to switch to Sleeper mid-draft)
 
-#### C5 — Focus the search box with a keystroke
+#### ~~C5 — Focus the search box with a keystroke~~ ✓ done 2026-08-28 (`82068f8`; `/` focuses and selects, ignored while typing or with a dialog open)
 - **Where:** `src/components/Board.tsx:127-133`; document-level key handling exists only in `Chat.tsx:44-56`
 - **What's wrong:** The most common mid-draft action — find a player by name — needs a mouse. With 90 seconds on the clock that is the wrong default.
 - **Fix:** Bind `/` (and `⌘F`) at the document level to focus the search input, ignoring the binding while a dialog or the chat input has focus.
@@ -173,7 +173,7 @@ The suite is real and it earned its keep today: 105 Rust tests (unit + 13 proper
 - **Effort:** M
 - **Grade lift:** B → A− (the data path's failure modes stop being untested)
 
-#### D3 — Run CI on this branch
+#### ~~D3 — Run CI on this branch~~ ✓ done 2026-08-28 (PR #1; three real failures found and fixed, run 33188132961 green)
 - **Where:** `.github/workflows/verify.yml` (triggers: push to `main`, pull_request); branch `t3code/review-prior-grade-report` is 28 commits ahead of its remote and 37 ahead of `origin/main`
 - **What's wrong:** The workflow exists and has never executed a single line of today's code. Everything green is green on one machine, with one toolchain, in one worktree.
 - **Fix:** Push the branch and open a PR (or add `push: branches: ['**']`). Confirm the macOS runner reproduces `bun run verify`.
@@ -234,7 +234,7 @@ The threat surface is small and mostly right: a local-first app against a read-o
 
 Clean on the axis that matters: `bun audit` reports **0 vulnerabilities** and `cargo audit` **0 vulnerabilities** across 519 crates. Runtime deps are current (Tauri 2, tokio 1.53, reqwest 0.12, React 19.1, serde 1). The grade is held down by three dev-dependency majors sitting still and by a toolchain nothing pins — on a machine that hit ENOSPC yesterday with 12 GB of build artifacts across two target directories.
 
-#### F1 — Pin the toolchain
+#### ~~F1 — Pin the toolchain~~ ✓ done 2026-08-28 (`ca3dd84`; `rust-toolchain.toml` at 1.88.0 and the workflow installs from it — CI had drifted to 1.98 and failed on three newer lints)
 - **Where:** no `rust-toolchain.toml`, no `.node-version`/`.bun-version`, no `engines` field in `package.json`; current: rustc 1.88.0, bun 1.3.14, node 26.7.0
 - **What's wrong:** CI (`macos-latest` + `setup-bun@v2` with no version) and this machine can silently diverge, and a rustc bump can change lint behaviour under `-D warnings`, turning a green branch red for reasons unrelated to the change.
 - **Fix:** Add `rust-toolchain.toml` (channel 1.88.0), pin Bun in the workflow, add `engines.node` to `package.json`.
@@ -295,7 +295,7 @@ Measured today, not estimated: 126 ms to interactive in the browser preview, a 5
 
 The README is genuinely good and unusually honest: what the app does and why each number is computed the way it is, dev/build/test commands, the headless `dump_state` CLI with `--simulate`, the Ask Claude settings table, the replay harness, the browser preview, a 30-row draft-day troubleshooting table keyed by the exact string on screen, data sources, and a file-by-file layout. Today it gained keeper behaviour and the new sync-stale row. Alongside it sit `TRACKER.md` (32 rows of what landed and where), three dogfood reports with screenshots and repro videos, and two archived grade reports. Comments in code explain *why* rather than *what* (`view.rs:130-137` on keepers, `Panels.tsx:96-99` on the live region). What is missing is the layer above the file list: nothing explains the design decisions, and nothing tells a first-time reader which of the four markdown files to read first.
 
-#### H1 — Write the draft-night runbook
+#### ~~H1 — Write the draft-night runbook~~ ✓ done 2026-08-28 (`02321d9`; README "Before the draft")
 - **Where:** `README.md` "Draft-day troubleshooting" covers symptoms; nothing covers the sequence
 - **What's wrong:** The troubleshooting table answers "this went wrong, what now" but not "it is 16:45, what do I do". Today's audit produced exactly that list — refresh data on good wifi, launch and eyeball the app, check the pill goes green, confirm your slot and keepers — and it lives only in a grade report.
 - **Fix:** Add a short "Before the draft" section: the checklist, the two cache TTLs and what expiring means, and the one-line recovery for each of the three most likely failures.
@@ -322,7 +322,7 @@ The README is genuinely good and unusually honest: what the app does and why eac
 
 `bun run verify` is the single gate and it is comprehensive: LOC cap → `cargo fmt --check` → `tsc` → Vite build → Vitest → `cargo test --all-targets` → Playwright → ESLint `--max-warnings=0` → clippy `-D warnings --all-features`. It ran green a dozen times today and caught real problems each time (the 500-line cap fired twice and forced two genuinely better file splits). Beyond that: three fuzz targets, a replay harness with pause/step/rewind control endpoints, a headless `dump_state` with `--simulate`, and a browser preview that renders a real captured dump. Held at B+ by the same two gaps as this morning: CI has still never run, and there is no pre-commit hook, so `verify` is a discipline rather than a guarantee.
 
-#### I1 — Make CI run (and be the thing that says green)
+#### ~~I1 — Make CI run (and be the thing that says green)~~ ✓ done 2026-08-28 (PR #1)
 - **Where:** `.github/workflows/verify.yml`; 28 unpushed commits
 - **What's wrong:** Same as D3 from the other side: the pipeline exists, is well-written, and has never executed. Every "verify is green" claim in three reports today means "green on this laptop".
 - **Fix:** Push and open a PR; add `push: branches: ['**']`; add a status badge to the README once it has run.
