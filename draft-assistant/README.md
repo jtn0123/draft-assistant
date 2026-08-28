@@ -115,6 +115,48 @@ The UI degrades to a read-only preview when opened in a plain browser (vite dev
 server on :1420): it renders `public/dev-fixture.json`, a captured state dump.
 Regenerate the fixture with `dump_state`.
 
+## Draft-day troubleshooting
+
+Every failure the app can detect is shown on screen. This is what each one
+means and what to do about it. "Pill" is the live-sync button in the header;
+"warning" is the amber banner under the clock; "toast" is the message at the
+bottom of the window — failures stay until dismissed, confirmations fade.
+
+| You see | What it means | What to do |
+|---|---|---|
+| Pill **● Sync retrying** | One poll of Sleeper failed. | Nothing yet — the next poll is in 3 s. |
+| Pill **● Sync stale · N failures** (red) | N polls in a row failed; the board is frozen at the last good state. Hover the pill for the error. | Check the network. Picks made in Sleeper meanwhile catch up on the next good poll. If it stays red, record picks by hand with the **Draft** buttons — Sleeper's picks override them the moment sync recovers. |
+| Pill **○ Live sync off** | Polling is switched off. | Click the pill. |
+| Warning `players refresh failed; using cache aged Nh` / `projections refresh failed; using cache aged Nh` / `weekly projections refresh failed; using cache aged Nh` | Sleeper did not answer; the app is running on its last download. Rankings are as good as that download. | Keep drafting. Click **Refresh data** once the network is back. |
+| Warning `weekly projections unavailable for weeks …` | Some per-week projections were missing. Only the yardage-bonus estimate loses a little precision. | Ignore. |
+| Warning `<file> could not be cached (…); will refetch` | The download worked but could not be saved — usually disk space or permissions. | Free disk space. The app works; it re-downloads on next launch. |
+| Warning `board unusually small (N players) — projections may be incomplete` | Sleeper's projections endpoint returned a partial list. | **Refresh data**. If it persists the endpoint is degraded: rankings below the top ~100 are unreliable, lean on ADP and survival. |
+| Warning `initial picks refresh failed: …` | The pick list did not load at startup. | Live sync retries every 3 s and clears it. |
+| Warning `your draft slot N is outside the valid range …` / `draft reports 0 teams …` | Sleeper sent malformed draft settings; the app clamped them. | **Refresh data**. If it persists, the draft page in Sleeper is the source of truth. |
+| Warning `mock draft: league settings synthesized …` | You loaded a mock draft by its draft ID; scoring is Sleeper's default for that mock type. | Informational. |
+| Toast `player already drafted` / `draft is complete` / `no manual picks to undo` | A manual pick or undo was refused because the state already says so. | Dismiss it. |
+| Toast `Live update rejected: Incompatible draft data …` | The backend and the UI disagree on the state format — a stale build. | Quit and relaunch. In dev, rebuild with `bun run tauri dev`. |
+| Toast `write …/config.json.tmp: …` / `replace config.json: …` | Your league and username could not be saved. | Free disk space or fix permissions. This session keeps working; the next launch would show Setup. |
+| Ask Claude `could not run the Claude CLI at … set DRAFT_ASSISTANT_CLAUDE_BIN` | The `claude` binary was not found. | `which claude`, then `export DRAFT_ASSISTANT_CLAUDE_BIN=<that path>` and relaunch. |
+| Ask Claude `Claude CLI error: …` | The CLI ran and failed — usually not logged in. | Run `claude` in a terminal and complete the login. |
+| Ask Claude `Claude did not answer within 45s` / `returned an empty answer` | Slow or hung model call. | Ask again, or **Cancel** and carry on — the board never waits on the chat. |
+| A page saying **Draft Assistant hit a display error** | The screen crashed rendering the state. The engine is still polling. | **Reload state**. If it recurs, **Restart app** — API picks and manual picks are all on disk. |
+
+### Resetting local state
+
+Everything lives in `~/Library/Application Support/com.justin.draft-assistant/`.
+Quit the app before deleting, relaunch after.
+
+| Delete | You lose | You get |
+|---|---|---|
+| `manual_picks_<draft>.json` | Manual fallback picks for that draft (API picks are unaffected) | A board that trusts Sleeper only |
+| `players.json`, `projections_*.json`, `weekly_*.json` | Cached downloads | A forced re-download on next launch (~10 s) |
+| `config.json` | Saved league and username | The Setup screen |
+| `draft-state.json` | The last **Export state** file | Nothing — regenerated on export |
+
+There is no log file yet. In dev, backend output appears in the terminal
+running `bun run tauri dev`.
+
 ## Data sources
 
 - `api.sleeper.app/v1` — league, draft, picks, players (documented, no auth)
