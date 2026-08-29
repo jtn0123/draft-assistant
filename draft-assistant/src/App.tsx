@@ -8,6 +8,8 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ClockBanner, RecCard, SidePanel, Setup } from "./components/Panels";
 import { SnakeStrip } from "./components/SnakeStrip";
 import { LeaguePicker } from "./components/LeaguePicker";
+import { useOnClockAlert } from "./components/useOnClockAlert";
+import { loadAlertPref, saveAlertPref } from "./components/alertPref";
 import "./App.css";
 import "./components.css";
 import "./snake.css";
@@ -34,6 +36,7 @@ export default function App() {
   // freezing at whatever it said when the last one arrived.
   const [now, setNow] = useState(() => Date.now());
   const [chatOpen, setChatOpen] = useState(false);
+  const [alertOn, setAlertOn] = useState(loadAlertPref);
   // Every league loaded so far, so switching to a mock and back is two clicks.
   const [leagues, setLeagues] = useState<StoredLeague[]>([]);
   const [activeLeagueId, setActiveLeagueId] = useState<string | null>(null);
@@ -201,6 +204,12 @@ export default function App() {
   };
 
   /// Load another league (or a bare draft ID) and make it the active one.
+  useOnClockAlert({
+    onClock: view?.draft.is_my_pick === true && view.draft.status === "drafting",
+    currentPick: view?.draft.current_pick,
+    enabled: alertOn,
+  });
+
   const doSwitchLeague = async (leagueId: string) => {
     setBusy(true);
     try {
@@ -316,6 +325,23 @@ export default function App() {
             }
           >
             Undo
+          </button>
+          <button
+            className={`ghost ${alertOn ? "on" : ""}`}
+            onClick={() => {
+              const next = !alertOn;
+              setAlertOn(next);
+              saveAlertPref(next);
+              notify(next ? "Chime on when you're on the clock" : "Chime off");
+            }}
+            title={
+              alertOn
+                ? "Chime and flash the window title when your pick comes up"
+                : "Alerts off — the title still changes"
+            }
+            aria-label={alertOn ? "Turn on-clock chime off" : "Turn on-clock chime on"}
+          >
+            {alertOn ? "🔔" : "🔕"}
           </button>
           <button
             className={`ghost ${chatOpen ? "on" : ""}`}
