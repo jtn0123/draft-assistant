@@ -1,7 +1,6 @@
-import { useState } from "react";
-import { api } from "../api";
 import type { DraftView, TradeVerdict } from "../types";
-import { errorMessage, fmt } from "../format";
+import { fmt } from "../format";
+import { useOffer, type OfferState } from "./useOffer";
 
 /**
  * Price an offer: pick a partner, tick what leaves and what arrives, and
@@ -9,33 +8,20 @@ import { errorMessage, fmt } from "../format";
  * week. The same arithmetic as the trade ideas, for any offer at all.
  */
 export function TradeOffer({ view }: { view: DraftView }) {
-  const mine = view.draft.my_slot;
-  const me = view.rosters.find((r) => r.slot === mine);
-  const others = view.rosters.filter((r) => r.slot !== mine && r.players.length > 0);
-  const [partner, setPartner] = useState<number>(others[0]?.slot ?? 0);
-  const [give, setGive] = useState<string[]>([]);
-  const [get, setGet] = useState<string[]>([]);
-  const [verdict, setVerdict] = useState<TradeVerdict | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  if (!me || others.length === 0 || mine === null) return null;
-  const them = others.find((r) => r.slot === partner) ?? others[0];
-  const toggle = (list: string[], id: string) =>
-    list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
-  const price = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      setVerdict(await api.evaluateTrade(them.slot, give, get));
-    } catch (e) {
-      setVerdict(null);
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const offer = useOffer(view);
+  return <OfferForm offer={offer} />;
+}
+
+/** The form itself, for a caller that owns the state (the trade ideas do). */
+export function OfferForm({ offer }: { offer: OfferState }) {
+  const { me, others, them } = offer;
+  if (!me || !them || others.length === 0) return null;
   return (
-    <details className="trade-offer">
+    <details
+      className="trade-offer"
+      open={offer.open}
+      onToggle={(e) => offer.setOpen(e.currentTarget.open)}
+    >
       <summary>
         <h2>Price an offer</h2>
       </summary>
@@ -44,11 +30,7 @@ export function TradeOffer({ view }: { view: DraftView }) {
         <select
           aria-label="Trade partner"
           value={them.slot}
-          onChange={(e) => {
-            setPartner(Number(e.target.value));
-            setGet([]);
-            setVerdict(null);
-          }}
+          onChange={(e) => offer.setPartner(Number(e.target.value))}
         >
           {others.map((r) => (
             <option key={r.slot} value={r.slot}>
@@ -64,8 +46,8 @@ export function TradeOffer({ view }: { view: DraftView }) {
             <label key={p.player_id}>
               <input
                 type="checkbox"
-                checked={give.includes(p.player_id)}
-                onChange={() => setGive((g) => toggle(g, p.player_id))}
+                checked={offer.give.includes(p.player_id)}
+                onChange={() => offer.toggleGive(p.player_id)}
               />{" "}
               <span className="muted">{p.position}</span> {p.name}
             </label>
@@ -77,19 +59,22 @@ export function TradeOffer({ view }: { view: DraftView }) {
             <label key={p.player_id}>
               <input
                 type="checkbox"
-                checked={get.includes(p.player_id)}
-                onChange={() => setGet((g) => toggle(g, p.player_id))}
+                checked={offer.get.includes(p.player_id)}
+                onChange={() => offer.toggleGet(p.player_id)}
               />{" "}
               <span className="muted">{p.position}</span> {p.name}
             </label>
           ))}
         </fieldset>
       </div>
-      <button onClick={() => void price()} disabled={busy || (give.length === 0 && get.length === 0)}>
-        {busy ? "Pricing…" : "Price it"}
+      <button
+        onClick={() => void offer.price()}
+        disabled={offer.busy || (offer.give.length === 0 && offer.get.length === 0)}
+      >
+        {offer.busy ? "Pricing…" : "Price it"}
       </button>
-      {error && <p className="error">{error}</p>}
-      {verdict && <Verdict v={verdict} />}
+      {offer.error && <p className="error">{offer.error}</p>}
+      {offer.verdict && <Verdict v={offer.verdict} />}
     </details>
   );
 }

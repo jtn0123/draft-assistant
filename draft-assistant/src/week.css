@@ -32,7 +32,7 @@
   font-weight: 600;
 }
 
-.standings-toggle {
+button.standings-toggle {
   border: none;
   padding: 0 6px;
   font-size: 11px;
@@ -234,7 +234,7 @@
 
 .trade-ideas li {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   gap: 8px;
   align-items: baseline;
 }

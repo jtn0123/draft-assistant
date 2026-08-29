@@ -9,6 +9,7 @@ import { SeasonSoFar } from "./SeasonSoFar";
 import { Activity } from "./Activity";
 import { History } from "./History";
 import { RosterCard } from "./RosterCard";
+import { PlayerCardProvider } from "./PlayerCard";
 
 /**
  * The season, week first: what to act on before kickoff on the left (the
@@ -19,7 +20,7 @@ import { RosterCard } from "./RosterCard";
 export function SeasonScreen({ view }: { view: DraftView }) {
   const matchup = view.this_week?.matchup ?? null;
   return (
-    <>
+    <PlayerCardProvider view={view}>
       <WeekBanner view={view} />
 
       {view.data_health.warnings.length > 0 && (
@@ -46,7 +47,7 @@ export function SeasonScreen({ view }: { view: DraftView }) {
           <History view={view} />
         </div>
       </div>
-    </>
+    </PlayerCardProvider>
   );
 }
 

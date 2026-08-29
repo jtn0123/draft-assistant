@@ -1,4 +1,5 @@
 import type { DraftView } from "../types";
+import { PlayerName } from "./PlayerCard";
 
 /** My roster as drafted, with keepers tagged and the open starting slots. */
 export function RosterCard({ view }: { view: DraftView }) {
@@ -18,7 +19,7 @@ export function RosterCard({ view }: { view: DraftView }) {
             <li key={p.player_id}>
               <span className={`pos-badge pos-${p.position}`}>{p.position}</span>
               <span>
-                {p.name}
+                <PlayerName id={p.player_id}>{p.name}</PlayerName>
                 {p.is_keeper && (
                   <span className="keeper-tag" title="Kept from last season, not drafted tonight">
                     keeper

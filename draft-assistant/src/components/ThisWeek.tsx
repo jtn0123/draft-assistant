@@ -1,5 +1,6 @@
 import type { DraftView, LineupChange, Starter } from "../types";
 import { fmt, pct } from "../format";
+import { PlayerName } from "./PlayerCard";
 
 /**
  * The week ahead. Two things the user can act on before kickoff: slots where
@@ -61,12 +62,26 @@ export function ThisWeek({ view }: { view: DraftView }) {
   );
 }
 
-function describe(c: LineupChange): string {
-  if (!c.out) return `empty — start ${c.in_.name} (${fmt(c.in_.points, 1)})`;
+function describe(c: LineupChange) {
+  const in_ = (
+    <>
+      <PlayerName id={c.in_.player_id}>{c.in_.name}</PlayerName> ({fmt(c.in_.points, 1)})
+    </>
+  );
+  if (!c.out) return <>empty — start {in_}</>;
+  const out = <PlayerName id={c.out.player_id}>{c.out.name}</PlayerName>;
   if (c.out.injury && c.out.points === 0) {
-    return `${c.out.name} is ${c.out.injury} — start ${c.in_.name} (${fmt(c.in_.points, 1)})`;
+    return (
+      <>
+        {out} is {c.out.injury} — start {in_}
+      </>
+    );
   }
-  return `${c.in_.name} (${fmt(c.in_.points, 1)}) over ${c.out.name} (${fmt(c.out.points, 1)})`;
+  return (
+    <>
+      {in_} over {out} ({fmt(c.out.points, 1)})
+    </>
+  );
 }
 
 function matchupTitle(mine: Starter[], theirs: Starter[]): string {

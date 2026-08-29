@@ -65,3 +65,33 @@ test("nothing overflows the window at the 1000px minimum width", async ({ page }
   );
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test("the header says where the season is, not how big the draft was", async ({ page }) => {
+  await expect(page.locator(".brand .muted")).toHaveText(/^\d{4} · Week \d+ · vs \S+$/);
+  await page.getByRole("button", { name: "Draft screen" }).click();
+  await expect(page.locator(".brand .muted")).toContainText("14 teams · 15 rounds");
+});
+
+test("a tap on a name opens a card with what the app knows", async ({ page }) => {
+  const table = page.getByRole("table", { name: "Lineups side by side" });
+  const first = table.locator("tbody tr").first().locator("button.player-link").first();
+  const name = await first.innerText();
+  await first.click();
+  const card = page.getByRole("dialog", { name });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Owner");
+  await expect(card).toContainText("YOU");
+  await expect(card).toContainText(/Week \d+/);
+  await page.getByRole("button", { name: "Close player card" }).click();
+  await expect(card).toHaveCount(0);
+});
+
+test("a trade idea fills and prices the offer in one tap", async ({ page }) => {
+  const idea = page.getByRole("list", { name: "Trade ideas" }).getByRole("listitem").first();
+  await idea.getByRole("button", { name: /^Price / }).click();
+  const form = page.locator(".trade-offer");
+  await expect(form).toHaveAttribute("open", "");
+  // The browser preview cannot price; it says so where the verdict would be.
+  await expect(form.locator(".error")).toContainText(/desktop/i);
+  await expect(form.getByRole("checkbox", { checked: true })).not.toHaveCount(0);
+});

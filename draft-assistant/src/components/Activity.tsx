@@ -1,16 +1,25 @@
-import type { Activity as Move, DraftView } from "../types";
+import type { Activity as Move, DraftView, TradeIdea } from "../types";
 import { fmt } from "../format";
-import { TradeOffer } from "./TradeOffer";
+import { OfferForm } from "./TradeOffer";
+import { useOffer } from "./useOffer";
+import { PlayerName } from "./PlayerCard";
 
 /** The league's moves, newest first, and the swaps worth proposing. */
 export function Activity({ view }: { view: DraftView }) {
   const moves = view.activity.slice(0, 10);
   const ideas = view.trade_ideas;
   const seasonMode = view.draft.status === "complete";
+  const offer = useOffer(view);
   if (moves.length === 0 && ideas.length === 0 && !seasonMode) return null;
+  const priceIdea = (i: TradeIdea) =>
+    void offer.load({
+      partner: i.partner_slot,
+      give: i.also_give_id ? [i.give_id, i.also_give_id] : [i.give_id],
+      get: [i.get_id],
+    });
   return (
     <section className="activity">
-      {seasonMode && <TradeOffer view={view} />}
+      {seasonMode && <OfferForm offer={offer} />}
       {ideas.length > 0 && (
         <>
           <h2>Trade ideas</h2>
@@ -18,12 +27,17 @@ export function Activity({ view }: { view: DraftView }) {
             {ideas.map((i) => (
               <li key={`${i.partner_slot}-${i.give_id}-${i.get_id}`}>
                 <span>
-                  <strong>{i.get}</strong> <span className="muted">{i.get_position}</span> for{" "}
-                  {i.give} <span className="muted">{i.give_position}</span>
-                  {i.also_give && (
+                  <strong>
+                    <PlayerName id={i.get_id}>{i.get}</PlayerName>
+                  </strong>{" "}
+                  <span className="muted">{i.get_position}</span> for{" "}
+                  <PlayerName id={i.give_id}>{i.give}</PlayerName>{" "}
+                  <span className="muted">{i.give_position}</span>
+                  {i.also_give && i.also_give_id && (
                     <>
                       {" + "}
-                      {i.also_give} <span className="muted">{i.also_give_position}</span>
+                      <PlayerName id={i.also_give_id}>{i.also_give}</PlayerName>{" "}
+                      <span className="muted">{i.also_give_position}</span>
                     </>
                   )}
                 </span>
@@ -31,6 +45,16 @@ export function Activity({ view }: { view: DraftView }) {
                 <span className="gain" title={`+${fmt(i.my_gain)} to my lineup; +${fmt(i.over_waiver)} over the best free agent`}>
                   +{fmt(i.over_waiver)} <span className="muted">/ them +{fmt(i.their_gain)}</span>
                 </span>
+                {seasonMode && (
+                  <button
+                    className="ghost small"
+                    onClick={() => priceIdea(i)}
+                    disabled={offer.busy}
+                    aria-label={`Price ${i.get} for ${i.give}`}
+                  >
+                    Price it
+                  </button>
+                )}
               </li>
             ))}
           </ul>

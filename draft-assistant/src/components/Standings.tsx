@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { DraftView, TeamProjection } from "../types";
 import { fmt, pct } from "../format";
+import { PlayerName } from "./PlayerCard";
 
 /**
  * The draft's scoreboard: every team's best lineup, ranked by what it
@@ -79,7 +80,9 @@ function Lineup({ t, name }: { t: TeamProjection; name: string }) {
       {xs.map((s) => (
         <li key={`${s.slot}-${s.player_id}`}>
           <span className="slot">{s.slot}</span>
-          <span className="standings-name">{s.name}</span>
+          <span className="standings-name">
+            <PlayerName id={s.player_id}>{s.name}</PlayerName>
+          </span>
           <span className="standings-pts">{fmt(s.points, digits)}</span>
         </li>
       ))}

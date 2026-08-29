@@ -13,6 +13,7 @@ import { useOnClockAlert } from "./components/useOnClockAlert";
 import { loadAlertPref, saveAlertPref } from "./components/alertPref";
 import { PickStyleContext, formatPick, loadPickStyle, savePickStyle } from "./pickFormat";
 import { useViewMode } from "./viewMode";
+import { subtitle } from "./subtitle";
 import { LAUNCH_RETRY_DELAYS_MS, startingLaunch, transientNetworkError, withRetry } from "./launch";
 import type { LaunchStatus } from "./launch";
 import { LaunchScreen } from "./components/LaunchScreen";
@@ -336,8 +337,7 @@ export default function App() {
         <div className="brand">
           <h1>{view.league.name}</h1>
           <span className="muted">
-            {view.league.season} · {view.draft.teams} teams · {view.draft.rounds} rounds
-            {view.draft.manual_picks_active && " · manual picks active"}
+            {subtitle(view, mode)}
           </span>
           <div className="mode-switch" role="group" aria-label="Screen">
             <button

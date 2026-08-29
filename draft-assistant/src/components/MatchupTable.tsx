@@ -1,5 +1,6 @@
 import type { MatchupPreview, Starter } from "../types";
 import { fmt } from "../format";
+import { PlayerName } from "./PlayerCard";
 
 type Row = { slot: string; mine: Starter | null; theirs: Starter | null };
 
@@ -44,9 +45,14 @@ export function MatchupTable({ matchup }: { matchup: MatchupPreview }) {
   );
 }
 
-function name(s: Starter | null): string {
+function name(s: Starter | null) {
   if (!s) return "empty";
-  return s.injury ? `${s.name} · ${s.injury}` : s.name;
+  return (
+    <>
+      <PlayerName id={s.player_id}>{s.name}</PlayerName>
+      {s.injury && ` · ${s.injury}`}
+    </>
+  );
 }
 
 function points(s: Starter | null): string {

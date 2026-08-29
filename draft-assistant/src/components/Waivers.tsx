@@ -1,5 +1,6 @@
 import type { DraftView } from "../types";
 import { fmt } from "../format";
+import { PlayerName } from "./PlayerCard";
 
 /**
  * The waiver wire, priced for this roster. Gain is what a player adds to
@@ -22,7 +23,7 @@ export function Waivers({ view }: { view: DraftView }) {
             <li key={t.player_id} title={`${fmt(t.points)} season pts · bye ${t.bye_week ?? "–"}`}>
               <span className={`pos-badge pos-${t.position}`}>{t.position}</span>
               <span className="waiver-name">
-                {t.name}
+                <PlayerName id={t.player_id}>{t.name}</PlayerName>
                 {t.team && <span className="muted"> {t.team}</span>}
                 {t.bye_week != null && <span className="muted"> · bye {t.bye_week}</span>}
               </span>

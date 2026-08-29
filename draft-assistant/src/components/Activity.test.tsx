@@ -1,5 +1,9 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const testState = vi.hoisted(() => ({ api: { evaluateTrade: vi.fn() } }));
+vi.mock("../api", () => ({ api: testState.api }));
 import fixtureJson from "../../public/dev-fixture.json";
 import type { DraftView } from "../types";
 import { Activity } from "./Activity";
@@ -39,5 +43,58 @@ describe("Activity", () => {
     expect(moves).toHaveTextContent("youngmomo added Cooper Kupp");
     expect(moves).toHaveTextContent("fisher23 ↔ ocrevo: 2026 round 4 (ocrevo) → fisher23");
     expect(moves).toHaveTextContent("ChrisWitz claimed Jonnu Smith ($37), dropped Someone Else");
+  });
+});
+
+describe("Activity prices a trade idea in one tap", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("fills the offer from the idea, both pieces of a two-for-one, and prices it", async () => {
+    const user = userEvent.setup();
+    const v = structuredClone(fixtureJson) as unknown as DraftView;
+    v.draft.my_slot = 2;
+    v.draft.status = "complete";
+    const them = v.rosters.find((r) => r.slot !== 2 && r.players.length > 0)!;
+    v.trade_ideas = [
+      {
+        partner_slot: them.slot,
+        partner_name: them.display_name,
+        give_id: "g1",
+        give: "Khalil Shakir",
+        give_position: "WR",
+        also_give_id: "g2",
+        also_give: "Xavier Worthy",
+        also_give_position: "WR",
+        get_id: "t1",
+        get: "Chase Brown",
+        get_position: "RB",
+        my_gain: 20,
+        over_waiver: 18,
+        their_gain: 9,
+      },
+    ];
+    testState.api.evaluateTrade.mockResolvedValue({
+      partner_slot: them.slot,
+      partner_name: them.display_name,
+      give: [],
+      get: [],
+      my_season_before: 1800,
+      my_season_after: 1818,
+      their_season_before: 1900,
+      their_season_after: 1909,
+      week: 1,
+      my_week_before: 120,
+      my_week_after: 121,
+      their_week_before: 130,
+      their_week_after: 131,
+    });
+    render(<Activity view={v} />);
+    await user.click(screen.getByRole("button", { name: "Price Chase Brown for Khalil Shakir" }));
+    expect(testState.api.evaluateTrade).toHaveBeenCalledWith(them.slot, ["g1", "g2"], ["t1"]);
+    const out = await screen.findByRole("status");
+    expect(out).toHaveTextContent("Me +18");
+    expect(out).toHaveTextContent("Both sides gain");
+    // The form opened on the same partner, so the offer can be adjusted from here.
+    expect(screen.getByRole("combobox", { name: "Trade partner" })).toHaveValue(String(them.slot));
   });
 });

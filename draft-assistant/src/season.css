@@ -141,3 +141,67 @@
   border-top: 2px solid var(--border);
   font-weight: 700;
 }
+
+/* ---------- player card ---------- */
+
+/* A name that opens the card: text, with a hint that it is a control. */
+button.player-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--text-muted);
+  text-underline-offset: 2px;
+}
+
+button.player-link:hover {
+  text-decoration-color: var(--accent);
+}
+
+.player-card {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 300px;
+  z-index: 30;
+  background: var(--bg-raised);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+}
+
+.player-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-card-head strong {
+  flex: 1;
+}
+
+.player-card dl {
+  display: grid;
+  gap: 3px;
+  margin: 10px 0 0;
+}
+
+.player-card dl > div {
+  display: grid;
+  grid-template-columns: 7em 1fr;
+  gap: 8px;
+}
+
+.player-card dt {
+  color: var(--text-muted);
+}
+
+.player-card dd {
+  margin: 0;
+}
