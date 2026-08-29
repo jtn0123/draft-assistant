@@ -12,14 +12,19 @@ describe("launch retry", () => {
     expect(transientNetworkError("Incompatible draft data: schema 1.3")).toBe(false);
   });
 
-  it("retries a transient failure and returns the eventual result", async () => {
+  it("retries a transient failure, saying so each time, and returns the eventual result", async () => {
     const run = vi
       .fn<() => Promise<string>>()
       .mockRejectedValueOnce(new Error("operation timed out"))
       .mockRejectedValueOnce(new Error("error sending request"))
       .mockResolvedValue("loaded");
-    await expect(withRetry(run, [1, 1], transientNetworkError)).resolves.toBe("loaded");
+    const onRetry = vi.fn();
+    await expect(withRetry(run, [1, 1], transientNetworkError, onRetry)).resolves.toBe("loaded");
     expect(run).toHaveBeenCalledTimes(3);
+    expect(onRetry.mock.calls).toEqual([
+      [2, "operation timed out"],
+      [3, "error sending request"],
+    ]);
   });
 
   it("gives up after the delays run out, and at once on anything else", async () => {

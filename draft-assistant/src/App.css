@@ -113,6 +113,48 @@ input:focus {
   margin: 0;
 }
 
+/* Launch: what is happening while the saved league is restored. */
+.launch-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.launch-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: launch-pulse 1.2s ease-in-out infinite;
+}
+
+.launch-dot.waiting {
+  background: var(--warn);
+}
+
+@keyframes launch-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.launch-detail {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.launch-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .setup label {
   display: flex;
   flex-direction: column;

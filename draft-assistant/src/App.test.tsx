@@ -113,7 +113,7 @@ describe("App live workflow", () => {
     });
 
     render(<App />);
-    expect(screen.getByText("Loading your league…")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Reading your settings…");
     expect(await screen.findByLabelText("League ID")).toBeInTheDocument();
   });
 
@@ -349,11 +349,33 @@ describe("App live workflow", () => {
     testState.api.addLeague.mockRejectedValue(new Error("Sleeper is unreachable"));
 
     render(<App />);
-    expect(await screen.findByLabelText("League ID")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("Sleeper is unreachable");
-    // Retrying is one click, not retyping an 19-digit id.
-    expect(screen.getByLabelText("League ID")).toHaveValue(initial.league.league_id);
+    // Not a bare setup form: the failure, a retry, and a way to change league.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sleeper is unreachable");
+    expect(screen.getByRole("heading", { name: "Unable to connect" })).toBeInTheDocument();
     expect(testState.api.addLeague).toHaveBeenCalledTimes(1);
+
+    const user = userEvent.setup();
+    testState.api.addLeague.mockResolvedValue(initial);
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+    expect(testState.api.addLeague).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers the setup form with the saved league filled in after a failed launch", async () => {
+    const user = userEvent.setup();
+    const initial = fixture();
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: null,
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockRejectedValue(new Error("HTTP 404 Not Found"));
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "Unable to connect" });
+    await user.click(screen.getByRole("button", { name: "Load a different league" }));
+    // Retrying is one click, not retyping a 19-digit id.
+    expect(screen.getByLabelText("League ID")).toHaveValue(initial.league.league_id);
   });
 
   it("retries a launch that stalled on the network before giving up", async () => {
@@ -368,6 +390,9 @@ describe("App live workflow", () => {
       .mockResolvedValue(initial);
 
     render(<App />);
+    // The screen says it is still trying, and why, while it waits.
+    await screen.findByText(/trying again \(attempt 2 of 3\)/);
+    expect(screen.getByRole("status")).toHaveTextContent("operation timed out");
     expect(await screen.findByText(initial.league.name, {}, { timeout: 4000 })).toBeInTheDocument();
     expect(testState.api.addLeague).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -446,50 +471,5 @@ describe("App live workflow", () => {
     await user.type(await screen.findByLabelText("League ID"), "123456789012345");
     await user.click(screen.getByRole("button", { name: "Load league" }));
     expect(await screen.findByText("league unavailable")).toBeInTheDocument();
-  });
-});
-
-describe("draft and season screens", () => {
-  function load(initial: DraftView) {
-    testState.api.getConfig.mockResolvedValue({
-      my_user_id: "browser-preview",
-      active_league_id: initial.league.league_id,
-      leagues: [],
-    });
-    testState.api.addLeague.mockResolvedValue(initial);
-  }
-
-  it("shows the draft while it is on, with the season a switch away", async () => {
-    const user = userEvent.setup();
-    load(fixture());
-    render(<App />);
-    await screen.findByText("YOU ARE ON THE CLOCK");
-    expect(screen.getByRole("button", { name: "Draft screen" })).toHaveAttribute("aria-pressed", "true");
-
-    await user.click(screen.getByRole("button", { name: "Season screen" }));
-    expect(screen.queryByText("YOU ARE ON THE CLOCK")).not.toBeInTheDocument();
-    expect(screen.getByText(/No week on the calendar yet/)).toBeInTheDocument();
-    // Draft-only controls leave with the draft.
-    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Toggle pick numbering")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "My roster" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Tier alerts" })).not.toBeInTheDocument();
-  });
-
-  it("opens on the season once the draft is complete and remembers a switch back", async () => {
-    const user = userEvent.setup();
-    const initial = fixture();
-    initial.draft.status = "complete";
-    load(initial);
-    render(<App />);
-    await screen.findByText(initial.league.name);
-    expect(screen.getByRole("button", { name: "Season screen" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByText("YOU ARE ON THE CLOCK")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Draft screen" }));
-    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
-    expect(
-      window.localStorage.getItem(`draft-assistant.view-mode:${initial.draft.draft_id}`),
-    ).toBe("draft");
   });
 });

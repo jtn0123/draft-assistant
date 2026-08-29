@@ -13,7 +13,9 @@ import { useOnClockAlert } from "./components/useOnClockAlert";
 import { loadAlertPref, saveAlertPref } from "./components/alertPref";
 import { PickStyleContext, formatPick, loadPickStyle, savePickStyle } from "./pickFormat";
 import { useViewMode } from "./viewMode";
-import { LAUNCH_RETRY_DELAYS_MS, transientNetworkError, withRetry } from "./launch";
+import { LAUNCH_RETRY_DELAYS_MS, startingLaunch, transientNetworkError, withRetry } from "./launch";
+import type { LaunchStatus } from "./launch";
+import { LaunchScreen } from "./components/LaunchScreen";
 import "./App.css";
 import "./components.css";
 import "./snake.css";
@@ -47,6 +49,11 @@ export default function App() {
   const [pickStyle, setPickStyle] = useState(loadPickStyle);
   // Every league loaded so far, so switching to a mock and back is two clicks.
   const [leagues, setLeagues] = useState<StoredLeague[]>([]);
+  // Restoring the saved league at launch, attempt by attempt, so the screen
+  // can say "still trying" and, in the end, "unable to connect" with a way
+  // back — rather than a blank wait and then an empty setup form.
+  const [launch, setLaunch] = useState<LaunchStatus | null>(null);
+  const [setupWanted, setSetupWanted] = useState(false);
   const [activeLeagueId, setActiveLeagueId] = useState<string | null>(null);
   // The draft cockpit or the season screen: the season once the draft is over,
   // either on request, remembered per draft.
@@ -122,6 +129,32 @@ export default function App() {
     }
   }, [fail]);
 
+  // Restore a league by id: the saved one at launch, or again from the
+  // launch screen. A stalled connect is tried again; the screen follows.
+  const restore = useCallback(
+    async (id: string) => {
+      setLaunch(startingLaunch(id));
+      setSetupWanted(false);
+      setBusy(true);
+      try {
+        const v = await withRetry(
+          () => api.addLeague(id),
+          LAUNCH_RETRY_DELAYS_MS,
+          transientNetworkError,
+          (attempt, error) => setLaunch((l) => l && { ...l, attempt, error }),
+        );
+        setLaunch(null);
+        applyView(v);
+        if (!api.preview || api.replay) await startLive();
+      } catch (e) {
+        setLaunch((l) => l && { ...l, failed: true, error: errorMessage(e) });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyView, startLive],
+  );
+
   // Restore last league on launch; live sync starts automatically (except in
   // the browser preview, where there is nothing to sync).
   useEffect(() => {
@@ -132,26 +165,14 @@ export default function App() {
         const config = await api.getConfig();
         setLeagues(config.leagues);
         setActiveLeagueId(config.active_league_id);
-        if (config.active_league_id) {
-          setBusy(true);
-          // A connect that stalls once at launch is not a reason to lose
-          // the saved league; try again before falling back to setup.
-          const id = config.active_league_id;
-          const v = await withRetry(
-            () => api.addLeague(id),
-            LAUNCH_RETRY_DELAYS_MS,
-            transientNetworkError,
-          );
-          applyView(v);
-          if (!api.preview || api.replay) await startLive();
-        }
+        if (config.active_league_id) await restore(config.active_league_id);
       } catch (e) {
         fail(errorMessage(e));
       } finally {
         setBusy(false);
       }
     })();
-  }, [fail, startLive, applyView]);
+  }, [fail, restore]);
 
   // Live updates from the poller. A rejected payload is surfaced rather than
   // dropped: updates silently stopping is the one failure this app must never
@@ -275,11 +296,13 @@ export default function App() {
   ) : null;
 
   if (view === null) {
-    return busy ? (
-      <div className="setup">
-        <h1>Draft Assistant</h1>
-        <p className="muted">Loading your league…</p>
-      </div>
+    const wantsSetup = setupWanted || (!busy && launch === null);
+    return !wantsSetup ? (
+      <LaunchScreen
+        status={launch}
+        onRetry={() => launch && void restore(launch.leagueId)}
+        onSetup={() => setSetupWanted(true)}
+      />
     ) : (
       <>
         {alertBar}
