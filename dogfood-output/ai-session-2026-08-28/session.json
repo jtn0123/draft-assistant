@@ -1,0 +1,65 @@
+[
+  {
+    "answer": "**Jahmyr Gibbs (RB, DET).** He's the top VORP on the board at 196 (353 projected pts) and the last of a 2-deep RB tier 1 alongside Bijan — with full PPR plus yardage bonuses, his receiving floor plays up. Bijan is the fine coin-flip alternative; Chase carries a Questionable tag and 23 fewer VORP.",
+    "as_of": {
+      "pick": 1,
+      "seq": 1
+    },
+    "question": "Who should I take next?",
+    "usage": {
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 20982,
+      "context_tokens": 20984,
+      "cost_usd": 0.232587,
+      "duration_ms": 5726,
+      "fast_mode": "off",
+      "fast_mode_reason": "sdk_opt_in_required",
+      "input_tokens": 2,
+      "model": "opus",
+      "output_tokens": 288,
+      "web_searches": 0
+    }
+  },
+  {
+    "answer": "Realistically only the very top of the board is at risk. Survival odds say Gibbs (74%), Bijan (84%), and Chase (85%) each have a ~15–26% chance of being taken in the 24 picks between your two selections — after you take one, expect roughly one of the other two to be gone. McCaffrey is 94%, and literally everyone else on the board sits at 99%.\n\nSo don't reach at 27 for anyone below that top four: Amon-Ra, Cook, Bowers, London, and the RB5-11 group are all near-locks to still be there.",
+    "as_of": {
+      "pick": 1,
+      "seq": 1
+    },
+    "question": "Who is likely gone before my next pick at 27?",
+    "usage": {
+      "cache_read_tokens": 2933,
+      "cache_write_tokens": 18219,
+      "context_tokens": 21154,
+      "cost_usd": 0.2101255,
+      "duration_ms": 7662,
+      "fast_mode": "off",
+      "fast_mode_reason": "sdk_opt_in_required",
+      "input_tokens": 2,
+      "model": "opus",
+      "output_tokens": 431,
+      "web_searches": 0
+    }
+  },
+  {
+    "answer": "**2 → Gibbs, 27 → Amon-Ra St. Brown, 30 → Brock Bowers.**\n\n- **Pick 2 (Gibbs, RB):** top VORP on the board at 196, and the RB1 tier empties right behind him.\n- **Pick 27 (Amon-Ra, WR):** 143 VORP is the biggest single drop-off available and it fills your open WR slot. Board says 99% survival, though his 8.0 ADP makes him the one name here I'd actually sweat — if he's gone, James Cook (122) or Drake London/Pickens (109/105) are the fallbacks.\n- **Pick 30 (Bowers, TE):** he's the last TE tier 1, and the next TE is LaPorta at 43 VORP — a 66-point cliff you can't recover from later. Since 27 and 30 are nearly back-to-back, you can flip the order if a run breaks out.\n\nThat leaves you RB/WR/TE anchored with four FLEX spots to fill from a very deep WR pool at 55/58 and beyond, and DEF can wait until the last couple rounds.",
+    "as_of": {
+      "pick": 1,
+      "seq": 1
+    },
+    "question": "Plan my next three picks.",
+    "usage": {
+      "cache_read_tokens": 2933,
+      "cache_write_tokens": 18418,
+      "context_tokens": 21353,
+      "cost_usd": 0.2343195,
+      "duration_ms": 19488,
+      "fast_mode": "off",
+      "fast_mode_reason": "sdk_opt_in_required",
+      "input_tokens": 2,
+      "model": "opus",
+      "output_tokens": 1313,
+      "web_searches": 0
+    }
+  }
+]

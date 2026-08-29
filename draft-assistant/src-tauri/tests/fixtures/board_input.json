@@ -1,0 +1,62 @@
+{
+  "league": {
+    "league_id": "fixture-league",
+    "name": "Mixed lineup fixture",
+    "season": "2026",
+    "status": "pre_draft",
+    "total_rosters": 2,
+    "roster_positions": ["QB", "RB", "WR", "TE", "SUPER_FLEX", "K", "DEF", "BN"],
+    "scoring_settings": {
+      "pass_yd": 0.04,
+      "pass_td": 4.0,
+      "rush_yd": 0.1,
+      "rush_td": 6.0,
+      "rec_yd": 0.1,
+      "rec_td": 6.0,
+      "fgm_40_49": 4.0,
+      "sack": 1.0,
+      "int": 2.0
+    },
+    "draft_id": "fixture-draft"
+  },
+  "draft": {
+    "draft_id": "fixture-draft",
+    "status": "pre_draft",
+    "type": "snake",
+    "settings": { "teams": 2, "rounds": 8, "pick_timer": 90 },
+    "draft_order": { "fixture-user": 1 },
+    "season": "2026"
+  },
+  "season_rows": [
+    {
+      "player_id": "qb-1",
+      "stats": { "pass_yd": 4000.0, "pass_td": 30.0, "adp_ppr": 10.0 },
+      "player": { "full_name": "Fixture QB", "position": "QB", "team": "AAA" }
+    },
+    {
+      "player_id": "rb-1",
+      "stats": { "rush_yd": 1000.0, "rush_td": 8.0, "adp_ppr": 20.0 },
+      "player": { "full_name": "Fixture RB", "position": "RB", "team": "BBB" }
+    },
+    {
+      "player_id": "wr-1",
+      "stats": { "rec_yd": 1000.0, "rec_td": 8.0, "adp_ppr": 30.0 },
+      "player": { "full_name": "Fixture WR", "position": "WR", "team": "CCC" }
+    },
+    {
+      "player_id": "te-1",
+      "stats": { "rec_yd": 700.0, "rec_td": 6.0, "adp_ppr": 40.0 },
+      "player": { "full_name": "Fixture TE", "position": "TE", "team": "DDD" }
+    },
+    {
+      "player_id": "k-1",
+      "stats": { "fgm_40_49": 25.0, "adp_ppr": 150.0 },
+      "player": { "full_name": "Fixture K", "position": "K", "team": "EEE" }
+    },
+    {
+      "player_id": "def-1",
+      "stats": { "sack": 40.0, "int": 15.0, "adp_ppr": 140.0 },
+      "player": { "first_name": "Fixture", "last_name": "Defense", "position": "DEF", "team": "FFF" }
+    }
+  ]
+}

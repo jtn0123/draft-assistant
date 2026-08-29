@@ -1,0 +1,39 @@
+[
+  {
+    "_note": "Synthetic exchange for the browser preview and E2E tests (?chat=/chat-fixture.json). Exercises streaming, markdown lists and emphasis, the as-of stamp and the usage line. Real recorded sessions are written by `dump_state --chat-out`.",
+    "question": "Who should I take next?",
+    "answer": "Take **Ladd McConkey** — he is the board's top VORP at 78 and fills your open FLEX slot, and with a 3% chance of lasting to your next pick he will not be there later.\n\nIf he goes before you:\n- **Chris Olave** — tier 2 WR, 60 VORP, still likely there\n- **Kyren Williams** — RB depth, 55 VORP\n\nYour roster is thinnest at WR (1 rostered against a starting WR plus two FLEX), so a wideout here is the priority over a second TE.",
+    "usage": {
+      "model": "opus",
+      "input_tokens": 9800,
+      "cache_read_tokens": 3400,
+      "cache_write_tokens": 0,
+      "output_tokens": 120,
+      "context_tokens": 13200,
+      "web_searches": 0,
+      "duration_ms": 8400,
+      "cost_usd": 0.11,
+      "fast_mode": null,
+      "fast_mode_reason": null
+    },
+    "as_of": { "pick": 1, "seq": 1 }
+  },
+  {
+    "question": "Why?",
+    "answer": "Because the gap is real: McConkey projects **236 points** against a WR replacement baseline near 158, so he is worth about a round more than the next wideout, and your four FLEX slots mean every one of those points starts.\n\n1. VORP 78 — best on the board\n2. Fills an open starter today\n3. Survival to pick 27 is only 3%",
+    "usage": {
+      "model": "opus",
+      "input_tokens": 9900,
+      "cache_read_tokens": 3400,
+      "cache_write_tokens": 0,
+      "output_tokens": 90,
+      "context_tokens": 13300,
+      "web_searches": 0,
+      "duration_ms": 7100,
+      "cost_usd": 0.1,
+      "fast_mode": null,
+      "fast_mode_reason": null
+    },
+    "as_of": { "pick": 1, "seq": 2 }
+  }
+]

@@ -45,7 +45,7 @@
 
 The Rust core has clear, compact modules for scoring, valuation, draft state, recommendations, API access, and view construction (`draft-assistant/src-tauri/src/scoring.rs`, `valuation.rs`, `draft.rs`, `recommend.rs`, `sleeper.rs`, and `view.rs`). A single serialized `DraftView` also gives the UI and export path one authoritative state shape (`src-tauri/src/view.rs:58-94`). The main architectural weakness is that roster eligibility and the Rust-to-TypeScript contract are repeated rather than generated or centralized, which already creates divergent behavior.
 
-#### A1 — Make roster-slot semantics one shared domain model
+#### ~~A1~~ ✓ done 2026-08-27 — Make roster-slot semantics one shared domain model
 - **Where:** `draft-assistant/src-tauri/src/valuation.rs:27-36`, `draft-assistant/src-tauri/src/draft.rs:44-94`, `draft-assistant/src-tauri/src/recommend.rs:33-100`, `draft-assistant/src/components/Board.tsx:5`
 - **What's wrong:** Slot eligibility is interpreted independently by valuation, roster filling, recommendation scoring, and the UI. The implementations disagree: valuation understands several flex types, recommendations only understand `FLEX`, and the UI filter omits `K`.
 - **Impact:** Major — a supported Sleeper roster can receive internally inconsistent replacement levels, needs, recommendations, and controls.
@@ -53,7 +53,7 @@ The Rust core has clear, compact modules for scoring, valuation, draft state, re
 - **Effort:** L
 - **Grade lift:** B− → B+ (removes the largest cross-module source of divergent business rules)
 
-#### A2 — Generate or validate the Rust-to-TypeScript state contract
+#### ~~A2~~ ✓ done 2026-08-27 — Generate or validate the Rust-to-TypeScript state contract
 - **Where:** `draft-assistant/src-tauri/src/view.rs:13-94`, `draft-assistant/src-tauri/src/recommend.rs:8-22`, `draft-assistant/src/types.ts:1-134`, `draft-assistant/src/api.ts:49-55`
 - **What's wrong:** The frontend manually mirrors Rust structs, and browser fixture JSON is trusted with a TypeScript cast rather than validated. A Rust field change can compile successfully while producing a runtime-only frontend break.
 - **Impact:** Moderate — schema drift can break the draft-night UI despite both language toolchains passing independently.
@@ -75,7 +75,7 @@ The Rust core has clear, compact modules for scoring, valuation, draft state, re
 
 The core is small, type-safe, deterministic, and generally returns errors instead of panicking (`src-tauri/src/lib.rs:43-179`); scoring and recommendation logic are intentionally auditable. However, two current behaviors violate important product promises: fallback picks are volatile, and recommendations are not actually generic across Sleeper roster shapes. Network and persistence failures are also frequently discarded rather than represented in `DataHealth`.
 
-#### B1 — Preserve manual picks across refreshes and reloads
+#### ~~B1~~ ✓ done 2026-08-27 — Preserve manual picks across refreshes and reloads
 - **Where:** `draft-assistant/src-tauri/src/lib.rs:113-124`, `draft-assistant/src-tauri/src/lib.rs:127-165`, `draft-assistant/src-tauri/src/engine.rs:247-260`
 - **What's wrong:** Manual picks live only inside `LoadedLeague`. Every full `refresh_data`, league reload, or application restart constructs a new `LoadedLeague` with `manual_picks: Vec::new()`, silently erasing the fallback state the README promises.
 - **Impact:** Major — using Refresh Data during an API outage can put drafted players back on the board and corrupt recommendations during a live draft.
@@ -83,7 +83,7 @@ The core is small, type-safe, deterministic, and generally returns errors instea
 - **Effort:** M
 - **Grade lift:** C+ → B− (closes the highest-risk draft-night state-loss path)
 
-#### B2 — Correct recommendations for superflex, mixed flex, and kicker leagues
+#### ~~B2~~ ✓ done 2026-08-27 — Correct recommendations for superflex, mixed flex, and kicker leagues
 - **Where:** `draft-assistant/src-tauri/src/recommend.rs:33-45`, `draft-assistant/src-tauri/src/recommend.rs:88-153`, `draft-assistant/src-tauri/src/valuation.rs:70-91`, `draft-assistant/src-tauri/src/board.rs:43-64`
 - **What's wrong:** Recommendations only treat RB/WR/TE as flex-eligible and apply RB/WR depth heuristics to every unrecognized position, including kickers. Valuation explicitly uses only the first flex slot's eligibility for all flex demand, so a league mixing `FLEX`, `REC_FLEX`, or `SUPER_FLEX` is valued incorrectly.
 - **Impact:** Major — users in common nonstandard leagues can receive strategically wrong picks even though the app claims to follow the exact roster and scoring settings.
@@ -91,7 +91,7 @@ The core is small, type-safe, deterministic, and generally returns errors instea
 - **Effort:** L
 - **Grade lift:** C+ → B (makes the core recommendation claim true across supported Sleeper leagues)
 
-#### B3 — Report live-sync failures instead of swallowing them
+#### ~~B3~~ ✓ done 2026-08-27 — Report live-sync failures instead of swallowing them
 - **Where:** `draft-assistant/src-tauri/src/lib.rs:212-241`, `draft-assistant/src/App.tsx:55-75`, `draft-assistant/src/types.ts:99-105`
 - **What's wrong:** The poller ignores failed pick/draft calls and ignores event-emission errors. The frontend continues displaying “Live sync on,” and `DataHealth` has no last-success, last-error, or consecutive-failure fields.
 - **Impact:** Major — a stale board can look live during the time-sensitive part of a draft.
@@ -129,7 +129,7 @@ The runtime layout is visually coherent and information-dense, with useful loadi
 - **Effort:** S
 - **Grade lift:** B− → B (makes critical live state available beyond vision)
 
-#### C3 — Give board controls complete accessible semantics
+#### ~~C3~~ ✓ done 2026-08-27 — Give board controls complete accessible semantics
 - **Where:** `draft-assistant/src/components/Board.tsx:27-47`, `draft-assistant/src/components/Board.tsx:48-95`
 - **What's wrong:** The position selector is visually tab-like but has neither pressed-state nor tab semantics, and player search relies on placeholder text without a label. The empty filtered state renders a blank table body with no explanation.
 - **Impact:** Moderate — board navigation is ambiguous for assistive technology and gives weak feedback when a filter has no matches.
@@ -143,21 +143,23 @@ The runtime layout is visually coherent and information-dense, with useful loadi
 
 The 13 Rust unit tests exercise useful math and recommendation guardrails and all pass (`src-tauri/src/scoring.rs:108-159`, `draft.rs:146-201`, `recommend.rs:238-333`, `valuation.rs:139-173`). But the data ingestion, view assembly, Tauri command/state lifecycle, frontend, and actual desktop journey are untested. There is no CI or coverage gate, so today's clean local result is not continuously enforced.
 
-#### D1 — Add fixture-driven backend integration tests `[BE]`
+#### D1 ◐ partial 2026-08-27 — Add fixture-driven backend integration tests `[BE]`
 - **Where:** Broad gap across `draft-assistant/src-tauri/src/board.rs`, `engine.rs`, `sleeper.rs`, `view.rs`, and `lib.rs`; create `draft-assistant/src-tauri/tests/`
 - **What's wrong:** None of the Sleeper response parsing, cache lifecycle, board assembly, merged picks, full `DraftView`, or polling state is tested end to end. Current tests construct small in-memory values and miss contract and state-transition failures.
 - **Impact:** Major — upstream payload drift or a refresh/poller regression can break draft-night behavior while all 13 tests remain green.
 - **Fix:** Add checked-in sanitized Sleeper fixtures for standard, superflex, partial weekly data, API outage, and manual-pick catch-up scenarios. Exercise assembly through `DraftView` snapshots and test cache refresh/reload behavior with temporary directories and a mock HTTP server.
 - **Effort:** L
 - **Grade lift:** C− → C+ (covers the app's core data and state boundaries)
+- **Progress:** Added a checked-in, network-free 210-pick integration simulation that repeatedly builds `DraftView` and gates uniqueness, availability, probability, roster, recommendation, and starter-completion invariants. Sleeper parsing and mock-HTTP cache scenarios remain.
 
-#### D2 — Add frontend component and interaction tests `[FE]`
+#### D2 ◐ partial 2026-08-27 — Add frontend component and interaction tests `[FE]`
 - **Where:** Broad gap across `draft-assistant/src/App.tsx`, `src/components/Board.tsx`, and `src/components/Panels.tsx`; create `draft-assistant/src/**/*.test.tsx`
 - **What's wrong:** There is no frontend test runner or repository-owned frontend test. Filtering, setup failures, polling state, modal actions, live events, warning states, and accessibility behavior are unchecked.
 - **Impact:** Major — user-facing regressions can ship even when TypeScript compiles and Rust tests pass.
 - **Fix:** Add Vitest, React Testing Library, and user-event; mock the API boundary; cover setup success/failure, live updates, filters, manual-pick confirmation/undo, refresh failures, empty states, and accessible dialog/status behavior.
 - **Effort:** L
 - **Grade lift:** C− → C+ (adds meaningful coverage of the entire visible product surface)
+- **Progress:** Added Vitest, Testing Library, user-event, and seven tests covering setup/no-saved-league and error paths, live updates and staleness, manual pick/undo, dynamic filters, empty search, and schema compatibility. Refresh/export failures and accessible dialog/status behavior remain.
 
 #### D3 — Add a real desktop smoke journey `[both]`
 - **Where:** Broad gap; create `draft-assistant/e2e/` and drive the Tauri app or a testable browser adapter against `public/dev-fixture.json`
@@ -167,13 +169,14 @@ The 13 Rust unit tests exercise useful math and recommendation guardrails and al
 - **Effort:** L
 - **Grade lift:** C− → C+ (establishes physical confidence in the shipped desktop journey)
 
-#### D4 — Enforce tests and coverage in CI `[both]`
+#### D4 ◐ partial 2026-08-27 — Enforce tests and coverage in CI `[both]`
 - **Where:** No `.github/workflows/` exists; `draft-assistant/package.json:6-10` has no test script and `draft-assistant/src-tauri/Cargo.toml:1-22` has no coverage tooling
 - **What's wrong:** Builds, tests, Clippy, formatting, audits, and coverage are not automatically gated. There is no baseline to reveal untested growth.
 - **Impact:** Moderate — quality depends on remembering a set of local commands, and regressions can enter unnoticed.
 - **Fix:** Add a CI workflow for frontend build/tests, Rust fmt/Clippy/tests, dependency audits, and artifact packaging. Publish frontend and Rust coverage, set an honest initial threshold based on measured coverage, then raise it with meaningful tests.
 - **Effort:** M
 - **Grade lift:** C− → C+ (turns local checks into a repeatable reliability contract)
+- **Progress:** Added a macOS GitHub Actions workflow running the unified format, typecheck, build, Rust test, ESLint, and Clippy gate. Coverage publication, audits, and packaging remain.
 
 ---
 
@@ -249,7 +252,7 @@ The frontend bundle is lean, board filtering is memoized and capped to 200 displ
 - **Effort:** S
 - **Grade lift:** B− → B (bounds failure time and improves recovery behavior)
 
-#### G3 — Stop recomputing replacement levels for every view
+#### ~~G3~~ ✓ done 2026-08-27 — Stop recomputing replacement levels for every view
 - **Where:** `draft-assistant/src-tauri/src/board.rs:175-190`, `draft-assistant/src-tauri/src/view.rs:269-282`
 - **What's wrong:** `build_board` computes replacement demand/baselines to assign VORP, but `build_view` reconstructs the scored vector and computes the same model again. Every pick update rebuilds a full view even though league settings and the board did not change.
 - **Impact:** Minor — current datasets are manageable, but repeated duplicate work consumes CPU on every live state emission.
@@ -293,7 +296,7 @@ The README clearly explains the product, architecture, run/build commands, fixtu
 
 TypeScript strictness, unused-code checks, lockfiles, a fast production build, passing strict Clippy, and a browser fixture provide a good local foundation (`tsconfig.json:3-24`, `package.json:6-24`, `src/api.ts:42-90`). The project lacks a single verification entry point, lint/test tooling for React, CI, version pins, and formatting enforcement; `cargo fmt --check` currently fails.
 
-#### I1 — Add one all-up verification command
+#### ~~I1~~ ✓ done 2026-08-27 — Add one all-up verification command
 - **Where:** `draft-assistant/package.json:6-10`
 - **What's wrong:** Developers must know separate npm and Cargo commands, and the existing scripts expose only dev/build/preview/Tauri. There is no canonical answer to “is this change ready?”
 - **Impact:** Major — important checks are easy to skip and validation differs between contributors.
@@ -301,7 +304,7 @@ TypeScript strictness, unused-code checks, lockfiles, a fast production build, p
 - **Effort:** S
 - **Grade lift:** C+ → B− (creates a repeatable local quality gate)
 
-#### I2 — Enforce Rust and frontend formatting/linting
+#### ~~I2~~ ✓ done 2026-08-27 — Enforce Rust and frontend formatting/linting
 - **Where:** Broad Rust formatting drift under `draft-assistant/src-tauri/src/`; no ESLint/Prettier config exists; `draft-assistant/package.json:18-24`
 - **What's wrong:** `cargo fmt --check` fails today across multiple Rust modules, while React/TypeScript has no semantic linter or consistent formatter beyond the compiler.
 - **Impact:** Moderate — avoidable style churn obscures real diffs, and React-specific mistakes are not checked.
@@ -317,13 +320,14 @@ TypeScript strictness, unused-code checks, lockfiles, a fast production build, p
 - **Effort:** S
 - **Grade lift:** C+ → B− (makes the local and automated build environments reproducible)
 
-#### I4 — Add CI with cached, target-aware jobs
+#### I4 ◐ partial 2026-08-27 — Add CI with cached, target-aware jobs
 - **Where:** No `.github/workflows/` directory exists
 - **What's wrong:** No automated system runs the otherwise useful build, tests, Clippy, audit, or packaging checks. Rust's 4.2 GB local target tree also shows the value of intentional caching and cleanup policy.
 - **Impact:** Major — regressions and platform-specific failures have no pre-merge signal.
 - **Fix:** Add macOS-focused CI for the currently shipped platform, cache npm/Cargo registries and build outputs with lockfile keys, run the all-up verification command, and add separate scheduled cross-target/advisory checks for future platforms.
 - **Effort:** M
 - **Grade lift:** C+ → B+ (makes the strong local toolchain consistently enforceable)
+- **Progress:** Added the macOS verification job with npm caching. Cargo build caching and separate scheduled cross-target/advisory jobs remain.
 
 ---
 

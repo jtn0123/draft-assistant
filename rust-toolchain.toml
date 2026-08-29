@@ -1,0 +1,6 @@
+# Pinned so CI and this laptop run the same compiler and the same clippy lint
+# set. Without it, `macos-latest` moved to 1.98 while local was 1.88 and three
+# new lints failed a branch that was green here (grade item F1).
+[toolchain]
+channel = "1.88.0"
+components = ["clippy", "rustfmt"]

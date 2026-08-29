@@ -1,0 +1,170 @@
+/* ---------- the snake: who is picking, for how long, and how many
+   people stand between them and you ---------- */
+.snake {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.snake-lead {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  line-height: 1.25;
+}
+
+.snake-title {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.snake-count {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.snake-track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.snake-track::-webkit-scrollbar {
+  display: none;
+}
+
+.snake-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg);
+}
+
+.snake-pick {
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.snake-name {
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Already in the book before tonight: in the order, but nobody waits on it. */
+.snake-cell.kept .snake-name {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.snake-cell.on-clock {
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.snake-cell.mine {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.snake-cell.mine.on-clock {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.snake-timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.snake-timer.urgent {
+  color: var(--danger);
+}
+
+/* "+21" where the strip skips ahead to your pick. */
+.snake-gap {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+}
+
+/* League switcher in the header: mocks and the real thing, two clicks apart. */
+.league-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.league-picker select,
+.league-picker .league-add {
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 7px;
+  max-width: 340px;
+}
+
+.league-picker .league-add {
+  min-width: 260px;
+}
+
+/* "Won't last to 27": value you lose by waiting, worst first. */
+.at-risk {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.at-risk li {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.at-risk-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.at-risk .surv.mid {
+  color: var(--warn);
+}

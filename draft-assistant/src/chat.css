@@ -1,0 +1,388 @@
+/* The Ask Claude panel: layout column, settings, thread, usage line. */
+
+/* ---------- chat panel ---------- */
+
+/* A column beside the page, not an overlay: the header buttons and the
+   board's decision columns stay visible while the answer is read. */
+.shell {
+  display: flex;
+  align-items: flex-start;
+  min-height: 100vh;
+}
+
+.shell > .app {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  width: 380px;
+  flex: 0 0 380px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border-left: 1px solid var(--border);
+  z-index: 20;
+}
+
+/* The board is the point of the app: it keeps the width it needs, and the
+   chat gives way rather than clipping it. Under 1500px the side panel drops
+   below the board (its numbers are all repeated there anyway); under 1200px
+   there is no room for both, so the chat floats over the page instead of
+   squeezing it. */
+@media (max-width: 1499px) {
+  .shell.with-chat main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shell.with-chat .side {
+    position: static;
+    order: 2;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+
+  .shell.with-chat .chat {
+    width: 340px;
+    flex-basis: 340px;
+  }
+}
+
+@media (max-width: 1199px) {
+  .shell.with-chat .chat {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: min(360px, 92vw);
+    flex-basis: auto;
+    box-shadow: -12px 0 32px rgb(0 0 0 / 45%);
+  }
+}
+
+.chat-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-settings {
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.chat-settings summary {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.chat-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-settings-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.chat-settings[open] .chat-settings-label {
+  color: var(--text);
+}
+
+.chat-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 14px 12px;
+}
+
+.chat-settings-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text);
+}
+
+.chat-settings-body label.chat-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: center;
+}
+
+.chat-settings-body label.chat-check .small-text {
+  grid-column: 2;
+}
+
+.chat-settings-body select {
+  font: inherit;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+.chat-usage {
+  margin: 0;
+  padding: 6px 14px;
+  font-size: 11px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-turn.summary p {
+  border-left: 2px solid var(--accent-dim);
+  padding-left: 10px;
+  color: var(--text-muted);
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-head h3 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-suggestion {
+  text-align: left;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chat-suggestion:hover {
+  border-color: var(--accent-dim);
+}
+
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-turn p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.chat-turn.you p {
+  background: var(--bg-hover);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.chat-role {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.chat-turn.claude .chat-role {
+  color: var(--accent);
+}
+
+.chat-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chat-input {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-input textarea {
+  flex: 1;
+  resize: none;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 8px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.chat-input textarea:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+
+.chat-note {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* ---------- answers ---------- */
+
+/* The answer is rendered as it streams; the bar marks where it has got to. */
+.chat-turn.streaming .chat-md > :last-child::after {
+  content: "▍";
+  color: var(--accent);
+  animation: chat-caret 1s steps(2) infinite;
+}
+
+@keyframes chat-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.chat-md {
+  font-size: 13px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-md p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.chat-md h4 {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.chat-md ul,
+.chat-md ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.chat-md li {
+  margin: 2px 0;
+}
+
+.chat-md .chat-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  /* A label is a hostname or a title, but an odd answer can still hand us
+     something long: break it rather than widening the whole panel. */
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.chat-md .chat-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.chat-md code {
+  font-size: 12px;
+  background: var(--bg-hover);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.chat-asof {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.chat-asof.stale {
+  color: var(--warn, #d9a441);
+}
+
+.chat-settings-body input[type="number"] {
+  font: inherit;
+  width: 80px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+/* Saved sessions row, under Settings. */
+.chat-sessions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.chat-sessions label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-sessions-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.chat-sessions select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.chat-briefs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.chat-briefs button {
+  font-size: 12px;
+  padding: 3px 8px;
+}

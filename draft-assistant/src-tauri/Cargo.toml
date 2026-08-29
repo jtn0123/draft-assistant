@@ -13,10 +13,33 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+default = ["desktop"]
+# The Tauri shell. Off for the fuzz targets, which link the domain library only.
+desktop = ["dep:tauri", "dep:tauri-plugin-opener"]
+
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
+tauri = { version = "2", features = [], optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json", "gzip"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "io-util"] }
+
+[[bin]]
+name = "draft-assistant"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "dump_state"
+path = "src/bin/dump_state.rs"
+
+[dev-dependencies]
+proptest = "1"
+serde_json = "1"
+
+[profile.release]
+overflow-checks = true
+lto = "thin"
+strip = true

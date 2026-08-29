@@ -40,3 +40,6 @@ draft-state.json
 players.json
 projections_*.json
 weekly_*.json
+
+# ---- Replay-mode state dump (scripts/replay-sleeper.mjs --dump) ----
+draft-assistant/public/live-state.json

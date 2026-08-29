@@ -1,0 +1,43 @@
+[package]
+name = "draft-assistant-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dependencies.draft-assistant]
+path = ".."
+# The Tauri shell is irrelevant here and its macro-generated command surface
+# does not resolve under the fuzz workspace's build settings.
+default-features = false
+
+# Fuzzing the ingestion surface: every type below is deserialized straight from
+# an undocumented third-party API, so upstream payload drift is the realistic
+# way this app breaks on draft night.
+[[bin]]
+name = "sleeper_payloads"
+path = "fuzz_targets/sleeper_payloads.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "board_assembly"
+path = "fuzz_targets/board_assembly.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "draft_math"
+path = "fuzz_targets/draft_math.rs"
+test = false
+doc = false
+bench = false

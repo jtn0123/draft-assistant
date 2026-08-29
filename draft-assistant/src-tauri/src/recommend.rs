@@ -1,7 +1,8 @@
 //! Deterministic, auditable pick recommendations (safe + balanced modes).
 
+use crate::board::AvailablePlayer;
 use crate::draft::TeamRoster;
-use crate::view::AvailablePlayer;
+use crate::roster::RosterRules;
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -21,11 +22,38 @@ pub struct Recommendation {
     pub reasons: Vec<String>,
 }
 
+/// What the best player at `position` is worth by the time you pick again.
+///
+/// Each candidate is the best survivor only if every better one at that
+/// position is gone, so the expectation walks down the board multiplying by
+/// the chance each is taken. Independence is an approximation — a run makes
+/// picks correlate — but it is the honest shape: deep positions come out
+/// near their current best (waiting costs nothing), thin ones fall away.
+fn expected_best_at_next_pick(available: &[AvailablePlayer], position: &str) -> f64 {
+    let mut ranked: Vec<&AvailablePlayer> = available
+        .iter()
+        .filter(|a| a.player.position == position)
+        .collect();
+    ranked.sort_by(|a, b| b.player.vorp.total_cmp(&a.player.vorp));
+    let mut expected = 0.0;
+    let mut all_gone = 1.0;
+    // Past a dozen deep the remaining probability mass is negligible and the
+    // survival model is guesswork anyway.
+    for a in ranked.iter().take(12) {
+        let survives = a.survival_next.unwrap_or(0.9).clamp(0.0, 1.0);
+        expected += all_gone * survives * a.player.vorp;
+        all_gone *= 1.0 - survives;
+        if all_gone < 0.01 {
+            break;
+        }
+    }
+    expected
+}
 
 pub fn recommend(
     available: &[AvailablePlayer],
     my_roster: Option<&TeamRoster>,
-    roster_positions: &[String],
+    rules: &RosterRules,
     current_round: u32,
     total_rounds: u32,
     current_pick: u32,
@@ -33,15 +61,15 @@ pub fn recommend(
     let open: HashMap<String, u32> = my_roster
         .map(|r| r.open_starters.iter().cloned().collect())
         .unwrap_or_else(|| {
-            roster_positions
+            rules
+                .slots()
                 .iter()
-                .filter(|s| *s != "BN")
+                .filter(|slot| !RosterRules::is_non_starting(slot))
                 .fold(HashMap::new(), |mut m, s| {
                     *m.entry(s.clone()).or_insert(0) += 1;
                     m
                 })
         });
-    let open_flex = open.get("FLEX").copied().unwrap_or(0);
     let rounds_left = total_rounds.saturating_sub(current_round) + 1;
     let total_open: u32 = open.values().sum();
     // When open starting slots ~= rounds left, filling starters is urgent.
@@ -80,46 +108,124 @@ pub fn recommend(
         for a in &candidates {
             let p = &a.player;
             let mut reasons: Vec<String> = Vec::new();
-            // Fixed scale: 0.6 pts of score per VORP point. Normalizing by the
-            // board-best VORP explodes late in drafts when that value is small.
-            let mut score = p.vorp * 0.6;
+            // What you lose by waiting, not what the player is worth in the
+            // abstract. Taking a receiver from a band four deep gains you
+            // almost nothing over your next pick; taking the last tier-4 tight
+            // end gains you the whole cliff behind him. Absolute VORP stays in
+            // as a small tiebreak so two equal drop-offs settle on the better
+            // player. Before this the two were 0.6/point against a flat six
+            // points for "he will not last", so scarcity could never win.
+            let expected_later = expected_best_at_next_pick(available, &p.position);
+            // Both ends floored at replacement level. Below it a player is
+            // worth no more than the waiver wire, so the gap between the best
+            // of a bad lot and the expected best of that same bad lot is not a
+            // cliff — it is noise. Unfloored, a barren position generated the
+            // biggest drop-off on the board and this recommended a running
+            // back at minus two VORP over an eighteen-VORP receiver.
+            let dropoff = (p.vorp.max(0.0) - expected_later.max(0.0)).max(0.0);
+            let value = dropoff + p.vorp * 0.12;
+            let mut score = value;
             reasons.push(format!("{:.0} VORP under league scoring", p.vorp));
+            if dropoff >= 8.0 {
+                reasons.push(format!(
+                    "{dropoff:.0} VORP better than what {} is likely to offer at your next pick",
+                    p.position
+                ));
+            } else if dropoff <= 2.0 {
+                reasons.push(format!(
+                    "{} is deep — similar value should still be there next time",
+                    p.position
+                ));
+            }
+
+            // How many of this position I already hold. Every need term
+            // below is relative to it: the same slot is worth much less to
+            // the sixth man at a position than to the first.
+            let count = have.get(p.position.as_str()).copied().unwrap_or(0);
+            // Crowding, 1 down to 1/7: your own players at a position compete
+            // with each other for the flex slots they would fill.
+            let crowding = 1.0 / (1.0 + f64::from(count));
 
             // Roster need: dedicated slot open, then flex eligibility.
-            let fills_dedicated = open.get(&p.position).copied().unwrap_or(0) > 0;
-            let flex_ok = open_flex > 0 && matches!(p.position.as_str(), "RB" | "WR" | "TE");
-            if fills_dedicated {
+            let open_slot = rules.first_open_slot_for(&open, &p.position);
+            if open_slot == Some(p.position.as_str()) {
+                // A dedicated slot names the position, so nothing else can
+                // fill it and crowding does not apply.
                 score += 12.0 * need_pressure.min(2.0);
                 reasons.push(format!("fills open {} starter slot", p.position));
-            } else if flex_ok {
-                score += 8.0 * need_pressure.min(2.0);
-                reasons.push("fills an open FLEX slot".into());
+            } else if let Some(slot) = open_slot {
+                // A flex slot does not care which position fills it, and
+                // crediting every position the same for it is what built a
+                // roster of five receivers and two backs: once RB, WR and TE
+                // were each covered once, four flex slots said yes to
+                // everyone and the receivers won every tiebreak on raw value.
+                score += 8.0 * need_pressure.min(2.0) * crowding;
+                reasons.push(format!("fills an open {slot} slot"));
             } else {
-                score -= 10.0;
-                reasons.push("depth pick — starters already filled at position".into());
+                // Starters filled is the normal state for the whole back half
+                // of a draft, so a flat penalty on everyone was a no-op that
+                // only flattened the field and let raw value pick every time.
+                // Depth is worth less the more of it you already hold: a sixth
+                // receiver is behind five of your own for the same four flex
+                // slots, while a third back is all that stands between one
+                // injury and a waiver pickup in your starting lineup.
+                //
+                // A discount on the gain, not a tax on the position. A flat
+                // penalty big enough to matter is a positional ban, and a
+                // receiver far enough ahead should still win — which is the
+                // line the user drew: backs and tight ends first, unless the
+                // gap in value is large.
+                let crowding = 1.0 / (1.0 + 0.35 * f64::from(count));
+                score = value.max(0.0) * crowding + value.min(0.0) - 4.0;
+                reasons.push(if count >= 4 {
+                    format!("depth behind {count} other {}s you hold", p.position)
+                } else {
+                    "depth pick — starters already filled at position".into()
+                });
+            }
+
+            // Two of one offence at one position share a quarterback, a target
+            // share and a bye week: when one booms the other usually busts,
+            // and both are out the same Sunday.
+            if let (Some(team), Some(roster)) = (p.team.as_deref(), my_roster) {
+                let same = roster
+                    .players
+                    .iter()
+                    .filter(|x| x.position == p.position && x.team.as_deref() == Some(team))
+                    .count();
+                if same > 0 {
+                    score -= 10.0;
+                    reasons.push(format!("you already roster a {team} {}", p.position));
+                }
             }
 
             // Positional discipline (fantasy-bot's documented failure modes,
             // fixed): backups at onesie positions are near-worthless, and a
             // second DEF is worthless outright.
-            let count = have.get(p.position.as_str()).copied().unwrap_or(0);
             match p.position.as_str() {
-                "DEF" => {
+                "DEF" | "K" => {
                     if count >= 1 {
-                        continue; // never draft a second defense
+                        continue; // never draft a second defense or kicker
                     }
-                    if current_round < total_rounds.saturating_sub(2) {
+                    // Last two rounds, not three: a defense is worth about
+                    // what the next one is worth, and the round spent on it a
+                    // round earlier is a round not spent on a flier.
+                    if current_round < total_rounds.saturating_sub(1) {
                         score -= 60.0; // never early either
                     } else {
                         score += 15.0;
-                        reasons.push("last rounds — lock in your one DEF".into());
+                        reasons.push(format!("last rounds — lock in your one {}", p.position));
                     }
                 }
                 "QB" => {
                     if count >= 2 {
                         continue;
                     }
-                    if count == 1 {
+                    // Only a backup if nothing would start him. A superflex
+                    // slot makes a second QB a starter, and the penalty used
+                    // to fire anyway — hidden until the drop-off model shrank
+                    // the raw-value term that had been paying for it.
+                    if count == 1 && open_slot.is_none() {
                         score -= 25.0;
                         reasons.push("backup QB — only at extreme value".into());
                     }
@@ -128,7 +234,7 @@ pub fn recommend(
                     if count >= 2 {
                         continue; // a third TE is a wasted roster spot
                     }
-                    if count == 1 {
+                    if count == 1 && open_slot.is_none() {
                         score -= 20.0;
                         reasons.push("backup TE — only at real value".into());
                     }
@@ -140,15 +246,27 @@ pub fn recommend(
                     // starting slot — escalate hard.
                     if count < 2 && current_round > 8 {
                         score += 20.0;
-                        reasons.push(format!("only {count} {} rostered — one injury from an empty slot", p.position));
+                        reasons.push(format!(
+                            "only {count} {} rostered — one injury from an empty slot",
+                            p.position
+                        ));
                     }
-                    if count < 3 {
+                    // Only for a player actually worth rostering. "Thin at
+                    // RB" is a reason to take a good back, never a reason to
+                    // take a bad one: below replacement he is worse than what
+                    // the waiver wire gives away for free, and this bonus was
+                    // large enough to carry a minus-24 back to the top of the
+                    // board on its own.
+                    if count < 3 && p.vorp > 0.0 {
                         score += 3.0 * (3 - count) as f64;
                         reasons.push(format!("thin at {} ({count} rostered)", p.position));
-                    } else if count > 5 {
-                        score -= 6.0 * (count - 5) as f64;
-                        reasons.push(format!("already {count} {}s rostered", p.position));
                     }
+                    // No flat "already N rostered" penalty here any more: the
+                    // crowding discount above is that penalty, expressed as a
+                    // discount on the gain rather than a tax on the position.
+                    // Charging both put a seventh receiver 12 points in the
+                    // hole and had this recommending a back at minus 24 VORP
+                    // over a receiver at plus 13.
                 }
             }
 
@@ -157,20 +275,32 @@ pub fn recommend(
                 .iter()
                 .filter(|x| x.player.position == p.position && x.player.tier == p.tier)
                 .count();
-            if tier_left <= 2 {
-                score += 8.0;
-                reasons.push(format!("only {tier_left} left in {} tier {}", p.position, p.tier));
+            // Halved when the drop-off model landed: "last of his tier" is a
+            // proxy for scarcity, and scarcity is now measured directly above.
+            // At the old +8 it could outvote the thing it was standing in for.
+            // Same gate: a tier among players nobody should roster is not
+            // scarcity, it is an artefact of where the tier lines fell.
+            if tier_left <= 2 && p.vorp > 0.0 {
+                score += 4.0;
+                reasons.push(format!(
+                    "only {tier_left} left in {} tier {}",
+                    p.position, p.tier
+                ));
             }
 
-            // Survival: if they'll likely make it back to my next pick, waiting
-            // is an option — that lowers urgency now.
+            // No flat bonus here any more: the drop-off above already prices
+            // the chance of losing him. This only says the odds out loud.
             if let Some(surv) = a.survival_next {
                 if surv > 0.7 {
-                    score -= 6.0;
-                    reasons.push(format!("{:.0}% likely to survive to your next pick", surv * 100.0));
+                    reasons.push(format!(
+                        "{:.0}% likely to survive to your next pick",
+                        surv * 100.0
+                    ));
                 } else if surv < 0.35 {
-                    score += 6.0;
-                    reasons.push(format!("only {:.0}% chance they last to your next pick", surv * 100.0));
+                    reasons.push(format!(
+                        "only {:.0}% chance they last to your next pick",
+                        surv * 100.0
+                    ));
                 }
             }
 
@@ -189,9 +319,10 @@ pub fn recommend(
             }
 
             if mode == "safe" {
-                // Safe mode: penalize injury flags and volatile bonus-heavy value.
+                // Safe mode: penalize real injury flags and volatile
+                // bonus-heavy value.
                 if let Some(status) = &p.injury_status {
-                    if !status.is_empty() {
+                    if serious_injury(status) {
                         score -= 15.0;
                         reasons.push(format!("injury flag: {status}"));
                     }
@@ -235,99 +366,12 @@ pub fn recommend(
     recs
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::board::BoardPlayer;
-    use crate::draft::RosterEntry;
-    use crate::view::AvailablePlayer;
-
-    fn player(id: &str, pos: &str, vorp: f64) -> AvailablePlayer {
-        AvailablePlayer {
-            player: BoardPlayer {
-                player_id: id.into(),
-                name: id.into(),
-                position: pos.into(),
-                team: None,
-                bye_week: None,
-                points: 150.0 + vorp,
-                bonus_points: 0.0,
-                vorp,
-                tier: 1,
-                position_rank: 1,
-                overall_rank: 1,
-                adp: Some(100.0),
-                injury_status: None,
-                sleeper_pts_ppr: None,
-            },
-            survival_next: None,
-        }
-    }
-
-    fn entry(pos: &str, n: u32) -> RosterEntry {
-        RosterEntry {
-            player_id: format!("{pos}{n}"),
-            name: format!("{pos}{n}"),
-            position: pos.into(),
-            team: None,
-            pick_no: n,
-            round: n,
-        }
-    }
-
-    fn roster(positions: &[&str]) -> TeamRoster {
-        TeamRoster {
-            slot: 2,
-            display_name: None,
-            players: positions
-                .iter()
-                .enumerate()
-                .map(|(i, p)| entry(p, i as u32 + 1))
-                .collect(),
-            open_starters: vec![("FLEX".into(), 2)],
-        }
-    }
-
-    fn slots() -> Vec<String> {
-        ["QB", "RB", "WR", "TE", "FLEX", "FLEX", "FLEX", "FLEX", "DEF", "BN"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
-    }
-
-    #[test]
-    fn never_recommends_second_def() {
-        // A monster-VORP second DEF must lose to a modest RB.
-        let available = vec![player("def2", "DEF", 90.0), player("rb1", "RB", 30.0)];
-        let mine = roster(&["QB", "RB", "WR", "TE", "DEF"]);
-        let recs = recommend(&available, Some(&mine), &slots(), 14, 15, 180);
-        assert!(recs.iter().all(|r| r.position != "DEF"), "{recs:?}");
-    }
-
-    #[test]
-    fn never_recommends_third_qb() {
-        let available = vec![player("qb3", "QB", 95.0), player("wr1", "WR", 20.0)];
-        let mine = roster(&["QB", "QB", "RB", "WR"]);
-        let recs = recommend(&available, Some(&mine), &slots(), 10, 15, 130);
-        assert!(recs.iter().all(|r| r.position != "QB"), "{recs:?}");
-    }
-
-    #[test]
-    fn locks_def_in_final_rounds_when_missing() {
-        let available = vec![player("def1", "DEF", 40.0), player("wr9", "WR", 42.0)];
-        let mut mine = roster(&["QB", "RB", "RB", "WR", "WR", "WR", "TE"]);
-        // As the engine would report it: the DEF starter slot is still open.
-        mine.open_starters = vec![("DEF".into(), 1), ("FLEX".into(), 1)];
-        let recs = recommend(&available, Some(&mine), &slots(), 14, 15, 184);
-        assert_eq!(recs[0].position, "DEF", "{recs:?}");
-    }
-
-    #[test]
-    fn fallback_when_all_disqualified() {
-        // Only a second DEF available — fallback must still recommend it.
-        let available = vec![player("def2", "DEF", 50.0)];
-        let mine = roster(&["QB", "RB", "WR", "TE", "DEF"]);
-        let recs = recommend(&available, Some(&mine), &slots(), 15, 15, 200);
-        assert!(!recs.is_empty());
-    }
+/// Statuses that mean a player may actually miss games. Through August Sleeper
+/// tags a large share of healthy starters `Questionable` (rest days, minor
+/// preseason knocks) — on draft night that flag alone is noise, not a signal.
+pub fn serious_injury(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "out" | "ir" | "pup" | "sus" | "doubtful" | "na" | "cov"
+    )
 }

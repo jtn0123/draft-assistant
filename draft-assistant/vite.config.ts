@@ -25,8 +25,18 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri`, and everything the test
+      //    suite and the dogfood scripts write into the worktree — otherwise a
+      //    coverage run or a Playwright report reloads the live `tauri dev`
+      //    window (observed 2026-08-28 12:37) and wipes the chat panel.
+      ignored: [
+        "**/src-tauri/**",
+        "**/coverage/**",
+        "**/playwright-report/**",
+        "**/test-results/**",
+        "**/dogfood-output/**",
+        "**/public/ai-*.json",
+      ],
     },
   },
 }));

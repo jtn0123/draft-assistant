@@ -1,0 +1,54 @@
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Frontend and Rust checks
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: draft-assistant
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust toolchain
+        # Version and components come from rust-toolchain.toml at the repo root,
+        # so CI and a laptop run the same compiler and the same clippy lint set.
+        # `rustup override set stable` used to defeat that: the runner moved to
+        # 1.98 while local was 1.88, and three new lints failed a green branch.
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' ../rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component rustfmt,clippy
+          rustup show active-toolchain
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps chromium
+
+      - name: Verify project
+        run: bun run verify
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: draft-assistant/playwright-report/
+          retention-days: 7

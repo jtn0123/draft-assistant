@@ -113,6 +113,48 @@ input:focus {
   margin: 0;
 }
 
+/* Launch: what is happening while the saved league is restored. */
+.launch-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.launch-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: launch-pulse 1.2s ease-in-out infinite;
+}
+
+.launch-dot.waiting {
+  background: var(--warn);
+}
+
+@keyframes launch-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.launch-detail {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.launch-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .setup label {
   display: flex;
   flex-direction: column;
@@ -140,17 +182,47 @@ header {
 header h1 {
   font-size: 20px;
   margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .brand {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
+.brand .muted {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* At the 1000px minimum window the buttons wrap as whole units and the
+   league name shortens, instead of both breaking mid-word. */
 .actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
+  flex: 0 1 auto;
+}
+
+.actions button,
+.actions .sync-age {
+  white-space: nowrap;
+}
+
+.notice {
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  color: #93c5fd;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  font-size: 13px;
 }
 
 button.live {
@@ -162,6 +234,23 @@ button.live {
 button.live.on {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+button.live.retrying {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+button.live.stale {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.sync-age {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 /* ---------- clock ---------- */
@@ -195,6 +284,10 @@ button.live.on {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-muted);
+}
+
+.clock-big.urgent {
+  color: #ff5c5c;
 }
 
 .clock-big {
@@ -245,3 +338,13 @@ button.live.on {
   font-size: 13px;
 }
 
+/* A required starter still empty with the picks running out. Louder than
+   the warnings strip: this one costs a starting slot for the season. */
+.starter-alert {
+  background: var(--danger, #f87171);
+  color: #111;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  margin: 6px 0;
+}

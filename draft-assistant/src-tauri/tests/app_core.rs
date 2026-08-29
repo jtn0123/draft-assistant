@@ -1,0 +1,476 @@
+//! The command surface behind the desktop app, exercised without Tauri:
+//! loading, identity, refreshes, manual picks and their rollback, export,
+//! Ask Claude through a stub CLI, and the live poll loop's state machine.
+
+mod support;
+
+use draft_assistant_lib::app::{AppCore, PollEvent};
+use draft_assistant_lib::chat::{ChatOptions, ChatTurn};
+use draft_assistant_lib::engine::Engine;
+use draft_assistant_lib::sleeper::SleeperClient;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use support::{loaded_rig, make_rig, pick, Reply, LEAGUE_ID, MY_USER, MY_USERNAME};
+#[tokio::test]
+async fn nothing_works_before_a_league_is_loaded() {
+    let rig = make_rig("empty");
+    assert_eq!(rig.core.get_state().await.unwrap_err(), "no league loaded");
+    assert_eq!(
+        rig.core.refresh_picks().await.unwrap_err(),
+        "no league loaded"
+    );
+    assert_eq!(
+        rig.core.refresh_data().await.unwrap_err(),
+        "no active league"
+    );
+    assert_eq!(
+        rig.core
+            .record_manual_pick("qb-1".into())
+            .await
+            .unwrap_err(),
+        "no league loaded"
+    );
+    assert_eq!(
+        rig.core.undo_manual_pick().await.unwrap_err(),
+        "no league loaded"
+    );
+    assert_eq!(
+        rig.core.export_state().await.unwrap_err(),
+        "no league loaded"
+    );
+    let err = rig
+        .core
+        .ask("Who?", &[], &ChatOptions::default(), &mut |_| {})
+        .await
+        .unwrap_err();
+    assert_eq!(err, "no league loaded");
+    assert!(rig.core.get_config().await.active_league_id.is_none());
+}
+
+#[tokio::test]
+async fn adding_a_league_makes_it_active_remembers_it_and_serves_its_state() {
+    let rig = make_rig("add");
+    let view = rig.core.add_league(LEAGUE_ID, false).await.unwrap();
+    assert_eq!(view.league.name, "Mixed lineup fixture");
+    assert_eq!(view.draft.current_pick, 1);
+    assert!(view.draft.my_slot.is_none(), "no username yet");
+
+    let config = rig.core.get_config().await;
+    assert_eq!(config.active_league_id.as_deref(), Some(LEAGUE_ID));
+    assert_eq!(config.leagues.len(), 1);
+    assert_eq!(config.leagues[0].name, "Mixed lineup fixture");
+    // Persisted: a fresh core over the same directory sees it.
+    let again = AppCore::new(Engine {
+        client: SleeperClient::with_base_url(&rig.stub.base),
+        data_dir: rig.core.engine.data_dir.clone(),
+    });
+    assert_eq!(
+        again.get_config().await.active_league_id.as_deref(),
+        Some(LEAGUE_ID)
+    );
+    // Adding it twice does not duplicate the entry.
+    rig.core.add_league(LEAGUE_ID, false).await.unwrap();
+    assert_eq!(rig.core.get_config().await.leagues.len(), 1);
+    assert_eq!(
+        rig.core.get_state().await.unwrap().league.league_id,
+        LEAGUE_ID
+    );
+}
+
+#[tokio::test]
+async fn the_username_resolves_my_slot_and_an_unknown_one_is_refused() {
+    let rig = make_rig("username");
+    rig.core.add_league(LEAGUE_ID, false).await.unwrap();
+    assert_eq!(
+        rig.core.set_my_username(MY_USERNAME).await.unwrap(),
+        MY_USER
+    );
+    let view = rig.core.get_state().await.unwrap();
+    assert_eq!(view.draft.my_slot, Some(1));
+    assert!(view.my_roster.is_some());
+    assert_eq!(
+        rig.core.set_my_username("nobody").await.unwrap_err(),
+        "Sleeper user 'nobody' not found"
+    );
+    rig.stub.set("/v1/user/down", Reply::Status(500));
+    assert!(rig
+        .core
+        .set_my_username("down")
+        .await
+        .unwrap_err()
+        .contains("HTTP 500"));
+}
+
+#[tokio::test]
+async fn refresh_picks_applies_new_picks_and_the_draft_status() {
+    let rig = loaded_rig("refresh-picks").await;
+    rig.fixture
+        .set_picks(&rig.stub, &[pick(1, 1, "qb-1"), pick(2, 2, "rb-1")]);
+    rig.fixture
+        .set_status(&rig.stub, "drafting", Some(1_700_000_000_000));
+    let view = rig.core.refresh_picks().await.unwrap();
+    assert_eq!(view.draft.status, "drafting");
+    assert_eq!(view.draft.total_picks_made, 2);
+    assert_eq!(view.draft.current_pick, 3);
+    assert!(view.draft.pick_deadline.is_some());
+    assert_eq!(view.my_roster.as_ref().unwrap().players.len(), 1);
+    assert!(view.available.iter().all(|p| p.player.player_id != "qb-1"));
+    assert_eq!(view.data_health.poll_consecutive_failures, 0);
+
+    // A failed picks fetch is an error here — the user asked.
+    rig.stub
+        .set("/v1/draft/fixture-draft/picks", Reply::Status(500));
+    assert!(rig
+        .core
+        .refresh_picks()
+        .await
+        .unwrap_err()
+        .contains("HTTP 500"));
+}
+
+#[tokio::test]
+async fn refresh_data_rebuilds_from_the_network_and_the_board_survives() {
+    let rig = loaded_rig("refresh-data").await;
+    rig.stub.reset_hits();
+    let view = rig.core.refresh_data().await.unwrap();
+    assert_eq!(
+        rig.stub.hits("/v1/players/nfl"),
+        1,
+        "force bypasses the cache"
+    );
+    assert_eq!(view.available.len(), 6);
+    assert_eq!(
+        view.draft.my_slot,
+        Some(1),
+        "identity is kept across a rebuild"
+    );
+}
+
+#[tokio::test]
+async fn export_writes_the_same_view_the_ui_renders() {
+    let rig = loaded_rig("export").await;
+    let path = rig.core.export_state().await.unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["schema_version"], "1.5");
+    assert_eq!(value["league"]["league_id"], LEAGUE_ID);
+    assert_eq!(value["available"].as_array().unwrap().len(), 6);
+    assert!(path.ends_with("draft-state.json"));
+}
+
+#[tokio::test]
+async fn ask_streams_the_answer_and_stamps_the_pick_it_saw() {
+    let rig = loaded_rig("ask").await;
+    let claude = support::stub_claude(&rig.core.engine.data_dir, "Take Fixture QB.");
+    std::env::set_var("DRAFT_ASSISTANT_CLAUDE_BIN", &claude);
+    let chunks = Arc::new(Mutex::new(Vec::new()));
+    let sink = chunks.clone();
+    let reply = rig
+        .core
+        .ask("Who?", &[], &ChatOptions::default(), &mut |t| {
+            sink.lock().unwrap().push(t.to_string())
+        })
+        .await
+        .unwrap();
+    assert_eq!(reply.answer, "Take Fixture QB.");
+    assert_eq!(chunks.lock().unwrap().concat(), "Take Fixture QB.");
+    assert_eq!(chunks.lock().unwrap().len(), 2, "two streamed pieces");
+    let as_of = reply.as_of.unwrap();
+    assert_eq!(as_of.pick, 1);
+    assert!(as_of.seq > 0);
+    assert_eq!(reply.usage.cost_usd, Some(0.05));
+    assert_eq!(reply.usage.context_tokens, 900);
+
+    let history = vec![
+        ChatTurn {
+            role: "you".into(),
+            text: "Who?".into(),
+        },
+        ChatTurn {
+            role: "claude".into(),
+            text: reply.answer,
+        },
+    ];
+    let summary = rig
+        .core
+        .compact(&history, &ChatOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(summary.answer, "Take Fixture QB.");
+    assert!(summary.as_of.is_none(), "a compaction is not about a pick");
+    std::env::remove_var("DRAFT_ASSISTANT_CLAUDE_BIN");
+}
+
+/// Wait until `events` satisfies `done`, or fail after five seconds.
+async fn wait_for(events: &Arc<Mutex<Vec<PollEvent>>>, done: impl Fn(&[PollEvent]) -> bool) {
+    let started = std::time::Instant::now();
+    loop {
+        if done(&events.lock().unwrap()) {
+            return;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "timed out; events: {:?}",
+            events.lock().unwrap().len()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+fn views(events: &[PollEvent]) -> usize {
+    events
+        .iter()
+        .filter(|e| matches!(e, PollEvent::View(_)))
+        .count()
+}
+
+fn last_health(events: &[PollEvent]) -> Option<draft_assistant_lib::view::PollHealth> {
+    events.iter().rev().find_map(|e| match e {
+        PollEvent::Health(h) => Some(h.clone()),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn the_poll_loop_emits_a_view_only_when_the_feed_changes_and_reports_failures() {
+    let rig = loaded_rig("poll").await;
+    let events: Arc<Mutex<Vec<PollEvent>>> = Arc::default();
+    let generation = rig.core.begin_polling();
+    let (core, sink) = (rig.core.clone(), events.clone());
+    let task = tokio::spawn(async move {
+        let emit = move |event: PollEvent| sink.lock().unwrap().push(event);
+        core.poll_loop(Duration::from_millis(25), generation, &emit)
+            .await;
+    });
+
+    // First poll: a health report and one view (nothing to compare against yet).
+    wait_for(&events, |e| views(e) == 1).await;
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    assert_eq!(views(&events.lock().unwrap()), 1, "no change, no re-emit");
+    assert!(last_health(&events.lock().unwrap())
+        .unwrap()
+        .last_success_at
+        .is_some());
+
+    // A pick lands: exactly one more view, carrying it.
+    rig.fixture.set_picks(&rig.stub, &[pick(1, 1, "qb-1")]);
+    wait_for(&events, |e| views(e) == 2).await;
+    let latest = events
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            PollEvent::View(v) => Some((**v).clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(latest.draft.total_picks_made, 1);
+    assert_eq!(latest.recent_picks[0].player_id, "qb-1");
+
+    // The status flips without a new pick: still a change.
+    rig.fixture
+        .set_status(&rig.stub, "drafting", Some(1_700_000_000_000));
+    wait_for(&events, |e| views(e) == 3).await;
+
+    // The feed breaks: health counts failures with the reason; no new view.
+    rig.stub
+        .set("/v1/draft/fixture-draft/picks", Reply::Status(500));
+    wait_for(&events, |e| {
+        last_health(e)
+            .map(|h| h.consecutive_failures >= 2)
+            .unwrap_or(false)
+    })
+    .await;
+    let health = last_health(&events.lock().unwrap()).unwrap();
+    assert!(health.last_error.as_deref().unwrap().contains("HTTP 500"));
+    assert_eq!(views(&events.lock().unwrap()), 3);
+
+    // It recovers: failures reset.
+    rig.fixture.set_picks(&rig.stub, &[pick(1, 1, "qb-1")]);
+    wait_for(&events, |e| {
+        last_health(e)
+            .map(|h| h.consecutive_failures == 0)
+            .unwrap_or(false)
+    })
+    .await;
+
+    // Stopping ends the loop.
+    rig.core.stop_polling();
+    tokio::time::timeout(Duration::from_secs(2), task)
+        .await
+        .expect("the loop exits once polling is off")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn starting_polling_again_supersedes_the_running_loop() {
+    let rig = loaded_rig("poll-generation").await;
+    let first = rig.core.begin_polling();
+    let (core, events) = (rig.core.clone(), Arc::<Mutex<Vec<PollEvent>>>::default());
+    let sink = events.clone();
+    let task = tokio::spawn(async move {
+        let emit = move |event: PollEvent| sink.lock().unwrap().push(event);
+        core.poll_loop(Duration::from_millis(25), first, &emit)
+            .await;
+    });
+    wait_for(&events, |e| !e.is_empty()).await;
+    let second = rig.core.begin_polling();
+    assert_eq!(second, first + 1);
+    tokio::time::timeout(Duration::from_secs(2), task)
+        .await
+        .expect("the superseded loop exits")
+        .unwrap();
+    // The no-league case: a loop with nothing loaded emits nothing and stops.
+    let bare = make_rig("poll-bare");
+    let generation = bare.core.begin_polling();
+    let mut fingerprint = None;
+    assert!(bare.core.poll_once(&mut fingerprint).await.is_none());
+    bare.core.stop_polling();
+    bare.core
+        .poll_loop(Duration::from_millis(1), generation, &|_| {})
+        .await;
+}
+
+#[tokio::test]
+async fn a_keeper_is_remembered_once_the_draft_passes_it() {
+    // Pick 5 is in the book before pick 1 is made: a keeper, flag or no flag.
+    let rig = make_rig("keeper-memory");
+    rig.fixture.set_picks(&rig.stub, &[pick(5, 1, "qb-1")]);
+    rig.core.add_league(LEAGUE_ID, false).await.unwrap();
+    rig.core.set_my_username(MY_USERNAME).await.unwrap();
+    let view = rig.core.get_state().await.unwrap();
+    assert!(view.my_roster.unwrap().players[0].is_keeper);
+    assert!(view.recent_picks.is_empty());
+
+    // The draft catches up and passes it; the flag never arrives.
+    rig.fixture.set_picks(
+        &rig.stub,
+        &[
+            pick(1, 1, "rb-1"),
+            pick(2, 2, "wr-1"),
+            pick(3, 2, "te-1"),
+            pick(4, 1, "k-1"),
+            pick(5, 1, "qb-1"),
+            pick(6, 2, "def-1"),
+        ],
+    );
+    let view = rig.core.refresh_picks().await.unwrap();
+    assert_eq!(view.draft.current_pick, 7);
+    let mine = view.my_roster.unwrap();
+    let kept: Vec<(u32, bool)> = mine
+        .players
+        .iter()
+        .map(|p| (p.pick_no, p.is_keeper))
+        .collect();
+    assert_eq!(kept, vec![(1, false), (4, false), (5, true)]);
+    let recent: Vec<u32> = view.recent_picks.iter().map(|p| p.pick_no).collect();
+    assert_eq!(
+        recent,
+        vec![6, 4, 3, 2, 1],
+        "the keeper is not a recent pick"
+    );
+}
+
+#[tokio::test]
+async fn refresh_season_rereads_the_calendar_and_keeps_the_board() {
+    let rig = loaded_rig("refresh-season").await;
+    rig.stub.reset_hits();
+    let view = rig.core.refresh_season().await.unwrap();
+    assert_eq!(rig.stub.hits("/v1/state/nfl"), 1, "the calendar is re-read");
+    assert_eq!(
+        rig.stub.hits("/v1/players/nfl"),
+        0,
+        "the player dictionary is not"
+    );
+    assert_eq!(view.available.len(), 6, "the board is untouched");
+    assert!(view.this_week.is_none(), "no matchups on the stub, no week");
+}
+
+#[tokio::test]
+async fn an_offer_naming_a_player_nobody_holds_is_refused_with_the_reason() {
+    let rig = loaded_rig("evaluate-trade").await;
+    let err = rig
+        .core
+        .evaluate_trade(2, vec!["nobody".into()], Vec::new())
+        .await
+        .unwrap_err();
+    assert!(err.contains("not on my roster"), "{err}");
+    let err = rig
+        .core
+        .evaluate_trade(2, Vec::new(), Vec::new())
+        .await
+        .unwrap_err();
+    assert!(err.contains("at least one player"), "{err}");
+}
+
+/// Keepers are remembered on disk: after the draft has passed a keeper's
+/// pick nothing in the feed says it was one, so a forced reload used to
+/// drop the tag.
+#[tokio::test]
+async fn a_keeper_stays_a_keeper_across_a_forced_reload() {
+    let rig = loaded_rig("keepers-persist").await;
+    let ids = rig.fixture.player_ids();
+    // Pick 8 is in the book while the draft still sits on pick 1: a keeper.
+    rig.fixture.set_picks(&rig.stub, &[pick(8, 2, &ids[0])]);
+    let view = rig.core.refresh_picks().await.unwrap();
+    let kept = |v: &draft_assistant_lib::view::DraftView| {
+        v.rosters
+            .iter()
+            .flat_map(|r| r.players.iter())
+            .any(|p| p.pick_no == 8 && p.is_keeper)
+    };
+    assert!(kept(&view), "judged a keeper from its position");
+    // The draft catches up and passes pick 8; a forced reload rebuilds
+    // everything from the network, where pick 8 now looks like any pick.
+    let picks: Vec<_> = (1..=8)
+        .map(|n| {
+            pick(
+                n,
+                if n % 2 == 1 { 1 } else { 2 },
+                &ids[(n as usize - 1) % ids.len()],
+            )
+        })
+        .collect();
+    rig.fixture.set_picks(&rig.stub, &picks);
+    let view = rig.core.refresh_data().await.unwrap();
+    assert!(kept(&view), "remembered from disk after the reload");
+}
+
+/// Injury tags come from the player dictionary, which the season refresh
+/// re-reads once a day and applies to the board in place.
+#[tokio::test]
+async fn a_daily_season_refresh_picks_up_a_new_injury_tag_without_rebuilding() {
+    let rig = loaded_rig("injury-refresh").await;
+    let ids = rig.fixture.player_ids();
+    // The dictionary now says the first player is Out.
+    let mut players: std::collections::HashMap<String, _> = rig
+        .fixture
+        .rows
+        .iter()
+        .filter_map(|r| r.player.clone().map(|p| (r.player_id.clone(), p)))
+        .collect();
+    players.get_mut(&ids[0]).unwrap().injury_status = Some("Out".into());
+    rig.stub.json("/v1/players/nfl", &players);
+    // Yesterday's dictionary is on file.
+    rig.core
+        .loaded
+        .lock()
+        .await
+        .as_mut()
+        .unwrap()
+        .players_fetched_at = 0;
+    rig.stub.reset_hits();
+    let view = rig.core.refresh_season().await.unwrap();
+    assert_eq!(rig.stub.hits("/v1/players/nfl"), 1, "re-read once");
+    let tagged = view
+        .available
+        .iter()
+        .find(|a| a.player.player_id == ids[0])
+        .expect("still on the board");
+    assert_eq!(tagged.player.injury_status.as_deref(), Some("Out"));
+    // And not again while it is fresh.
+    rig.stub.reset_hits();
+    rig.core.refresh_season().await.unwrap();
+    assert_eq!(rig.stub.hits("/v1/players/nfl"), 0);
+}

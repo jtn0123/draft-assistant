@@ -1,0 +1,380 @@
+/* The season side of the sidebar: projected standings and the week ahead. */
+
+/* ---------- projected standings ---------- */
+
+.standings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.standings li {
+  display: grid;
+  grid-template-columns: 1.6em 1fr auto auto auto auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.standings li.standings-head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-bottom: 0;
+}
+
+.standings li.mine {
+  background: var(--accent-dim);
+  font-weight: 600;
+}
+
+button.standings-toggle {
+  border: none;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* The lineup under an opened row, both columns of it. */
+.standings-lineup {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 4px 0 6px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.standings-lineup ul {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.standings-lineup li {
+  grid-template-columns: 3.2em 1fr auto;
+  gap: 6px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.standings-lineup .slot {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.standings-rank {
+  color: var(--muted);
+  text-align: right;
+}
+
+.standings-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.standings-pts {
+  font-variant-numeric: tabular-nums;
+}
+
+.standings-gap {
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5em;
+  text-align: right;
+}
+
+/* ---------- this week ---------- */
+
+.this-week .ok {
+  color: var(--accent);
+  margin: 0;
+}
+
+.this-week .strong {
+  margin: 0 0 4px;
+}
+
+.this-week .gain {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.lineup-changes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.lineup-changes li {
+  display: grid;
+  grid-template-columns: 3.2em 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.this-week .lineup-empty {
+  margin: 4px 0 0;
+  color: var(--danger, #f87171);
+  font-size: 13px;
+}
+
+.lineup-changes li.empty {
+  color: var(--danger, #f87171);
+}
+
+.lineup-changes .slot {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.matchup {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.matchup-score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* ---------- waivers ---------- */
+
+.waiver-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.waiver-list li {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.waiver-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.waiver-reason {
+  display: block;
+  font-size: 11px;
+}
+
+.waiver-demand {
+  font-size: 12px;
+  min-width: 5em;
+  text-align: right;
+}
+
+/* ---------- season so far ---------- */
+
+.results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.results li {
+  display: grid;
+  grid-template-columns: 3em 1.2em auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.results li.won > :nth-child(2) {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.results li.lost > :nth-child(2) {
+  color: var(--danger, #f87171);
+  font-weight: 600;
+}
+
+/* ---------- activity + trade ideas ---------- */
+
+.activity h2:not(:first-child) {
+  margin-top: 12px;
+}
+
+.activity .trade-offer {
+  margin-bottom: 4px;
+}
+
+.trade-ideas,
+.moves {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 13px;
+}
+
+.trade-ideas li {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.moves li {
+  display: grid;
+  grid-template-columns: 3.4em 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.moves li.trade > :last-child {
+  color: var(--accent);
+}
+
+/* A claim that lost: worth knowing, not worth the same ink. */
+.moves li.failed {
+  opacity: 0.6;
+}
+
+.standings-odds {
+  font-variant-numeric: tabular-nums;
+  min-width: 3.2em;
+  text-align: right;
+}
+
+/* ---------- last season ---------- */
+
+.history summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history summary h2 {
+  margin: 0;
+}
+
+.managers {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.managers li {
+  display: grid;
+  grid-template-columns: 1fr 3em 3em 3.5em 3.5em 3.5em;
+  gap: 6px;
+  align-items: baseline;
+}
+
+/* ---------- price an offer ---------- */
+
+.trade-offer summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.trade-offer summary h2 {
+  margin: 0;
+}
+
+.offer-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.offer-sides fieldset {
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  padding: 4px 6px;
+  display: grid;
+  gap: 2px;
+  max-height: 14em;
+  overflow-y: auto;
+}
+
+.offer-sides label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.verdict {
+  margin-top: 6px;
+}
+
+.verdict p {
+  margin: 2px 0;
+}
+
+/* ---------- bye weeks ---------- */
+
+.bye-weeks summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bye-weeks summary h2 {
+  margin: 0;
+}
+
+.bye-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.bye-list li {
+  display: grid;
+  grid-template-columns: 3em 1fr auto auto;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.bye-list li.empty > :last-child {
+  color: var(--danger, #f87171);
+}
+
+.bye-out {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

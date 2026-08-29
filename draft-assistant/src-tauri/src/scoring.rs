@@ -42,11 +42,21 @@ fn game_cv(stat_key: &str) -> f64 {
 pub fn norm_cdf(z: f64) -> f64 {
     let t = 1.0 / (1.0 + 0.2316419 * z.abs());
     let d = 0.3989423 * (-z * z / 2.0).exp();
-    let p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    let p =
+        d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
     if z > 0.0 {
         1.0 - p
     } else {
         p
+    }
+}
+
+/// Upper tail P(Z > z), computed directly so small tails do not cancel to 0.
+pub fn norm_sf(z: f64) -> f64 {
+    if z > 0.0 {
+        norm_cdf(-z)
+    } else {
+        1.0 - norm_cdf(z)
     }
 }
 
@@ -76,17 +86,18 @@ pub fn base_points(stats: &HashMap<String, f64>, scoring: &HashMap<String, f64>)
         .filter(|(k, _)| !NON_STAT_KEYS.contains(&k.as_str()))
         .filter(|(k, _)| !NON_STAT_PREFIXES.iter().any(|p| k.starts_with(p)))
         // Game bonuses are handled by the expectation model, never dot product.
-        .filter(|(k, _)| !k.starts_with("bonus_pass_yd") && !k.starts_with("bonus_rush_yd") && !k.starts_with("bonus_rec_yd"))
+        .filter(|(k, _)| {
+            !k.starts_with("bonus_pass_yd")
+                && !k.starts_with("bonus_rush_yd")
+                && !k.starts_with("bonus_rec_yd")
+        })
         .filter_map(|(k, v)| scoring.get(k).map(|w| w * v))
         .sum()
 }
 
 /// Expected season points from per-game yardage bonuses, computed from weekly
 /// per-game projected means. `weekly_stats` is one entry per projected game.
-pub fn bonus_points(
-    weekly_stats: &[&HashMap<String, f64>],
-    scoring: &HashMap<String, f64>,
-) -> f64 {
+pub fn bonus_points(weekly_stats: &[&HashMap<String, f64>], scoring: &HashMap<String, f64>) -> f64 {
     let mut total = 0.0;
     for (score_key, stat_key, lo, hi) in GAME_BONUSES {
         let Some(&pts) = scoring.get(score_key) else {
@@ -103,6 +114,26 @@ pub fn bonus_points(
         }
     }
     total
+}
+
+/// Each player's projected points for each week, scored the way the season
+/// total is: the stat line under league scoring plus the expected per-game
+/// yardage bonuses for that one game.
+pub fn weekly_points_by_player(
+    rows: &[crate::sleeper::ProjectionRow],
+    scoring: &HashMap<String, f64>,
+) -> HashMap<String, Vec<(u32, f64)>> {
+    let mut out: HashMap<String, Vec<(u32, f64)>> = HashMap::new();
+    for row in rows {
+        let (Some(week), Some(stats)) = (row.week, row.stats.as_ref()) else {
+            continue;
+        };
+        let pts = base_points(stats, scoring) + bonus_points(&[stats], scoring);
+        out.entry(row.player_id.clone())
+            .or_default()
+            .push((week, pts));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -145,7 +176,10 @@ mod tests {
         let scoring = scoring_fixture();
         let b_big = bonus_points(&[&big], &scoring);
         let b_small = bonus_points(&[&small], &scoring);
-        assert!(b_big > 1.0, "expected >1 bonus pt/game for 120yd mean, got {b_big}");
+        assert!(
+            b_big > 1.0,
+            "expected >1 bonus pt/game for 120yd mean, got {b_big}"
+        );
         assert!(b_small < 0.2, "expected ~0 for 30yd mean, got {b_small}");
         assert!(b_big < 4.0, "cannot exceed max bonus, got {b_big}");
     }

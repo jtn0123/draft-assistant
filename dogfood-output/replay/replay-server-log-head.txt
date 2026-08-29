@@ -1,0 +1,60 @@
+12:35:46 recorded UMass Wrestling Fantasy Football League: 14 teams × 15 rounds, 210 picks, status complete
+12:35:46 user 872674602265051136 placed at slot 2
+12:35:46 replay server on http://localhost:8787 — 0/210 picks released, one every 8s
+12:35:46 DRAFT_ASSISTANT_SLEEPER_BASE=http://localhost:8787
+12:35:47 57997 league
+12:35:47 57997 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:35:47 57997 picks -> 0/210
+12:35:52 58002 league
+12:35:52 58002 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:35:52 58002 picks -> 0/210
+12:35:54 pick 1 (R1 slot 1): Ja'Marr Chase WR
+12:35:57 58005 league
+12:35:57 58005 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:35:57 58005 picks -> 1/210
+12:36:01 58008 league
+12:36:01 58008 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:01 58008 picks -> 1/210
+12:36:02 pick 2 (R1 slot 2): Bijan Robinson RB
+12:36:06 58011 league
+12:36:06 58011 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:06 58011 picks -> 2/210
+12:36:10 pick 3 (R1 slot 3): Jahmyr Gibbs RB
+12:36:11 58015 league
+12:36:11 58015 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:11 58015 picks -> 3/210
+12:36:16 58021 league
+12:36:16 58021 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:16 58021 picks -> 3/210
+12:36:18 pick 4 (R1 slot 4): Saquon Barkley RB
+12:36:21 58025 league
+12:36:21 58025 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:21 58025 picks -> 4/210
+12:36:26 58028 league
+12:36:26 58028 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:26 58028 picks -> 4/210
+12:36:26 pick 5 (R1 slot 5): Derrick Henry RB
+12:36:31 58033 league
+12:36:31 58033 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:31 58033 picks -> 5/210
+12:36:34 pick 6 (R1 slot 6): Ashton Jeanty RB
+12:36:36 58036 league
+12:36:36 58036 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:36 58036 picks -> 6/210
+12:36:41 58039 league
+12:36:41 58039 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:41 58039 picks -> 6/210
+12:36:42 pick 7 (R1 slot 7): Christian McCaffrey RB
+12:36:46 58042 league
+12:36:46 58042 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:46 58042 picks -> 7/210
+12:36:50 pick 8 (R1 slot 8): Josh Jacobs RB
+12:36:50 58048 league
+12:36:50 58048 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:50 58048 picks -> 8/210
+12:36:55 58051 league
+12:36:55 58051 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)
+12:36:55 58051 picks -> 8/210
+12:36:58 pick 9 (R1 slot 9): James Cook RB
+12:37:00 58077 league
+12:37:00 58077 proxy /v1/league/1236044119877369856/users -> 200 (12378 bytes)

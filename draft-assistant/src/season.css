@@ -1,0 +1,225 @@
+/* Season mode: the header switch, the week banner where the clock was, and
+   the two-column week layout. */
+
+/* ---------- draft / season switch ---------- */
+
+.mode-switch {
+  display: inline-flex;
+  align-self: flex-start;
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mode-switch button {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mode-switch button + button {
+  border-left: 1px solid var(--border);
+}
+
+.mode-switch button:hover {
+  background: var(--bg-hover);
+}
+
+.mode-switch button[aria-pressed="true"] {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* ---------- week banner ---------- */
+
+.week-banner .clock-cell {
+  min-width: 110px;
+}
+
+.week-banner .week-odds {
+  border-right: none;
+}
+
+.week-score {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Quieter than the starter alert: a lineup can be fixed until kickoff. */
+.lineup-alert {
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: var(--warn);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ---------- layout ---------- */
+
+.season-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 1099px) {
+  .season-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.season-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* ---------- lineups side by side ---------- */
+
+.matchup-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+.matchup-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchup-table td {
+  padding: 4px 6px;
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchup-table .slot {
+  width: 4.6em;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.matchup-table .num {
+  width: 4.8em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.matchup-table td.edge {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.matchup-table td.empty {
+  color: var(--danger);
+}
+
+.matchup-table tr.total td {
+  border-top: 2px solid var(--border);
+  font-weight: 700;
+}
+
+/* ---------- player card ---------- */
+
+/* A name that opens the card: text, with a hint that it is a control. */
+button.player-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--text-muted);
+  text-underline-offset: 2px;
+}
+
+button.player-link:hover {
+  text-decoration-color: var(--accent);
+}
+
+.player-card {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 300px;
+  z-index: 30;
+  background: var(--bg-raised);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+}
+
+.player-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-card-head strong {
+  flex: 1;
+}
+
+.player-card dl {
+  display: grid;
+  gap: 3px;
+  margin: 10px 0 0;
+}
+
+.player-card dl > div {
+  display: grid;
+  grid-template-columns: 7em 1fr;
+  gap: 8px;
+}
+
+.player-card dt {
+  color: var(--text-muted);
+}
+
+.player-card dd {
+  margin: 0;
+}
+
+.player-card .sparkline {
+  margin: 10px 0 0;
+}
+
+.player-card figcaption {
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.player-card .bar {
+  fill: var(--accent);
+  opacity: 0.45;
+}
+
+.player-card .bar.current {
+  opacity: 1;
+}
