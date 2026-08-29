@@ -21,8 +21,9 @@ const MAX_TURN_CHARS: usize = 2_000;
 
 const BASE_SYSTEM_PROMPT: &str =
     "You are a fantasy football draft assistant embedded in a live draft app. \
-Each message carries the current draft state as JSON inside <draft_state> tags, then the full \
-available-player board inside <board> tags as a \
+Each message carries the current draft state as JSON inside <draft_state> tags, then the \
+available-player board inside <board> tags (the whole board during the draft; the top of each \
+position once it is over, when the board is the waiver wire) as a \
 pipe-separated table (columns: rank|name|pos|team|bye|pts|vorp|tier|adp|surv|status, where pts is \
 the season projection under the league's exact scoring, vorp is value over replacement, surv is \
 the chance the player is still there at the user's next pick, and status is an injury tag or \
@@ -30,8 +31,26 @@ blank), then the conversation so far, then the question. \
 Rankings, projections, and values come from that state — never invent players, numbers, or picks \
 that are not in it. `my_roster` is the user's team, `recommendations` is the app's own suggestion, \
 `recent_picks` is what just happened, `replacement_baselines` are the points a waiver-level player \
-at each position scores. `rosters` is every team in the league with their picks and their open \
-starting slots — use it. The managers picking between the user and their next turn have needs of \
+at each position scores. `rosters` is every team in the league — each player as `POS Name TEAM` — with their open \
+starting slots; use it. `projected_standings` is every team's projected \
+season points with byes honoured and this week's projection, best first: the draft's scoreboard. `this_week`, when \
+present, is the week ahead: `lineup` compares the user's lineup as set on Sleeper with the best \
+one (slot by slot, with the gain) and lists empty slots; `matchup` is the opponent, both lineups, \
+the margin and a win probability. The app cannot change a lineup — tell the user what to set. `waivers`, once the draft is over, is \
+the free-agent wire priced for the user: `targets` with `my_gain` (season points he adds to their \
+lineup, byes honoured), `rivals_helped` (how many other teams he would also lift — the competition \
+for the claim) and `trending_adds`; `drops` are the user's players who never start. `season`, once a week has been played, is the \
+record and standings Sleeper keeps, the user's result each week, and `trends`: every player on \
+their roster with projected vs actual points and the per-game difference, most over-performing \
+first. `activity` is every trade, claim, add and drop in the league, newest first, with FAAB bids. \
+`trade_ideas` are one-for-one swaps that lift both the user's season lineup and a rival's (both \
+gains given) — the ones worth proposing, because the other side wins too. `playoff_odds` is the \
+rest of the season simulated on the league's own schedule two thousand times: each team's chance \
+of making the playoffs and expected wins. `history` is last season: trades and claims, what \
+winning FAAB bids cost (median, 75th percentile, max), and each manager's trades, moves, FAAB \
+spent and record — who answers offers and who overpays. `bye_weeks` is every week someone on the \
+user's roster is on a bye, worst first, with who is out, the points lost and any starting slot \
+nobody can fill — the weeks to have a body for. The managers picking between the user and their next turn have needs of \
 their own, and what they need is what will be gone; a position is only safe to wait on if the \
 room does not want it. Hold to the same discipline the app does: no defense or kicker before the \
 last two rounds, and say so if a suggestion would put two players from the same NFL team at the \
@@ -121,13 +140,45 @@ pub fn board_table(available: &[AvailablePlayer]) -> String {
     out
 }
 
-/// The state without `available` — that goes in as the table.
+/// The state without `available` (that goes in as the table) and without
+/// the two things that were three quarters of it: every team's projected
+/// starters twice over, and every rostered player as a seven-field record.
+/// A roster reads as "RB Bijan Robinson ATL" a line; the standings keep
+/// their numbers and lose their lineups. Measured on the real league:
+/// 76k characters of state down to under 20k.
 fn state_json(view: &DraftView) -> Result<String, String> {
     let mut value = serde_json::to_value(view).map_err(|e| format!("serialize state: {e}"))?;
     if let Value::Object(map) = &mut value {
         map.remove("available");
+        if let Some(Value::Array(teams)) = map.get_mut("projected_standings") {
+            for team in teams.iter_mut().filter_map(Value::as_object_mut) {
+                team.remove("starters");
+                team.remove("week_starters");
+            }
+        }
+        if let Some(Value::Array(rosters)) = map.get_mut("rosters") {
+            for roster in rosters.iter_mut().filter_map(Value::as_object_mut) {
+                if let Some(Value::Array(players)) = roster.get_mut("players") {
+                    for player in players.iter_mut() {
+                        *player = Value::String(compact_player(player));
+                    }
+                }
+            }
+        }
     }
     serde_json::to_string(&value).map_err(|e| format!("serialize state: {e}"))
+}
+
+/// "RB Bijan Robinson ATL", with "(keeper)" when he was.
+fn compact_player(player: &Value) -> String {
+    let field = |k: &str| player.get(k).and_then(Value::as_str).unwrap_or("");
+    let mut line = format!("{} {} {}", field("position"), field("name"), field("team"))
+        .trim()
+        .to_string();
+    if player.get("is_keeper").and_then(Value::as_bool) == Some(true) {
+        line.push_str(" (keeper)");
+    }
+    line
 }
 
 fn clipped(text: &str) -> String {
@@ -169,6 +220,32 @@ pub fn conversation(history: &[ChatTurn]) -> String {
     out
 }
 
+/// Free agents per position sent once the draft is over. During the draft
+/// every row matters — the question is who to take from all of them. After
+/// it, the pool is the waiver wire, and the fortieth receiver on it has never
+/// been the answer to anything; sending him cost ten thousand tokens a
+/// question for nothing.
+const SEASON_PER_POSITION: usize = 12;
+
+/// The board as the model should see it: whole during the draft, the top of
+/// each position afterwards. The board arrives sorted by value, so the first
+/// N seen per position are the best.
+pub fn board_for_prompt(status: &str, available: &[AvailablePlayer]) -> Vec<AvailablePlayer> {
+    if status != "complete" {
+        return available.to_vec();
+    }
+    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    available
+        .iter()
+        .filter(|a| {
+            let n = seen.entry(a.player.position.as_str()).or_insert(0);
+            *n += 1;
+            *n <= SEASON_PER_POSITION
+        })
+        .cloned()
+        .collect()
+}
+
 pub fn build_prompt(
     view: &DraftView,
     history: &[ChatTurn],
@@ -176,7 +253,7 @@ pub fn build_prompt(
 ) -> Result<String, String> {
     Ok(compose(
         &state_json(view)?,
-        &board_table(&view.available),
+        &board_table(&board_for_prompt(&view.draft.status, &view.available)),
         history,
         question,
     ))
@@ -296,6 +373,44 @@ mod tests {
         assert!(table.starts_with("Available players (419 total"));
         assert_eq!(table.lines().count(), 420);
         assert!(table.contains("\n419|P419|"));
+    }
+
+    #[test]
+    fn once_the_draft_is_over_only_the_top_of_each_position_is_sent() {
+        // Thirty receivers and thirty backs on the wire, in value order.
+        let available: Vec<AvailablePlayer> = (1..=60)
+            .map(|i| {
+                let mut a = player(i, &format!("P{i}"), None);
+                a.player.position = if i % 2 == 0 { "RB".into() } else { "WR".into() };
+                a
+            })
+            .collect();
+        assert_eq!(
+            board_for_prompt("drafting", &available).len(),
+            60,
+            "the whole board mid-draft"
+        );
+        let sliced = board_for_prompt("complete", &available);
+        assert_eq!(sliced.len(), 24);
+        assert_eq!(
+            sliced.iter().filter(|a| a.player.position == "RB").count(),
+            12
+        );
+        // The best of each position, not an arbitrary dozen.
+        assert_eq!(sliced[0].player.name, "P1");
+        assert!(sliced.iter().all(|a| a.player.overall_rank <= 24));
+        let whole = board_table(&available).len();
+        let cut = board_table(&sliced).len();
+        assert!(cut * 2 < whole, "{cut} vs {whole} chars");
+    }
+
+    #[test]
+    fn a_rostered_player_reads_as_one_line() {
+        let p = serde_json::json!({"player_id": "9509", "name": "Bijan Robinson", "position": "RB",
+            "team": "ATL", "pick_no": 2, "round": 1, "is_keeper": false});
+        assert_eq!(compact_player(&p), "RB Bijan Robinson ATL");
+        let k = serde_json::json!({"name": "Kenny Gainwell", "position": "RB", "team": null, "is_keeper": true});
+        assert_eq!(compact_player(&k), "RB Kenny Gainwell (keeper)");
     }
 
     #[test]

@@ -152,7 +152,7 @@ async fn export_writes_the_same_view_the_ui_renders() {
     let path = rig.core.export_state().await.unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
     let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(value["schema_version"], "1.3");
+    assert_eq!(value["schema_version"], "1.4");
     assert_eq!(value["league"]["league_id"], LEAGUE_ID);
     assert_eq!(value["available"].as_array().unwrap().len(), 6);
     assert!(path.ends_with("draft-state.json"));
@@ -370,4 +370,107 @@ async fn a_keeper_is_remembered_once_the_draft_passes_it() {
         vec![6, 4, 3, 2, 1],
         "the keeper is not a recent pick"
     );
+}
+
+#[tokio::test]
+async fn refresh_season_rereads_the_calendar_and_keeps_the_board() {
+    let rig = loaded_rig("refresh-season").await;
+    rig.stub.reset_hits();
+    let view = rig.core.refresh_season().await.unwrap();
+    assert_eq!(rig.stub.hits("/v1/state/nfl"), 1, "the calendar is re-read");
+    assert_eq!(
+        rig.stub.hits("/v1/players/nfl"),
+        0,
+        "the player dictionary is not"
+    );
+    assert_eq!(view.available.len(), 6, "the board is untouched");
+    assert!(view.this_week.is_none(), "no matchups on the stub, no week");
+}
+
+#[tokio::test]
+async fn an_offer_naming_a_player_nobody_holds_is_refused_with_the_reason() {
+    let rig = loaded_rig("evaluate-trade").await;
+    let err = rig
+        .core
+        .evaluate_trade(2, vec!["nobody".into()], Vec::new())
+        .await
+        .unwrap_err();
+    assert!(err.contains("not on my roster"), "{err}");
+    let err = rig
+        .core
+        .evaluate_trade(2, Vec::new(), Vec::new())
+        .await
+        .unwrap_err();
+    assert!(err.contains("at least one player"), "{err}");
+}
+
+/// Keepers are remembered on disk: after the draft has passed a keeper's
+/// pick nothing in the feed says it was one, so a forced reload used to
+/// drop the tag.
+#[tokio::test]
+async fn a_keeper_stays_a_keeper_across_a_forced_reload() {
+    let rig = loaded_rig("keepers-persist").await;
+    let ids = rig.fixture.player_ids();
+    // Pick 8 is in the book while the draft still sits on pick 1: a keeper.
+    rig.fixture.set_picks(&rig.stub, &[pick(8, 2, &ids[0])]);
+    let view = rig.core.refresh_picks().await.unwrap();
+    let kept = |v: &draft_assistant_lib::view::DraftView| {
+        v.rosters
+            .iter()
+            .flat_map(|r| r.players.iter())
+            .any(|p| p.pick_no == 8 && p.is_keeper)
+    };
+    assert!(kept(&view), "judged a keeper from its position");
+    // The draft catches up and passes pick 8; a forced reload rebuilds
+    // everything from the network, where pick 8 now looks like any pick.
+    let picks: Vec<_> = (1..=8)
+        .map(|n| {
+            pick(
+                n,
+                if n % 2 == 1 { 1 } else { 2 },
+                &ids[(n as usize - 1) % ids.len()],
+            )
+        })
+        .collect();
+    rig.fixture.set_picks(&rig.stub, &picks);
+    let view = rig.core.refresh_data().await.unwrap();
+    assert!(kept(&view), "remembered from disk after the reload");
+}
+
+/// Injury tags come from the player dictionary, which the season refresh
+/// re-reads once a day and applies to the board in place.
+#[tokio::test]
+async fn a_daily_season_refresh_picks_up_a_new_injury_tag_without_rebuilding() {
+    let rig = loaded_rig("injury-refresh").await;
+    let ids = rig.fixture.player_ids();
+    // The dictionary now says the first player is Out.
+    let mut players: std::collections::HashMap<String, _> = rig
+        .fixture
+        .rows
+        .iter()
+        .filter_map(|r| r.player.clone().map(|p| (r.player_id.clone(), p)))
+        .collect();
+    players.get_mut(&ids[0]).unwrap().injury_status = Some("Out".into());
+    rig.stub.json("/v1/players/nfl", &players);
+    // Yesterday's dictionary is on file.
+    rig.core
+        .loaded
+        .lock()
+        .await
+        .as_mut()
+        .unwrap()
+        .players_fetched_at = 0;
+    rig.stub.reset_hits();
+    let view = rig.core.refresh_season().await.unwrap();
+    assert_eq!(rig.stub.hits("/v1/players/nfl"), 1, "re-read once");
+    let tagged = view
+        .available
+        .iter()
+        .find(|a| a.player.player_id == ids[0])
+        .expect("still on the board");
+    assert_eq!(tagged.player.injury_status.as_deref(), Some("Out"));
+    // And not again while it is fresh.
+    rig.stub.reset_hits();
+    rig.core.refresh_season().await.unwrap();
+    assert_eq!(rig.stub.hits("/v1/players/nfl"), 0);
 }

@@ -205,3 +205,20 @@ describe("SidePanel keepers", () => {
     expect(tags[0].closest("li")).toHaveTextContent(roster.players[0].name);
   });
 });
+
+describe("ClockBanner starter alert", () => {
+  it("shouts when a required slot is empty with the picks running out", () => {
+    const v = view();
+    v.draft.status = "drafting";
+    v.draft.starter_alert = "DEF still empty with 1 pick left";
+    render(<ClockBanner view={v} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("DEF still empty with 1 pick left");
+  });
+
+  it("says nothing otherwise", () => {
+    const v = view();
+    v.draft.starter_alert = null;
+    render(<ClockBanner view={v} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});

@@ -30,6 +30,18 @@ const SUGGESTIONS = [
 
 type Busy = "ask" | "compact" | null;
 
+/** The Tuesday question: what to claim, what to drop, what to bid. */
+const WAIVER_BRIEF =
+  "Waiver brief for this week. Using waivers, season, activity and my roster: who should I " +
+  "claim, who do I drop for each, what FAAB bid makes sense given the budget and what others " +
+  "have paid, and which rivals are likely bidding on the same players. Be specific and brief.";
+
+/** The Sunday-morning question: exactly what to set. */
+const START_SIT_BRIEF =
+  "Start/sit brief for this week. Using this_week and the matchup: tell me the exact lineup " +
+  "to set on Sleeper slot by slot, every change from what is set now with the gain, and the " +
+  "one thing about the matchup to watch. Be specific and brief.";
+
 export function Chat({
   open,
   onClose,
@@ -38,6 +50,7 @@ export function Chat({
   leagueName = "",
   onClock = false,
   onAutoAsk,
+  seasonMode = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -50,6 +63,8 @@ export function Chat({
   onClock?: boolean;
   /** Called when the panel asks by itself, so the app can show it. */
   onAutoAsk?: () => void;
+  /** The draft is over: offer the two questions that matter each week. */
+  seasonMode?: boolean;
 }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [question, setQuestion] = useState("");
@@ -402,11 +417,21 @@ export function Chat({
       <UsageLine usage={usage} questions={session.questions} cost={session.cost} />
 
       <div className="chat-input">
+        {seasonMode && !busy && (
+          <div className="chat-briefs" aria-label="Weekly briefs">
+            <button className="ghost" onClick={() => void ask(WAIVER_BRIEF)} disabled={!canAsk}>
+              Waiver brief
+            </button>
+            <button className="ghost" onClick={() => void ask(START_SIT_BRIEF)} disabled={!canAsk}>
+              Start/sit brief
+            </button>
+          </div>
+        )}
         <textarea
           ref={inputRef}
           value={question}
           rows={2}
-          placeholder="Ask about the draft…"
+          placeholder={seasonMode ? "Ask about the week…" : "Ask about the draft…"}
           aria-label="Your question"
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => {

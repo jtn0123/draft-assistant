@@ -1,13 +1,18 @@
-//! Replacement levels, VORP, and tiers.
+//! Demand model: each starting slot contributes demand to the positions
+//! eligible for it; dedicated slots contribute 1; flex slots go to whichever
+//! eligible position the *market* starts next (the candidate with the
+//! earliest ADP), falling back to projected points when nobody has one.
+//! Bench does NOT inflate replacement level. Replacement value at a position
+//! = mean of the 3 players around the replacement rank, to smooth cliffs.
 //!
-//! Demand model (borrowed from fantasy-bot's README, fixed per its own
-//! failure notes): each starting slot contributes demand to the positions
-//! eligible for it; dedicated slots contribute 1, flex slots are allocated to
-//! whichever eligible positions actually hold the best remaining projected
-//! players (not split evenly). Bench does NOT inflate replacement level.
-//! Replacement value at a position = mean of the 3 players around the
-//! replacement rank, to smooth cliffs.
-
+//! Why the market and not our own projections: allocating flex to the best
+//! projected player was circular. In full PPR receivers project higher, so
+//! the model decided the league starts 52 receivers and 31 backs, set the RB
+//! baseline at RB31 (about 157 points, the same as WR) and told the user that
+//! waiting on running backs was free. The room disagreed: by pick 132 it had
+//! taken 45 backs, and the one actually available was 133 points. Allocating
+//! by ADP on the same pool gives RB41/WR42 and baselines of 123 and 170,
+//! within ten points of what was really left on the board at the end.
 use std::collections::HashMap;
 
 use crate::roster::RosterRules;
@@ -17,6 +22,8 @@ use crate::roster::RosterRules;
 pub struct ScoredPlayer {
     pub position: String,
     pub points: f64,
+    /// Market draft position, if known. Decides where flex demand goes.
+    pub adp: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -65,21 +72,33 @@ pub fn compute_replacement(
 
     // Allocate each flex slot independently against its own eligible pool.
     // This remains correct when a league mixes FLEX, REC_FLEX, and SUPER_FLEX.
+    // Each slot goes to the position whose next man up the market drafts
+    // soonest; only when no candidate carries an ADP does projection decide.
     let mut demand = base_demand.clone();
     for eligible in flex_slots {
         for _ in 0..teams {
-            let best_position = eligible
+            let candidates: Vec<(&str, &ScoredPlayer)> = eligible
                 .iter()
                 .filter_map(|position| {
                     let index = demand.get(*position).copied().unwrap_or(0);
                     pools
                         .get(*position)
                         .and_then(|pool| pool.get(index))
-                        .map(|player| (*position, player.points))
+                        .map(|player| (*position, *player))
                 })
-                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .collect();
+            let by_market = candidates
+                .iter()
+                .filter_map(|(position, player)| player.adp.map(|adp| (*position, adp)))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
                 .map(|(position, _)| position);
-            if let Some(position) = best_position {
+            let by_points = || {
+                candidates
+                    .iter()
+                    .max_by(|a, b| a.1.points.total_cmp(&b.1.points))
+                    .map(|(position, _)| *position)
+            };
+            if let Some(position) = by_market.or_else(by_points) {
                 *demand.entry(position.to_string()).or_insert(0) += 1;
             }
         }
@@ -145,7 +164,62 @@ mod tests {
         ScoredPlayer {
             position: pos.into(),
             points: pts,
+            adp: None,
         }
+    }
+
+    fn mk(pos: &str, pts: f64, adp: f64) -> ScoredPlayer {
+        ScoredPlayer {
+            position: pos.into(),
+            points: pts,
+            adp: Some(adp),
+        }
+    }
+
+    /// The 2026 draft in miniature: receivers project higher, but the room
+    /// drafts running backs first. Flex demand must follow the room.
+    #[test]
+    fn flex_demand_follows_the_market_not_the_projection() {
+        let roster: Vec<String> = ["RB", "WR", "FLEX", "BN"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let players = vec![
+            mk("WR", 250.0, 30.0),
+            mk("WR", 240.0, 40.0),
+            mk("WR", 230.0, 50.0),
+            mk("WR", 220.0, 60.0),
+            mk("RB", 200.0, 10.0),
+            mk("RB", 190.0, 15.0),
+            mk("RB", 180.0, 20.0),
+            mk("RB", 170.0, 25.0),
+        ];
+        let model = compute_replacement(&players, &RosterRules::new(&roster), 2);
+        // Both flex slots go to RB: after the two dedicated starters, RB3 and
+        // RB4 (ADP 20, 25) are drafted before WR3 (ADP 50).
+        assert_eq!(model.demand.get("RB"), Some(&4));
+        assert_eq!(model.demand.get("WR"), Some(&2));
+        // So replacement RB is deep and replacement WR is shallow, which is
+        // what makes a back worth more than his raw points say.
+        assert!(model.baseline["RB"] < model.baseline["WR"]);
+    }
+
+    #[test]
+    fn without_market_data_projection_still_decides() {
+        let roster: Vec<String> = ["RB", "WR", "FLEX", "BN"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        // RB2 carries an ADP; the receiver in line does not, and never wins
+        // on projection alone against a candidate the market has priced.
+        let players = vec![
+            mk("RB", 200.0, 10.0),
+            mk("RB", 150.0, 80.0),
+            mk("WR", 210.0, 20.0),
+            sp("WR", 205.0),
+        ];
+        let model = compute_replacement(&players, &RosterRules::new(&roster), 1);
+        assert_eq!(model.demand.get("RB"), Some(&2), "{:?}", model.demand);
     }
 
     #[test]

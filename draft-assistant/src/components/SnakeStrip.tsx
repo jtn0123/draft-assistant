@@ -29,10 +29,16 @@ export function SnakeStrip({ view }: { view: DraftView }) {
   const label = usePickLabel(d.teams);
   if (d.status === "complete" || d.teams < 1) return null;
 
+  // The snake, corrected for traded picks: the backend lists every pick
+  // that changed hands, so a chip names the manager who will actually make
+  // it rather than the one whose slot it started in.
+  const ownerSlot = (pick: number) =>
+    d.traded_pick_slots[String(pick)] ?? slotForPick(pick, d.teams);
+
   // Trust the backend's own answer for the pick on the clock. If our snake
   // disagrees — a draft type this does not model — say nothing rather than
   // name the wrong manager.
-  if (slotForPick(d.current_pick, d.teams) !== d.on_clock_slot) return null;
+  if (ownerSlot(d.current_pick) !== d.on_clock_slot) return null;
 
   const names = new Map(view.rosters.map((r) => [r.slot, r.display_name]));
   const taken = new Set(view.rosters.flatMap((r) => r.players.map((p) => p.pick_no)));
@@ -43,7 +49,7 @@ export function SnakeStrip({ view }: { view: DraftView }) {
   const last = upcoming[1] ?? upcoming[0] ?? d.current_pick + MAX_CELLS - 1;
 
   const cell = (pick: number) => {
-    const slot = slotForPick(pick, d.teams);
+    const slot = ownerSlot(pick);
     return {
       pick,
       name: names.get(slot) ?? `Slot ${slot}`,

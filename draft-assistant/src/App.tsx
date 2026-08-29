@@ -14,6 +14,7 @@ import { PickStyleContext, formatPick, loadPickStyle, savePickStyle } from "./pi
 import "./App.css";
 import "./components.css";
 import "./snake.css";
+import "./week.css";
 import "./chat.css";
 
 // ---------- app ----------
@@ -444,6 +445,7 @@ export default function App() {
       leagueName={view.league.name}
       onClock={view.draft.is_my_pick && view.draft.status === "drafting"}
       onAutoAsk={() => setChatOpen(true)}
+      seasonMode={view.draft.status === "complete"}
     />
     </div>
     </PickStyleContext.Provider>

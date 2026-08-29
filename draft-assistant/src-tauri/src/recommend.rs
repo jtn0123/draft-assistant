@@ -251,13 +251,22 @@ pub fn recommend(
                             p.position
                         ));
                     }
-                    if count < 3 {
+                    // Only for a player actually worth rostering. "Thin at
+                    // RB" is a reason to take a good back, never a reason to
+                    // take a bad one: below replacement he is worse than what
+                    // the waiver wire gives away for free, and this bonus was
+                    // large enough to carry a minus-24 back to the top of the
+                    // board on its own.
+                    if count < 3 && p.vorp > 0.0 {
                         score += 3.0 * (3 - count) as f64;
                         reasons.push(format!("thin at {} ({count} rostered)", p.position));
-                    } else if count > 5 {
-                        score -= 6.0 * (count - 5) as f64;
-                        reasons.push(format!("already {count} {}s rostered", p.position));
                     }
+                    // No flat "already N rostered" penalty here any more: the
+                    // crowding discount above is that penalty, expressed as a
+                    // discount on the gain rather than a tax on the position.
+                    // Charging both put a seventh receiver 12 points in the
+                    // hole and had this recommending a back at minus 24 VORP
+                    // over a receiver at plus 13.
                 }
             }
 
@@ -269,7 +278,9 @@ pub fn recommend(
             // Halved when the drop-off model landed: "last of his tier" is a
             // proxy for scarcity, and scarcity is now measured directly above.
             // At the old +8 it could outvote the thing it was standing in for.
-            if tier_left <= 2 {
+            // Same gate: a tier among players nobody should roster is not
+            // scarcity, it is an artefact of where the tier lines fell.
+            if tier_left <= 2 && p.vorp > 0.0 {
                 score += 4.0;
                 reasons.push(format!(
                     "only {tier_left} left in {} tier {}",

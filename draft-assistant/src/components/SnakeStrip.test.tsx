@@ -22,6 +22,7 @@ function live(pick: number, mySlot: number, myNext: number[]): DraftView {
   v.draft.on_clock_slot = round % 2 === 1 ? index + 1 : 14 - index;
   v.draft.my_slot = mySlot;
   v.draft.my_next_picks = myNext;
+  v.draft.traded_pick_slots = {};
   v.draft.is_my_pick = v.draft.on_clock_slot === mySlot;
   v.draft.picks_until_mine = myNext[0] - pick;
   v.draft.pick_deadline = null;
@@ -35,6 +36,37 @@ function live(pick: number, mySlot: number, myNext: number[]): DraftView {
 }
 
 const cells = () => screen.getAllByRole("listitem");
+
+describe("SnakeStrip with traded picks", () => {
+  it("names the manager who owns a traded pick, not the slot it came from", () => {
+    // Pick 5 is slot 5's in the snake, but slot 9 acquired it.
+    const v = live(3, 8, [8]);
+    v.draft.traded_pick_slots = { "5": 9 };
+    render(<SnakeStrip view={v} />);
+    const chip = cells().find((c) => c.querySelector(".snake-pick")?.textContent === "5");
+    expect(chip).toHaveTextContent("Team9");
+    expect(chip).not.toHaveTextContent("Team5");
+  });
+
+  it("marks an acquired pick as mine", () => {
+    const v = live(3, 8, [5, 8]);
+    v.draft.traded_pick_slots = { "5": 8 };
+    render(<SnakeStrip view={v} />);
+    const chip = cells().find((c) => c.querySelector(".snake-pick")?.textContent === "5");
+    expect(chip).toHaveClass("mine");
+    expect(chip).toHaveTextContent("YOU");
+  });
+
+  it("still draws when a traded pick is on the clock", () => {
+    // Pick 3 is slot 3's in the snake; slot 11 owns it and is on the clock.
+    const v = live(3, 8, [8]);
+    v.draft.traded_pick_slots = { "3": 11 };
+    v.draft.on_clock_slot = 11;
+    render(<SnakeStrip view={v} />);
+    expect(cells()[0]).toHaveClass("on-clock");
+    expect(cells()[0]).toHaveTextContent("Team11");
+  });
+});
 
 describe("SnakeStrip pick numbering", () => {
   it("labels chips with the overall number by default", () => {

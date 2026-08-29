@@ -40,6 +40,233 @@ export interface TeamRoster {
   open_starters: [string, number][];
 }
 
+export interface Starter {
+  slot: string;
+  player_id: string;
+  name: string;
+  position: string;
+  points: number;
+  /** Sleeper's injury tag, when there is one. */
+  injury: string | null;
+}
+
+/** A team's best lineup and what it projects to over the season. */
+export interface TeamProjection {
+  slot: number;
+  display_name: string | null;
+  /** Best lineup, season total, nobody ever on a bye. */
+  full_strength: number;
+  /** Week-by-week best lineup with byes honoured, summed. */
+  season: number;
+  starters: Starter[];
+  /** Which week `week_points` is for. */
+  week: number;
+  /** Best lineup from that week's own projections; 0 with no rows. */
+  week_points: number;
+  week_starters: Starter[];
+}
+
+export interface LineupChange {
+  slot: string;
+  /** Who is set there now; null for an empty slot. */
+  out: Starter | null;
+  in_: Starter;
+  gain: number;
+}
+
+export interface LineupCheck {
+  set_points: number;
+  best_points: number;
+  changes: LineupChange[];
+  empty_slots: string[];
+}
+
+export interface MatchupPreview {
+  opponent_slot: number;
+  opponent_name: string | null;
+  my_points: number;
+  opponent_points: number;
+  margin: number;
+  win_probability: number;
+  my_starters: Starter[];
+  opponent_starters: Starter[];
+}
+
+/** The week ahead: lineup check against Sleeper, and the matchup. */
+export interface ThisWeek {
+  week: number;
+  lineup: LineupCheck | null;
+  matchup: MatchupPreview | null;
+}
+
+export interface WaiverTarget {
+  player_id: string;
+  name: string;
+  position: string;
+  team: string | null;
+  bye_week: number | null;
+  points: number;
+  /** Season points he adds to my bye-adjusted lineup total. */
+  my_gain: number;
+  /** Rivals he would lift by 5+ points: the competition for the claim. */
+  rivals_helped: number;
+  trending_adds: number | null;
+  /** FAAB, from what winning claims cost last season; null without history. */
+  suggested_bid: number | null;
+}
+
+export interface DropCandidate {
+  player_id: string;
+  name: string;
+  position: string;
+  points: number;
+  /** Weeks he starts in my best lineup; 0 = never. */
+  starts: number;
+}
+
+export interface WaiverBoard {
+  targets: WaiverTarget[];
+  drops: DropCandidate[];
+}
+
+export interface StandingRow {
+  slot: number;
+  display_name: string | null;
+  wins: number;
+  losses: number;
+  ties: number;
+  points_for: number;
+  points_against: number;
+}
+
+export interface WeekResult {
+  week: number;
+  my_points: number;
+  opponent_slot: number | null;
+  opponent_name: string | null;
+  opponent_points: number | null;
+  won: boolean | null;
+}
+
+export interface PlayerTrend {
+  player_id: string;
+  name: string;
+  position: string;
+  games: number;
+  projected: number;
+  actual: number;
+  delta_per_game: number;
+}
+
+/** Record, standings, results and projected-vs-actual, once a week has been played. */
+export interface SeasonSoFar {
+  through_week: number;
+  standings: StandingRow[];
+  my_results: WeekResult[];
+  trends: PlayerTrend[];
+}
+
+export interface Activity {
+  /** ms since the epoch. */
+  at: number;
+  week: number;
+  kind: string;
+  teams: string[];
+  adds: [string, string][];
+  drops: [string, string][];
+  picks: string[];
+  bid: number | null;
+}
+
+/** A one-for-one swap that lifts both my season lineup and a rival's. */
+export interface TradeIdea {
+  partner_slot: number;
+  partner_name: string | null;
+  give_id: string;
+  give: string;
+  give_position: string;
+  /** A second player going with `give`: a two-for-one. */
+  also_give_id: string | null;
+  also_give: string | null;
+  also_give_position: string | null;
+  get_id: string;
+  get: string;
+  get_position: string;
+  my_gain: number;
+  /** my_gain less what the best free agent at that position adds for nothing. */
+  over_waiver: number;
+  their_gain: number;
+}
+
+/** Simulated rest of season: how often a team makes the playoffs. */
+export interface TeamOdds {
+  slot: number;
+  display_name: string | null;
+  /** 0..1 */
+  playoff_odds: number;
+  expected_wins: number;
+  expected_points: number;
+  /** Simulated seasons. */
+  runs: number;
+}
+
+export interface BidStats {
+  count: number;
+  median: number;
+  p75: number;
+  max: number;
+}
+
+export interface ManagerProfile {
+  user_id: string;
+  display_name: string | null;
+  trades: number;
+  moves: number;
+  faab_used: number;
+  wins: number;
+  losses: number;
+  points_for: number;
+}
+
+/** Last season: who trades, who churns, what claims cost. */
+export interface LeagueHistory {
+  league_id: string;
+  trades: number;
+  claims: number;
+  bids: BidStats;
+  managers: ManagerProfile[];
+}
+
+/** An offer priced both ways: season (byes honoured) and this week. */
+export interface TradeVerdict {
+  partner_slot: number;
+  partner_name: string | null;
+  give: Starter[];
+  get: Starter[];
+  my_season_before: number;
+  my_season_after: number;
+  their_season_before: number;
+  their_season_after: number;
+  week: number;
+  my_week_before: number;
+  my_week_after: number;
+  their_week_before: number;
+  their_week_after: number;
+}
+
+/** One week where someone on my roster is on a bye. */
+export interface ByeWeek {
+  week: number;
+  /** Who is out, in roster order. */
+  out: string[];
+  /** Best lineup that week, from season projections. */
+  points: number;
+  /** What the same lineup scores in a week with nobody out. */
+  shortfall: number;
+  /** Starting slots left empty that week. */
+  empty_slots: string[];
+}
+
 export interface DraftStatus {
   draft_id: string;
   status: string;
@@ -58,6 +285,11 @@ export interface DraftStatus {
   is_my_pick: boolean;
   picks_until_mine: number | null;
   my_next_picks: number[];
+  /** A required slot is still empty and the picks are running out. */
+  starter_alert: string | null;
+  /** Picks that do not follow the snake because they were traded: pick
+   *  number -> the slot whose manager makes it. Keys are strings (JSON). */
+  traded_pick_slots: Record<string, number>;
   total_picks_made: number;
   manual_picks_active: boolean;
 }
@@ -134,6 +366,18 @@ export interface DraftView {
   position_run: string | null;
   recommendations: Recommendation[];
   recent_picks: RecentPick[];
+  /** Every team, best projected season first. */
+  projected_standings: TeamProjection[];
+  this_week: ThisWeek | null;
+  waivers: WaiverBoard | null;
+  season: SeasonSoFar | null;
+  activity: Activity[];
+  trade_ideas: TradeIdea[];
+  /** Empty without a schedule. Best odds first. */
+  playoff_odds: TeamOdds[];
+  history: LeagueHistory | null;
+  /** My bye weeks, worst first. Empty without a roster. */
+  bye_weeks: ByeWeek[];
   replacement_baselines: Record<string, number>;
   replacement_demand: Record<string, number>;
   data_health: DataHealth;

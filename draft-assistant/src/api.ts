@@ -10,9 +10,10 @@ import type {
   ChatTurn,
   DraftView,
   PollHealth,
+  TradeVerdict,
 } from "./types";
 
-const DRAFT_VIEW_SCHEMA_VERSION = "1.3";
+const DRAFT_VIEW_SCHEMA_VERSION = "1.4";
 
 export function validateDraftView(value: DraftView): DraftView {
   if (value.schema_version !== DRAFT_VIEW_SCHEMA_VERSION) {
@@ -54,6 +55,8 @@ interface Api {
   recordManualPick(playerId: string): Promise<DraftView>;
   undoManualPick(): Promise<DraftView>;
   exportState(): Promise<string>;
+  /** Price an offer: `give` leaves my roster, `get` comes from the partner's. */
+  evaluateTrade(partnerSlot: number, give: string[], get: string[]): Promise<TradeVerdict>;
   /**
    * Ask Claude. `onText` receives each piece of the answer as it is written;
    * the resolved reply carries the whole answer.
@@ -98,6 +101,8 @@ const tauriApi: Api = {
   recordManualPick: (playerId) =>
     invokeView("record_manual_pick", { playerId }),
   undoManualPick: () => invokeView("undo_manual_pick"),
+  evaluateTrade: (partnerSlot, give, get) =>
+    invoke<TradeVerdict>("evaluate_trade", { partnerSlot, give, get }),
   exportState: () => invoke<string>("export_state"),
   chat: (question, history, options, onText) => {
     const channel = new Channel<string>();
@@ -259,6 +264,9 @@ function browserApi(): Api {
     },
     recordManualPick: async () => {
       throw new Error("browser preview is read-only — run the desktop app to draft");
+    },
+    evaluateTrade: async () => {
+      throw new Error("Pricing an offer needs the desktop app.");
     },
     undoManualPick: async () => {
       throw new Error("browser preview is read-only — run the desktop app to draft");

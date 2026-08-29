@@ -66,6 +66,9 @@ async function upstream(path) {
 const league = await upstream(`/v1/league/${o.league}`);
 const draft = await upstream(`/v1/draft/${o.draft}`);
 const picks = (await upstream(`/v1/draft/${o.draft}/picks`)).sort((a, b) => a.pick_no - b.pick_no);
+// Pick trades are fixed before the draft, so the whole list is served from the
+// start; without it the app reads the order as a plain snake and warns.
+const traded = await upstream(`/v1/draft/${o.draft}/traded_picks`).catch(() => []);
 if (picks.length === 0) {
   console.error("that draft has no picks to replay");
   process.exit(1);
@@ -152,6 +155,9 @@ const server = http.createServer(async (req, res) => {
     if (path === `/v1/draft/${o.draft}/picks`) {
       log(`${who} picks -> ${released}/${total}`);
       return send(res, 200, JSON.stringify(picks.slice(0, released)));
+    }
+    if (path === `/v1/draft/${o.draft}/traded_picks`) {
+      return send(res, 200, JSON.stringify(traded ?? []));
     }
     if (path === "/replay/status") {
       return send(res, 200, JSON.stringify({ released, total, interval, paused, uptime_s: Math.round((Date.now() - serverStart) / 1000) }));

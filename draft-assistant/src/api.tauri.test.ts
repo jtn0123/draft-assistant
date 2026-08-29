@@ -29,11 +29,11 @@ describe("Tauri live-update listener", () => {
     const emit = tauri.listeners.get("draft-updated");
     expect(emit).toBeDefined();
 
-    emit?.({ payload: { schema_version: "1.3" } });
+    emit?.({ payload: { schema_version: "1.4" } });
     emit?.({ payload: { schema_version: "0.9" } });
 
     expect(views).toHaveLength(1);
     expect(errors).toHaveLength(1);
-    expect(String(errors[0])).toContain("expected schema 1.3, received 0.9");
+    expect(String(errors[0])).toContain("expected schema 1.4, received 0.9");
   });
 });

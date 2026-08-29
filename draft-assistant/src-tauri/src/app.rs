@@ -26,11 +26,17 @@ pub enum PollEvent {
 
 /// Fold newly seen keepers into the league's memory of them: judged from
 /// where each pick sits now, and never forgotten once judged.
-fn note_keepers(loaded: &mut LoadedLeague) {
+fn note_keepers(engine: &Engine, loaded: &mut LoadedLeague) {
     let teams = loaded.draft.settings.teams.max(1);
     let rounds = loaded.draft.settings.rounds.max(1);
     let seen = view::keeper_pick_nos(&loaded.api_picks, teams, rounds);
+    let before = loaded.keeper_pick_nos.len();
     loaded.keeper_pick_nos.extend(seen);
+    if loaded.keeper_pick_nos.len() != before {
+        if let Err(error) = engine.save_keepers(&loaded.draft.draft_id, &loaded.keeper_pick_nos) {
+            log::warn(format!("keepers not saved: {error}"));
+        }
+    }
 }
 
 pub struct AppCore {
@@ -143,7 +149,7 @@ impl AppCore {
         let mut loaded = self.loaded.lock().await;
         let loaded = loaded.as_mut().ok_or("no league loaded")?;
         loaded.api_picks = picks;
-        note_keepers(loaded);
+        note_keepers(&self.engine, loaded);
         log::info(format!(
             "refresh_picks in {:.1}s: {} picks, status {}",
             started.elapsed().as_secs_f64(),
@@ -365,7 +371,7 @@ impl AppCore {
         match picks {
             Ok(picks) => {
                 loaded.api_picks = picks;
-                note_keepers(loaded);
+                note_keepers(&self.engine, loaded);
                 if engine::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
                     manual_changed = true;
                     if let Err(error) = self
@@ -457,6 +463,7 @@ impl AppCore {
         emit: &(dyn Fn(PollEvent) + Send + Sync),
     ) {
         let mut last_fingerprint: Option<u64> = None;
+        let mut last_season_refresh = std::time::Instant::now();
         log::info(format!(
             "poll loop {generation} started at {interval:?} intervals"
         ));
@@ -467,7 +474,21 @@ impl AppCore {
                     emit(PollEvent::View(Box::new(view)));
                 }
             }
-            tokio::time::sleep(interval).await;
+            // Once the draft is over the picks feed never changes again; the
+            // season side does, on the scale of hours. Slow down, and re-read
+            // the calendar, matchups, records and transactions periodically.
+            if self.draft_over().await {
+                if last_season_refresh.elapsed() >= crate::app_season::SEASON_REFRESH {
+                    last_season_refresh = std::time::Instant::now();
+                    match self.refresh_season().await {
+                        Ok(view) => emit(PollEvent::View(Box::new(view))),
+                        Err(error) => log::warn(format!("season refresh failed: {error}")),
+                    }
+                }
+                tokio::time::sleep(interval.max(crate::app_season::SEASON_IDLE)).await;
+            } else {
+                tokio::time::sleep(interval).await;
+            }
         }
         log::info(format!("poll loop {generation} stopped"));
     }

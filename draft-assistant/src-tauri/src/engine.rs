@@ -4,17 +4,17 @@
 //! state dump — there is deliberately no difference between what the human
 //! and the model can see.
 
-use crate::board::{build_board, BoardPlayer};
+use crate::board::build_board;
+use crate::engine_season::SeasonContext;
 use crate::mock_league::synthesize_league;
 use crate::roster::RosterRules;
 use crate::sleeper::{Draft, League, Pick, PlayerMeta, ProjectionRow, SleeperClient};
-use crate::valuation::ReplacementModel;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const PLAYERS_TTL_SECS: u64 = 24 * 3600;
+pub(crate) const PLAYERS_TTL_SECS: u64 = 24 * 3600;
 const PROJECTIONS_TTL_SECS: u64 = 6 * 3600;
 const WEEKS: u32 = 18;
 
@@ -52,31 +52,7 @@ pub(crate) struct Cached<T> {
 
 // ---------- engine ----------
 
-pub struct LoadedLeague {
-    pub league: League,
-    pub draft: Draft,
-    /// user_id -> display name, from /league/{id}/users.
-    pub user_names: HashMap<String, String>,
-    pub board: Vec<BoardPlayer>,
-    pub board_index: HashMap<String, usize>,
-    pub replacement_model: ReplacementModel,
-    pub roster_rules: RosterRules,
-    pub api_picks: Vec<Pick>,
-    pub manual_picks: Vec<Pick>,
-    /// Pick numbers known to be keepers: flagged by Sleeper, or sitting in
-    /// the book ahead of the draft's progress when first seen. Remembered so
-    /// a keeper stays a keeper once the draft passes its slot — the flag
-    /// alone cannot be trusted (`Pick::is_keeper`).
-    pub keeper_pick_nos: HashSet<u32>,
-    pub poll_last_success_at: Option<u64>,
-    pub poll_consecutive_failures: u32,
-    pub poll_last_error: Option<String>,
-    pub players_fetched_at: u64,
-    pub projections_fetched_at: u64,
-    pub weekly_fetched_at: u64,
-    pub warnings: Vec<String>,
-    pub player_meta: HashMap<String, PlayerMeta>,
-}
+pub use crate::loaded::LoadedLeague;
 
 pub struct Engine {
     pub client: SleeperClient,
@@ -96,7 +72,7 @@ impl Engine {
         })
     }
 
-    async fn players(
+    pub(crate) async fn players(
         &self,
         force: bool,
     ) -> Result<(u64, HashMap<String, PlayerMeta>, Option<String>), String> {
@@ -287,6 +263,18 @@ impl Engine {
         if reconcile_manual_picks(&api_picks, &mut manual_picks) {
             self.save_manual_picks(&draft.draft_id, &manual_picks)?;
         }
+        // Best effort: a league with no trades answers `[]`, and a failed
+        // fetch must not stop the draft loading. It just means the order is
+        // read as the plain snake, which is what the app always did.
+        let (traded_picks, traded_warning) = match self.client.traded_picks(&draft.draft_id).await {
+            Ok(trades) => (trades, None),
+            Err(error) => (
+                Vec::new(),
+                Some(format!(
+                    "traded picks unavailable ({error}); pick order assumes no trades"
+                )),
+            ),
+        };
         let season: u32 = league
             .season
             .parse()
@@ -304,7 +292,22 @@ impl Engine {
         if let Some(error) = &poll_last_error {
             warnings.push(format!("initial picks refresh failed: {error}"));
         }
+        warnings.extend(traded_warning);
+        let SeasonContext {
+            nfl_state,
+            trending,
+            matchups,
+            league_rosters,
+            past_matchups,
+            transactions,
+            schedule,
+            history,
+        } = self
+            .season_context(&league, &user_names, &mut warnings)
+            .await;
         let roster_rules = RosterRules::new(&league.roster_positions);
+        let weekly_points =
+            crate::scoring::weekly_points_by_player(&weekly_rows, &league.scoring_settings);
         let board_build = build_board(
             &league,
             &draft,
@@ -327,11 +330,18 @@ impl Engine {
             .map(|(i, p)| (p.player_id.clone(), i))
             .collect();
 
-        let keeper_pick_nos = crate::view::keeper_pick_nos(
+        // Judged from where the picks sit now, plus what was judged before:
+        // a keeper the draft has passed can no longer be told from a pick.
+        let mut keeper_pick_nos = self.load_keepers(&draft.draft_id);
+        let before = keeper_pick_nos.len();
+        keeper_pick_nos.extend(crate::view::keeper_pick_nos(
             &api_picks,
             draft.settings.teams.max(1),
             draft.settings.rounds.max(1),
-        );
+        ));
+        if keeper_pick_nos.len() != before {
+            warnings.extend(self.save_keepers(&draft.draft_id, &keeper_pick_nos).err());
+        }
         Ok(LoadedLeague {
             league,
             draft,
@@ -342,6 +352,16 @@ impl Engine {
             roster_rules,
             api_picks,
             manual_picks,
+            traded_picks,
+            weekly_points,
+            nfl_state,
+            matchups,
+            trending,
+            league_rosters,
+            past_matchups,
+            transactions,
+            schedule,
+            history,
             keeper_pick_nos,
             poll_last_success_at,
             poll_consecutive_failures,

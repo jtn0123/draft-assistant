@@ -71,6 +71,16 @@ async fn undo_manual_pick(state: State<'_, AppState>) -> Result<DraftView, Strin
 }
 
 #[tauri::command]
+async fn evaluate_trade(
+    state: State<'_, AppState>,
+    partner_slot: u32,
+    give: Vec<String>,
+    get: Vec<String>,
+) -> Result<crate::trade::TradeVerdict, String> {
+    state.core.evaluate_trade(partner_slot, give, get).await
+}
+
+#[tauri::command]
 async fn export_state(state: State<'_, AppState>) -> Result<String, String> {
     state.core.export_state().await
 }
@@ -210,6 +220,7 @@ pub fn run() {
             refresh_data,
             record_manual_pick,
             undo_manual_pick,
+            evaluate_trade,
             export_state,
             chat,
             chat_compact,

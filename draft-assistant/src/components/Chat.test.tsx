@@ -387,3 +387,17 @@ describe("Chat panel", () => {
     expect(screen.getAllByText(/Fast mode unavailable/)).toHaveLength(1);
   });
 });
+
+describe("weekly briefs", () => {
+  it("are offered only once the draft is over, and send the canned question", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Chat open onClose={() => undefined} />);
+    expect(screen.queryByRole("button", { name: "Waiver brief" })).toBeNull();
+    rerender(<Chat open onClose={() => undefined} seasonMode />);
+    await user.click(screen.getByRole("button", { name: "Waiver brief" }));
+    const calls = testState.api.chat.mock.calls;
+    const call = JSON.stringify(calls[calls.length - 1]);
+    expect(call).toMatch(/Waiver brief for this week/);
+    expect(call).toMatch(/FAAB/);
+  });
+});

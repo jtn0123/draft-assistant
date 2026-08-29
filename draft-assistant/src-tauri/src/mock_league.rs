@@ -81,5 +81,7 @@ pub(crate) fn synthesize_league(draft: &Draft) -> League {
         roster_positions,
         scoring_settings,
         draft_id: Some(draft.draft_id.clone()),
+        settings: Default::default(),
+        previous_league_id: None,
     }
 }

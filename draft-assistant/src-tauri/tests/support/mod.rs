@@ -174,6 +174,32 @@ impl Fixture {
         );
         stub.json(&format!("/v1/draft/{DRAFT_ID}"), &self.draft);
         stub.json(&format!("/v1/draft/{DRAFT_ID}/picks"), &Vec::<Pick>::new());
+        stub.set(
+            &format!("/v1/draft/{DRAFT_ID}/traded_picks"),
+            Reply::Json("[]".into()),
+        );
+        stub.set(
+            "/v1/players/nfl/trending/add?lookback_hours=24&limit=50",
+            Reply::Json("[]".into()),
+        );
+        stub.set(
+            &format!("/v1/league/{LEAGUE_ID}/rosters"),
+            Reply::Json("[]".into()),
+        );
+        stub.set(
+            &format!("/v1/league/{LEAGUE_ID}/transactions/1"),
+            Reply::Json("[]".into()),
+        );
+        stub.json(
+            "/v1/state/nfl",
+            &serde_json::json!({"week": 1, "season_type": "pre", "season": "2026"}),
+        );
+        for week in 1..=14 {
+            stub.set(
+                &format!("/v1/league/{LEAGUE_ID}/matchups/{week}"),
+                Reply::Json("[]".into()),
+            );
+        }
         stub.json(
             &format!("/v1/user/{MY_USERNAME}"),
             &serde_json::json!({"user_id": MY_USER, "username": MY_USERNAME}),
@@ -211,6 +237,10 @@ impl Fixture {
         stub.json(
             &format!("/v1/draft/{MOCK_DRAFT_ID}/picks"),
             &Vec::<Pick>::new(),
+        );
+        stub.set(
+            &format!("/v1/draft/{MOCK_DRAFT_ID}/traded_picks"),
+            Reply::Json("[]".into()),
         );
     }
 

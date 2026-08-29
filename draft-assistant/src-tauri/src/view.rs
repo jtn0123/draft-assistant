@@ -4,10 +4,20 @@
 use crate::board::AvailablePlayer;
 use crate::draft::{self, TeamRoster};
 use crate::engine::{now_secs, AppConfig, LoadedLeague};
+use crate::history::LeagueHistory;
+use crate::lineup::{self, ByeWeek, TeamProjection};
+use crate::matchup::ThisWeek;
+use crate::playoffs::TeamOdds;
 use crate::recommend::{recommend, Recommendation};
+use crate::results::SeasonSoFar;
+use crate::sleeper::NflState;
 use crate::sleeper::Pick;
+use crate::trade::TradeIdea;
+use crate::trades::PickOwnership;
+use crate::transactions::Activity;
+use crate::waivers::WaiverBoard;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Monotonic build counter. `generated_at` is only second-resolution, which is
@@ -36,6 +46,14 @@ pub struct DraftStatus {
     pub is_my_pick: bool,
     pub picks_until_mine: Option<u32>,
     pub my_next_picks: Vec<u32>,
+    /// A required starting slot is still empty and the picks are running
+    /// out: "DEF still empty with 1 pick left". Only while drafting.
+    pub starter_alert: Option<String>,
+    /// Picks that do not follow the snake because they were traded:
+    /// pick number -> the slot whose manager makes it. Empty in a league
+    /// with no trades. The strip draws from this so it never names the
+    /// wrong manager.
+    pub traded_pick_slots: HashMap<u32, u32>,
     pub total_picks_made: usize,
     pub manual_picks_active: bool,
 }
@@ -74,116 +92,38 @@ pub struct DraftView {
     pub position_run: Option<String>,
     pub recommendations: Vec<Recommendation>,
     pub recent_picks: Vec<RecentPick>,
+    /// Every team's best lineup and what it projects to, best first. The
+    /// draft's scoreboard: who is winning it so far.
+    pub projected_standings: Vec<TeamProjection>,
+    /// The week ahead: is my Sleeper lineup the best one, and who do I play.
+    /// Absent without a league (mock draft) or before the schedule exists.
+    pub this_week: Option<ThisWeek>,
+    /// The waiver wire priced for my roster. Only once the draft is over.
+    pub waivers: Option<WaiverBoard>,
+    /// Record, standings, my results and projected-vs-actual, once a week
+    /// of the regular season has been played.
+    pub season: Option<SeasonSoFar>,
+    /// The league's moves, newest first. Empty for a mock draft.
+    pub activity: Vec<Activity>,
+    /// One-for-one swaps that lift both my lineup and a rival's. Only once
+    /// the draft is over.
+    pub trade_ideas: Vec<TradeIdea>,
+    /// Simulated rest of season on the league's schedule; empty without one.
+    pub playoff_odds: Vec<TeamOdds>,
+    /// Last season: who trades, who churns, what claims cost.
+    pub history: Option<LeagueHistory>,
+    /// My bye weeks, worst first. Empty without a roster.
+    pub bye_weeks: Vec<ByeWeek>,
     pub replacement_baselines: HashMap<String, f64>,
     /// position -> number of league-wide startable players (incl. flex share)
     pub replacement_demand: HashMap<String, usize>,
     pub data_health: DataHealth,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct LeagueSummary {
-    pub league_id: String,
-    pub name: String,
-    pub season: String,
-    pub total_rosters: u32,
-    pub roster_positions: Vec<String>,
-    pub draftable_positions: Vec<String>,
-    pub scoring_settings: HashMap<String, f64>,
-}
+use crate::picks::validated_slot;
+pub use crate::picks::{keeper_pick_nos, merged_picks, next_open_pick, poll_fingerprint};
 
-#[derive(Debug, Clone, Serialize)]
-pub struct DataHealth {
-    pub players_fetched_at: u64,
-    pub projections_fetched_at: u64,
-    pub weekly_fetched_at: u64,
-    pub board_size: usize,
-    pub warnings: Vec<String>,
-    pub poll_last_success_at: Option<u64>,
-    pub poll_consecutive_failures: u32,
-    pub poll_last_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct PollHealth {
-    pub last_success_at: Option<u64>,
-    pub consecutive_failures: u32,
-    pub last_error: Option<String>,
-}
-
-pub fn poll_health(loaded: &LoadedLeague) -> PollHealth {
-    PollHealth {
-        last_success_at: loaded.poll_last_success_at,
-        consecutive_failures: loaded.poll_consecutive_failures,
-        last_error: loaded.poll_last_error.clone(),
-    }
-}
-
-fn validated_slot(slot: Option<u32>, teams: u32) -> (Option<u32>, Option<String>) {
-    match slot {
-        Some(value) if !(1..=teams).contains(&value) => (
-            None,
-            Some(format!(
-                "your draft slot {value} is outside the valid range 1..={teams}"
-            )),
-        ),
-        _ => (slot, None),
-    }
-}
-
-/// What the poll loop compares between polls to decide whether the UI needs
-/// a fresh view. Must change whenever anything the view renders from the
-/// draft feed changes — not just the pick count.
-pub fn poll_fingerprint(picks: &[Pick], draft: &crate::sleeper::Draft) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for pick in picks {
-        (pick.pick_no, pick.draft_slot, pick.player_id.as_str()).hash(&mut hasher);
-    }
-    draft.status.hash(&mut hasher);
-    draft.last_picked.hash(&mut hasher);
-    hasher.finish()
-}
-
-/// Merge API picks with manual fallback picks. API picks are authoritative;
-/// a manual pick survives only where the API has not filled that pick number.
-///
-/// Keyed on the number rather than "beyond the highest API pick": a keeper
-/// league arrives with picks scattered all over the board (this league opens
-/// with keepers at 11, 14, 20 … 177), and the old rule silently threw away
-/// every manual pick below the last of them.
-pub fn merged_picks(api: &[Pick], manual: &[Pick]) -> Vec<Pick> {
-    let taken: std::collections::HashSet<u32> = api.iter().map(|p| p.pick_no).collect();
-    let mut picks = api.to_vec();
-    for m in manual {
-        if !taken.contains(&m.pick_no) {
-            picks.push(m.clone());
-        }
-    }
-    picks.sort_by_key(|p| p.pick_no);
-    picks
-}
-
-/// The lowest pick number nobody has filled yet, or `None` once the board is
-/// full. Counting picks instead would put a keeper league several rounds ahead
-/// of itself before the draft even starts.
-pub fn next_open_pick(picks: &[Pick], teams: u32, rounds: u32) -> Option<u32> {
-    let made: std::collections::HashSet<u32> = picks.iter().map(|p| p.pick_no).collect();
-    (1..=teams.saturating_mul(rounds)).find(|pick| !made.contains(pick))
-}
-
-/// Which picks are keepers, judged by position rather than by Sleeper's
-/// flag: anything flagged, plus anything already in the book at or beyond
-/// the next open pick — a pick the draft has not reached can only be a
-/// keeper. Union this into `LoadedLeague::keeper_pick_nos` whenever picks
-/// arrive so the judgement survives the draft passing the slot.
-pub fn keeper_pick_nos(picks: &[Pick], teams: u32, rounds: u32) -> HashSet<u32> {
-    let open = next_open_pick(picks, teams, rounds).unwrap_or(u32::MAX);
-    picks
-        .iter()
-        .filter(|p| p.is_keeper == Some(true) || p.pick_no >= open)
-        .map(|p| p.pick_no)
-        .collect()
-}
+pub use crate::view_types::{poll_health, DataHealth, LeagueSummary, PollHealth};
 
 pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let league = &loaded.league;
@@ -203,7 +143,9 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let draft_over = open_pick.is_none();
     let current_round = (current_pick - 1) / teams + 1;
     let (order, order_warning) = draft::DraftOrder::from_draft(draft);
-    let on_clock_slot = draft::slot_for_pick(current_pick, teams, order);
+    // Who *actually* picks: the snake, corrected for traded picks.
+    let ownership = PickOwnership::from_draft(draft, &loaded.traded_picks, teams, rounds, order);
+    let on_clock_slot = ownership.owner_slot(current_pick);
 
     // Slot display names: draft_order user ids resolved via league users.
     // Only real names go in here. A user id that resolves to nothing is not a
@@ -248,7 +190,8 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let made: std::collections::HashSet<u32> = picks.iter().map(|p| p.pick_no).collect();
     let my_next_picks: Vec<u32> = my_slot
         .map(|slot| {
-            draft::picks_for_slot(slot, teams, rounds, order)
+            ownership
+                .picks_owned_by(slot)
                 .into_iter()
                 .filter(|p| *p >= current_pick && !made.contains(p))
                 .collect()
@@ -271,32 +214,67 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let taken: std::collections::HashSet<&str> =
         picks.iter().map(|p| p.player_id.as_str()).collect();
 
-    let name_of = |player_id: &str| -> (String, String, Option<String>) {
-        if let Some(&i) = loaded.board_index.get(player_id) {
-            let p = &loaded.board[i];
-            (p.name.clone(), p.position.clone(), p.team.clone())
-        } else if let Some(meta) = loaded.player_meta.get(player_id) {
-            (
-                meta.full_name
-                    .clone()
-                    .unwrap_or_else(|| player_id.to_string()),
-                meta.position.clone().unwrap_or_default(),
-                meta.team.clone(),
-            )
-        } else {
-            (player_id.to_string(), String::new(), None)
-        }
-    };
+    let name_of = |player_id: &str| loaded.name_of(player_id);
 
+    // Whose roster a pick is on: the user who made it, else (manual picks
+    // carry no user) whoever owns that pick number.
+    let user_slots: HashMap<&str, u32> = draft
+        .draft_order
+        .iter()
+        .flat_map(|o| o.iter().map(|(u, s)| (u.as_str(), *s)))
+        .collect();
+    let slot_of = |p: &Pick| -> u32 {
+        p.picked_by
+            .as_deref()
+            .and_then(|u| user_slots.get(u).copied())
+            .unwrap_or_else(|| ownership.owner_slot(p.pick_no))
+    };
     let rosters = draft::build_rosters(
         &picks,
         teams,
         &loaded.roster_rules,
         &slot_names,
         &keepers,
+        slot_of,
         name_of,
     );
     let my_roster = my_slot.and_then(|slot| rosters.get((slot - 1) as usize).cloned());
+    let starter_alert = crate::picks::alert_for(
+        my_roster.as_ref(),
+        draft.status == "drafting" && !draft_over,
+        my_next_picks.len(),
+    );
+    let bye_weeks = lineup::bye_weeks_for(
+        my_roster.as_ref(),
+        &loaded.board,
+        &loaded.board_index,
+        &loaded.roster_rules,
+    );
+    let week = loaded
+        .nfl_state
+        .as_ref()
+        .and_then(NflState::upcoming_week)
+        .unwrap_or(lineup::OPENING_WEEK);
+    let projected_standings = lineup::standings(
+        &rosters,
+        &loaded.board,
+        &loaded.board_index,
+        &loaded.weekly_points,
+        week,
+        &loaded.roster_rules,
+    );
+    let this_week = crate::matchup::this_week(loaded, &rosters, my_slot, week);
+    let season = crate::results::season_so_far(loaded, &rosters, my_slot);
+    let playoff_odds = if draft_over {
+        crate::playoffs::simulate(loaded, &rosters, week)
+    } else {
+        Vec::new()
+    };
+    let activity = crate::transactions::timeline(
+        &loaded.transactions,
+        &crate::transactions::team_lookup(loaded, &rosters),
+        &crate::transactions::name_lookup(loaded),
+    );
 
     // Available players with survival probabilities.
     let available: Vec<AvailablePlayer> = loaded
@@ -311,6 +289,16 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             player: p.clone(),
         })
         .collect();
+    // The free-agent pool, priced for my roster: the waiver board, and the
+    // bar any trade has to clear. Only once the draft is over.
+    let free: Vec<&crate::board::BoardPlayer> = available.iter().map(|a| &a.player).collect();
+    let (waivers, trade_ideas) = match my_slot {
+        Some(slot) if draft_over => (
+            crate::waivers::board(loaded, &rosters, slot, &free, &loaded.trending),
+            crate::trade::ideas(loaded, &rosters, slot, &free, &loaded.roster_rules),
+        ),
+        _ => (None, Vec::new()),
+    };
 
     // Tier alerts: top remaining tier per position and how many are left in it.
     let mut tier_alerts: Vec<TierAlert> = Vec::new();
@@ -403,11 +391,12 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         .take(10)
         .map(|p| {
             let (name, position, _) = name_of(&p.player_id);
+            let slot = slot_of(p);
             RecentPick {
                 pick_no: p.pick_no,
                 round: p.round,
-                slot: p.draft_slot,
-                slot_name: slot_names.get(&p.draft_slot).cloned(),
+                slot,
+                slot_name: slot_names.get(&slot).cloned(),
                 player_id: p.player_id.clone(),
                 name,
                 position,
@@ -426,7 +415,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     }
 
     DraftView {
-        schema_version: "1.3".into(),
+        schema_version: "1.4".into(),
         generated_at: now_secs(),
         seq: VIEW_SEQ.fetch_add(1, Ordering::Relaxed) + 1,
         league: LeagueSummary {
@@ -458,6 +447,8 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             is_my_pick,
             picks_until_mine,
             my_next_picks,
+            starter_alert,
+            traded_pick_slots: ownership.overrides(),
             total_picks_made: total_picks,
             manual_picks_active: !loaded.manual_picks.is_empty(),
         },
@@ -468,6 +459,15 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         position_run,
         recommendations,
         recent_picks,
+        projected_standings,
+        this_week,
+        waivers,
+        season,
+        activity,
+        trade_ideas,
+        playoff_odds,
+        history: loaded.history.clone(),
+        bye_weeks,
         replacement_demand: loaded.replacement_model.demand.clone(),
         replacement_baselines: loaded.replacement_model.baseline.clone(),
         data_health: DataHealth {

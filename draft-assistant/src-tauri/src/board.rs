@@ -207,6 +207,7 @@ pub fn build_board(
         .map(|p| ScoredPlayer {
             position: p.position.clone(),
             points: p.points,
+            adp: p.adp,
         })
         .collect();
     let model = valuation::compute_replacement(&as_scored, rules, league.total_rosters as usize);
@@ -250,6 +251,26 @@ pub fn build_board(
         players: scored,
         replacement: model,
     }
+}
+
+/// Bring the board's injury tags (and teams — a player traded in September
+/// scores for someone else) up to date from a fresh player dictionary,
+/// without rebuilding the board. Returns how many players changed.
+pub fn apply_player_meta(board: &mut [BoardPlayer], meta: &HashMap<String, PlayerMeta>) -> usize {
+    let mut changed = 0;
+    for p in board.iter_mut() {
+        let Some(m) = meta.get(&p.player_id) else {
+            continue;
+        };
+        let injury = m.injury_status.clone();
+        let team = m.team.clone().or_else(|| p.team.clone());
+        if injury != p.injury_status || team != p.team {
+            p.injury_status = injury;
+            p.team = team;
+            changed += 1;
+        }
+    }
+    changed
 }
 
 #[cfg(test)]
@@ -337,5 +358,54 @@ mod adp_tests {
         };
         assert_eq!(adp_of("a"), Some(9.0));
         assert_eq!(adp_of("b"), Some(12.0));
+    }
+
+    #[test]
+    fn a_fresh_dictionary_updates_tags_and_teams_and_counts_the_changes() {
+        let mk = |id: &str, team: &str, injury: Option<&str>| BoardPlayer {
+            player_id: id.into(),
+            name: id.into(),
+            position: "WR".into(),
+            team: Some(team.into()),
+            bye_week: None,
+            points: 100.0,
+            bonus_points: 0.0,
+            vorp: 0.0,
+            tier: 1,
+            position_rank: 1,
+            overall_rank: 1,
+            adp: None,
+            injury_status: injury.map(String::from),
+            sleeper_pts_ppr: None,
+        };
+        let mut board = vec![
+            mk("a", "CIN", None),
+            mk("b", "SEA", Some("Questionable")),
+            mk("c", "NO", None),
+        ];
+        let meta_of = |team: Option<&str>, injury: Option<&str>| PlayerMeta {
+            full_name: None,
+            first_name: None,
+            last_name: None,
+            position: None,
+            team: team.map(String::from),
+            fantasy_positions: None,
+            injury_status: injury.map(String::from),
+            age: None,
+            years_exp: None,
+        };
+        let meta: HashMap<String, PlayerMeta> = HashMap::from([
+            ("a".to_string(), meta_of(Some("CIN"), Some("Out"))),
+            ("b".to_string(), meta_of(Some("SEA"), Some("Questionable"))),
+            ("c".to_string(), meta_of(Some("KC"), None)),
+        ]);
+        assert_eq!(apply_player_meta(&mut board, &meta), 2);
+        assert_eq!(board[0].injury_status.as_deref(), Some("Out"));
+        assert_eq!(
+            board[1].injury_status.as_deref(),
+            Some("Questionable"),
+            "unchanged"
+        );
+        assert_eq!(board[2].team.as_deref(), Some("KC"), "traded");
     }
 }

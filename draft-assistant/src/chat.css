@@ -375,3 +375,14 @@
   border-radius: 6px;
   padding: 4px 8px;
 }
+
+.chat-briefs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.chat-briefs button {
+  font-size: 12px;
+  padding: 3px 8px;
+}

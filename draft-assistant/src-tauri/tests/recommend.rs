@@ -418,3 +418,35 @@ fn a_defense_waits_for_the_last_two_rounds() {
         "took a defense with three rounds left: {recs:?}"
     );
 }
+
+/// Caught live at pick 121: with the backs picked over, "thin at RB" and
+/// "last of his tier" were flat bonuses that applied to a back 24 points
+/// *below* replacement, and together they carried him to the top of the board.
+/// A position being thin is a reason to take a good player there, never a
+/// reason to take a bad one.
+#[test]
+fn thinness_never_recommends_a_below_replacement_body() {
+    let available = vec![
+        player("rb_scraps", "RB", -24.0),
+        player("wr_ok", "WR", 13.0),
+    ];
+    // Seven receivers, as on the night: deep enough that the old flat
+    // "already N rostered" penalty stacked on top of the crowding discount
+    // and buried the only player on the board worth having.
+    let mut mine = roster(&[
+        "QB", "RB", "RB", "WR", "WR", "WR", "WR", "WR", "WR", "WR", "TE",
+    ]);
+    mine.open_starters = vec![("DEF".into(), 1)];
+    let recs = recommend(
+        &available,
+        Some(&mine),
+        &RosterRules::new(&slots()),
+        9,
+        15,
+        121,
+    );
+    assert!(
+        recs.iter().all(|r| r.position == "WR"),
+        "took a back worth less than the waiver wire: {recs:?}"
+    );
+}

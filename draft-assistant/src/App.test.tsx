@@ -17,6 +17,7 @@ const testState = vi.hoisted(() => ({
     refreshData: vi.fn(),
     recordManualPick: vi.fn(),
     undoManualPick: vi.fn(),
+    evaluateTrade: vi.fn(),
     exportState: vi.fn(),
     saveChatSession: vi.fn(),
     listChatSessions: vi.fn(),

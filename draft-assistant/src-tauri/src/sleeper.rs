@@ -16,6 +16,11 @@ const DEFAULT_BASE: &str = "https://api.sleeper.app";
 /// case. Those two get their own, much longer cap.
 const LARGE_TRANSFER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+pub use crate::season::{
+    LeagueRoster, Matchup, NflState, RosterSettings, Transaction, TransactionSettings,
+    TrendingPlayer,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct League {
     pub league_id: String,
@@ -26,6 +31,49 @@ pub struct League {
     pub roster_positions: Vec<String>,
     pub scoring_settings: HashMap<String, f64>,
     pub draft_id: Option<String>,
+    #[serde(default)]
+    pub settings: LeagueSettings,
+    /// Last season's league, for what it says about the managers.
+    #[serde(default)]
+    pub previous_league_id: Option<String>,
+}
+
+/// The league settings the season side cares about. Defaults are Sleeper's
+/// own for a league that leaves them alone.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeagueSettings {
+    #[serde(default = "LeagueSettings::default_playoff_teams")]
+    pub playoff_teams: u32,
+    #[serde(default = "LeagueSettings::default_playoff_week_start")]
+    pub playoff_week_start: u32,
+    /// 1 when every team also plays the league average each week.
+    #[serde(default)]
+    pub league_average_match: u32,
+    #[serde(default)]
+    pub trade_deadline: u32,
+    #[serde(default)]
+    pub waiver_budget: u32,
+}
+
+impl LeagueSettings {
+    fn default_playoff_teams() -> u32 {
+        6
+    }
+    fn default_playoff_week_start() -> u32 {
+        15
+    }
+}
+
+impl Default for LeagueSettings {
+    fn default() -> Self {
+        Self {
+            playoff_teams: Self::default_playoff_teams(),
+            playoff_week_start: Self::default_playoff_week_start(),
+            league_average_match: 0,
+            trade_deadline: 0,
+            waiver_budget: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +139,23 @@ pub struct Draft {
     /// User ids that created the draft (mock drafts may use a guest id here).
     #[serde(default)]
     pub creators: Option<Vec<String>>,
+    /// Draft slot (as a string key, Sleeper's shape) -> league roster id.
+    /// Needed to translate a traded pick's roster ids back into slots.
+    #[serde(default)]
+    pub slot_to_roster_id: Option<HashMap<String, u32>>,
+}
+
+/// One entry from `/draft/{id}/traded_picks`: the pick that roster
+/// `roster_id` started the draft with in `round` now belongs to `owner_id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradedPick {
+    #[serde(default)]
+    pub season: String,
+    pub round: u32,
+    pub roster_id: u32,
+    pub owner_id: u32,
+    #[serde(default)]
+    pub previous_owner_id: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,6 +243,7 @@ pub struct LeagueUser {
     pub display_name: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct SleeperClient {
     http: reqwest::Client,
     /// Cap for the player dictionary and the weekly projections — the only two
@@ -301,6 +367,56 @@ impl SleeperClient {
         Ok(v.unwrap_or_default())
     }
 
+    pub async fn nfl_state(&self) -> Result<NflState, String> {
+        let v: Option<NflState> = self.get_json(&self.v1("state/nfl")).await?;
+        v.ok_or_else(|| "NFL state unavailable (Sleeper returned null)".to_string())
+    }
+
+    /// The most-added players across Sleeper in the last day.
+    pub async fn trending_adds(&self) -> Result<Vec<TrendingPlayer>, String> {
+        let v: Option<Vec<TrendingPlayer>> = self
+            .get_json(&self.v1("players/nfl/trending/add?lookback_hours=24&limit=50"))
+            .await?;
+        Ok(v.unwrap_or_default())
+    }
+
+    /// Every team's record and current roster.
+    pub async fn league_rosters(&self, league_id: &str) -> Result<Vec<LeagueRoster>, String> {
+        let v: Option<Vec<LeagueRoster>> = self
+            .get_json(&self.v1(&format!("league/{league_id}/rosters")))
+            .await?;
+        Ok(v.unwrap_or_default())
+    }
+
+    /// Every move in one week of the league: trades, claims, adds, drops.
+    pub async fn transactions(
+        &self,
+        league_id: &str,
+        week: u32,
+    ) -> Result<Vec<Transaction>, String> {
+        let v: Option<Vec<Transaction>> = self
+            .get_json(&self.v1(&format!("league/{league_id}/transactions/{week}")))
+            .await?;
+        Ok(v.unwrap_or_default())
+    }
+
+    /// Every roster's lineup and pairing for one week.
+    pub async fn matchups(&self, league_id: &str, week: u32) -> Result<Vec<Matchup>, String> {
+        let v: Option<Vec<Matchup>> = self
+            .get_json(&self.v1(&format!("league/{league_id}/matchups/{week}")))
+            .await?;
+        Ok(v.unwrap_or_default())
+    }
+
+    /// Picks that changed hands before or during the draft. Empty when the
+    /// league has none; Sleeper answers `[]`, not null, but tolerate both.
+    pub async fn traded_picks(&self, draft_id: &str) -> Result<Vec<TradedPick>, String> {
+        let v: Option<Vec<TradedPick>> = self
+            .get_json(&self.v1(&format!("draft/{draft_id}/traded_picks")))
+            .await?;
+        Ok(v.unwrap_or_default())
+    }
+
     /// All members of a league (for slot display names). One call.
     pub async fn league_users(&self, league_id: &str) -> Result<Vec<LeagueUser>, String> {
         let v: Option<Vec<LeagueUser>> = self
@@ -354,59 +470,7 @@ fn describe(error: &reqwest::Error) -> String {
     text
 }
 
-/// Pull the Sleeper ID out of whatever the user pasted — a bare ID or a full
-/// URL like https://sleeper.com/draft/nfl/139888...?ftue=commish. Sleeper IDs
-/// are 18–19 digit snowflakes; anything shorter is handed back untouched so
-/// the API can reject it with its own message.
-pub fn extract_id(input: &str) -> String {
-    input
-        .split(|c: char| !c.is_ascii_digit())
-        .max_by_key(|run| run.len())
-        .filter(|run| run.len() >= 15)
-        .unwrap_or(input.trim())
-        .to_string()
-}
-
-#[cfg(test)]
-mod extract_id_tests {
-    use super::extract_id;
-
-    #[test]
-    fn a_bare_id_passes_through() {
-        assert_eq!(extract_id("1389710366300200961"), "1389710366300200961");
-        assert_eq!(extract_id("  1389710366300200961\n"), "1389710366300200961");
-    }
-
-    #[test]
-    fn a_draft_url_with_query_yields_the_draft_id() {
-        assert_eq!(
-            extract_id("https://sleeper.com/draft/nfl/1389710366300200961?ftue=commish"),
-            "1389710366300200961"
-        );
-    }
-
-    #[test]
-    fn a_league_url_yields_the_league_id() {
-        assert_eq!(
-            extract_id("https://sleeper.com/leagues/1389710366300200960/team"),
-            "1389710366300200960"
-        );
-    }
-
-    #[test]
-    fn the_longest_digit_run_wins_over_short_ones() {
-        // `nfl` sits between a year-ish number and the real ID.
-        assert_eq!(
-            extract_id("2026/nfl/1389710366300200961/1"),
-            "1389710366300200961"
-        );
-    }
-
-    #[test]
-    fn a_short_string_is_returned_trimmed_for_the_api_to_reject() {
-        assert_eq!(extract_id(" abc123 "), "abc123");
-    }
-}
+pub use crate::sleeper_id::extract_id;
 
 #[cfg(test)]
 mod base_url_tests {

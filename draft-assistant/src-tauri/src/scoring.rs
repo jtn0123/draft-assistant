@@ -116,6 +116,26 @@ pub fn bonus_points(weekly_stats: &[&HashMap<String, f64>], scoring: &HashMap<St
     total
 }
 
+/// Each player's projected points for each week, scored the way the season
+/// total is: the stat line under league scoring plus the expected per-game
+/// yardage bonuses for that one game.
+pub fn weekly_points_by_player(
+    rows: &[crate::sleeper::ProjectionRow],
+    scoring: &HashMap<String, f64>,
+) -> HashMap<String, Vec<(u32, f64)>> {
+    let mut out: HashMap<String, Vec<(u32, f64)>> = HashMap::new();
+    for row in rows {
+        let (Some(week), Some(stats)) = (row.week, row.stats.as_ref()) else {
+            continue;
+        };
+        let pts = base_points(stats, scoring) + bonus_points(&[stats], scoring);
+        out.entry(row.player_id.clone())
+            .or_default()
+            .push((week, pts));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

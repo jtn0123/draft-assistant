@@ -81,6 +81,8 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         roster_positions: fixture.league.roster_positions,
         scoring_settings: fixture.league.scoring_settings,
         draft_id: Some(fixture.draft.draft_id.clone()),
+        settings: Default::default(),
+        previous_league_id: None,
     };
     let draft = Draft {
         draft_id: fixture.draft.draft_id,
@@ -106,6 +108,7 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         season: Some(league.season.clone()),
         metadata: None,
         creators: None,
+        slot_to_roster_id: None,
     };
     let config = AppConfig {
         my_user_id: Some(my_user_id.clone()),
@@ -125,6 +128,16 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         roster_rules,
         api_picks: Vec::new(),
         manual_picks: Vec::new(),
+        traded_picks: Vec::new(),
+        weekly_points: HashMap::new(),
+        nfl_state: None,
+        matchups: Vec::new(),
+        trending: Vec::new(),
+        league_rosters: Vec::new(),
+        past_matchups: Vec::new(),
+        transactions: Vec::new(),
+        schedule: Vec::new(),
+        history: None,
         keeper_pick_nos: Default::default(),
         poll_last_success_at: None,
         poll_consecutive_failures: 0,

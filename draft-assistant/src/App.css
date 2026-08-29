@@ -295,3 +295,14 @@ button.live.stale {
   margin-bottom: 14px;
   font-size: 13px;
 }
+
+/* A required starter still empty with the picks running out. Louder than
+   the warnings strip: this one costs a starting slot for the season. */
+.starter-alert {
+  background: var(--danger, #f87171);
+  color: #111;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  margin: 6px 0;
+}

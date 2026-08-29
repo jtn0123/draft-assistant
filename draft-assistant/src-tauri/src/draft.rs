@@ -129,13 +129,16 @@ pub fn survival_probability(adp: f64, now_pick: u32, at_pick: u32) -> f64 {
     (tail(at) / now_tail).clamp(0.01, 0.99)
 }
 
-/// Group picks into per-slot rosters.
+/// Group picks into per-slot rosters. `slot_of` says whose roster a pick
+/// lands on — not `draft_slot`, which is only where the pick *started*: in a
+/// league that trades picks the two differ for a quarter of the board.
 pub fn build_rosters(
     picks: &[Pick],
     teams: u32,
     rules: &RosterRules,
     slot_names: &std::collections::HashMap<u32, String>,
     keepers: &std::collections::HashSet<u32>,
+    slot_of: impl Fn(&Pick) -> u32,
     name_of: impl Fn(&str) -> (String, String, Option<String>),
 ) -> Vec<TeamRoster> {
     let mut rosters: Vec<TeamRoster> = (1..=teams)
@@ -147,7 +150,7 @@ pub fn build_rosters(
         })
         .collect();
     for pick in picks {
-        let slot = pick.draft_slot;
+        let slot = slot_of(pick);
         if slot == 0 || slot > teams {
             continue;
         }

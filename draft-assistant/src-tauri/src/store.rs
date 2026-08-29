@@ -9,6 +9,7 @@ use crate::engine::now_secs;
 use crate::engine::{AppConfig, Cached, Engine};
 use crate::sleeper::Pick;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -104,6 +105,24 @@ impl Engine {
 
     pub fn save_manual_picks(&self, draft_id: &str, picks: &[Pick]) -> Result<(), String> {
         self.write_cache_checked(&Self::manual_picks_cache_name(draft_id), &picks)?;
+        Ok(())
+    }
+
+    /// Keeper pick numbers remembered for a draft. Sleeper's own flag misses
+    /// some, and the position-based judgement only works before the draft
+    /// reaches them: once it has, only this file knows.
+    pub fn load_keepers(&self, draft_id: &str) -> HashSet<u32> {
+        let name = Self::manual_picks_cache_name(draft_id).replace("manual_picks_", "keepers_");
+        self.read_cache_any::<Vec<u32>>(&name)
+            .map(|(_, picks)| picks.into_iter().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn save_keepers(&self, draft_id: &str, keepers: &HashSet<u32>) -> Result<(), String> {
+        let name = Self::manual_picks_cache_name(draft_id).replace("manual_picks_", "keepers_");
+        let mut sorted: Vec<u32> = keepers.iter().copied().collect();
+        sorted.sort_unstable();
+        self.write_cache_checked(&name, &sorted)?;
         Ok(())
     }
 
