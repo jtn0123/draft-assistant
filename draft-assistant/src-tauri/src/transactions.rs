@@ -18,6 +18,9 @@ pub struct Activity {
     pub week: u32,
     /// "trade" | "waiver" | "free_agent" | "commissioner".
     pub kind: String,
+    /// "complete", or "failed" for a waiver claim that lost — kept because
+    /// what a rival bid on, and how much, says what they value.
+    pub status: String,
     pub teams: Vec<String>,
     /// (team, player) pairs.
     pub adds: Vec<(String, String)>,
@@ -36,11 +39,12 @@ pub fn timeline(
     let mut out: Vec<Activity> = transactions
         .iter()
         .flat_map(|(week, list)| list.iter().map(move |t| (*week, t)))
-        .filter(|(_, t)| t.status == "complete")
+        .filter(|(_, t)| t.status == "complete" || (t.kind == "waiver" && t.status == "failed"))
         .map(|(week, t)| Activity {
             at: t.created,
             week,
             kind: t.kind.clone(),
+            status: t.status.clone(),
             teams: t.roster_ids.iter().map(|r| team(*r)).collect(),
             adds: t
                 .adds
@@ -148,18 +152,26 @@ mod tests {
         }];
         let mut failed = tx("waiver", 300, &[5]);
         failed.status = "failed".into();
-        let list = vec![(1, vec![trade, waiver, failed])];
+        let mut failed_add = tx("free_agent", 400, &[6]);
+        failed_add.status = "failed".into();
+        let list = vec![(1, vec![trade, waiver, failed, failed_add])];
         let team = |r: u32| Some(format!("T{r}"));
         let name = |id: &str| format!("Player {id}");
         let feed = timeline(&list, &team, &name);
-        assert_eq!(feed.len(), 2, "failed claims are not activity");
-        assert_eq!(feed[0].kind, "waiver");
+        // A lost claim is kept (it says what a rival bid on); a failed add is noise.
+        assert_eq!(feed.len(), 3, "{feed:?}");
         assert_eq!(
-            feed[0].adds,
+            (feed[0].kind.as_str(), feed[0].status.as_str()),
+            ("waiver", "failed")
+        );
+        assert_eq!(feed[1].kind, "waiver");
+        assert_eq!(feed[1].status, "complete");
+        assert_eq!(
+            feed[1].adds,
             vec![("T5".to_string(), "Player p1".to_string())]
         );
-        assert_eq!(feed[0].bid, Some(37));
-        assert_eq!(feed[1].picks, vec!["2026 round 3 (T2) → T4"]);
-        assert_eq!(feed[1].teams, vec!["T2", "T4"]);
+        assert_eq!(feed[1].bid, Some(37));
+        assert_eq!(feed[2].picks, vec!["2026 round 3 (T2) → T4"]);
+        assert_eq!(feed[2].teams, vec!["T2", "T4"]);
     }
 }

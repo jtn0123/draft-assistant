@@ -66,6 +66,50 @@ function Card({ facts, onClose }: { facts: PlayerFacts; onClose: () => void }) {
           </div>
         ))}
       </dl>
+      {facts.weeks && facts.weeks.some((w) => w > 0) && (
+        <Sparkline weeks={facts.weeks} current={facts.weekNo} />
+      )}
     </div>
+  );
+}
+
+/**
+ * The season's shape, one thin bar a week from a shared baseline: a bye is
+ * a gap, the current week is the accent, the rest are quieter. Each bar
+ * carries its own tooltip and the whole thing reads as text for a screen
+ * reader — the numbers are the label, not the colour.
+ */
+function Sparkline({ weeks, current }: { weeks: number[]; current: number | null }) {
+  const max = Math.max(...weeks, 1);
+  const width = 272;
+  const height = 44;
+  const gap = 2;
+  const bar = (width - gap * (weeks.length - 1)) / weeks.length;
+  const text = weeks.map((w, i) => `wk ${i + 1} ${w > 0 ? fmt(w, 1) : "bye"}`).join(", ");
+  const peak = weeks.indexOf(Math.max(...weeks));
+  return (
+    <figure className="sparkline" aria-label={`Weekly projection: ${text}`}>
+      <figcaption className="muted">
+        Weekly projection · peak wk {peak + 1} {fmt(weeks[peak], 1)}
+      </figcaption>
+      <svg width={width} height={height} role="img" aria-hidden="true">
+        {weeks.map((w, i) => {
+          const h = w > 0 ? Math.max(2, (w / max) * (height - 4)) : 0;
+          return (
+            <rect
+              key={i}
+              x={i * (bar + gap)}
+              y={height - h}
+              width={bar}
+              height={h}
+              rx={2}
+              className={i + 1 === current ? "bar current" : "bar"}
+            >
+              <title>{`Week ${i + 1}: ${w > 0 ? fmt(w, 1) : "bye"}`}</title>
+            </rect>
+          );
+        })}
+      </svg>
+    </figure>
   );
 }

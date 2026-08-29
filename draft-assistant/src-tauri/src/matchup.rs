@@ -16,10 +16,29 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 /// Week-to-week spread of a fantasy player around his projection, as a
-/// fraction of it. Wide, because a weekly projection is a mean over boom and
-/// bust games; the team-level sigma this produces (about 20 points for nine
-/// starters) matches what real fantasy scores do.
-const PLAYER_CV: f64 = 0.5;
+/// fraction of it, by position. Wide, because a weekly projection is a mean
+/// over boom and bust games: a quarterback's week is the steadiest, a
+/// defense's the wildest. The team-level sigma this produces (about 20
+/// points for nine starters) matches what real fantasy scores do.
+pub fn position_cv(position: &str) -> f64 {
+    match position {
+        "QB" => 0.35,
+        "RB" => 0.5,
+        "WR" => 0.6,
+        "TE" => 0.65,
+        "K" => 0.6,
+        "DEF" | "DST" => 0.7,
+        _ => 0.5,
+    }
+}
+
+/// Two starters on the same NFL team rise and fall together — a quarterback
+/// and his receiver most of all. Correlation applied between same-team
+/// starters on one side.
+const STACK_CORRELATION: f64 = 0.3;
+
+/// player_id -> NFL team, for the stack correlation.
+pub type Teams = HashMap<String, String>;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LineupChange {
@@ -40,6 +59,10 @@ pub struct LineupCheck {
     pub changes: Vec<LineupChange>,
     /// Starting slots with nobody in them.
     pub empty_slots: Vec<String>,
+    /// Set starters carrying an injury tag that does not sideline them
+    /// (Questionable): playing as far as the projection knows, but worth a
+    /// look at the inactives before kickoff.
+    pub questionable: Vec<Starter>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -147,26 +170,51 @@ pub fn lineup_check(starters: &[String], week: &[Candidate], rules: &RosterRules
             });
         }
     }
+    let questionable = set
+        .iter()
+        .flatten()
+        .filter(|s| s.injury.is_some() && s.points > 0.0)
+        .cloned()
+        .collect();
     LineupCheck {
         set_points,
         best_points,
         changes,
         empty_slots,
+        questionable,
     }
 }
 
-fn team_sigma(starters: &[Starter]) -> f64 {
-    starters
+/// A side's spread: each starter's own, plus the covariance of starters who
+/// share an NFL team.
+fn team_variance(starters: &[Starter], teams: &Teams) -> f64 {
+    let sigmas: Vec<f64> = starters
         .iter()
-        .map(|s| (PLAYER_CV * s.points).powi(2))
-        .sum::<f64>()
-        .sqrt()
+        .map(|s| position_cv(&s.position) * s.points)
+        .collect();
+    let mut var: f64 = sigmas.iter().map(|x| x * x).sum();
+    for i in 0..starters.len() {
+        for j in (i + 1)..starters.len() {
+            let same = match (
+                teams.get(&starters[i].player_id),
+                teams.get(&starters[j].player_id),
+            ) {
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            };
+            if same {
+                var += 2.0 * STACK_CORRELATION * sigmas[i] * sigmas[j];
+            }
+        }
+    }
+    var
 }
 
 pub fn preview(
     my_week: &[Candidate],
     opponent: (u32, Option<String>, &[String], &[Candidate]),
     rules: &RosterRules,
+    teams: &Teams,
 ) -> MatchupPreview {
     let (opponent_slot, opponent_name, their_set, their_week) = opponent;
     let (my_points, my_starters) = best_lineup(my_week, rules);
@@ -180,7 +228,8 @@ pub fn preview(
         (set.iter().map(|s| s.points).sum(), set)
     };
     let margin = my_points - opponent_points;
-    let sigma = (team_sigma(&my_starters).powi(2) + team_sigma(&opponent_starters).powi(2)).sqrt();
+    let sigma =
+        (team_variance(&my_starters, teams) + team_variance(&opponent_starters, teams)).sqrt();
     let win_probability = if sigma > 0.0 {
         norm_cdf(margin / sigma)
     } else if margin > 0.0 {
@@ -241,6 +290,11 @@ pub fn this_week(
         })
     };
     let mine = candidates(my_slot)?;
+    let teams: Teams = loaded
+        .board
+        .iter()
+        .filter_map(|p| Some((p.player_id.clone(), p.team.clone()?)))
+        .collect();
     let lineup = loaded
         .matchups
         .iter()
@@ -262,6 +316,7 @@ pub fn this_week(
                 &mine,
                 (opp_slot, name, set, &theirs),
                 &loaded.roster_rules,
+                &teams,
             ))
         });
     if lineup.is_none() && matchup.is_none() {
@@ -275,175 +330,4 @@ pub fn this_week(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn c(id: &str, pos: &str, pts: f64) -> Candidate {
-        Candidate {
-            player_id: id.into(),
-            name: id.into(),
-            position: pos.into(),
-            points: pts,
-            bye_week: None,
-            injury: None,
-        }
-    }
-
-    fn rules() -> RosterRules {
-        RosterRules::new(
-            &["QB", "RB", "WR", "FLEX", "DEF", "BN"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>(),
-        )
-    }
-
-    fn week() -> Vec<Candidate> {
-        vec![
-            c("qb", "QB", 20.0),
-            c("rb1", "RB", 18.0),
-            c("rb2", "RB", 9.0),
-            c("wr1", "WR", 15.0),
-            c("wr2", "WR", 11.0),
-            c("def", "DEF", 7.0),
-        ]
-    }
-
-    #[test]
-    fn a_worse_flex_and_an_empty_slot_are_both_reported() {
-        // Set: rb2 in FLEX over wr2, and no DEF.
-        let set: Vec<String> = ["qb", "rb1", "wr1", "rb2", "0"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let check = lineup_check(&set, &week(), &rules());
-        assert_eq!(check.set_points, 62.0);
-        assert_eq!(check.best_points, 71.0);
-        assert_eq!(check.empty_slots, vec!["DEF"]);
-        let changes: Vec<(&str, Option<&str>, &str)> = check
-            .changes
-            .iter()
-            .map(|x| {
-                (
-                    x.slot.as_str(),
-                    x.out.as_ref().map(|o| o.player_id.as_str()),
-                    x.in_.player_id.as_str(),
-                )
-            })
-            .collect();
-        assert_eq!(
-            changes,
-            vec![("FLEX", Some("rb2"), "wr2"), ("DEF", None, "def")]
-        );
-        assert!((check.changes[0].gain - 2.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn a_slot_nobody_can_fill_is_reported_empty_with_no_change_to_make() {
-        // No DEF on the roster at all; the slot is set to "0".
-        let roster: Vec<Candidate> = week().into_iter().filter(|c| c.position != "DEF").collect();
-        let set: Vec<String> = ["qb", "rb1", "wr1", "wr2", "0"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let check = lineup_check(&set, &roster, &rules());
-        assert_eq!(check.empty_slots, vec!["DEF"]);
-        assert!(check.changes.is_empty(), "{:?}", check.changes);
-    }
-
-    #[test]
-    fn the_best_lineup_set_needs_no_changes() {
-        let set: Vec<String> = ["qb", "rb1", "wr1", "wr2", "def"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let check = lineup_check(&set, &week(), &rules());
-        assert!(check.changes.is_empty(), "{:?}", check.changes);
-        assert!(check.empty_slots.is_empty());
-        assert_eq!(check.set_points, check.best_points);
-    }
-
-    #[test]
-    fn the_same_players_in_swapped_slots_is_not_a_change() {
-        // wr2 in WR, wr1 in FLEX: same nine points, different order.
-        let set: Vec<String> = ["qb", "rb1", "wr2", "wr1", "def"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let check = lineup_check(&set, &week(), &rules());
-        assert!(check.changes.is_empty(), "{:?}", check.changes);
-    }
-
-    #[test]
-    fn a_projected_favourite_is_more_likely_to_win_and_a_tie_is_a_coin_flip() {
-        let theirs = vec![
-            c("tqb", "QB", 18.0),
-            c("trb", "RB", 12.0),
-            c("twr", "WR", 12.0),
-            c("twr2", "WR", 8.0),
-            c("tdef", "DEF", 6.0),
-        ];
-        let p = preview(&week(), (5, Some("Them".into()), &[], &theirs), &rules());
-        assert_eq!(p.opponent_points, 56.0);
-        assert!(p.margin > 0.0);
-        assert!(
-            p.win_probability > 0.5 && p.win_probability < 1.0,
-            "{}",
-            p.win_probability
-        );
-        let even = preview(&week(), (5, None, &[], &week()), &rules());
-        assert!(
-            (even.win_probability - 0.5).abs() < 1e-6,
-            "{}",
-            even.win_probability
-        );
-    }
-
-    #[test]
-    fn the_opponents_set_lineup_is_used_when_they_have_one() {
-        // They benched their best back.
-        let theirs = week();
-        let set: Vec<String> = ["qb", "rb2", "wr1", "wr2", "def"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let p = preview(&week(), (5, None, &set, &theirs), &rules());
-        assert_eq!(p.opponent_points, 62.0);
-    }
-
-    #[test]
-    fn opponents_share_a_matchup_id() {
-        let m = |roster_id: u32, matchup_id: u32| Matchup {
-            roster_id,
-            matchup_id: Some(matchup_id),
-            starters: Vec::new(),
-            players: Vec::new(),
-            points: 0.0,
-            players_points: Default::default(),
-        };
-        let ms = [m(1, 7), m(3, 7), m(2, 4)];
-        assert_eq!(opponent_roster_id(&ms, 1), Some(3));
-        assert_eq!(opponent_roster_id(&ms, 2), None);
-    }
-
-    #[test]
-    fn an_out_starter_is_replaced_and_the_change_says_why() {
-        let mut roster = week();
-        // rb1 is set and Out; he scores nothing this week.
-        roster[1].injury = Some("Out".into());
-        roster[1].points = 0.0;
-        let set: Vec<String> = ["qb", "rb1", "wr1", "wr2", "def"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let check = lineup_check(&set, &roster, &rules());
-        assert_eq!(check.changes.len(), 1, "{:?}", check.changes);
-        let ch = &check.changes[0];
-        assert_eq!((ch.slot.as_str(), ch.in_.player_id.as_str()), ("RB", "rb2"));
-        assert_eq!(
-            ch.out.as_ref().and_then(|o| o.injury.as_deref()),
-            Some("Out")
-        );
-        assert!((ch.gain - 9.0).abs() < 1e-9);
-    }
-}
+mod tests;

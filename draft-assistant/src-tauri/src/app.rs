@@ -7,6 +7,7 @@
 
 use crate::chat::{self, ChatOptions, ChatReply, ChatSession, ChatTurn, SessionSummary};
 use crate::engine::{self, AppConfig, Engine, LoadedLeague, StoredLeague};
+use crate::keepers::note_keepers;
 use crate::log;
 use crate::sleeper::extract_id;
 use crate::view::{self, build_view, DraftView, PollHealth};
@@ -22,21 +23,6 @@ use tokio::sync::Mutex;
 pub enum PollEvent {
     Health(PollHealth),
     View(Box<DraftView>),
-}
-
-/// Fold newly seen keepers into the league's memory of them: judged from
-/// where each pick sits now, and never forgotten once judged.
-fn note_keepers(engine: &Engine, loaded: &mut LoadedLeague) {
-    let teams = loaded.draft.settings.teams.max(1);
-    let rounds = loaded.draft.settings.rounds.max(1);
-    let seen = view::keeper_pick_nos(&loaded.api_picks, teams, rounds);
-    let before = loaded.keeper_pick_nos.len();
-    loaded.keeper_pick_nos.extend(seen);
-    if loaded.keeper_pick_nos.len() != before {
-        if let Err(error) = engine.save_keepers(&loaded.draft.draft_id, &loaded.keeper_pick_nos) {
-            log::warn(format!("keepers not saved: {error}"));
-        }
-    }
 }
 
 pub struct AppCore {
@@ -478,7 +464,17 @@ impl AppCore {
             // season side does, on the scale of hours. Slow down, and re-read
             // the calendar, matchups, records and transactions periodically.
             if self.draft_over().await {
-                if last_season_refresh.elapsed() >= crate::app_season::SEASON_REFRESH {
+                // Projections a day old get the full reload, so the standings
+                // and the odds follow the season; otherwise the light one.
+                if self.projections_stale().await {
+                    last_season_refresh = std::time::Instant::now();
+                    match self.refresh_data().await {
+                        Ok(view) => emit(PollEvent::View(Box::new(view))),
+                        Err(error) => {
+                            log::warn(format!("season projections reload failed: {error}"))
+                        }
+                    }
+                } else if last_season_refresh.elapsed() >= crate::app_season::SEASON_REFRESH {
                     last_season_refresh = std::time::Instant::now();
                     match self.refresh_season().await {
                         Ok(view) => emit(PollEvent::View(Box::new(view))),

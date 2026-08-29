@@ -79,6 +79,8 @@ export interface LineupCheck {
   best_points: number;
   changes: LineupChange[];
   empty_slots: string[];
+  /** Set starters tagged but not sidelined (Questionable): check the inactives before kickoff. */
+  questionable: Starter[];
 }
 
 export interface MatchupPreview {
@@ -111,6 +113,8 @@ export interface WaiverTarget {
   /** Rivals he would lift by 5+ points: the competition for the claim. */
   rivals_helped: number;
   trending_adds: number | null;
+  /** Why the gain: weeks he starts, byes he covers; "never starts". */
+  reason: string;
   /** FAAB, from what winning claims cost last season; null without history. */
   suggested_bid: number | null;
 }
@@ -171,6 +175,8 @@ export interface Activity {
   at: number;
   week: number;
   kind: string;
+  /** "complete", or "failed" for a waiver claim that lost. */
+  status: string;
   teams: string[];
   adds: [string, string][];
   drops: [string, string][];
@@ -196,6 +202,8 @@ export interface TradeIdea {
   /** my_gain less what the best free agent at that position adds for nothing. */
   over_waiver: number;
   their_gain: number;
+  /** Trades this manager made last season; null without history. */
+  partner_trades: number | null;
 }
 
 /** Simulated rest of season: how often a team makes the playoffs. */
@@ -378,6 +386,8 @@ export interface DraftView {
   history: LeagueHistory | null;
   /** My bye weeks, worst first. Empty without a roster. */
   bye_weeks: ByeWeek[];
+  /** player_id -> projected points for weeks 1..17 (0 on a bye), rostered players and waiver targets. */
+  player_weeks: Record<string, number[]>;
   replacement_baselines: Record<string, number>;
   replacement_demand: Record<string, number>;
   data_health: DataHealth;

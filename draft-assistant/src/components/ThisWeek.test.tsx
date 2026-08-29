@@ -36,7 +36,7 @@ describe("ThisWeek", () => {
           { slot: "DEF", out: null, in_: st("DEF", "New York Giants", 6.2), gain: 6.2 },
           { slot: "WR", out: { ...st("WR", "Tee Higgins", 0), injury: "Out" }, in_: st("WR", "Michael Wilson", 11.6), gain: 11.6 },
         ],
-        empty_slots: ["DEF"],
+        empty_slots: ["DEF"], questionable: [],
       },
       matchup: {
         opponent_slot: 6,
@@ -66,7 +66,7 @@ describe("ThisWeek", () => {
     const v = view();
     v.this_week = {
       week: 3,
-      lineup: { set_points: 120, best_points: 120, changes: [], empty_slots: [] },
+      lineup: { set_points: 120, best_points: 120, changes: [], empty_slots: [], questionable: [] },
       matchup: null,
     };
     render(<ThisWeek view={v} />);
@@ -79,12 +79,31 @@ describe("ThisWeek with a slot nobody can fill", () => {
     const v = view();
     v.this_week = {
       week: 1,
-      lineup: { set_points: 119.3, best_points: 119.3, changes: [], empty_slots: ["DEF"] },
+      lineup: { set_points: 119.3, best_points: 119.3, changes: [], empty_slots: ["DEF"], questionable: [] },
       matchup: null,
     };
     render(<ThisWeek view={v} />);
     expect(screen.getByText(/Best lineup set — 119.3 projected/)).toBeInTheDocument();
     expect(screen.getByText(/DEF empty and nobody on the roster fills it/)).toBeInTheDocument();
     expect(screen.queryByText(/\+0\.0/)).not.toBeInTheDocument();
+  });
+});
+
+describe("ThisWeek questionable starters", () => {
+  it("lists set starters to check before kickoff", () => {
+    const v = view();
+    v.this_week = {
+      week: 1,
+      lineup: {
+        set_points: 119.3,
+        best_points: 119.3,
+        changes: [],
+        empty_slots: [],
+        questionable: [{ ...st("TE", "Sam LaPorta", 12.2), injury: "Questionable" }],
+      },
+      matchup: null,
+    };
+    render(<ThisWeek view={v} />);
+    expect(screen.getByText(/Check before kickoff/)).toHaveTextContent("Sam LaPorta (Questionable)");
   });
 });

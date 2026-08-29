@@ -26,6 +26,7 @@ export function Waivers({ view }: { view: DraftView }) {
                 <PlayerName id={t.player_id}>{t.name}</PlayerName>
                 {t.team && <span className="muted"> {t.team}</span>}
                 {t.bye_week != null && <span className="muted"> · bye {t.bye_week}</span>}
+                <span className="muted waiver-reason">{t.reason}</span>
               </span>
               <span className="gain">
                 +{fmt(t.my_gain)}

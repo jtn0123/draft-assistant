@@ -17,8 +17,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 const RUNS: usize = 2000;
-/// Week-to-week spread of a starter around his projection, as a fraction.
-const PLAYER_CV: f64 = 0.5;
 /// Fantasy regular season, and the weeks a season projection is spread over.
 const WEEKS: u32 = 17;
 
@@ -88,7 +86,7 @@ fn strength(
     let (mean, starters) = lineup::best_lineup(&candidates, rules);
     let sigma = starters
         .iter()
-        .map(|s| (PLAYER_CV * s.points).powi(2))
+        .map(|s| (crate::matchup::position_cv(&s.position) * s.points).powi(2))
         .sum::<f64>()
         .sqrt();
     WeekStrength { mean, sigma }

@@ -152,7 +152,7 @@ async fn export_writes_the_same_view_the_ui_renders() {
     let path = rig.core.export_state().await.unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
     let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(value["schema_version"], "1.4");
+    assert_eq!(value["schema_version"], "1.5");
     assert_eq!(value["league"]["league_id"], LEAGUE_ID);
     assert_eq!(value["available"].as_array().unwrap().len(), 6);
     assert!(path.ends_with("draft-state.json"));

@@ -19,6 +19,8 @@ export interface PlayerFacts {
   bye: number | null;
   adp: number | null;
   trendingAdds: number | null;
+  /** Projected points, weeks 1..17, when the view carries them. */
+  weeks: number[] | null;
 }
 
 /**
@@ -43,6 +45,7 @@ export function playerFacts(view: DraftView, id: string): PlayerFacts | null {
     bye: null,
     adp: null,
     trendingAdds: null,
+    weeks: view.player_weeks[id] ?? null,
   };
   let found = false;
   const mine = view.draft.my_slot;

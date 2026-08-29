@@ -178,6 +178,11 @@ button.standings-toggle {
   white-space: nowrap;
 }
 
+.waiver-reason {
+  display: block;
+  font-size: 11px;
+}
+
 .waiver-demand {
   font-size: 12px;
   min-width: 5em;
@@ -248,6 +253,11 @@ button.standings-toggle {
 
 .moves li.trade > :last-child {
   color: var(--accent);
+}
+
+/* A claim that lost: worth knowing, not worth the same ink. */
+.moves li.failed {
+  opacity: 0.6;
 }
 
 .standings-odds {

@@ -45,6 +45,17 @@ export function ThisWeek({ view }: { view: DraftView }) {
           )}
         </div>
       )}
+      {lineup && lineup.questionable.length > 0 && (
+        <p className="muted small-text questionable">
+          Check before kickoff:{" "}
+          {lineup.questionable.map((s, i) => (
+            <span key={s.player_id}>
+              {i > 0 && ", "}
+              <PlayerName id={s.player_id}>{s.name}</PlayerName> ({s.injury})
+            </span>
+          ))}
+        </p>
+      )}
       {matchup && (
         <div className="matchup" title={matchupTitle(matchup.my_starters, matchup.opponent_starters)}>
           <span>

@@ -13,6 +13,22 @@ use std::time::Duration;
 pub(crate) const SEASON_REFRESH: Duration = Duration::from_secs(30 * 60);
 /// The poll's own beat once the draft is over: nothing changes by the second.
 pub(crate) const SEASON_IDLE: Duration = Duration::from_secs(60);
+/// Projections are re-read (a full reload) once they are this old during
+/// the season, so the standings and odds follow the year instead of August.
+pub(crate) const PROJECTIONS_SEASON_TTL_SECS: u64 = 24 * 3600;
+
+/// How old the player dictionary (where injury tags live) may be before it
+/// is re-read: half an hour on game days, when an Out designation is the
+/// difference between a lineup and a zero; three hours otherwise. The
+/// dictionary is 14 MB, which is why not always half an hour.
+pub(crate) fn injury_refresh_secs(now_secs: u64) -> u64 {
+    // Days since the epoch, which was a Thursday: 0 = Sunday.
+    let weekday = (now_secs / 86_400 + 4) % 7;
+    match weekday {
+        0 | 1 | 4 => 30 * 60,
+        _ => 3 * 3600,
+    }
+}
 
 impl AppCore {
     pub(crate) async fn draft_over(&self) -> bool {
@@ -54,10 +70,11 @@ impl AppCore {
         if history.is_some() {
             loaded.history = history;
         }
-        // Injuries move daily and the player dictionary is where they live.
-        // Once a day is plenty, and a failed fetch keeps yesterday's tags.
-        let age = crate::engine::now_secs().saturating_sub(loaded.players_fetched_at);
-        if age >= crate::engine::PLAYERS_TTL_SECS {
+        // Injuries live in the player dictionary; re-read it on the game-day
+        // cadence. A failed fetch keeps the tags it had.
+        let now = crate::engine::now_secs();
+        let age = now.saturating_sub(loaded.players_fetched_at);
+        if age >= injury_refresh_secs(now) {
             match self.engine.players(true).await {
                 Ok((at, meta, warning)) => {
                     let changed = crate::board::apply_player_meta(&mut loaded.board, &meta);
@@ -88,6 +105,14 @@ impl AppCore {
 }
 
 impl AppCore {
+    /// Whether the season's projections are old enough for a full reload.
+    pub(crate) async fn projections_stale(&self) -> bool {
+        self.loaded.lock().await.as_ref().is_some_and(|l| {
+            crate::engine::now_secs().saturating_sub(l.projections_fetched_at)
+                >= PROJECTIONS_SEASON_TTL_SECS
+        })
+    }
+
     /// Price an offer against the current rosters. Read-only: nothing is
     /// sent anywhere — Sleeper has no API for that.
     pub async fn evaluate_trade(
@@ -132,4 +157,22 @@ fn is_season_warning(w: &str) -> bool {
         || w.contains("transactions unavailable")
         || w.starts_with("traded picks unavailable")
         || w.starts_with("injury refresh failed")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn injuries_are_read_every_half_hour_on_game_days_and_less_often_between() {
+        // 1970-01-01 was a Thursday.
+        let thursday = 0;
+        let sunday = 3 * 86_400;
+        let monday = 4 * 86_400;
+        let wednesday = 6 * 86_400;
+        assert_eq!(injury_refresh_secs(thursday), 1800);
+        assert_eq!(injury_refresh_secs(sunday + 3600), 1800);
+        assert_eq!(injury_refresh_secs(monday), 1800);
+        assert_eq!(injury_refresh_secs(wednesday), 3 * 3600);
+    }
 }

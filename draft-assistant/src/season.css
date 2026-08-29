@@ -205,3 +205,21 @@ button.player-link:hover {
 .player-card dd {
   margin: 0;
 }
+
+.player-card .sparkline {
+  margin: 10px 0 0;
+}
+
+.player-card figcaption {
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.player-card .bar {
+  fill: var(--accent);
+  opacity: 0.45;
+}
+
+.player-card .bar.current {
+  opacity: 1;
+}

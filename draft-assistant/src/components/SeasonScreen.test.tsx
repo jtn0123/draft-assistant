@@ -39,7 +39,7 @@ function inSeason(): DraftView {
         { slot: "FLEX", out: st("RB", "Kenny Gainwell", 9.4), in_: st("WR", "Khalil Shakir", 11.5), gain: 2.1 },
         { slot: "DEF", out: null, in_: st("DEF", "New York Giants", 6.2), gain: 6.2 },
       ],
-      empty_slots: ["DEF"],
+      empty_slots: ["DEF"], questionable: [],
     },
     matchup: {
       opponent_slot: 6,

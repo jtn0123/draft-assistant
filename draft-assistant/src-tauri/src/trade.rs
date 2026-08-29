@@ -46,6 +46,31 @@ pub struct TradeIdea {
     pub over_waiver: f64,
     /// Same as `my_gain` for them — why they would say yes.
     pub their_gain: f64,
+    /// Trades this manager made last season, when the league had one and
+    /// they were in it. A manager who has never traded is a long shot
+    /// whatever the numbers say.
+    pub partner_trades: Option<u32>,
+}
+
+/// Slot -> trades last season, via the draft order's user ids.
+fn trades_by_slot(loaded: &LoadedLeague) -> HashMap<u32, u32> {
+    let (Some(order), Some(history)) = (loaded.draft.draft_order.as_ref(), loaded.history.as_ref())
+    else {
+        return HashMap::new();
+    };
+    order
+        .iter()
+        .filter_map(|(user_id, slot)| {
+            let m = history.managers.iter().find(|m| &m.user_id == user_id)?;
+            Some((*slot, m.trades))
+        })
+        .collect()
+}
+
+/// Ordering score: value first, with a point per trade the partner made
+/// last season (to ten) — the same numbers land better with a dealer.
+fn appeal(idea: &TradeIdea) -> f64 {
+    idea.over_waiver + f64::from(idea.partner_trades.unwrap_or(0).min(10))
 }
 
 fn top_by_points(candidates: &[Candidate], n: usize) -> Vec<Candidate> {
@@ -116,6 +141,7 @@ pub fn ideas(
     let my_base = lineup::season_points(&my_season, rules);
     let my_pool = top_by_points(&my_season, SWAP_POOL);
     let free_gain = free_gain_by_position(&my_season, my_base, free, rules);
+    let trades = trades_by_slot(loaded);
     let mut out: Vec<TradeIdea> = Vec::new();
     for rival in rosters.iter().filter(|r| r.slot != my_slot) {
         let their_season = lineup::season_candidates(rival, &loaded.board, &loaded.board_index);
@@ -151,6 +177,7 @@ pub fn ideas(
                     my_gain,
                     over_waiver,
                     their_gain,
+                    partner_trades: trades.get(&rival.slot).copied(),
                 });
             }
         }
@@ -222,15 +249,17 @@ pub fn ideas(
                         my_gain,
                         over_waiver,
                         their_gain,
+                        partner_trades: trades.get(&rival.slot).copied(),
                     });
                 }
             }
         }
     }
-    // Best for me first; at equal value the simpler deal wins.
+    // Best for me first, nudged towards managers who trade; at equal value
+    // the simpler deal wins.
     out.sort_by(|a, b| {
-        b.over_waiver
-            .total_cmp(&a.over_waiver)
+        appeal(b)
+            .total_cmp(&appeal(a))
             .then(a.also_give_id.is_some().cmp(&b.also_give_id.is_some()))
     });
     // One idea per player I would get, and a couple per partner: the list

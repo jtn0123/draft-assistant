@@ -46,6 +46,9 @@ pub struct WaiverTarget {
     pub rivals_helped: u32,
     /// Sleeper-wide adds in the trending window, if he is on the list.
     pub trending_adds: Option<u64>,
+    /// Why the gain is what it is: how many weeks he would start, and which
+    /// of my byes he covers. "never starts" when the answer is none.
+    pub reason: String,
     /// A FAAB bid in the league's own money, from what winning claims cost
     /// last season: the top targets at the 75th percentile, the middle at
     /// the median, the rest at half of it. Absent without history.
@@ -84,6 +87,52 @@ fn gain_for(roster: &[Candidate], base: f64, extra: &Candidate, rules: &RosterRu
     let mut with = roster.to_vec();
     with.push(extra.clone());
     lineup::season_points(&with, rules) - base
+}
+
+/// How `extra` earns his gain: the weeks he starts with the roster as it
+/// is, and the byes at his position he covers while starting.
+fn reason_for(roster: &[Candidate], extra: &Candidate, rules: &RosterRules) -> String {
+    let mut with = roster.to_vec();
+    with.push(extra.clone());
+    let mut starts = 0u32;
+    let mut covers: Vec<u32> = Vec::new();
+    for week in 1..=17u32 {
+        if extra.bye_week == Some(week) {
+            continue;
+        }
+        let active: Vec<Candidate> = with
+            .iter()
+            .filter(|c| c.bye_week != Some(week))
+            .cloned()
+            .collect();
+        if !lineup::best_lineup(&active, rules)
+            .1
+            .iter()
+            .any(|s| s.player_id == extra.player_id)
+        {
+            continue;
+        }
+        starts += 1;
+        if roster
+            .iter()
+            .any(|c| c.position == extra.position && c.bye_week == Some(week))
+        {
+            covers.push(week);
+        }
+    }
+    if starts == 0 {
+        return "never starts".into();
+    }
+    let mut out = format!("starts {starts} of 17 weeks");
+    if !covers.is_empty() {
+        let weeks: Vec<String> = covers.iter().map(|w| format!("wk {w}")).collect();
+        out.push_str(&format!(
+            "; covers the {} bye {}",
+            extra.position,
+            weeks.join(", ")
+        ));
+    }
+    out
 }
 
 /// Weeks each player on `roster` starts in the best lineup.
@@ -154,6 +203,7 @@ pub fn board(
                 my_gain,
                 rivals_helped,
                 trending_adds: trending.get(p.player_id.as_str()).copied(),
+                reason: reason_for(&my_season, &c, rules),
                 suggested_bid: None,
             }
         })
@@ -265,6 +315,31 @@ mod tests {
         let rb_good = gain_for(&roster, base, &c("rb3", "RB", 170.0, None), &rules());
         let expected = 16.0 * (170.0 - 150.0) / 17.0 + 170.0 / 17.0;
         assert!((rb_good - expected).abs() < 1e-9, "{rb_good} vs {expected}");
+    }
+
+    #[test]
+    fn the_reason_names_the_starts_and_the_bye_covered() {
+        let roster = vec![
+            c("rb1", "RB", 200.0, Some(6)),
+            c("wr1", "WR", 190.0, None),
+            c("wr2", "WR", 150.0, None),
+            c("wr3", "WR", 140.0, None),
+        ];
+        // Starts only on rb1's bye, which is exactly the bye he covers.
+        assert_eq!(
+            reason_for(&roster, &c("rb2", "RB", 85.0, None), &rules()),
+            "starts 1 of 17 weeks; covers the RB bye wk 6"
+        );
+        // Never starts behind three better receivers.
+        assert_eq!(
+            reason_for(&roster, &c("wr4", "WR", 120.0, None), &rules()),
+            "never starts"
+        );
+        // A better back starts every week he plays, including the bye cover.
+        assert_eq!(
+            reason_for(&roster, &c("rb3", "RB", 170.0, Some(9)), &rules()),
+            "starts 16 of 17 weeks; covers the RB bye wk 6"
+        );
     }
 
     #[test]

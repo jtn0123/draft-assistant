@@ -41,7 +41,15 @@ export function Activity({ view }: { view: DraftView }) {
                     </>
                   )}
                 </span>
-                <span className="muted">{i.partner_name ?? `slot ${i.partner_slot}`}</span>
+                <span className="muted">
+                  {i.partner_name ?? `slot ${i.partner_slot}`}
+                  {i.partner_trades !== null && (
+                    <span className="trades" title="Trades this manager made last season">
+                      {" "}
+                      · {i.partner_trades === 0 ? "never traded" : `${i.partner_trades} trades`}
+                    </span>
+                  )}
+                </span>
                 <span className="gain" title={`+${fmt(i.my_gain)} to my lineup; +${fmt(i.over_waiver)} over the best free agent`}>
                   +{fmt(i.over_waiver)} <span className="muted">/ them +{fmt(i.their_gain)}</span>
                 </span>
@@ -65,7 +73,7 @@ export function Activity({ view }: { view: DraftView }) {
           <h2>League activity</h2>
           <ul className="moves" aria-label="League activity">
             {moves.map((m) => (
-              <li key={m.at} className={m.kind}>
+              <li key={m.at} className={`${m.kind} ${m.status}`}>
                 <span className="muted">{when(m.at)}</span>
                 <span>{describe(m)}</span>
               </li>
@@ -89,6 +97,7 @@ function describe(m: Move): string {
   const add = m.adds.map(([, p]) => p).join(", ");
   const drop = m.drops.map(([, p]) => p).join(", ");
   const bid = m.bid != null ? ` ($${m.bid})` : "";
+  if (m.status === "failed") return `${who} bid${bid} on ${add} — lost`;
   const verb = m.kind === "waiver" ? "claimed" : m.kind === "commissioner" ? "commissioner:" : "added";
   const parts = [add && `${verb} ${add}${bid}`, drop && `dropped ${drop}`].filter(Boolean);
   return `${who} ${parts.join(", ")}`;

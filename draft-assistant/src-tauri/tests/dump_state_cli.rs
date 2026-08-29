@@ -44,7 +44,7 @@ fn prints_the_view_as_json_on_stdout() {
     let output = cli.run(&[LEAGUE_ID, MY_USERNAME]);
     assert!(output.status.success(), "{}", stderr(&output));
     let view: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(view["schema_version"], "1.4");
+    assert_eq!(view["schema_version"], "1.5");
     assert_eq!(view["draft"]["my_slot"], 1, "the username resolved");
     assert_eq!(view["available"].as_array().unwrap().len(), 6);
     assert!(

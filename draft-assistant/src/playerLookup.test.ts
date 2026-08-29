@@ -65,7 +65,7 @@ describe("playerFacts", () => {
           my_gain: 92,
           rivals_helped: 1,
           trending_adds: 4000,
-          suggested_bid: 10,
+          suggested_bid: 10, reason: "starts 9 of 17 weeks",
         },
       ],
       drops: [],

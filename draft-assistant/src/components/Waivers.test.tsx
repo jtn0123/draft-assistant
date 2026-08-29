@@ -18,7 +18,7 @@ function target(name: string, pos: string, gain: number, rivals: number, trendin
     my_gain: gain,
     rivals_helped: rivals,
     trending_adds: trending,
-    suggested_bid: null,
+    suggested_bid: null, reason: "starts 9 of 17 weeks",
   };
 }
 
@@ -34,13 +34,15 @@ describe("Waivers", () => {
     const v = view();
     v.waivers = {
       targets: [
-        { ...target("New York Giants", "DEF", 92.3, 1, null), suggested_bid: 60 },
+        { ...target("New York Giants", "DEF", 92.3, 1, null), suggested_bid: 60, reason: "starts 9 of 17 weeks" },
         target("MarShawn Lloyd", "RB", 6.1, 4, 157140),
         target("Jack Bech", "WR", 0, 0, 2000),
       ],
       drops: [{ player_id: "s", name: "Nicholas Singleton", position: "RB", points: 63.7, starts: 0 }],
     };
     render(<Waivers view={v} />);
+    // Why the number: the starts and the byes covered, on the row.
+    expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("starts 9 of 17 weeks");
     // The bye is on the row, not only in a hover title.
     expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("bye 8");
     const rows = screen.getAllByRole("listitem");

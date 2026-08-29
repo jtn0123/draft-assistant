@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.4",
+  "schema_version": "1.5",
   "generated_at": 1787927640,
   "seq": 27,
   "league": {
@@ -7407,5 +7407,6 @@
     "poll_last_success_at": 1787927639,
     "poll_consecutive_failures": 0,
     "poll_last_error": null
-  }
+  },
+  "player_weeks": {}
 }

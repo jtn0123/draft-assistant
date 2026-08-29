@@ -13,7 +13,7 @@ import type {
   TradeVerdict,
 } from "./types";
 
-const DRAFT_VIEW_SCHEMA_VERSION = "1.4";
+const DRAFT_VIEW_SCHEMA_VERSION = "1.5";
 
 export function validateDraftView(value: DraftView): DraftView {
   if (value.schema_version !== DRAFT_VIEW_SCHEMA_VERSION) {

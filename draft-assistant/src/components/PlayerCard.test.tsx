@@ -46,3 +46,23 @@ describe("PlayerCard", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
+
+describe("PlayerCard season shape", () => {
+  it("draws a bar a week with a bye as a gap and reads as text", async () => {
+    const user = userEvent.setup();
+    const v = view();
+    const me = v.rosters.find((r) => r.slot === v.draft.my_slot)!;
+    const p = me.players[0];
+    const weeks = Array.from({ length: 17 }, (_, i) => (i === 6 ? 0 : 10 + i));
+    v.player_weeks = { [p.player_id]: weeks };
+    render(
+      <PlayerCardProvider view={v}>
+        <PlayerName id={p.player_id}>{p.name}</PlayerName>
+      </PlayerCardProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: p.name }));
+    const figure = screen.getByRole("figure", { name: /Weekly projection: wk 1 10\.0, .*wk 7 bye/ });
+    expect(figure).toHaveTextContent("peak wk 17 26.0");
+    expect(figure.querySelectorAll("rect")).toHaveLength(17);
+  });
+});

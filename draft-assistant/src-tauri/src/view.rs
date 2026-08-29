@@ -2,20 +2,13 @@
 //! AI-readable state dump — no difference between what human and model see.
 
 use crate::board::AvailablePlayer;
-use crate::draft::{self, TeamRoster};
+use crate::draft;
 use crate::engine::{now_secs, AppConfig, LoadedLeague};
-use crate::history::LeagueHistory;
-use crate::lineup::{self, ByeWeek, TeamProjection};
-use crate::matchup::ThisWeek;
-use crate::playoffs::TeamOdds;
-use crate::recommend::{recommend, Recommendation};
-use crate::results::SeasonSoFar;
+use crate::lineup;
+use crate::recommend::recommend;
 use crate::sleeper::NflState;
 use crate::sleeper::Pick;
-use crate::trade::TradeIdea;
 use crate::trades::PickOwnership;
-use crate::transactions::Activity;
-use crate::waivers::WaiverBoard;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -76,49 +69,7 @@ pub struct RecentPick {
     pub position: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct DraftView {
-    pub schema_version: String,
-    pub generated_at: u64,
-    /// Strictly increasing per build. Used by the UI to discard out-of-order
-    /// updates; see [`VIEW_SEQ`].
-    pub seq: u64,
-    pub league: LeagueSummary,
-    pub draft: DraftStatus,
-    pub my_roster: Option<TeamRoster>,
-    pub rosters: Vec<TeamRoster>,
-    pub available: Vec<AvailablePlayer>,
-    pub tier_alerts: Vec<TierAlert>,
-    pub position_run: Option<String>,
-    pub recommendations: Vec<Recommendation>,
-    pub recent_picks: Vec<RecentPick>,
-    /// Every team's best lineup and what it projects to, best first. The
-    /// draft's scoreboard: who is winning it so far.
-    pub projected_standings: Vec<TeamProjection>,
-    /// The week ahead: is my Sleeper lineup the best one, and who do I play.
-    /// Absent without a league (mock draft) or before the schedule exists.
-    pub this_week: Option<ThisWeek>,
-    /// The waiver wire priced for my roster. Only once the draft is over.
-    pub waivers: Option<WaiverBoard>,
-    /// Record, standings, my results and projected-vs-actual, once a week
-    /// of the regular season has been played.
-    pub season: Option<SeasonSoFar>,
-    /// The league's moves, newest first. Empty for a mock draft.
-    pub activity: Vec<Activity>,
-    /// One-for-one swaps that lift both my lineup and a rival's. Only once
-    /// the draft is over.
-    pub trade_ideas: Vec<TradeIdea>,
-    /// Simulated rest of season on the league's schedule; empty without one.
-    pub playoff_odds: Vec<TeamOdds>,
-    /// Last season: who trades, who churns, what claims cost.
-    pub history: Option<LeagueHistory>,
-    /// My bye weeks, worst first. Empty without a roster.
-    pub bye_weeks: Vec<ByeWeek>,
-    pub replacement_baselines: HashMap<String, f64>,
-    /// position -> number of league-wide startable players (incl. flex share)
-    pub replacement_demand: HashMap<String, usize>,
-    pub data_health: DataHealth,
-}
+pub use crate::view_types::DraftView;
 
 use crate::picks::validated_slot;
 pub use crate::picks::{keeper_pick_nos, merged_picks, next_open_pick, poll_fingerprint};
@@ -299,6 +250,25 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         ),
         _ => (None, Vec::new()),
     };
+    let player_weeks: HashMap<String, Vec<f64>> = rosters
+        .iter()
+        .flat_map(|r| r.players.iter().map(|p| p.player_id.as_str()))
+        .chain(
+            waivers
+                .iter()
+                .flat_map(|w| w.targets.iter().map(|t| t.player_id.as_str())),
+        )
+        .filter_map(|id| {
+            let weeks = loaded.weekly_points.get(id)?;
+            let mut v = vec![0.0; 17];
+            for (w, pts) in weeks {
+                if (1..=17).contains(w) {
+                    v[(*w - 1) as usize] = *pts;
+                }
+            }
+            Some((id.to_string(), v))
+        })
+        .collect();
 
     // Tier alerts: top remaining tier per position and how many are left in it.
     let mut tier_alerts: Vec<TierAlert> = Vec::new();
@@ -415,7 +385,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     }
 
     DraftView {
-        schema_version: "1.4".into(),
+        schema_version: "1.5".into(),
         generated_at: now_secs(),
         seq: VIEW_SEQ.fetch_add(1, Ordering::Relaxed) + 1,
         league: LeagueSummary {
@@ -468,6 +438,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         playoff_odds,
         history: loaded.history.clone(),
         bye_weeks,
+        player_weeks,
         replacement_demand: loaded.replacement_model.demand.clone(),
         replacement_baselines: loaded.replacement_model.baseline.clone(),
         data_health: DataHealth {
