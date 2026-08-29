@@ -50,7 +50,7 @@ describe("ThisWeek", () => {
       },
     };
     render(<ThisWeek view={v} />);
-    expect(screen.getByRole("heading", { name: "Week 1" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Lineup check" })).toBeInTheDocument();
     const rows = screen.getAllByRole("listitem");
     expect(rows[0]).toHaveTextContent("Khalil Shakir (11.5) over Kenny Gainwell (9.4)");
     expect(rows[0]).toHaveTextContent("+2.1");
@@ -71,5 +71,20 @@ describe("ThisWeek", () => {
     };
     render(<ThisWeek view={v} />);
     expect(screen.getByText(/is the best one/)).toBeInTheDocument();
+  });
+});
+
+describe("ThisWeek with a slot nobody can fill", () => {
+  it("names the empty slot without pretending there is a swap to make", () => {
+    const v = view();
+    v.this_week = {
+      week: 1,
+      lineup: { set_points: 119.3, best_points: 119.3, changes: [], empty_slots: ["DEF"] },
+      matchup: null,
+    };
+    render(<ThisWeek view={v} />);
+    expect(screen.getByText(/Best lineup set — 119.3 projected/)).toBeInTheDocument();
+    expect(screen.getByText(/DEF empty and nobody on the roster fills it/)).toBeInTheDocument();
+    expect(screen.queryByText(/\+0\.0/)).not.toBeInTheDocument();
   });
 });

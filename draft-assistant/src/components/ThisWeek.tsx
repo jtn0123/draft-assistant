@@ -12,11 +12,19 @@ export function ThisWeek({ view }: { view: DraftView }) {
   const { lineup, matchup } = w;
   return (
     <section className="this-week" aria-label={`Week ${w.week}`}>
-      <h2>Week {w.week}</h2>
+      <h2>Lineup check</h2>
       {lineup && (
         <div className="lineup-check">
           {lineup.changes.length === 0 && lineup.empty_slots.length === 0 ? (
             <p className="ok">Your Sleeper lineup is the best one — {fmt(lineup.best_points, 1)} projected.</p>
+          ) : lineup.changes.length === 0 ? (
+            <>
+              <p className="ok">Best lineup set — {fmt(lineup.best_points, 1)} projected.</p>
+              <p className="lineup-empty">
+                {lineup.empty_slots.join(", ")} empty and nobody on the roster fills it — see
+                waiver targets.
+              </p>
+            </>
           ) : (
             <>
               <p className="strong">

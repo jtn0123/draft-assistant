@@ -70,7 +70,7 @@ test("search narrows the board and shows an empty state", async ({ page }) => {
 });
 
 test("the draft confirmation is reversible", async ({ page }) => {
-  await page.getByRole("button", { name: "Draft" }).first().click();
+  await page.getByRole("button", { name: "Draft", exact: true }).first().click();
 
   const confirm = page.getByRole("button", { name: "Confirm" });
   await expect(confirm).toBeVisible();
@@ -81,7 +81,7 @@ test("the draft confirmation is reversible", async ({ page }) => {
 });
 
 test("browser preview refuses to mutate and says why", async ({ page }) => {
-  await page.getByRole("button", { name: "Draft" }).first().click();
+  await page.getByRole("button", { name: "Draft", exact: true }).first().click();
   await page.getByRole("button", { name: "Confirm" }).click();
 
   // The preview API rejects writes; that must surface, not fail silently.
@@ -194,7 +194,7 @@ test("the Ask Claude panel sits beside the page instead of over it", async ({ pa
 
   const panelBox = await panel.boundingBox();
   const refresh = await page.getByRole("button", { name: "Refresh data" }).boundingBox();
-  const draft = await page.getByRole("button", { name: "Draft" }).first().boundingBox();
+  const draft = await page.getByRole("button", { name: "Draft", exact: true }).first().boundingBox();
   expect(panelBox).not.toBeNull();
   // Nothing the user acts on is underneath the panel.
   expect(refresh!.x + refresh!.width).toBeLessThanOrEqual(panelBox!.x + 1);
@@ -218,7 +218,7 @@ test("the board is not clipped at a narrow width with the chat closed", async ({
   });
   expect(fit).not.toBeNull();
   expect(fit!).toBeLessThanOrEqual(1);
-  await expect(page.getByRole("button", { name: "Draft" }).first()).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Draft", exact: true }).first()).toBeInViewport();
 });
 
 test.describe("board stays usable with the chat open", () => {
@@ -243,7 +243,7 @@ test.describe("board stays usable with the chat open", () => {
       expect(clipped!.wrapRight).toBeLessThanOrEqual(clipped!.viewport + 1);
 
       // The action that matters most must be on screen, not off the right edge.
-      const draft = page.getByRole("button", { name: "Draft" }).first();
+      const draft = page.getByRole("button", { name: "Draft", exact: true }).first();
       await expect(draft).toBeInViewport();
     });
   }
@@ -276,4 +276,19 @@ test("the conversation survives a reload and a new chat starts a separate sessio
   await expect(panel.getByLabel("Saved sessions").locator("option")).toHaveCount(2);
   await panel.getByLabel("Saved sessions").selectOption({ index: 1 });
   await expect(panel.locator(".chat-turn.claude")).toHaveCount(1);
+});
+
+test("the season screen is a switch away, remembered across a reload", async ({ page }) => {
+  await page.getByRole("button", { name: "Season screen" }).click();
+  await expect(page.getByText(/No week on the calendar yet/)).toBeVisible();
+  await expect(page.locator(".board")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 2, name: "My roster" })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText(/No week on the calendar yet/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Draft screen" }).click();
+  await expect(page.locator(".board")).toBeVisible();
+  await expect(page.locator(".clock")).toContainText("YOU ARE ON THE CLOCK");
 });

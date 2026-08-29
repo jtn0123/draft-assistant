@@ -93,14 +93,17 @@ main {
   top: 14px;
 }
 
-.side section {
+.side section,
+.season-col section,
+.season-col > details {
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 14px;
 }
 
-.side h2 {
+.side h2,
+.season-col h2 {
   margin: 0 0 10px;
   font-size: 13px;
   text-transform: uppercase;

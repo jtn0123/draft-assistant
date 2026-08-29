@@ -50,6 +50,7 @@ function fixture(): DraftView {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
   testState.draftHandler = null;
   testState.errorHandler = null;
   testState.healthHandler = null;
@@ -355,6 +356,7 @@ describe("App live workflow", () => {
   // Dogfood ISSUE-011: every row still offered an enabled Draft button once
   // the draft was over, and the pick was only refused after Confirm.
   it("disables drafting once the draft is complete", async () => {
+    const user = userEvent.setup();
     const initial = fixture();
     initial.draft.status = "complete";
     testState.api.getConfig.mockResolvedValue({
@@ -366,6 +368,8 @@ describe("App live workflow", () => {
 
     render(<App />);
     expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+    // A complete draft opens on the season; the board is one switch away.
+    await user.click(screen.getByRole("button", { name: "Draft screen" }));
     for (const button of screen.getAllByRole("button", { name: /^Draft$/ })) {
       expect(button).toBeDisabled();
     }
@@ -422,5 +426,50 @@ describe("App live workflow", () => {
     await user.type(await screen.findByLabelText("League ID"), "123456789012345");
     await user.click(screen.getByRole("button", { name: "Load league" }));
     expect(await screen.findByText("league unavailable")).toBeInTheDocument();
+  });
+});
+
+describe("draft and season screens", () => {
+  function load(initial: DraftView) {
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+  }
+
+  it("shows the draft while it is on, with the season a switch away", async () => {
+    const user = userEvent.setup();
+    load(fixture());
+    render(<App />);
+    await screen.findByText("YOU ARE ON THE CLOCK");
+    expect(screen.getByRole("button", { name: "Draft screen" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByRole("button", { name: "Season screen" }));
+    expect(screen.queryByText("YOU ARE ON THE CLOCK")).not.toBeInTheDocument();
+    expect(screen.getByText(/No week on the calendar yet/)).toBeInTheDocument();
+    // Draft-only controls leave with the draft.
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Toggle pick numbering")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "My roster" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Tier alerts" })).not.toBeInTheDocument();
+  });
+
+  it("opens on the season once the draft is complete and remembers a switch back", async () => {
+    const user = userEvent.setup();
+    const initial = fixture();
+    initial.draft.status = "complete";
+    load(initial);
+    render(<App />);
+    await screen.findByText(initial.league.name);
+    expect(screen.getByRole("button", { name: "Season screen" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("YOU ARE ON THE CLOCK")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Draft screen" }));
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+    expect(
+      window.localStorage.getItem(`draft-assistant.view-mode:${initial.draft.draft_id}`),
+    ).toBe("draft");
   });
 });

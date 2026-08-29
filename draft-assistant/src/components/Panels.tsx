@@ -5,12 +5,8 @@ import { errorMessage, fmt, pct } from "../format";
 import { useCountdown } from "./useCountdown";
 import { AtRisk } from "./AtRisk";
 import { Standings } from "./Standings";
-import { ThisWeek } from "./ThisWeek";
-import { Waivers } from "./Waivers";
-import { SeasonSoFar } from "./SeasonSoFar";
-import { Activity } from "./Activity";
-import { History } from "./History";
 import { ByeWeeks } from "./ByeWeeks";
+import { RosterCard } from "./RosterCard";
 import { usePickLabel } from "../pickFormat";
 
 // ---------- setup screen ----------
@@ -224,59 +220,13 @@ export function RecCard({
 // ---------- side panel ----------
 
 export function SidePanel({ view }: { view: DraftView }) {
-  const roster = view.my_roster;
-  const starters = view.league.roster_positions.filter((s) => s !== "BN");
   const label = usePickLabel(view.draft.teams);
-  const benchSize = view.league.roster_positions.filter(
-    (s) => s === "BN",
-  ).length;
   return (
     <aside className="side">
-      <SeasonSoFar view={view} />
-      <ThisWeek view={view} />
-      <ByeWeeks view={view} />
-      <Waivers view={view} />
-      <section>
-        <h2>My roster</h2>
-        {roster === null ? (
-          <p className="muted">Set your Sleeper username to track your team.</p>
-        ) : roster.players.length === 0 ? (
-          <p className="muted">No picks yet.</p>
-        ) : (
-          <ul className="roster" aria-label="My roster">
-            {roster.players.map((p) => (
-              <li key={p.player_id}>
-                <span className={`pos-badge pos-${p.position}`}>
-                  {p.position}
-                </span>
-                <span>
-                  {p.name}
-                  {p.is_keeper && (
-                    <span
-                      className="keeper-tag"
-                      title="Kept from last season, not drafted tonight"
-                    >
-                      keeper
-                    </span>
-                  )}
-                </span>
-                <span className="muted">R{p.round}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {roster !== null && roster.open_starters.length > 0 && (
-          <p className="muted small-text">
-            Open starters:{" "}
-            {roster.open_starters.map(([slot, n]) => `${slot}×${n}`).join(", ")}{" "}
-            · {starters.length} starters + {benchSize} bench
-          </p>
-        )}
-      </section>
+      <RosterCard view={view} />
       <AtRisk view={view} />
       <Standings view={view} />
-      <Activity view={view} />
-      <History view={view} />
+      <ByeWeeks view={view} />
       <section>
         <h2>Tier alerts</h2>
         <ul className="alerts">

@@ -1,5 +1,5 @@
 import type { DraftView } from "../types";
-import { fmt } from "../format";
+import { fmt, ordinal } from "../format";
 
 /**
  * The season so far: my record and place, each week's result, and who on
@@ -52,10 +52,4 @@ export function SeasonSoFar({ view }: { view: DraftView }) {
 function trend(t: { name: string; delta_per_game: number; games: number }): string {
   const sign = t.delta_per_game > 0 ? "+" : "";
   return `${t.name} ${sign}${fmt(t.delta_per_game, 1)}/g over ${t.games}`;
-}
-
-function ordinal(n: number): string {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
 }

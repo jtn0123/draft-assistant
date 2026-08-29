@@ -2,19 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { DraftView, PollHealth, StoredLeague } from "./types";
 import { errorMessage } from "./format";
-import { Board } from "./components/Board";
 import { Chat } from "./components/Chat";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { ClockBanner, RecCard, SidePanel, Setup } from "./components/Panels";
-import { SnakeStrip } from "./components/SnakeStrip";
+import { Setup } from "./components/Panels";
+import { DraftScreen } from "./components/DraftScreen";
+import { SeasonScreen } from "./components/SeasonScreen";
 import { LeaguePicker } from "./components/LeaguePicker";
+import { formatAge, syncClass, syncLabel } from "./components/syncStatus";
 import { useOnClockAlert } from "./components/useOnClockAlert";
 import { loadAlertPref, saveAlertPref } from "./components/alertPref";
 import { PickStyleContext, formatPick, loadPickStyle, savePickStyle } from "./pickFormat";
+import { useViewMode } from "./viewMode";
 import "./App.css";
 import "./components.css";
 import "./snake.css";
 import "./week.css";
+import "./season.css";
 import "./chat.css";
 
 // ---------- app ----------
@@ -44,6 +47,9 @@ export default function App() {
   // Every league loaded so far, so switching to a mock and back is two clicks.
   const [leagues, setLeagues] = useState<StoredLeague[]>([]);
   const [activeLeagueId, setActiveLeagueId] = useState<string | null>(null);
+  // The draft cockpit or the season screen: the season once the draft is over,
+  // either on request, remembered per draft.
+  const [mode, setMode] = useViewMode(view?.draft.draft_id ?? null, view?.draft.status ?? null);
   const toastTimer = useRef<number | undefined>(undefined);
   // Highest view seq already rendered. The 3s poll and the awaited click
   // handlers both push views with no ordering guarantee, so without this a
@@ -301,6 +307,22 @@ export default function App() {
             {view.league.season} · {view.draft.teams} teams · {view.draft.rounds} rounds
             {view.draft.manual_picks_active && " · manual picks active"}
           </span>
+          <div className="mode-switch" role="group" aria-label="Screen">
+            <button
+              aria-label="Draft screen"
+              aria-pressed={mode === "draft"}
+              onClick={() => setMode("draft")}
+            >
+              Draft
+            </button>
+            <button
+              aria-label="Season screen"
+              aria-pressed={mode === "season"}
+              onClick={() => setMode("season")}
+            >
+              Season
+            </button>
+          </div>
           {!api.preview && (
             <LeaguePicker
               leagues={leagues}
@@ -323,6 +345,8 @@ export default function App() {
               Last sync {formatAge(pollHealth.last_success_at, now)} ago
             </span>
           )}
+          {mode === "draft" && (
+            <>
           <button
             className="ghost"
             onClick={doUndo}
@@ -375,10 +399,12 @@ export default function App() {
                 button shows what it does rather than describing it. */}
             {pickStyle === "round" ? formatPick(view.draft.current_pick, view.draft.teams, "round") : `#${view.draft.current_pick}`}
           </button>
+            </>
+          )}
           <button
             className={`ghost ${chatOpen ? "on" : ""}`}
             onClick={() => setChatOpen((v) => !v)}
-            title="Ask Claude about the current draft"
+            title={mode === "season" ? "Ask Claude about the week" : "Ask Claude about the current draft"}
           >
             Ask Claude
           </button>
@@ -393,33 +419,11 @@ export default function App() {
 
       {alertBar}
 
-      <ClockBanner view={view} />
-      <SnakeStrip view={view} />
-
-      {view.data_health.warnings.length > 0 && (
-        <div className="warnings">{view.data_health.warnings.join(" · ")}</div>
+      {mode === "season" ? (
+        <SeasonScreen view={view} />
+      ) : (
+        <DraftScreen view={view} onDraft={(id, name) => setConfirm({ playerId: id, name })} />
       )}
-
-      <div className="recs">
-        {view.recommendations
-          .filter(
-            (r, i, all) =>
-              i === all.findIndex((x) => x.player_id === r.player_id),
-          )
-          .map((r) => (
-            <RecCard key={r.mode} rec={r} onDraft={(id, name) => setConfirm({ playerId: id, name })} />
-          ))}
-      </div>
-
-      <main>
-        <SidePanel view={view} />
-        <Board
-          players={view.available}
-          positions={view.league.draftable_positions}
-          onDraft={(id, name) => setConfirm({ playerId: id, name })}
-          draftOver={view.draft.status === "complete"}
-        />
-      </main>
 
       {confirm && (
         <ConfirmDialog
@@ -452,38 +456,4 @@ export default function App() {
   );
 }
 
-// Polls run every 3s, so nothing at all for this long means the feed has
-// stopped even when no single poll reported an error — the case a green pill
-// used to hide.
-const QUIET_SECS = 30;
 const TICK_MS = 5000;
-
-function ageSeconds(timestamp: number | null | undefined, now: number): number | null {
-  if (!timestamp) return null;
-  return Math.max(0, Math.floor(now / 1000 - timestamp));
-}
-
-function syncClass(polling: boolean, health: PollHealth | null, now: number): string {
-  if (!polling) return "";
-  if ((health?.consecutive_failures ?? 0) >= 2) return "stale";
-  if ((health?.consecutive_failures ?? 0) === 1) return "retrying";
-  return (ageSeconds(health?.last_success_at, now) ?? 0) >= QUIET_SECS ? "stale" : "on";
-}
-
-function syncLabel(polling: boolean, health: PollHealth | null, now: number): string {
-  if (!polling) return "○ Live sync off";
-  const failures = health?.consecutive_failures ?? 0;
-  if (failures >= 2) return `● Sync stale · ${failures} failures`;
-  if (failures === 1) return "● Sync retrying";
-  const age = ageSeconds(health?.last_success_at, now);
-  if (age !== null && age >= QUIET_SECS) {
-    return `● Sync stale · nothing for ${formatAge(health?.last_success_at ?? 0, now)}`;
-  }
-  return "● Live sync on";
-}
-
-function formatAge(timestamp: number, now: number): string {
-  const seconds = ageSeconds(timestamp, now) ?? 0;
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m`;
-}

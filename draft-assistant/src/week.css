@@ -85,6 +85,12 @@
   font-size: 13px;
 }
 
+.this-week .lineup-empty {
+  margin: 4px 0 0;
+  color: var(--danger, #f87171);
+  font-size: 13px;
+}
+
 .lineup-changes li.empty {
   color: var(--danger, #f87171);
 }
@@ -167,6 +173,14 @@
 }
 
 /* ---------- activity + trade ideas ---------- */
+
+.activity h2:not(:first-child) {
+  margin-top: 12px;
+}
+
+.activity .trade-offer {
+  margin-bottom: 4px;
+}
 
 .trade-ideas,
 .moves {
