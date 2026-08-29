@@ -13,7 +13,8 @@ export function ConfirmDialog({
   onCancel,
 }: {
   name: string;
-  pick: number;
+  /** Already formatted — the dialog inherits whatever numbering the app is in. */
+  pick: string;
   slot: number;
   onConfirm: () => void;
   onCancel: () => void;

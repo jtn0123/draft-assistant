@@ -37,10 +37,13 @@ function chime() {
 export function useOnClockAlert({
   onClock,
   currentPick,
+  pickLabel,
   enabled,
 }: {
   onClock: boolean;
   currentPick?: number;
+  /** How to name the pick in the title. The number itself when absent. */
+  pickLabel?: string;
   enabled: boolean;
 }) {
   const alerted = useRef<number | null>(null);
@@ -50,7 +53,7 @@ export function useOnClockAlert({
       document.title = IDLE_TITLE;
       return;
     }
-    document.title = `⏰ YOUR PICK ${currentPick} — ${IDLE_TITLE}`;
+    document.title = `⏰ YOUR PICK ${pickLabel ?? currentPick} — ${IDLE_TITLE}`;
     if (!enabled || alerted.current === currentPick) return;
     alerted.current = currentPick;
     try {
@@ -58,7 +61,7 @@ export function useOnClockAlert({
     } catch {
       // No audio device, or the webview refused: the title still changed.
     }
-  }, [onClock, currentPick, enabled]);
+  }, [onClock, currentPick, pickLabel, enabled]);
 
   // Never leave the title shouting once the panel is gone.
   useEffect(() => () => void (document.title = IDLE_TITLE), []);

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import fixtureJson from "../../public/dev-fixture.json";
 import type { DraftView } from "../types";
 import { SnakeStrip } from "./SnakeStrip";
+import { PickStyleContext } from "../pickFormat";
 
 function view(): DraftView {
   return structuredClone(fixtureJson) as unknown as DraftView;
@@ -34,6 +35,27 @@ function live(pick: number, mySlot: number, myNext: number[]): DraftView {
 }
 
 const cells = () => screen.getAllByRole("listitem");
+
+describe("SnakeStrip pick numbering", () => {
+  it("labels chips with the overall number by default", () => {
+    render(<SnakeStrip view={live(55, 2, [55, 58])} />);
+    expect(cells()[0]).toHaveTextContent("55");
+  });
+
+  it("labels them round.pick when the app is set that way", () => {
+    render(
+      <PickStyleContext.Provider value="round">
+        <SnakeStrip view={live(55, 2, [55, 58])} />
+      </PickStyleContext.Provider>,
+    );
+    // Pick 55 is the thirteenth pick of round 4; 58 is the second of round 5.
+    const labels = cells()
+      .filter((c) => c.classList.contains("snake-cell"))
+      .map((c) => c.querySelector(".snake-pick")?.textContent);
+    expect(labels[0]).toBe("4.13");
+    expect(labels).toContain("5.2");
+  });
+});
 
 describe("SnakeStrip", () => {
   it("draws every pick from the clock up to yours, and says how many are ahead", () => {

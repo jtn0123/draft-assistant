@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import type { DraftView } from "../types";
 import { useCountdown } from "./useCountdown";
+import { usePickLabel } from "../pickFormat";
 
 /**
  * The snake, drawn: every pick from the one on the clock up to and including
@@ -25,6 +26,7 @@ function slotForPick(pick: number, teams: number): number {
 export function SnakeStrip({ view }: { view: DraftView }) {
   const d = view.draft;
   const remaining = useCountdown(d.pick_deadline);
+  const label = usePickLabel(d.teams);
   if (d.status === "complete" || d.teams < 1) return null;
 
   // Trust the backend's own answer for the pick on the clock. If our snake
@@ -109,9 +111,13 @@ export function SnakeStrip({ view }: { view: DraftView }) {
               ]
                 .filter(Boolean)
                 .join(" ")}
-              title={c.kept ? `Pick ${c.pick} — already kept` : `Pick ${c.pick} — ${c.name}`}
+              title={
+                c.kept
+                  ? `Pick ${label(c.pick)} — already kept`
+                  : `Pick ${label(c.pick)} — ${c.name}`
+              }
             >
-              <span className="snake-pick">{c.pick}</span>
+              <span className="snake-pick">{label(c.pick)}</span>
               <span className="snake-name">{c.isMine ? "YOU" : c.name}</span>
               {c.onClock && !waiting && remaining !== null && (
                 <span className={`snake-timer${remaining <= 10_000 ? " urgent" : ""}`}>

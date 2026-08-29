@@ -4,6 +4,7 @@ import type { DraftView, Recommendation } from "../types";
 import { errorMessage, fmt, pct } from "../format";
 import { useCountdown } from "./useCountdown";
 import { AtRisk } from "./AtRisk";
+import { usePickLabel } from "../pickFormat";
 
 // ---------- setup screen ----------
 
@@ -92,6 +93,7 @@ function formatStart(ms: number, now: number): string {
 
 export function ClockBanner({ view }: { view: DraftView }) {
   const d = view.draft;
+  const label = usePickLabel(d.teams);
   // Not "no picks made": a keeper league starts with picks already in the book
   // (this one with 25), and counting those had the app announcing someone on
   // the clock hours before the draft. Nothing has been *played* until the
@@ -111,7 +113,7 @@ export function ClockBanner({ view }: { view: DraftView }) {
       </div>
       <div className="clock-cell">
         <span className="clock-label">Pick</span>
-        <span className="clock-big">{d.current_pick}</span>
+        <span className="clock-big">{label(d.current_pick)}</span>
       </div>
       {/* Only the status text is a live region: the countdown below changes
           every second, and inside here a screen reader would re-read the whole
@@ -153,7 +155,7 @@ export function ClockBanner({ view }: { view: DraftView }) {
       <div className="clock-cell next-picks">
         <span className="clock-label">Your picks</span>
         <span className="next-pick-list">
-          {d.my_next_picks.slice(0, 4).join(" · ") || "–"}
+          {d.my_next_picks.slice(0, 4).map(label).join(" · ") || "–"}
         </span>
       </div>
     </div>
@@ -191,6 +193,7 @@ export function RecCard({ rec, onDraft }: { rec: Recommendation; onDraft: (id: s
 export function SidePanel({ view }: { view: DraftView }) {
   const roster = view.my_roster;
   const starters = view.league.roster_positions.filter((s) => s !== "BN");
+  const label = usePickLabel(view.draft.teams);
   const benchSize = view.league.roster_positions.filter((s) => s === "BN").length;
   return (
     <aside className="side">
@@ -259,7 +262,7 @@ export function SidePanel({ view }: { view: DraftView }) {
         <ul className="recent">
           {view.recent_picks.map((p) => (
             <li key={p.pick_no}>
-              <span className="muted">{p.pick_no}.</span> {p.name}
+              <span className="muted">{label(p.pick_no)}</span> {p.name}
               <span className="muted">
                 {" "}· {p.position} · {p.slot_name ?? `slot ${p.slot}`}
               </span>

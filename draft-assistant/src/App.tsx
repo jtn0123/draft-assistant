@@ -10,6 +10,7 @@ import { SnakeStrip } from "./components/SnakeStrip";
 import { LeaguePicker } from "./components/LeaguePicker";
 import { useOnClockAlert } from "./components/useOnClockAlert";
 import { loadAlertPref, saveAlertPref } from "./components/alertPref";
+import { PickStyleContext, formatPick, loadPickStyle, savePickStyle } from "./pickFormat";
 import "./App.css";
 import "./components.css";
 import "./snake.css";
@@ -37,6 +38,8 @@ export default function App() {
   const [now, setNow] = useState(() => Date.now());
   const [chatOpen, setChatOpen] = useState(false);
   const [alertOn, setAlertOn] = useState(loadAlertPref);
+  // Overall pick number, or round.pick the way drafters say it out loud.
+  const [pickStyle, setPickStyle] = useState(loadPickStyle);
   // Every league loaded so far, so switching to a mock and back is two clicks.
   const [leagues, setLeagues] = useState<StoredLeague[]>([]);
   const [activeLeagueId, setActiveLeagueId] = useState<string | null>(null);
@@ -207,6 +210,8 @@ export default function App() {
   useOnClockAlert({
     onClock: view?.draft.is_my_pick === true && view.draft.status === "drafting",
     currentPick: view?.draft.current_pick,
+    pickLabel:
+      view === null ? undefined : formatPick(view.draft.current_pick, view.draft.teams, pickStyle),
     enabled: alertOn,
   });
 
@@ -273,9 +278,12 @@ export default function App() {
     );
   }
 
+  const pickLabel = (pick: number) => formatPick(pick, view.draft.teams, pickStyle);
+
   // The chat is a column beside the page, not an overlay: the numbers being
   // asked about stay visible next to the answer.
   return (
+    <PickStyleContext.Provider value={pickStyle}>
     <div className={chatOpen ? "shell with-chat" : "shell"}>
     <div className="app">
       {api.preview && (
@@ -344,6 +352,29 @@ export default function App() {
             {alertOn ? "🔔" : "🔕"}
           </button>
           <button
+            className={`ghost ${pickStyle === "round" ? "on" : ""}`}
+            onClick={() => {
+              const next = pickStyle === "round" ? "overall" : "round";
+              setPickStyle(next);
+              savePickStyle(next);
+              notify(
+                next === "round"
+                  ? "Picks shown as round.pick"
+                  : "Picks shown as the overall number",
+              );
+            }}
+            title={
+              pickStyle === "round"
+                ? "Showing round.pick — switch to overall pick numbers"
+                : "Showing overall pick numbers — switch to round.pick"
+            }
+            aria-label="Toggle pick numbering"
+          >
+            {/* Labelled with the live pick in the current notation, so the
+                button shows what it does rather than describing it. */}
+            {pickStyle === "round" ? formatPick(view.draft.current_pick, view.draft.teams, "round") : `#${view.draft.current_pick}`}
+          </button>
+          <button
             className={`ghost ${chatOpen ? "on" : ""}`}
             onClick={() => setChatOpen((v) => !v)}
             title="Ask Claude about the current draft"
@@ -392,7 +423,7 @@ export default function App() {
       {confirm && (
         <ConfirmDialog
           name={confirm.name}
-          pick={view.draft.current_pick}
+          pick={pickLabel(view.draft.current_pick)}
           slot={view.draft.on_clock_slot}
           onConfirm={() => void doDraft(confirm.playerId)}
           onCancel={() => setConfirm(null)}
@@ -415,6 +446,7 @@ export default function App() {
       onAutoAsk={() => setChatOpen(true)}
     />
     </div>
+    </PickStyleContext.Provider>
   );
 }
 

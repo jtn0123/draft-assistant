@@ -69,6 +69,39 @@ beforeEach(() => {
   });
 });
 
+describe("pick numbering toggle", () => {
+  it("switches every pick in the page between overall and round.pick", async () => {
+    const user = userEvent.setup();
+    const initial = fixture();
+    initial.draft.teams = 14;
+    initial.draft.current_pick = 55;
+    initial.draft.current_round = 4;
+    initial.draft.my_next_picks = [55, 58, 83];
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+
+    render(<App />);
+    await screen.findByText(initial.league.name);
+
+    const toggle = screen.getByLabelText("Toggle pick numbering");
+    expect(toggle).toHaveTextContent("#55");
+    // Your upcoming picks, in the clock banner, as Sleeper numbers them.
+    expect(screen.getByText("55 · 58 · 83")).toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(toggle).toHaveTextContent("4.13");
+    expect(screen.getByText("4.13 · 5.2 · 6.13")).toBeInTheDocument();
+    expect(window.localStorage.getItem("draft-assistant.pick-style")).toBe("round");
+
+    await user.click(toggle);
+    expect(screen.getByText("55 · 58 · 83")).toBeInTheDocument();
+  });
+});
+
 describe("App live workflow", () => {
   it("shows setup only after confirming there is no saved league", async () => {
     testState.api.getConfig.mockResolvedValue({
