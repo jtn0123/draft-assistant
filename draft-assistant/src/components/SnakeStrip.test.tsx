@@ -203,3 +203,45 @@ describe("SnakeStrip — the live mock draft", () => {
     if (expected) expect(picks).toEqual(expected);
   });
 });
+
+describe("SnakeStrip — your own picks are never dropped", () => {
+  it("keeps pick 2 when the draft opens at pick 1 and your next is 27", () => {
+    // The live bug: with your picks at 2 and 27, the far stretch was anchored
+    // on 27 and counted back fourteen, landing at 13 — so the strip ran
+    // 1, +11, 13…20 and your own pick 2 was nowhere in it.
+    const v = live(1, 2, [2, 27, 30, 55]);
+    render(<SnakeStrip view={v} />);
+    const picks = cells()
+      .filter((c) => c.className.includes("snake-cell"))
+      .map((c) => Number(c.querySelector(".snake-pick")?.textContent));
+    expect(picks).toContain(2);
+    expect(picks).toContain(27);
+    expect(picks[0]).toBe(1);
+    expect(picks[picks.length - 1]).toBe(27);
+    const mine = cells().filter((c) => c.className.includes("mine"));
+    expect(mine).toHaveLength(2);
+    // The jump between them is stated, not silent.
+    expect(screen.getByText(/^\+\d+$/)).toBeInTheDocument();
+  });
+
+  it("always shows both of your picks, however far apart they are", () => {
+    for (const [pick, slot, next] of [
+      [1, 2, [2, 27]],
+      [1, 14, [14, 15]],
+      [5, 1, [15, 16]],
+      [30, 7, [36, 51]],
+      [100, 3, [103, 118]],
+    ] as [number, number, number[]][]) {
+      const { unmount } = render(<SnakeStrip view={live(pick, slot, next)} />);
+      const picks = cells()
+        .filter((c) => c.className.includes("snake-cell"))
+        .map((c) => Number(c.querySelector(".snake-pick")?.textContent));
+      expect(picks, `from ${pick}`).toContain(next[0]);
+      expect(picks, `from ${pick}`).toContain(next[1]);
+      expect(picks[0]).toBe(pick);
+      expect(new Set(picks).size).toBe(picks.length);
+      expect(picks.length).toBeLessThanOrEqual(16);
+      unmount();
+    }
+  });
+});

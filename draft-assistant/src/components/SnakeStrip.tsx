@@ -51,29 +51,29 @@ export function SnakeStrip({ view }: { view: DraftView }) {
     };
   };
 
-  // Early in a round your pick can be twenty away. Rather than run off the
-  // end, keep the near stretch and your own turn, and mark the jump between.
-  // Built as a set of pick numbers: the near stretch and the turn overlap
-  // whenever it is already your pick, and a duplicated chip means duplicated
-  // React keys, which is how a chip from the previous league survived a
-  // league switch.
+  // Two stretches, never more: who stands between you and your next pick,
+  // and the turn around the pick after that. Your own picks are always in,
+  // whatever the distance — anchoring the second stretch on the far pick and
+  // counting back once dropped pick 2 off a strip that started at pick 1.
+  const NEAR_MAX = 10;
+  const TURN_MAX = 4;
   const wanted = new Set<number>();
-  const turnStart = Math.max(d.current_pick, upcoming[0] ?? d.current_pick);
-  const turnLength = last - turnStart + 1;
-  const headLength = Math.max(1, MAX_CELLS - Math.min(turnLength, MAX_CELLS - 1) - 1);
-  for (let p = d.current_pick; p < d.current_pick + headLength && p <= last; p += 1) {
-    wanted.add(p);
-  }
-  for (let p = Math.max(turnStart, last - (MAX_CELLS - 2)); p <= last; p += 1) {
-    wanted.add(p);
+  const nearEnd = Math.min(upcoming[0] ?? last, d.current_pick + NEAR_MAX - 1);
+  for (let p = d.current_pick; p <= nearEnd; p += 1) wanted.add(p);
+  if (upcoming[0] !== undefined) wanted.add(upcoming[0]);
+  if (upcoming[1] !== undefined) {
+    const turnStart = Math.max(upcoming[1] - (TURN_MAX - 1), (upcoming[0] ?? d.current_pick) + 1);
+    for (let p = turnStart; p <= upcoming[1]; p += 1) wanted.add(p);
   }
   const picks = [...wanted].sort((a, b) => a - b).slice(0, MAX_CELLS);
   const cells = picks.map(cell);
-  // The one jump in the run, if the middle was skipped.
-  const jump = picks.findIndex((p, i) => i > 0 && p - picks[i - 1] > 1);
-  const gap = jump > 0 ? picks[jump] - picks[jump - 1] - 1 : 0;
   if (cells.length === 0) return null;
-  const gapBefore = gap > 0 ? picks[jump] : null;
+  // How many picks each chip skipped over, so a jump is never silent.
+  const skipped = new Map<number, number>();
+  picks.forEach((pick, i) => {
+    const jump = i > 0 ? pick - picks[i - 1] - 1 : 0;
+    if (jump > 0) skipped.set(pick, jump);
+  });
 
   const ahead = d.picks_until_mine;
   const waiting = d.status === "pre_draft" && d.current_pick === 1;
@@ -95,9 +95,9 @@ export function SnakeStrip({ view }: { view: DraftView }) {
       <ol className="snake-track">
         {cells.map((c) => (
           <Fragment key={c.pick}>
-            {gap > 0 && c.pick === gapBefore && (
-              <li className="snake-gap" aria-label={`${gap} more picks`}>
-                +{gap}
+            {skipped.has(c.pick) && (
+              <li className="snake-gap" aria-label={`${skipped.get(c.pick)} more picks`}>
+                +{skipped.get(c.pick)}
               </li>
             )}
             <li
