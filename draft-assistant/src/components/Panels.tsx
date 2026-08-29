@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { DraftView, Recommendation } from "../types";
 import { errorMessage, fmt, pct } from "../format";
 import { useCountdown } from "./useCountdown";
+import { AtRisk } from "./AtRisk";
 
 // ---------- setup screen ----------
 
@@ -225,6 +226,7 @@ export function SidePanel({ view }: { view: DraftView }) {
           </p>
         )}
       </section>
+      <AtRisk view={view} />
       <section>
         <h2>Tier alerts</h2>
         <ul className="alerts">

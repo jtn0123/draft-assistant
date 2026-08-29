@@ -40,7 +40,7 @@ export function useOnClockAlert({
   enabled,
 }: {
   onClock: boolean;
-  currentPick: number | undefined;
+  currentPick?: number;
   enabled: boolean;
 }) {
   const alerted = useRef<number | null>(null);

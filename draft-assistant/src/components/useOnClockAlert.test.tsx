@@ -48,7 +48,7 @@ describe("useOnClockAlert", () => {
     expect(document.title).toBe("Draft Assistant");
 
     rerender(<Harness onClock currentPick={27} enabled />);
-    expect(started).toBe(2, "a two-tone chime");
+    expect(started, "a two-tone chime").toBe(2);
     expect(document.title).toContain("YOUR PICK 27");
 
     // Polling re-renders every three seconds; it must not chime again.
@@ -65,11 +65,11 @@ describe("useOnClockAlert", () => {
     expect(started).toBe(2);
     rerender(<Harness onClock={false} currentPick={28} enabled />);
     rerender(<Harness onClock currentPick={30} enabled />);
-    expect(started).toBe(4, "a fresh pick chimes");
+    expect(started, "a fresh pick chimes").toBe(4);
 
     rerender(<Harness onClock={false} currentPick={31} enabled={false} />);
     rerender(<Harness onClock currentPick={55} enabled={false} />);
-    expect(started).toBe(4, "muted");
+    expect(started, "muted").toBe(4);
     expect(document.title).toContain("YOUR PICK 55");
   });
 
