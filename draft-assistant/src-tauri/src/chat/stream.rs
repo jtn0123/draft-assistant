@@ -45,6 +45,21 @@ struct CliUsage {
     server_tool_use: ServerToolUse,
 }
 
+/// One content block of an assistant message. Only `tool_use` matters here.
+#[derive(Deserialize, Default)]
+struct Block {
+    #[serde(default, rename = "type")]
+    kind: String,
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Deserialize, Default)]
+struct Message {
+    #[serde(default)]
+    content: Vec<Block>,
+}
+
 #[derive(Deserialize, Default)]
 struct Delta {
     #[serde(default, rename = "type")]
@@ -80,6 +95,8 @@ struct Line {
     #[serde(default)]
     usage: CliUsage,
     #[serde(default)]
+    message: Message,
+    #[serde(default)]
     fast_mode_state: Option<String>,
     #[serde(default)]
     fast_mode_disabled_reason: Option<String>,
@@ -94,6 +111,10 @@ pub enum StreamLine {
     Done { answer: String, usage: ChatUsage },
     /// The CLI reported a failure (not logged in, refused, ...).
     Failed(String),
+    /// The model ran a web search. Counted here because the CLI runs
+    /// WebSearch as a client tool, so `server_tool_use.web_search_requests`
+    /// stays 0 however many searches really happened.
+    Searched,
     /// Status, thinking, tool traffic — nothing the panel shows.
     Other,
 }
@@ -110,6 +131,15 @@ pub fn parse_line(line: &str, model: &str) -> StreamLine {
         return StreamLine::Other;
     };
     match parsed.kind.as_str() {
+        "assistant"
+            if parsed
+                .message
+                .content
+                .iter()
+                .any(|b| b.kind == "tool_use" && b.name == "WebSearch") =>
+        {
+            StreamLine::Searched
+        }
         "stream_event" => {
             if parsed.event.kind == "content_block_delta" && parsed.event.delta.kind == "text_delta"
             {
@@ -140,6 +170,7 @@ pub fn parse_line(line: &str, model: &str) -> StreamLine {
                         + u.cache_read_input_tokens
                         + u.cache_creation_input_tokens,
                     output_tokens: u.output_tokens,
+                    // Filled in by the accumulator when the count is client-side.
                     web_searches: u.server_tool_use.web_search_requests,
                     duration_ms: parsed.duration_ms,
                     cost_usd: parsed.total_cost_usd,
@@ -161,6 +192,7 @@ pub struct Accumulator {
     streamed: String,
     saw_json: bool,
     head: String,
+    searches: u64,
 }
 
 impl Accumulator {
@@ -170,6 +202,7 @@ impl Accumulator {
             streamed: String::new(),
             saw_json: false,
             head: String::new(),
+            searches: 0,
         }
     }
 
@@ -190,7 +223,15 @@ impl Accumulator {
                 self.streamed.push_str(&text);
                 None
             }
-            StreamLine::Done { answer, usage } => {
+            StreamLine::Searched => {
+                self.saw_json = true;
+                self.searches += 1;
+                None
+            }
+            StreamLine::Done { answer, mut usage } => {
+                if usage.web_searches == 0 {
+                    usage.web_searches = self.searches;
+                }
                 let answer = if answer.is_empty() {
                     self.streamed.trim().to_string()
                 } else {
@@ -265,6 +306,40 @@ mod tests {
             Some("extra_usage_disabled")
         );
         assert_eq!(usage.model, "opus");
+    }
+
+    #[test]
+    fn a_client_side_web_search_is_counted_from_the_stream() {
+        // The CLI runs WebSearch itself, so the result line reports zero
+        // however many searches ran. Counting the tool_use lines is the only
+        // honest number, and the usage line under the answer shows it.
+        let mut acc = Accumulator::new("opus");
+        let mut sink = |_: &str| {};
+        let search = r#"{"type":"assistant","message":{"content":[
+            {"type":"text","text":"I'll look."},
+            {"type":"tool_use","name":"WebSearch","input":{"query":"nfl injuries"}}]}}"#;
+        assert!(acc.push(search, &mut sink).is_none());
+        assert!(acc.push(search, &mut sink).is_none());
+        // A tool that is not a search does not count.
+        let other =
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read"}]}}"#;
+        assert!(acc.push(other, &mut sink).is_none());
+        let done = r#"{"type":"result","is_error":false,"result":"Two sources agree.",
+            "duration_ms":900,"total_cost_usd":0.2,
+            "usage":{"input_tokens":10,"output_tokens":5,"server_tool_use":{"web_search_requests":0}}}"#;
+        let (answer, usage) = acc.push(done, &mut sink).unwrap().unwrap();
+        assert_eq!(answer, "Two sources agree.");
+        assert_eq!(usage.web_searches, 2);
+    }
+
+    #[test]
+    fn a_server_side_count_still_wins_when_the_cli_reports_one() {
+        let mut acc = Accumulator::new("opus");
+        let mut sink = |_: &str| {};
+        let done = r#"{"type":"result","is_error":false,"result":"ok","duration_ms":1,
+            "usage":{"input_tokens":1,"output_tokens":1,"server_tool_use":{"web_search_requests":3}}}"#;
+        let (_, usage) = acc.push(done, &mut sink).unwrap().unwrap();
+        assert_eq!(usage.web_searches, 3);
     }
 
     #[test]

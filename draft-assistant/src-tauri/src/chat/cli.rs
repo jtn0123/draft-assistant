@@ -123,6 +123,14 @@ pub fn args(options: &ChatOptions, system_prompt: &str) -> Result<Vec<OsString>,
             "".into()
         },
     ];
+    if options.web_search {
+        // `--tools` offers the tool; it does not permit it. Without this the
+        // model asks for approval, nobody is there to give it under
+        // `--print`, and the answer comes back "I don't have permission to
+        // use web search" — which read as web search simply not working.
+        args.push("--allowedTools".into());
+        args.push("WebSearch".into());
+    }
     if let Some(effort) = effort_for(options)? {
         args.push("--effort".into());
         args.push(effort.into());
@@ -275,6 +283,29 @@ mod tests {
             options,
             timeout: Duration::from_secs(10),
         }
+    }
+
+    #[test]
+    fn web_search_is_permitted_as_well_as_offered() {
+        // `--tools` alone left the model asking for approval that nothing in
+        // `--print` mode can give, and the answer came back saying it had no
+        // permission to search.
+        let on = args(&opts(None, None, false, true), "sys").unwrap();
+        let flat: Vec<String> = on.iter().map(|a| a.to_string_lossy().into()).collect();
+        let tools = flat.iter().position(|a| a == "--tools").unwrap();
+        assert_eq!(flat[tools + 1], "WebSearch");
+        let allowed = flat
+            .iter()
+            .position(|a| a == "--allowedTools")
+            .expect("the tool has to be permitted, not just offered");
+        assert_eq!(flat[allowed + 1], "WebSearch");
+
+        // Off, neither flag names it and nothing is permitted.
+        let off = args(&opts(None, None, false, false), "sys").unwrap();
+        let flat: Vec<String> = off.iter().map(|a| a.to_string_lossy().into()).collect();
+        assert!(!flat.iter().any(|a| a == "--allowedTools"), "{flat:?}");
+        let tools = flat.iter().position(|a| a == "--tools").unwrap();
+        assert_eq!(flat[tools + 1], "");
     }
 
     /// A stub standing in for the CLI, so the spawn/stdin/stdout path is
