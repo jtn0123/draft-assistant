@@ -13,6 +13,7 @@ import { useOnClockAlert } from "./components/useOnClockAlert";
 import { loadAlertPref, saveAlertPref } from "./components/alertPref";
 import { PickStyleContext, formatPick, loadPickStyle, savePickStyle } from "./pickFormat";
 import { useViewMode } from "./viewMode";
+import { LAUNCH_RETRY_DELAYS_MS, transientNetworkError, withRetry } from "./launch";
 import "./App.css";
 import "./components.css";
 import "./snake.css";
@@ -133,7 +134,14 @@ export default function App() {
         setActiveLeagueId(config.active_league_id);
         if (config.active_league_id) {
           setBusy(true);
-          const v = await api.addLeague(config.active_league_id);
+          // A connect that stalls once at launch is not a reason to lose
+          // the saved league; try again before falling back to setup.
+          const id = config.active_league_id;
+          const v = await withRetry(
+            () => api.addLeague(id),
+            LAUNCH_RETRY_DELAYS_MS,
+            transientNetworkError,
+          );
           applyView(v);
           if (!api.preview || api.replay) await startLive();
         }
@@ -276,6 +284,7 @@ export default function App() {
       <>
         {alertBar}
         <Setup
+          initialLeagueId={activeLeagueId ?? undefined}
           onReady={(v) => {
             applyView(v);
             if (!api.preview || api.replay) void startLive();

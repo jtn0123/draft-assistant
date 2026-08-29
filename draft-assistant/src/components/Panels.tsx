@@ -11,9 +11,16 @@ import { usePickLabel } from "../pickFormat";
 
 // ---------- setup screen ----------
 
-export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
+export function Setup({
+  onReady,
+  initialLeagueId,
+}: {
+  onReady: (view: DraftView) => void;
+  /** The saved league when its launch restore failed: retrying is one click. */
+  initialLeagueId?: string;
+}) {
   const [username, setUsername] = useState("");
-  const [leagueId, setLeagueId] = useState("");
+  const [leagueId, setLeagueId] = useState(initialLeagueId ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 

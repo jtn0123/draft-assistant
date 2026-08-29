@@ -351,7 +351,27 @@ describe("App live workflow", () => {
     render(<App />);
     expect(await screen.findByLabelText("League ID")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Sleeper is unreachable");
+    // Retrying is one click, not retyping an 19-digit id.
+    expect(screen.getByLabelText("League ID")).toHaveValue(initial.league.league_id);
+    expect(testState.api.addLeague).toHaveBeenCalledTimes(1);
   });
+
+  it("retries a launch that stalled on the network before giving up", async () => {
+    const initial = fixture();
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague
+      .mockRejectedValueOnce(new Error("client error (Connect): operation timed out"))
+      .mockResolvedValue(initial);
+
+    render(<App />);
+    expect(await screen.findByText(initial.league.name, {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(testState.api.addLeague).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  }, 8000);
 
   // Dogfood ISSUE-011: every row still offered an enabled Draft button once
   // the draft was over, and the pick was only refused after Confirm.
