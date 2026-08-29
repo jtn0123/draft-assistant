@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Markdown } from "./Markdown";
 import { parseBlocks } from "./chatMarkdown";
 
@@ -57,5 +57,49 @@ describe("Markdown", () => {
     const { container } = render(<Markdown text="my_roster is thin_at WR" />);
     expect(container.querySelector("em")).toBeNull();
     expect(container.textContent).toBe("my_roster is thin_at WR");
+  });
+});
+
+describe("links", () => {
+  const url =
+    "https://www.fantasypros.com/2026/08/nfl-week-1-running-back-usage-report-training-camp-notes/";
+
+  it("shows a bare URL as its site, not its whole address", () => {
+    const { container } = render(<Markdown text={`Camp notes: ${url}`} />);
+    const link = container.querySelector("a");
+    expect(link).toHaveTextContent("fantasypros.com");
+    expect(link).toHaveAttribute("href", url);
+    // The full address is still reachable, just not printed.
+    expect(link).toHaveAttribute("title", url);
+    expect(container.textContent).toBe("Camp notes: fantasypros.com");
+  });
+
+  it("keeps a titled link's own words", () => {
+    const { container } = render(<Markdown text={`See [the usage report](${url}) first.`} />);
+    expect(container.querySelector("a")).toHaveTextContent("the usage report");
+    expect(container.textContent).toBe("See the usage report first.");
+  });
+
+  it("leaves the sentence's full stop out of the link", () => {
+    const { container } = render(<Markdown text="Per https://espn.com/nfl/story." />);
+    expect(container.querySelector("a")).toHaveAttribute("href", "https://espn.com/nfl/story");
+    expect(container.textContent).toBe("Per espn.com.");
+  });
+
+  it("does not make a link out of anything that is not http", () => {
+    const { container } = render(<Markdown text="Run `javascript:alert(1)` never." />);
+    expect(container.querySelector("a")).toBeNull();
+  });
+
+  it("hands the click to the browser instead of navigating this window", () => {
+    // jsdom has no window.open, and outside Tauri that is the path taken.
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const { container } = render(<Markdown text={url} />);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    container.querySelector("a")?.dispatchEvent(event);
+    // The draft is in this window: following the href here would end it.
+    expect(event.defaultPrevented).toBe(true);
+    expect(open).toHaveBeenCalledWith(url, "_blank", "noopener,noreferrer");
+    open.mockRestore();
   });
 });

@@ -299,6 +299,20 @@
   margin: 2px 0;
 }
 
+.chat-md .chat-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  /* A label is a hostname or a title, but an odd answer can still hand us
+     something long: break it rather than widening the whole panel. */
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.chat-md .chat-link:hover {
+  text-decoration-thickness: 2px;
+}
+
 .chat-md code {
   font-size: 12px;
   background: var(--bg-hover);
