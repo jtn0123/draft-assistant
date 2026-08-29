@@ -41,6 +41,8 @@ describe("Waivers", () => {
       drops: [{ player_id: "s", name: "Nicholas Singleton", position: "RB", points: 63.7, starts: 0 }],
     };
     render(<Waivers view={v} />);
+    // The bye is on the row, not only in a hover title.
+    expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("bye 8");
     const rows = screen.getAllByRole("listitem");
     // A zero-gain player is not a target, however hot he is elsewhere.
     expect(rows).toHaveLength(2);

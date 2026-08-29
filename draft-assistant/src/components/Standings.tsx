@@ -1,13 +1,17 @@
+import { useState } from "react";
 import type { DraftView, TeamProjection } from "../types";
 import { fmt, pct } from "../format";
 
 /**
  * The draft's scoreboard: every team's best lineup, ranked by what it
  * projects to over the season with byes honoured. Your row is marked. A
- * team with no picks yet projects to nothing and sits at the bottom.
+ * team with no picks yet projects to nothing and sits at the bottom. A row
+ * opens on a tap to show the lineup — the hover title alone is no use on a
+ * tablet.
  */
 export function Standings({ view }: { view: DraftView }) {
   const rows = view.projected_standings;
+  const [open, setOpen] = useState<number | null>(null);
   if (rows.length === 0) return null;
   const mine = view.draft.my_slot;
   const top = rows[0]?.season ?? 0;
@@ -15,6 +19,8 @@ export function Standings({ view }: { view: DraftView }) {
   const hasWeek = rows.some((t) => t.week_points > 0);
   const odds = new Map(view.playoff_odds.map((o) => [o.slot, o]));
   const hasOdds = odds.size > 0;
+  const nameOf = (t: TeamProjection) =>
+    t.slot === mine ? "YOU" : (t.display_name ?? `Slot ${t.slot}`);
   return (
     <section>
       <h2>Projected standings</h2>
@@ -25,13 +31,12 @@ export function Standings({ view }: { view: DraftView }) {
           <span className="standings-pts">Season</span>
           <span className="standings-gap">{hasWeek ? `Wk ${week}` : ""}</span>
           {hasOdds && <span className="standings-odds">Playoffs</span>}
+          <span />
         </li>
         {rows.map((t, i) => (
           <li key={t.slot} className={t.slot === mine ? "mine" : ""} title={lineupTitle(t)}>
             <span className="standings-rank">{i + 1}</span>
-            <span className="standings-name">
-              {t.slot === mine ? "YOU" : (t.display_name ?? `Slot ${t.slot}`)}
-            </span>
+            <span className="standings-name">{nameOf(t)}</span>
             <span className="standings-pts">
               {fmt(t.season)}
               {i > 0 && <span className="muted"> (−{fmt(top - t.season)})</span>}
@@ -45,6 +50,15 @@ export function Standings({ view }: { view: DraftView }) {
                 {odds.get(t.slot) ? pct(odds.get(t.slot)!.playoff_odds) : ""}
               </span>
             )}
+            <button
+              className="ghost small standings-toggle"
+              aria-expanded={open === t.slot}
+              aria-label={`${open === t.slot ? "Hide" : "Show"} ${nameOf(t)} lineup`}
+              onClick={() => setOpen(open === t.slot ? null : t.slot)}
+            >
+              {open === t.slot ? "▾" : "▸"}
+            </button>
+            {open === t.slot && <Lineup t={t} name={nameOf(t)} />}
           </li>
         ))}
       </ol>
@@ -55,6 +69,37 @@ export function Standings({ view }: { view: DraftView }) {
         for the lineups.
       </p>
     </section>
+  );
+}
+
+/** The lineup behind a row: the season at full strength, and this week. */
+function Lineup({ t, name }: { t: TeamProjection; name: string }) {
+  const list = (xs: TeamProjection["starters"], digits: number) => (
+    <ul>
+      {xs.map((s) => (
+        <li key={`${s.slot}-${s.player_id}`}>
+          <span className="slot">{s.slot}</span>
+          <span className="standings-name">{s.name}</span>
+          <span className="standings-pts">{fmt(s.points, digits)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+  return (
+    <div className="standings-lineup" aria-label={`${name} lineup`}>
+      <div>
+        <span className="muted">Season · {fmt(t.full_strength)} at full strength</span>
+        {list(t.starters, 0)}
+      </div>
+      {t.week_starters.length > 0 && (
+        <div>
+          <span className="muted">
+            Week {t.week} · {fmt(t.week_points, 1)}
+          </span>
+          {list(t.week_starters, 1)}
+        </div>
+      )}
+    </div>
   );
 }
 

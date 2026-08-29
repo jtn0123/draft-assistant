@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import fixtureJson from "../../public/dev-fixture.json";
 import type { DraftView, TeamProjection } from "../types";
@@ -53,6 +54,28 @@ describe("Standings", () => {
     expect(rows[0]).toHaveTextContent("81%");
     expect(rows[1]).toHaveTextContent("44%");
     expect(rows[2].querySelector(".standings-odds")).toHaveTextContent("");
+  });
+
+  it("opens a team's lineup on a tap, not only on hover", async () => {
+    const user = userEvent.setup();
+    const v = view();
+    v.draft.my_slot = 2;
+    v.projected_standings = [team(5, "ChrisWitz", 1901.4), team(2, "McSleeper26", 1850.2)];
+    render(<Standings view={v} />);
+    expect(screen.queryByLabelText("ChrisWitz lineup")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Show ChrisWitz lineup" }));
+    const panel = screen.getByLabelText("ChrisWitz lineup");
+    expect(panel).toHaveTextContent("1941 at full strength");
+    expect(panel).toHaveTextContent("QBSome QB300");
+    expect(panel).toHaveTextContent("Week 1 · 111.8");
+    expect(panel).toHaveTextContent("18.2");
+    expect(screen.getByRole("button", { name: "Hide ChrisWitz lineup" })).toHaveAttribute("aria-expanded", "true");
+
+    // One open at a time; my own row is named as such.
+    await user.click(screen.getByRole("button", { name: "Show YOU lineup" }));
+    expect(screen.queryByLabelText("ChrisWitz lineup")).toBeNull();
+    expect(screen.getByLabelText("YOU lineup")).toBeInTheDocument();
   });
 
   it("leaves the week column blank when no team has rows for it", () => {

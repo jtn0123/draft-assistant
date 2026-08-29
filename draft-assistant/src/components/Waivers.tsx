@@ -24,6 +24,7 @@ export function Waivers({ view }: { view: DraftView }) {
               <span className="waiver-name">
                 {t.name}
                 {t.team && <span className="muted"> {t.team}</span>}
+                {t.bye_week != null && <span className="muted"> · bye {t.bye_week}</span>}
               </span>
               <span className="gain">
                 +{fmt(t.my_gain)}

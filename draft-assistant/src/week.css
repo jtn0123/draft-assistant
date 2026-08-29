@@ -12,7 +12,7 @@
 
 .standings li {
   display: grid;
-  grid-template-columns: 1.6em 1fr auto auto auto;
+  grid-template-columns: 1.6em 1fr auto auto auto auto;
   gap: 8px;
   align-items: baseline;
   padding: 2px 4px;
@@ -30,6 +30,46 @@
 .standings li.mine {
   background: var(--accent-dim);
   font-weight: 600;
+}
+
+.standings-toggle {
+  border: none;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* The lineup under an opened row, both columns of it. */
+.standings-lineup {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 4px 0 6px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.standings-lineup ul {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.standings-lineup li {
+  grid-template-columns: 3.2em 1fr auto;
+  gap: 6px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.standings-lineup .slot {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
 }
 
 .standings-rank {
