@@ -38,8 +38,7 @@ export function SeasonScreen({ view }: { view: SeasonView }) {
   }, [tab]);
 
   const onTabKey = (event: React.KeyboardEvent) => {
-    const step =
-      event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
     let next: SeasonTab | null = null;
     if (step !== 0) {
       const at = SEASON_TABS.indexOf(tab);
@@ -92,12 +91,7 @@ export function SeasonScreen({ view }: { view: SeasonView }) {
         </div>
 
         <div className="season-rail">
-          <div
-            className="rail-tabs"
-            role="tablist"
-            aria-label="League detail"
-            onKeyDown={onTabKey}
-          >
+          <div className="rail-tabs" role="tablist" aria-label="League detail" onKeyDown={onTabKey}>
             {SEASON_TABS.map((name) => (
               <button
                 key={name}
@@ -119,31 +113,26 @@ export function SeasonScreen({ view }: { view: SeasonView }) {
           </div>
 
           <div role="tabpanel" id={panelId(tab)} aria-labelledby={tabId(tab)}>
-
-          {tab === "Standings" && (
-            <Standings rows={view.standings} avatars={view.team_avatars} />
-          )}
-          {tab === "Games" && (
-            <GamesTab
-              live={view.live}
-              myProjected={header.my_projected}
-              oppProjected={header.opp_projected}
-              opponentName={header.opponent_name}
-            />
-          )}
-          {tab === "My team" && <TeamRoster rows={view.roster} />}
-          {tab === "Trends" && <TrendsTab trends={view.trends} avatars={view.team_avatars} />}
-          {tab === "League" && (
-            <LeagueTab
-              trades={view.trades}
-              recentTrades={view.recent_trades}
-              activity={view.activity}
-              avatars={view.team_avatars}
-            />
-          )}
-          {tab === "Last season" && (
-            <LastSeason rows={view.last_season} season={view.season} />
-          )}
+            {tab === "Standings" && <Standings rows={view.standings} avatars={view.team_avatars} />}
+            {tab === "Games" && (
+              <GamesTab
+                live={view.live}
+                myProjected={header.my_projected}
+                oppProjected={header.opp_projected}
+                opponentName={header.opponent_name}
+              />
+            )}
+            {tab === "My team" && <TeamRoster rows={view.roster} />}
+            {tab === "Trends" && <TrendsTab trends={view.trends} avatars={view.team_avatars} />}
+            {tab === "League" && (
+              <LeagueTab
+                trades={view.trades}
+                recentTrades={view.recent_trades}
+                activity={view.activity}
+                avatars={view.team_avatars}
+              />
+            )}
+            {tab === "Last season" && <LastSeason rows={view.last_season} season={view.season} />}
           </div>
         </div>
       </div>

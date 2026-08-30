@@ -1,0 +1,13 @@
+#!/bin/sh
+# The sub-15-second slice of `npm run verify`: everything that does not need a
+# Rust or Vite build. Catches the mistakes that would otherwise cost a full CI
+# round trip.
+#
+# Enable once with:  git config core.hooksPath .githooks
+set -e
+cd "$(dirname "$0")/../draft-assistant"
+npm run check:loc
+npm run check:css
+npx prettier --check "src/**/*.{ts,tsx,css}" "scripts/**/*.mjs" "*.{ts,js,json}"
+npx eslint . --max-warnings=0
+npx tsc --noEmit

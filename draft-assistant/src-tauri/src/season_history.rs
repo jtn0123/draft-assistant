@@ -11,6 +11,7 @@
 //! claim, free-agent add, drop), and a player whose projection shifted is
 //! reported with the shift and, if it changed, their injury tag.
 
+use crate::cache::safe_key;
 use crate::engine::{now_secs, Engine, LoadedLeague};
 use crate::season_engine::LoadedSeason;
 use crate::season_lineup::optimal_points;
@@ -127,13 +128,23 @@ pub fn push(history: &mut History, snapshot: Snapshot) {
     }
 }
 
+/// Persisting the Trends snapshots for a league.
+pub trait HistoryStore {
+    /// Load this league's history, add a snapshot if one is due, and persist.
+    fn record_history(&self, loaded: &LoadedLeague, season: &LoadedSeason) -> History;
+}
+
 impl Engine {
     fn history_name(league_id: &str) -> String {
-        format!("history_{league_id}.json")
+        // Sanitized like every other cache filename: the id comes back from
+        // Sleeper's own response today, but this must not be the one place a
+        // traversal could land.
+        format!("history_{}.json", safe_key(league_id))
     }
+}
 
-    /// Load this league's history, add a snapshot if one is due, and persist.
-    pub fn record_history(&self, loaded: &LoadedLeague, season: &LoadedSeason) -> History {
+impl HistoryStore for Engine {
+    fn record_history(&self, loaded: &LoadedLeague, season: &LoadedSeason) -> History {
         let name = Self::history_name(&loaded.league.league_id);
         let mut history: History = self
             .read_cache_any(&name)

@@ -9,17 +9,7 @@ import { PlayerName, SortHead } from "./bits";
 const PAGE = 200;
 const SKELETON_WIDTHS = ["72%", "88%", "64%", "80%", "70%", "84%"];
 
-type SortKey =
-  | "rank"
-  | "name"
-  | "pos"
-  | "team"
-  | "bye"
-  | "pts"
-  | "vorp"
-  | "tier"
-  | "adp"
-  | "surv";
+type SortKey = "rank" | "name" | "pos" | "team" | "bye" | "pts" | "vorp" | "tier" | "adp" | "surv";
 
 type Direction = "asc" | "desc";
 
@@ -178,13 +168,21 @@ export function Board({
     const q = query.trim().toLowerCase();
     const column = COLUMNS.find((c) => c.key === sortKey);
     const sign = direction === "asc" ? 1 : -1;
-    return players
-      .filter((p) => pos === "ALL" || p.position === pos)
-      .filter((p) => !q || p.name.toLowerCase().includes(q))
-      .slice()
-      .sort((a, b) =>
-        column === undefined ? 0 : compare(column.value(a), column.value(b)) * sign,
-      );
+    const filtered = players.filter(
+      (p) => (pos === "ALL" || p.position === pos) && (!q || p.name.toLowerCase().includes(q)),
+    );
+    if (column === undefined) return filtered;
+    // Decorate-sort-undecorate: the comparator runs O(n log n) times, and
+    // `column.value` is doing string work on every one of those calls.
+    return filtered
+      .map((player) => ({ player, key: column.value(player) }))
+      .sort((a, b) => compare(a.key, b.key) * sign)
+      .map(({ player }) => player);
+    // `players` stays in the dependency list on purpose. Its identity does
+    // change on every poll, so this re-runs every 3 seconds — but a rebuilt
+    // board can carry the same players with new projections, and skipping the
+    // recompute there would render stale numbers. With the sort keys
+    // precomputed above, re-running is cheap enough that correctness wins.
   }, [players, pos, query, sortKey, direction]);
 
   const visible = showAll ? matching : matching.slice(0, PAGE);
@@ -268,7 +266,9 @@ export function Board({
             </div>
           ))}
           <div className="muted board-loading-note">
-            {boardSize > 0 ? `Pulling projections for ${boardSize} players…` : "Pulling projections…"}
+            {boardSize > 0
+              ? `Pulling projections for ${boardSize} players…`
+              : "Pulling projections…"}
           </div>
         </div>
       ) : matching.length === 0 ? (
@@ -295,11 +295,7 @@ export function Board({
           click any column
         </span>
         {matching.length > PAGE && (
-          <button
-            type="button"
-            className="btn-ghost btn-row"
-            onClick={() => setShowAll((s) => !s)}
-          >
+          <button type="button" className="btn-ghost btn-row" onClick={() => setShowAll((s) => !s)}>
             {showAll ? `Show first ${PAGE}` : `Show all ${matching.length}`}
           </button>
         )}

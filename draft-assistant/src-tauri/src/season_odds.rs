@@ -136,51 +136,78 @@ pub fn playoff_odds(
         }
     };
 
-    let mut rng = Rng::new(seed);
-    let mut wins: HashMap<u32, f64> = HashMap::new();
-    let mut points: HashMap<u32, f64> = HashMap::new();
-    for _ in 0..SIMULATIONS {
-        wins.clear();
-        points.clear();
-        for t in teams {
-            wins.insert(t.roster_id, t.wins as f64 + t.ties as f64 * 0.5);
-            points.insert(t.roster_id, t.points_for);
-        }
-        for game in schedule {
-            let mut score = |roster_id: u32, rng: &mut Rng| {
-                let mean = means
+    // Everything below indexes teams by slot rather than roster id. The inner
+    // loop runs SIMULATIONS x schedule times — millions of lookups — and a
+    // hash of a u32 is pure overhead once the mapping is fixed.
+    let slot_of: HashMap<u32, usize> = teams
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (t.roster_id, i))
+        .collect();
+    // Per-slot mean for each scheduled game, resolved once instead of per
+    // simulation: the schedule does not change between runs.
+    let games: Vec<(usize, usize, f64, f64)> = schedule
+        .iter()
+        .filter_map(|game| {
+            let home = *slot_of.get(&game.home)?;
+            let away = *slot_of.get(&game.away)?;
+            let mean_for = |roster_id: u32| {
+                means
                     .get(&roster_id)
                     .and_then(|w| w.get(&game.week).copied())
                     .filter(|m| *m > 0.0)
-                    .unwrap_or(league_mean);
-                let value = mean + rng.next_normal() * mean * TEAM_SCORE_CV;
-                let value = value.max(0.0);
-                *points.entry(roster_id).or_insert(0.0) += value;
+                    .unwrap_or(league_mean)
+            };
+            Some((home, away, mean_for(game.home), mean_for(game.away)))
+        })
+        .collect();
+
+    let start_wins: Vec<f64> = teams
+        .iter()
+        .map(|t| t.wins as f64 + t.ties as f64 * 0.5)
+        .collect();
+    let start_points: Vec<f64> = teams.iter().map(|t| t.points_for).collect();
+
+    let mut rng = Rng::new(seed);
+    let mut wins = vec![0.0f64; teams.len()];
+    let mut points = vec![0.0f64; teams.len()];
+    let mut made_count = vec![0u32; teams.len()];
+    let mut order: Vec<usize> = (0..teams.len()).collect();
+
+    for _ in 0..SIMULATIONS {
+        wins.copy_from_slice(&start_wins);
+        points.copy_from_slice(&start_points);
+        for &(home, away, home_mean, away_mean) in &games {
+            let mut score = |slot: usize, mean: f64, rng: &mut Rng| {
+                let value = (mean + rng.next_normal() * mean * TEAM_SCORE_CV).max(0.0);
+                points[slot] += value;
                 value
             };
-            let home = score(game.home, &mut rng);
-            let away = score(game.away, &mut rng);
-            if (home - away).abs() < 1e-9 {
-                *wins.entry(game.home).or_insert(0.0) += 0.5;
-                *wins.entry(game.away).or_insert(0.0) += 0.5;
-            } else if home > away {
-                *wins.entry(game.home).or_insert(0.0) += 1.0;
+            let home_score = score(home, home_mean, &mut rng);
+            let away_score = score(away, away_mean, &mut rng);
+            if (home_score - away_score).abs() < 1e-9 {
+                wins[home] += 0.5;
+                wins[away] += 0.5;
+            } else if home_score > away_score {
+                wins[home] += 1.0;
             } else {
-                *wins.entry(game.away).or_insert(0.0) += 1.0;
+                wins[away] += 1.0;
             }
         }
-        let mut order: Vec<u32> = teams.iter().map(|t| t.roster_id).collect();
-        order.sort_by_key(|id| {
-            std::cmp::Reverse(rank_key(
-                wins.get(id).copied().unwrap_or(0.0),
-                points.get(id).copied().unwrap_or(0.0),
-            ))
-        });
-        for id in order.iter().take(cut) {
-            *made.entry(*id).or_insert(0) += 1;
+        order.sort_by_key(|&slot| std::cmp::Reverse(rank_key(wins[slot], points[slot])));
+        for &slot in order.iter().take(cut) {
+            made_count[slot] += 1;
+        }
+        // sort_by_key leaves `order` permuted; reset so the next simulation
+        // starts from the same ordering and the tie-break stays deterministic.
+        for (slot, entry) in order.iter_mut().enumerate() {
+            *entry = slot;
         }
     }
 
+    for (slot, team) in teams.iter().enumerate() {
+        made.insert(team.roster_id, made_count[slot]);
+    }
     made.into_iter()
         .map(|(id, count)| (id, count as f64 / SIMULATIONS as f64))
         .collect()

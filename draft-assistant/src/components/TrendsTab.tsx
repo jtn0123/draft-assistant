@@ -54,7 +54,10 @@ function Ranked({ series, avatars }: { series: TeamSeries[]; avatars: Record<str
         const delta = v - from;
         const flat = Math.abs(delta) < 0.05;
         return (
-          <div className={s.is_mine ? "trend-rank-row is-mine" : "trend-rank-row"} key={s.roster_id}>
+          <div
+            className={s.is_mine ? "trend-rank-row is-mine" : "trend-rank-row"}
+            key={s.roster_id}
+          >
             <span className="ellipsis team-cell">
               <TeamAvatar avatar={avatars[String(s.roster_id)]} name={s.name} />
               <span className="ellipsis">{s.name}</span>
@@ -69,10 +72,22 @@ function Ranked({ series, avatars }: { series: TeamSeries[]; avatars: Record<str
                   }}
                 />
               )}
-              <span className="trend-mark" style={{ left: `${pct(v)}%` }} title={`${fmt(v, 1)}/wk`} />
+              <span
+                className="trend-mark"
+                style={{ left: `${pct(v)}%` }}
+                title={`${fmt(v, 1)}/wk`}
+              />
             </span>
             <span className="trend-right mid">{fmt(v, 1)}</span>
-            <span className={flat ? "trend-right muted" : delta > 0 ? "trend-right trend-pos" : "trend-right trend-act"}>
+            <span
+              className={
+                flat
+                  ? "trend-right muted"
+                  : delta > 0
+                    ? "trend-right trend-pos"
+                    : "trend-right trend-act"
+              }
+            >
               {flat ? "0.0" : signed(delta)}
             </span>
           </div>
@@ -122,8 +137,7 @@ function Chart({
   };
 
   const at = hoverAt ?? t1;
-  const valueAt = (s: TeamSeries | null) =>
-    s?.points.find((p) => p.at === at)?.strength ?? null;
+  const valueAt = (s: TeamSeries | null) => s?.points.find((p) => p.at === at)?.strength ?? null;
 
   return (
     <div className="trend-chart">
@@ -149,10 +163,18 @@ function Chart({
           {dateLabel(t1, sameDay)}
         </text>
         {hoverAt !== null && (
-          <line className="trend-crosshair" x1={x(hoverAt)} x2={x(hoverAt)} y1={PAD.top} y2={H - PAD.bottom} />
+          <line
+            className="trend-crosshair"
+            x1={x(hoverAt)}
+            x2={x(hoverAt)}
+            y1={PAD.top}
+            y2={H - PAD.bottom}
+          />
         )}
         {series.map((s) => {
-          const d = s.points.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.at)},${y(p.strength)}`).join(" ");
+          const d = s.points
+            .map((p, i) => `${i === 0 ? "M" : "L"}${x(p.at)},${y(p.strength)}`)
+            .join(" ");
           const cls = s.is_mine
             ? "trend-line is-mine"
             : s.roster_id === focus
@@ -264,7 +286,10 @@ function Feed({ changes }: { changes: TrendChange[] }) {
   return (
     <div className="trend-feed">
       {changes.map((c, i) => (
-        <div className={c.is_mine ? "trend-change is-mine" : "trend-change"} key={`${c.at}-${c.roster_id}-${i}`}>
+        <div
+          className={c.is_mine ? "trend-change is-mine" : "trend-change"}
+          key={`${c.at}-${c.roster_id}-${i}`}
+        >
           <div className="trend-change-head">
             <span className="ellipsis">
               <b>{c.team}</b>
@@ -305,11 +330,20 @@ export function TrendsTab({
     <div className="tab-body">
       <PanelHead
         title="Projected strength"
-        note={snapshots < 2 ? "first snapshot taken — the graph fills in over time" : `${snapshots} snapshots`}
+        note={
+          snapshots < 2
+            ? "first snapshot taken — the graph fills in over time"
+            : `${snapshots} snapshots`
+        }
       />
       <div className="trend-controls">
         <span className="muted small">Best-lineup points per week, rest of season</span>
-        <Segmented options={["Chart", "Table"] as const} value={mode} onChange={setMode} label="Trends view" />
+        <Segmented
+          options={["Chart", "Table"] as const}
+          value={mode}
+          onChange={setMode}
+          label="Trends view"
+        />
       </div>
       {mode === "Chart" &&
         (plottable ? (
@@ -327,7 +361,9 @@ export function TrendsTab({
             <Ranked series={series} avatars={avatars} />
           </>
         ))}
-      {mode === "Table" && <Legend series={series} focus={focus} onFocus={setFocus} avatars={avatars} />}
+      {mode === "Table" && (
+        <Legend series={series} focus={focus} onFocus={setFocus} avatars={avatars} />
+      )}
       <div className="tab-head-spaced">
         <PanelHead title="Why it moved" note="newest first" />
       </div>

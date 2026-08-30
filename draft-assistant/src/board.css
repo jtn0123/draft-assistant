@@ -210,3 +210,12 @@
   border-top: 1px solid var(--rule);
   font-size: 12px;
 }
+
+/* Board rows are tighter than season rows, so the shared avatar slot shrinks
+   here. Lives beside .board-row on purpose: a rule for this row belongs in
+   this file, not in the shared one. */
+.board-row .avatar {
+  width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+}

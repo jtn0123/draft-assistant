@@ -29,10 +29,7 @@ describe("Board", () => {
     const user = userEvent.setup();
     render(
       <Board
-        players={[
-          player("qb", "Quarterback", "QB"),
-          player("k", "Kicker", "K"),
-        ]}
+        players={[player("qb", "Quarterback", "QB"), player("k", "Kicker", "K")]}
         positions={["QB", "K"]}
         loading={false}
         boardSize={2}

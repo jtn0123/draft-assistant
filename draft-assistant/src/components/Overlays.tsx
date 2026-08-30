@@ -38,8 +38,8 @@ export function ConfirmDialog({
           Mark {playerName} as drafted?
         </span>
         <span className="mid dialog-note">
-          This records the pick locally. It does not draft them in Sleeper, and live sync
-          from Sleeper overrides it.
+          This records the pick locally. It does not draft them in Sleeper, and live sync from
+          Sleeper overrides it.
         </span>
         <div className="dialog-actions">
           <button type="button" className="btn-primary" onClick={onConfirm} ref={confirmRef}>

@@ -1,6 +1,10 @@
 //! Tauri commands for the in-season screen.
 
-use crate::season::{build_season_view_cached, SeasonAnalysis, SeasonView};
+use crate::headshots::ImageCache;
+use crate::poll::{AnalysisCache, LiveEmitGate};
+use crate::season::{build_season_view_cached, SeasonView};
+use crate::season_engine::SeasonLoader;
+use crate::season_history::HistoryStore;
 use crate::state::{season_view_from, AppState};
 use std::sync::atomic::Ordering;
 use tauri::{Emitter, State};
@@ -101,13 +105,8 @@ pub async fn start_season_polling(
     let season_generation = state.season_generation.clone();
 
     tauri::async_runtime::spawn(async move {
-        let mut last_totals: Option<(u64, u64)> = None;
-        // Computed on the first tick and reused after: the poll only refreshes
-        // live scoring, which cannot move playoff odds, waivers or trades.
-        // Rebuilt every ANALYSIS_EVERY ticks so a waiver claim or a trade
-        // elsewhere in the league still works its way in.
-        let mut analysis: Option<SeasonAnalysis> = None;
-        let mut ticks: u32 = 0;
+        let mut gate = LiveEmitGate::default();
+        let mut analysis = AnalysisCache::new(ANALYSIS_EVERY);
         loop {
             if !polling.load(Ordering::SeqCst)
                 || season_generation.load(Ordering::SeqCst) != generation
@@ -135,23 +134,13 @@ pub async fn start_season_polling(
                             loaded,
                             season,
                             config.my_user_id.as_deref(),
-                            analysis.as_ref(),
+                            analysis.get(),
                         );
-                        if analysis.is_none() {
-                            analysis = Some(SeasonAnalysis::of(&view));
-                        }
-                        ticks += 1;
-                        if ticks % ANALYSIS_EVERY == 0 {
-                            analysis = None;
-                        }
-                        // Emit only when a score actually moved: this view is
-                        // large and the panel re-renders on every event.
-                        let totals = (
-                            (view.live.totals.my_live_points * 100.0) as u64,
-                            (view.live.totals.opp_live_points * 100.0) as u64,
-                        );
-                        if last_totals != Some(totals) {
-                            last_totals = Some(totals);
+                        analysis.observe(&view);
+                        if gate.should_emit(
+                            view.live.totals.my_live_points,
+                            view.live.totals.opp_live_points,
+                        ) {
                             app.emit("season-updated", &view).ok();
                         }
                     }

@@ -1,0 +1,5 @@
+# Pinned so a local build and CI see the same clippy and rustfmt. Bump this
+# deliberately, in its own commit, rather than discovering a drift in review.
+[toolchain]
+channel = "1.88.0"
+components = ["rustfmt", "clippy"]

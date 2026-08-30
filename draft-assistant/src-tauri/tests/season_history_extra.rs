@@ -4,6 +4,7 @@ use draft_assistant_lib::engine::{Engine, LoadedLeague};
 use draft_assistant_lib::roster::RosterRules;
 use draft_assistant_lib::season_api::Roster;
 use draft_assistant_lib::season_engine::LoadedSeason;
+use draft_assistant_lib::season_history::HistoryStore;
 use draft_assistant_lib::season_history::{take_snapshot, History};
 use draft_assistant_lib::sleeper::{Draft, League, PlayerMeta, ProjectionRow};
 use draft_assistant_lib::valuation::ReplacementModel;

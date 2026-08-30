@@ -14,6 +14,12 @@ const BASE_UNDOC: &str = "https://api.sleeper.app";
 /// Total attempts per request, including the first.
 const RETRIES: u32 = 3;
 
+/// A Sleeper account, as returned by `/v1/user/{username}`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SleeperUser {
+    pub user_id: String,
+}
+
 /// League-wide knobs the season screen needs. All optional: a mock draft's
 /// synthesized league has none of them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -305,6 +311,25 @@ impl SleeperClient {
             backoff *= 2;
         }
         Err(format!("request failed: {url}"))
+    }
+
+    /// Resolve a Sleeper username to its user id.
+    ///
+    /// Sleeper usernames are alphanumerics plus `_` and `-`; anything else is
+    /// refused rather than escaped, because it would be interpolated into the
+    /// request path.
+    pub async fn user(&self, username: &str) -> Result<SleeperUser, String> {
+        let username = username.trim();
+        let legal = !username.is_empty()
+            && username.len() <= 32
+            && username
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        if !legal {
+            return Err(format!("'{username}' is not a valid Sleeper username"));
+        }
+        let user: Option<SleeperUser> = self.get_json(&format!("{BASE}/user/{username}")).await?;
+        user.ok_or_else(|| format!("Sleeper user '{username}' not found"))
     }
 
     pub async fn league(&self, league_id: &str) -> Result<League, String> {

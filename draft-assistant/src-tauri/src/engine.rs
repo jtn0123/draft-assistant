@@ -5,7 +5,9 @@
 //! and the model can see.
 
 use crate::board::{build_board, BoardPlayer};
-use crate::cache::{envelope_json, fresh_enough, read_cached, replace_file, write_atomic};
+use crate::cache::{
+    envelope_json, fresh_enough, read_cached, replace_file, safe_key, write_atomic,
+};
 use crate::mock_league::synthesize_league;
 use crate::roster::RosterRules;
 use crate::sleeper::{Draft, League, Pick, PlayerMeta, SleeperClient};
@@ -89,6 +91,16 @@ pub struct Engine {
     pub data_dir: PathBuf,
 }
 
+/// The one thing that talks to Sleeper and owns the on-disk cache.
+///
+/// Its draft-loading surface is below. Everything else `Engine` can do is
+/// declared as a trait next to the code that implements it, so this list is
+/// the whole story:
+///
+/// - [`crate::projections`] — the players dictionary and projection fetches
+/// - [`crate::headshots::ImageCache`] — player photos and manager avatars
+/// - [`crate::season_engine::SeasonLoader`] — loading and refreshing a season
+/// - [`crate::season_history::HistoryStore`] — Trends snapshots
 impl Engine {
     pub fn new(data_dir: PathBuf) -> Self {
         std::fs::create_dir_all(&data_dir).ok();
@@ -170,11 +182,7 @@ impl Engine {
     }
 
     fn manual_picks_cache_name(draft_id: &str) -> String {
-        let safe_id: String = draft_id
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-            .collect();
-        format!("manual_picks_{safe_id}.json")
+        format!("manual_picks_{}.json", safe_key(draft_id))
     }
 
     pub fn load_manual_picks(&self, draft_id: &str) -> Vec<Pick> {

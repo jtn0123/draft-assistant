@@ -7,7 +7,13 @@ import { teamLogo } from "../format";
 import { closeZoom, openZoom, useZoom, type Zoomed } from "../zoom";
 
 /** NFL team mark. Renders nothing when the player has no team (free agents). */
-export function TeamLogo({ team, className }: { team: string | null | undefined; className?: string }) {
+export function TeamLogo({
+  team,
+  className,
+}: {
+  team: string | null | undefined;
+  className?: string;
+}) {
   const src = teamLogo(team);
   if (src === null) return null;
   return (
@@ -83,7 +89,9 @@ export function ZoomLayer() {
       if (e.key !== "Tab") return;
       // A modal must not leak focus to the page behind it. Close is the only
       // stop in here, so Tab and Shift+Tab both land back on it.
-      const stops = card.current?.querySelectorAll<HTMLElement>("button, [href], [tabindex]:not([tabindex='-1'])");
+      const stops = card.current?.querySelectorAll<HTMLElement>(
+        "button, [href], [tabindex]:not([tabindex='-1'])",
+      );
       if (stops === undefined || stops.length === 0) return;
       const first = stops[0];
       const last = stops[stops.length - 1];
@@ -152,9 +160,11 @@ export function Headshot({
   const wanted = mode === "headshots" && isPlayer ? playerId : null;
   // A defence's id is its team code ("JAX"), which is also the only mark it
   // has — callers that know no separate team still get a logo.
-  const fallbackTeam =
-    team ?? (typeof playerId === "string" && !isPlayer ? playerId : null);
-  const [src, setSrc] = useState<{ id: string | null; url: string | null }>({ id: null, url: null });
+  const fallbackTeam = team ?? (typeof playerId === "string" && !isPlayer ? playerId : null);
+  const [src, setSrc] = useState<{ id: string | null; url: string | null }>({
+    id: null,
+    url: null,
+  });
 
   // Resolved through the session cache, which sits in front of the
   // backend's on-disk copy: Sleeper is asked for each face once, ever.

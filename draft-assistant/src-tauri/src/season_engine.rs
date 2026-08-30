@@ -5,6 +5,7 @@
 //! matchup sweep only changes when a week ends, and last season never changes
 //! at all. Each is cached with a TTL that matches.
 
+use crate::cache::safe_key;
 use crate::engine::{now_secs, Engine, REQUEST_CONCURRENCY};
 use crate::season::LastSeasonRow;
 use crate::season_api::{Matchup, Roster, ScoreGame, Transaction};
@@ -73,13 +74,29 @@ fn pairs_from(matchups: &[Matchup]) -> Vec<(u32, u32)> {
     pairs
 }
 
+/// Loading and refreshing a season, as distinct from loading a draft.
+///
+/// Stated as a trait so the season sweep is a declared extension of `Engine`
+/// rather than another anonymous `impl` block bolted onto it.
+pub trait SeasonLoader {
+    /// Load everything the season screen needs, from cache where possible.
+    #[allow(async_fn_in_trait)]
+    async fn load_season(
+        &self,
+        league: &League,
+        my_user_id: Option<&str>,
+        force: bool,
+    ) -> Result<LoadedSeason, String>;
+
+    /// Refresh only the fast-moving slice: this week's scoring and the NFL
+    /// scoreboard. `Err` when every request failed.
+    #[allow(async_fn_in_trait)]
+    async fn refresh_live(&self, season: &mut LoadedSeason, league_id: &str) -> Result<(), String>;
+}
+
 impl Engine {
     fn season_cache_name(league_id: &str, suffix: &str) -> String {
-        let safe: String = league_id
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-            .collect();
-        format!("season_{safe}_{suffix}.json")
+        format!("season_{}_{suffix}.json", safe_key(league_id))
     }
 
     /// Sweep every regular-season week once: pairings for the simulation and
@@ -250,7 +267,19 @@ impl Engine {
     ///
     /// Individual panels degrade rather than failing the load: a transactions
     /// outage costs you the activity feed, not the screen.
-    pub async fn load_season(
+    /// How stale the live slice is, in seconds.
+    pub fn live_age(season: &LoadedSeason) -> u64 {
+        now_secs().saturating_sub(season.fetched_at)
+    }
+
+    /// True when the live slice is old enough to be worth re-fetching.
+    pub fn live_is_stale(season: &LoadedSeason) -> bool {
+        Self::live_age(season) >= LIVE_TTL_SECS
+    }
+}
+
+impl SeasonLoader for Engine {
+    async fn load_season(
         &self,
         league: &League,
         my_user_id: Option<&str>,
@@ -334,11 +363,7 @@ impl Engine {
 
     /// Refresh only the fast-moving parts: this week's scoring and the NFL
     /// scoreboard. Used by the in-season poller.
-    pub async fn refresh_live(
-        &self,
-        season: &mut LoadedSeason,
-        league_id: &str,
-    ) -> Result<(), String> {
+    async fn refresh_live(&self, season: &mut LoadedSeason, league_id: &str) -> Result<(), String> {
         let (matchups, scores, rosters) = tokio::join!(
             self.client.matchups(league_id, season.week),
             self.client.nfl_scores(season.season, season.week),
@@ -366,16 +391,6 @@ impl Engine {
         }
         season.fetched_at = now_secs();
         Ok(())
-    }
-
-    /// How stale the live slice is, in seconds.
-    pub fn live_age(season: &LoadedSeason) -> u64 {
-        now_secs().saturating_sub(season.fetched_at)
-    }
-
-    /// True when the live slice is old enough to be worth re-fetching.
-    pub fn live_is_stale(season: &LoadedSeason) -> bool {
-        Self::live_age(season) >= LIVE_TTL_SECS
     }
 }
 

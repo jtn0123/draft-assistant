@@ -32,7 +32,10 @@ describe("clicking a picture", () => {
       button.click();
     });
     const dialog = screen.getByRole("dialog", { name: "Josh Downs" });
-    expect(dialog.querySelector(".zoom-image")).toHaveAttribute("src", "data:image/png;base64,AAAA");
+    expect(dialog.querySelector(".zoom-image")).toHaveAttribute(
+      "src",
+      "data:image/png;base64,AAAA",
+    );
 
     await act(async () => {
       screen.getByRole("button", { name: "Close" }).click();
@@ -114,7 +117,9 @@ describe("PlayerName", () => {
         <PlayerName name="Josh Downs" team="IND" playerId="11560" />
       </>,
     );
-    await waitFor(() => expect(screen.getAllByRole("presentation", { hidden: true })).toHaveLength(2));
+    await waitFor(() =>
+      expect(screen.getAllByRole("presentation", { hidden: true })).toHaveLength(2),
+    );
     expect(mocks.headshot).toHaveBeenCalledTimes(1);
   });
 
@@ -132,7 +137,10 @@ describe("PlayerName", () => {
     mocks.headshot.mockResolvedValue("data:image/png;base64,AAAA");
     render(<PlayerName name="Josh Downs" team="IND" playerId="11560" />);
     await waitFor(() =>
-      expect(screen.getByRole("presentation", { hidden: true })).toHaveAttribute("src", "data:image/png;base64,AAAA"),
+      expect(screen.getByRole("presentation", { hidden: true })).toHaveAttribute(
+        "src",
+        "data:image/png;base64,AAAA",
+      ),
     );
     act(() => setAvatarMode("logos"));
     expect(screen.getByRole("presentation", { hidden: true })).toHaveAttribute(
@@ -141,13 +149,18 @@ describe("PlayerName", () => {
     );
     act(() => setAvatarMode("headshots"));
     await waitFor(() =>
-      expect(screen.getByRole("presentation", { hidden: true })).toHaveAttribute("src", "data:image/png;base64,AAAA"),
+      expect(screen.getByRole("presentation", { hidden: true })).toHaveAttribute(
+        "src",
+        "data:image/png;base64,AAAA",
+      ),
     );
     expect(mocks.headshot).toHaveBeenCalledTimes(1);
   });
 
   it("draws a defence's logo from its id when no team is passed", () => {
-    const { container } = render(<PlayerName name="Jacksonville Jaguars" team={null} playerId="JAX" />);
+    const { container } = render(
+      <PlayerName name="Jacksonville Jaguars" team={null} playerId="JAX" />,
+    );
     expect(container.querySelector(".avatar-logo")).toHaveAttribute(
       "src",
       "https://sleepercdn.com/images/team_logos/nfl/jax.png",

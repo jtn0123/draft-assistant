@@ -101,8 +101,6 @@ describe("SidePanel", () => {
     view.my_roster = null;
 
     render(<SidePanel view={view} />);
-    expect(
-      screen.getByText("Set your Sleeper username to track your team."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Set your Sleeper username to track your team.")).toBeInTheDocument();
   });
 });

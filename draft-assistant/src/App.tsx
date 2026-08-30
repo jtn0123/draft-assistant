@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { setAvatarMode, useAvatarMode } from "./avatars";
+import { setChime, useChime } from "./prefs";
+import { useSeasonSession } from "./session";
 import type { DraftView, PollHealth, StoredLeague } from "./types";
 import type { SeasonView } from "./season-types";
 import { Header, type Screen, type SettingsRow } from "./components/Header";
@@ -37,7 +39,6 @@ const SCREEN_KEY = "da.screen";
 
 export default function App() {
   const [view, setView] = useState<DraftView | null>(null);
-  const [season, setSeason] = useState<SeasonView | null>(null);
   // Season is the everyday screen; the draft is a few hours a year. The last
   // choice is remembered so a draft-night user lands back on the board.
   const [screen, setScreen] = useState<Screen>(() => {
@@ -53,7 +54,6 @@ export default function App() {
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
-  const [seasonError, setSeasonError] = useState<string | null>(null);
   // Stable across renders so the memoised board rows are not invalidated by a
   // fresh closure on every 3-second poll.
   const askToDraft = useCallback(
@@ -69,7 +69,6 @@ export default function App() {
   const [showSetup, setShowSetup] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  const [chime, setChime] = useState(true);
   const [preference, setPreference] = useState<ThemePreference>(storedPreference);
   const toastTimer = useRef<number | undefined>(undefined);
   const wasMyPick = useRef(false);
@@ -97,6 +96,15 @@ export default function App() {
   }, []);
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+
+  // The season screen's own data lifecycle: loads on first open, polls while
+  // it is showing, and knows how to retry itself.
+  const {
+    season,
+    error: seasonError,
+    retry: retrySeason,
+  } = useSeasonSession(screen === "season", view !== null, showToast);
+  const chime = useChime();
 
   // ---------- data ----------
 
@@ -178,36 +186,6 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const un = api.onSeasonUpdated(setSeason);
-    return () => {
-      un.then((f) => f()).catch(() => undefined);
-    };
-  }, []);
-
-  // Load season data the first time the tab is opened, then keep it live.
-  useEffect(() => {
-    if (screen !== "season" || view === null) return undefined;
-    let cancelled = false;
-    if (season === null) {
-      api
-        .loadSeason(false)
-        .then((s) => {
-          if (!cancelled) setSeason(s);
-        })
-        .catch((e) => {
-          if (cancelled) return;
-          setSeasonError(String(e));
-          showToast(String(e));
-        });
-    }
-    api.startSeasonPolling(30).catch(() => undefined);
-    return () => {
-      cancelled = true;
-      api.stopSeasonPolling().catch(() => undefined);
-    };
-  }, [screen, view, season, showToast]);
-
   // Chime when the clock reaches you — the one moment worth interrupting for.
   useEffect(() => {
     const isMine = view?.draft.is_my_pick ?? false;
@@ -267,10 +245,9 @@ export default function App() {
     try {
       const refreshed = await api.refreshData();
       applyView(refreshed);
-      if (screen === "season") {
-        setSeasonError(null);
-        setSeason(await api.loadSeason(true));
-      }
+      // The board was rebuilt from new projections, so the season view is
+      // built on stale numbers until it reloads too.
+      if (screen === "season") retrySeason();
       showToast(
         `Projections refreshed — board rebuilt from ${refreshed.data_health.board_size} players`,
       );
@@ -329,7 +306,7 @@ export default function App() {
       note: "Sound when you're on the clock",
       value: chime ? "On" : "Off",
       on: chime,
-      onSelect: () => setChime((c) => !c),
+      onSelect: () => setChime(!chime),
     },
     {
       label: "Live sync",
@@ -400,7 +377,7 @@ export default function App() {
             polling={polling}
             pollHealth={pollHealth}
             chime={chime}
-            onToggleChime={() => setChime((c) => !c)}
+            onToggleChime={() => setChime(!chime)}
             onUndo={() => void doUndo()}
             chatOpen={chatOpen}
             onToggleChat={() => setChatOpen((c) => !c)}
@@ -413,27 +390,13 @@ export default function App() {
           {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
 
           {screen === "draft" ? (
-            <DraftScreen
-              view={view}
-              busy={busy}
-              onDraft={askToDraft}
-            />
+            <DraftScreen view={view} busy={busy} onDraft={askToDraft} />
           ) : season !== null ? (
             <SeasonScreen view={season} />
           ) : seasonError !== null ? (
             <div className="season-loading is-error">
               <span>{seasonError}</span>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={() => {
-                  setSeasonError(null);
-                  api
-                    .loadSeason(true)
-                    .then(setSeason)
-                    .catch((e) => setSeasonError(String(e)));
-                }}
-              >
+              <button type="button" className="btn-primary" onClick={retrySeason}>
                 Try again
               </button>
             </div>

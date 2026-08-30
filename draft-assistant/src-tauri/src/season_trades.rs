@@ -43,19 +43,46 @@ fn lineup_total(rules: &RosterRules, candidates: &[Candidate]) -> f64 {
 }
 
 /// Swap `out_id` for `incoming` and return the resulting best-lineup total.
+///
+/// `scratch` is reused across calls so the inner loop is not reallocating a
+/// roster-sized vector thousands of times per refresh.
 fn total_after_swap(
     rules: &RosterRules,
     roster: &[Candidate],
     out_id: &str,
     incoming: &Candidate,
+    scratch: &mut Vec<Candidate>,
 ) -> f64 {
-    let mut next: Vec<Candidate> = roster
+    scratch.clear();
+    scratch.extend(roster.iter().filter(|c| c.player_id != out_id).cloned());
+    scratch.push(incoming.clone());
+    lineup_total(rules, scratch)
+}
+
+/// What a roster loses by giving up each of its players: the drop in its best
+/// lineup total. Indexed alongside `roster`.
+///
+/// This is what makes the search affordable. Swapping `out` for `incoming`
+/// changes the total by at most `incoming.points - cost_of_losing[out]` —
+/// adding one player can never add more than that player's points, and losing
+/// `out` always costs at least this much. So any pair whose bound falls short
+/// of `MIN_EDGE` cannot produce an idea, and is skipped without solving a
+/// single lineup.
+fn cost_of_losing(rules: &RosterRules, roster: &[Candidate], baseline: f64) -> Vec<f64> {
+    let mut scratch: Vec<Candidate> = Vec::with_capacity(roster.len());
+    roster
         .iter()
-        .filter(|c| c.player_id != out_id)
-        .cloned()
-        .collect();
-    next.push(incoming.clone());
-    lineup_total(rules, &next)
+        .map(|player| {
+            scratch.clear();
+            scratch.extend(
+                roster
+                    .iter()
+                    .filter(|c| c.player_id != player.player_id)
+                    .cloned(),
+            );
+            baseline - lineup_total(rules, &scratch)
+        })
+        .collect()
 }
 
 /// A rival roster to evaluate against.
@@ -73,19 +100,34 @@ pub fn trade_ideas(
     describe: &impl Fn(&str) -> (String, String),
 ) -> Vec<TradeIdea> {
     let my_baseline = lineup_total(rules, mine);
+    let my_loss = cost_of_losing(rules, mine, my_baseline);
     let mut ideas: Vec<TradeIdea> = Vec::new();
+    let mut scratch: Vec<Candidate> = Vec::new();
 
     for partner in partners {
         let their_baseline = lineup_total(rules, partner.candidates);
-        for theirs in partner.candidates {
-            for ours in mine {
-                let my_after = total_after_swap(rules, mine, &ours.player_id, theirs);
+        let their_loss = cost_of_losing(rules, partner.candidates, their_baseline);
+        for (their_index, theirs) in partner.candidates.iter().enumerate() {
+            for (my_index, ours) in mine.iter().enumerate() {
+                // Cheap bound first: most pairs die here without a solve.
+                if theirs.points - my_loss[my_index] < MIN_EDGE {
+                    continue;
+                }
+                let my_after = total_after_swap(rules, mine, &ours.player_id, theirs, &mut scratch);
                 let my_edge = my_after - my_baseline;
                 if my_edge < MIN_EDGE {
                     continue;
                 }
-                let their_after =
-                    total_after_swap(rules, partner.candidates, &theirs.player_id, ours);
+                if ours.points - their_loss[their_index] < MIN_EDGE {
+                    continue;
+                }
+                let their_after = total_after_swap(
+                    rules,
+                    partner.candidates,
+                    &theirs.player_id,
+                    ours,
+                    &mut scratch,
+                );
                 let their_edge = their_after - their_baseline;
                 if their_edge < MIN_EDGE {
                     continue;
@@ -136,6 +178,110 @@ pub fn trade_ideas(
 
 #[cfg(test)]
 mod tests {
+    /// Brute force: every pair, both totals solved, no bounds. The pruned
+    /// search must agree with this exactly.
+    fn ideas_by_brute_force(
+        rules: &RosterRules,
+        mine: &[Candidate],
+        partners: &[TradePartner],
+    ) -> Vec<(u32, String, String)> {
+        let my_baseline = lineup_total(rules, mine);
+        let mut found = Vec::new();
+        for partner in partners {
+            let their_baseline = lineup_total(rules, partner.candidates);
+            for theirs in partner.candidates {
+                for ours in mine {
+                    let mut scratch = Vec::new();
+                    let my_edge =
+                        total_after_swap(rules, mine, &ours.player_id, theirs, &mut scratch)
+                            - my_baseline;
+                    if my_edge < MIN_EDGE {
+                        continue;
+                    }
+                    let their_edge = total_after_swap(
+                        rules,
+                        partner.candidates,
+                        &theirs.player_id,
+                        ours,
+                        &mut scratch,
+                    ) - their_baseline;
+                    if their_edge < MIN_EDGE {
+                        continue;
+                    }
+                    found.push((
+                        partner.roster_id,
+                        theirs.player_id.clone(),
+                        ours.player_id.clone(),
+                    ));
+                }
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn pruning_never_hides_a_trade_the_full_search_would_find() {
+        // A spread of rosters and point distributions, deterministic so a
+        // failure is reproducible.
+        let rules = RosterRules::new(
+            &["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "BN", "BN", "BN"]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>(),
+        );
+        let positions = ["QB", "RB", "WR", "TE"];
+        let mut seed = 12_345u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            (seed >> 33) as f64 % 25.0
+        };
+
+        for trial in 0..40 {
+            let mine: Vec<Candidate> = (0..10)
+                .map(|i| Candidate {
+                    player_id: format!("mine-{trial}-{i}"),
+                    position: positions[i % positions.len()].to_string(),
+                    points: next(),
+                })
+                .collect();
+            let theirs: Vec<Candidate> = (0..10)
+                .map(|i| Candidate {
+                    player_id: format!("theirs-{trial}-{i}"),
+                    position: positions[i % positions.len()].to_string(),
+                    points: next(),
+                })
+                .collect();
+            let partners = vec![TradePartner {
+                roster_id: 2,
+                name: "Rival".into(),
+                candidates: &theirs,
+            }];
+
+            let brute = ideas_by_brute_force(&rules, &mine, &partners);
+            let pruned = trade_ideas(&rules, &mine, &partners, &|id| {
+                (id.to_string(), "RB".to_string())
+            });
+
+            // trade_ideas keeps one idea per partner, so the check is that
+            // whatever it kept is a pair brute force also found, and that it
+            // finds something whenever brute force does.
+            assert_eq!(
+                pruned.is_empty(),
+                brute.is_empty(),
+                "trial {trial}: pruned {} vs brute {}",
+                pruned.len(),
+                brute.len()
+            );
+            for idea in &pruned {
+                assert!(
+                    brute.contains(&(idea.roster_id, idea.get_id.clone(), idea.give_id.clone())),
+                    "trial {trial}: pruned search invented {:?}",
+                    idea.get_id
+                );
+            }
+        }
+    }
+
     use super::*;
 
     fn rules(slots: &[&str]) -> RosterRules {

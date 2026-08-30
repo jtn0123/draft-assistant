@@ -35,8 +35,8 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
       <div className="card-screen-intro">
         <h1>Draft Assistant</h1>
         <p className="mid">
-          A read-only second screen for Sleeper. You draft in Sleeper; this tracks every
-          pick and says who to take.
+          A read-only second screen for Sleeper. You draft in Sleeper; this tracks every pick and
+          says who to take.
         </p>
       </div>
       <label className="field">
@@ -107,7 +107,11 @@ export function LaunchScreen({
       </div>
       <span className="muted small launch-detail">
         {leagueName === null ? (
-          leagueId === null ? "Restoring your last league." : `Restoring league ${leagueId}.`
+          leagueId === null ? (
+            "Restoring your last league."
+          ) : (
+            `Restoring league ${leagueId}.`
+          )
         ) : (
           <>
             Restoring <strong className="mid">{leagueName}</strong>
@@ -196,9 +200,7 @@ export function SidePanel({ view }: { view: DraftView }) {
   // what the backend computed `survival_next` against — the label has to name
   // the same pick, in the same round.pick form used everywhere else.
   const survivalPick =
-    (view.draft.is_my_pick
-      ? view.draft.my_next_picks[1]
-      : view.draft.my_next_picks[0]) ?? null;
+    (view.draft.is_my_pick ? view.draft.my_next_picks[1] : view.draft.my_next_picks[0]) ?? null;
 
   return (
     <aside className="rail">

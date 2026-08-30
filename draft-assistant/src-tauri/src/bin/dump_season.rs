@@ -6,6 +6,8 @@
 
 use draft_assistant_lib::engine::{AppConfig, Engine};
 use draft_assistant_lib::season::build_season_view;
+use draft_assistant_lib::season_engine::SeasonLoader;
+use draft_assistant_lib::season_history::HistoryStore;
 
 fn parse_args() -> (String, Option<String>, Option<String>) {
     let positional: Vec<String> = std::env::args().skip(1).collect();

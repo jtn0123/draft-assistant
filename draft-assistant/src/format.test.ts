@@ -6,7 +6,9 @@ import {
   posRank,
   scoringFormat,
   signed,
-  untilLabel, lockLabel } from "./format";
+  untilLabel,
+  lockLabel,
+} from "./format";
 
 describe("pickLabel", () => {
   it("renders round.pick with a padded pick number", () => {

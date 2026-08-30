@@ -10,7 +10,10 @@ const listen = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: (...a: unknown[]) => listen(...a) }));
 
-const draftView = { schema_version: "1.1", league: { league_id: "L1", name: "Test", season: "2026" } } as unknown as DraftView;
+const draftView = {
+  schema_version: "1.1",
+  league: { league_id: "L1", name: "Test", season: "2026" },
+} as unknown as DraftView;
 const seasonView = { schema_version: "1.0" } as unknown as SeasonView;
 
 async function load(shell: boolean) {
@@ -33,7 +36,9 @@ describe("schema validation", () => {
     const { validateDraftView, validateSeasonView } = await load(false);
     expect(validateDraftView(draftView)).toBe(draftView);
     expect(validateSeasonView(seasonView)).toBe(seasonView);
-    expect(() => validateDraftView({ schema_version: "0.9" } as DraftView)).toThrow(/expected schema 1\.1, received 0\.9/);
+    expect(() => validateDraftView({ schema_version: "0.9" } as DraftView)).toThrow(
+      /expected schema 1\.1, received 0\.9/,
+    );
     expect(() => validateSeasonView({} as SeasonView)).toThrow(/received missing/);
   });
 });
@@ -125,7 +130,10 @@ describe("tauri arm", () => {
 
 describe("browser arm", () => {
   const fixtureFetch = (body: unknown, ok = true) =>
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok, json: async () => body })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok, json: async () => body })),
+    );
 
   it("serves and caches the draft fixture", async () => {
     const { api } = await load(false);
@@ -157,7 +165,9 @@ describe("browser arm", () => {
 
   it("builds Sleeper CDN URLs for headshots and avatars", async () => {
     const { api } = await load(false);
-    expect(await api.headshot("4881")).toBe("https://sleepercdn.com/content/nfl/players/thumb/4881.jpg");
+    expect(await api.headshot("4881")).toBe(
+      "https://sleepercdn.com/content/nfl/players/thumb/4881.jpg",
+    );
     expect(await api.headshot("JAX")).toBeNull();
     expect(await api.avatar("abc123", false)).toBe("https://sleepercdn.com/avatars/thumbs/abc123");
     expect(await api.avatar("abc123", true)).toBe("https://sleepercdn.com/avatars/abc123");
@@ -173,7 +183,9 @@ describe("browser arm", () => {
     await expect(api.undoManualPick()).rejects.toThrow(/read-only/);
     await expect(api.startPolling()).rejects.toThrow(/read-only/);
     await expect(api.startSeasonPolling()).rejects.toThrow(/read-only/);
-    await expect(api.askClaude({ screen: "s", model: "m", effort: "e", messages: [] })).rejects.toThrow(/read-only/);
+    await expect(
+      api.askClaude({ screen: "s", model: "m", effort: "e", messages: [] }),
+    ).rejects.toThrow(/read-only/);
     expect(await api.setMyUsername("me")).toBe("me");
     expect(await api.exportState()).toMatch(/no export/);
     expect(await api.setApiKey("k")).toBe(false);

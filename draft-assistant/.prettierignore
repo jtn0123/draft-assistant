@@ -1,0 +1,6 @@
+coverage
+dist
+public/dev-fixture.json
+public/dev-season-fixture.json
+package-lock.json
+src-tauri/target

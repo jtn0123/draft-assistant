@@ -171,9 +171,7 @@ describe("App live workflow", () => {
     testState.api.getConfig.mockResolvedValue({
       my_user_id: null,
       active_league_id: initial.league.league_id,
-      leagues: [
-        { league_id: initial.league.league_id, name: "Dynasty Warriors", season: "2026" },
-      ],
+      leagues: [{ league_id: initial.league.league_id, name: "Dynasty Warriors", season: "2026" }],
     });
     testState.api.addLeague.mockRejectedValue(new Error("request timed out"));
 
@@ -385,4 +383,3 @@ function seasonFixture(): SeasonView {
     data_health: { fetched_at: 0, warnings: [] },
   };
 }
-

@@ -51,7 +51,17 @@ function SyncPill({ polling, health }: { polling: boolean; health: PollHealth | 
 
 function UndoIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M2.5 5.5h6.2a3 3 0 0 1 0 6H5" />
       <path d="M4.8 3.2 2.4 5.5l2.4 2.3" />
     </svg>
@@ -60,16 +70,39 @@ function UndoIcon() {
 
 function ChimeIcon({ on }: { on: boolean }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M2 5.4h2.1L7 3v8L4.1 8.6H2z" />
-      {on ? <path d="M9.4 5.1a2.6 2.6 0 0 1 0 3.8M11 3.6a4.8 4.8 0 0 1 0 6.8" /> : <path d="M9.6 5.4l3 3.2M12.6 5.4l-3 3.2" />}
+      {on ? (
+        <path d="M9.4 5.1a2.6 2.6 0 0 1 0 3.8M11 3.6a4.8 4.8 0 0 1 0 6.8" />
+      ) : (
+        <path d="M9.6 5.4l3 3.2M12.6 5.4l-3 3.2" />
+      )}
     </svg>
   );
 }
 
 function GearIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
       <circle cx="7" cy="7" r="2.1" />
       <path d="M7 1.4v1.4M7 11.2v1.4M1.4 7h1.4M11.2 7h1.4M3 3l1 1M10 10l1 1M11 3l-1 1M4 10l-1 1" />
     </svg>
@@ -165,7 +198,12 @@ export function Header({
 
         {screen === "draft" && (
           <>
-            <button type="button" className="btn-ghost btn-icon" onClick={onUndo} title="Undo last recorded pick">
+            <button
+              type="button"
+              className="btn-ghost btn-icon"
+              onClick={onUndo}
+              title="Undo last recorded pick"
+            >
               <UndoIcon />
               <span>Undo</span>
             </button>

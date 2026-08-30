@@ -113,9 +113,7 @@ export function GamesTab({
         <>
           <div className="tab-head tab-head-spaced">
             <span className="eyebrow">Next kickoff · {kickoffLabel(nextWindow.kickoff_ms)}</span>
-            <span className="muted small">
-              {nextWindow.my_starters} of your starters
-            </span>
+            <span className="muted small">{nextWindow.my_starters} of your starters</span>
           </div>
           <div className="game-list">
             {nextWindow.games.map((game) => (

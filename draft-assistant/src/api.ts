@@ -73,39 +73,31 @@ interface Api {
 }
 
 const tauriApi: Api = {
-  addLeague: (leagueId, force = false) =>
-    invokeView("add_league", { leagueId, force }),
+  addLeague: (leagueId, force = false) => invokeView("add_league", { leagueId, force }),
   setMyUsername: (username) => invoke<string>("set_my_username", { username }),
   getConfig: () => invoke<AppConfig>("get_config"),
   getState: () => invokeView("get_state"),
   refreshPicks: () => invokeView("refresh_picks"),
   refreshData: () => invokeView("refresh_data"),
-  recordManualPick: (playerId) =>
-    invokeView("record_manual_pick", { playerId }),
+  recordManualPick: (playerId) => invokeView("record_manual_pick", { playerId }),
   undoManualPick: () => invokeView("undo_manual_pick"),
   exportState: () => invoke<string>("export_state"),
   headshot: (playerId) => invoke<string | null>("headshot", { playerId }),
   avatar: (reference, full) => invoke<string | null>("avatar", { reference, full }),
-  startPolling: (intervalSecs = 3) =>
-    invoke<void>("start_polling", { intervalSecs }),
+  startPolling: (intervalSecs = 3) => invoke<void>("start_polling", { intervalSecs }),
   stopPolling: () => invoke<void>("stop_polling"),
   onDraftUpdated: (handler) =>
     listen<DraftView>("draft-updated", (event) => handler(validateDraftView(event.payload))),
-  onPollHealth: (handler) =>
-    listen<PollHealth>("poll-health", (event) => handler(event.payload)),
+  onPollHealth: (handler) => listen<PollHealth>("poll-health", (event) => handler(event.payload)),
   loadSeason: (force = false) => invokeSeason("load_season", { force }),
   getSeason: () => invokeSeason("get_season"),
   refreshSeason: () => invokeSeason("refresh_season"),
-  startSeasonPolling: (intervalSecs = 30) =>
-    invoke<void>("start_season_polling", { intervalSecs }),
+  startSeasonPolling: (intervalSecs = 30) => invoke<void>("start_season_polling", { intervalSecs }),
   stopSeasonPolling: () => invoke<void>("stop_season_polling"),
   onSeasonUpdated: (handler) =>
-    listen<SeasonView>("season-updated", (event) =>
-      handler(validateSeasonView(event.payload)),
-    ),
+    listen<SeasonView>("season-updated", (event) => handler(validateSeasonView(event.payload))),
   setApiKey: (key) => invoke<boolean>("set_api_key", { key }),
-  setChatProvider: (provider) =>
-    invoke<"api" | "claude_code">("set_chat_provider", { provider }),
+  setChatProvider: (provider) => invoke<"api" | "claude_code">("set_chat_provider", { provider }),
   chatSettings: () => invoke<ChatSettings>("chat_settings"),
   chatSuggestions: (screen) => invoke<string[]>("chat_suggestions", { screen }),
   askClaude: (args) => invoke<ChatReply>("ask_claude", args),
@@ -134,7 +126,10 @@ function browserApi(): Api {
   const fixture = async (): Promise<DraftView> => {
     if (cached === null) {
       const resp = await fetch("/dev-fixture.json");
-      if (!resp.ok) throw new Error("dev fixture missing (browser preview only works with public/dev-fixture.json)");
+      if (!resp.ok)
+        throw new Error(
+          "dev fixture missing (browser preview only works with public/dev-fixture.json)",
+        );
       cached = validateDraftView((await resp.json()) as DraftView);
     }
     return cached;

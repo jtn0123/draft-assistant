@@ -109,7 +109,13 @@ describe("TeamRoster", () => {
       <TeamRoster
         rows={[
           row({ player_id: "1", role: "Start", projected: 23.4, points: 0 }),
-          row({ player_id: "2", name: "Tony Pollard", role: "Bench", projected: 9.1, points: 41.5 }),
+          row({
+            player_id: "2",
+            name: "Tony Pollard",
+            role: "Bench",
+            projected: 9.1,
+            points: 41.5,
+          }),
         ]}
       />,
     );
@@ -146,9 +152,32 @@ function standing(overrides: Partial<StandingsRow>): StandingsRow {
 
 describe("Standings", () => {
   const rows = [
-    standing({ roster_id: 1, seed: 1, name: "AllDay21", wins: 2, projected_points: 130, playoff_odds: 0.9 }),
-    standing({ roster_id: 2, seed: 2, name: "Witzy", wins: 1, projected_points: 110, playoff_odds: 0.4, is_mine: true }),
-    standing({ roster_id: 3, seed: 3, name: "Bears", wins: 0, losses: 2, projected_points: 90, playoff_odds: 0.1 }),
+    standing({
+      roster_id: 1,
+      seed: 1,
+      name: "AllDay21",
+      wins: 2,
+      projected_points: 130,
+      playoff_odds: 0.9,
+    }),
+    standing({
+      roster_id: 2,
+      seed: 2,
+      name: "Witzy",
+      wins: 1,
+      projected_points: 110,
+      playoff_odds: 0.4,
+      is_mine: true,
+    }),
+    standing({
+      roster_id: 3,
+      seed: 3,
+      name: "Bears",
+      wins: 0,
+      losses: 2,
+      projected_points: 90,
+      playoff_odds: 0.1,
+    }),
   ];
 
   const order = (container: HTMLElement) =>
@@ -221,7 +250,15 @@ describe("LeagueTab trade ideas", () => {
 });
 
 function finish(overrides: Partial<LastSeasonRow>): LastSeasonRow {
-  return { place: 1, name: "AllDay21", record: "11–3", points: 1800, tag: null, is_mine: false, ...overrides };
+  return {
+    place: 1,
+    name: "AllDay21",
+    record: "11–3",
+    points: 1800,
+    tag: null,
+    is_mine: false,
+    ...overrides,
+  };
 }
 
 describe("LastSeason", () => {
@@ -299,7 +336,9 @@ describe("LeagueTab manager avatars", () => {
       />,
     );
     const rows = container.querySelectorAll(".activity-row");
-    expect(within(rows[0] as HTMLElement).getByText("Witzy benched Josh Downs")).toBeInTheDocument();
+    expect(
+      within(rows[0] as HTMLElement).getByText("Witzy benched Josh Downs"),
+    ).toBeInTheDocument();
     expect((rows[0] as HTMLElement).querySelector(".team-avatar")).not.toBeNull();
     expect((rows[1] as HTMLElement).querySelector(".team-avatar")).toBeNull();
   });

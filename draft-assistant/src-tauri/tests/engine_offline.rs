@@ -5,6 +5,7 @@
 //! error and the error-handling paths run exactly as they would in an outage.
 
 use draft_assistant_lib::engine::Engine;
+use draft_assistant_lib::season_engine::SeasonLoader;
 use draft_assistant_lib::sleeper::League;
 use std::sync::Once;
 

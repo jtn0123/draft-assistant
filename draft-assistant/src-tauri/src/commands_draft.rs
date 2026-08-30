@@ -2,19 +2,30 @@
 
 use crate::draft;
 use crate::engine::{self, AppConfig, StoredLeague};
+use crate::poll::{record_poll_outcome, DraftPollMemory};
 use crate::sleeper::Pick;
 use crate::state::{view_from, AppState};
 use crate::view::{self, DraftView};
 use std::sync::atomic::Ordering;
 use tauri::{Emitter, State};
 
-fn extract_id(input: &str) -> String {
+/// Pull a Sleeper id out of whatever the user pasted — a bare id, or a URL
+/// like `sleeper.com/draft/nfl/1234567890123456789`.
+///
+/// Anything that is not a run of digits is refused rather than passed through:
+/// the result is interpolated straight into a request path, and text that
+/// happens to contain `../` would otherwise walk out of `/v1/`.
+fn extract_id(input: &str) -> Result<String, String> {
     input
         .split(|c: char| !c.is_ascii_digit())
         .max_by_key(|run| run.len())
-        .filter(|run| run.len() >= 15)
-        .unwrap_or(input.trim())
-        .to_string()
+        .filter(|run| (15..=25).contains(&run.len()))
+        .map(str::to_string)
+        .ok_or_else(|| {
+            "that doesn't look like a Sleeper ID — paste the league or draft link, \
+             or the long number from it"
+                .to_string()
+        })
 }
 
 /// Add (or re-sync) a league by ID, make it active, and build its board.
@@ -26,7 +37,7 @@ pub async fn add_league(
     force: Option<bool>,
 ) -> Result<DraftView, String> {
     let force = force.unwrap_or(false);
-    let league_id = extract_id(&league_id);
+    let league_id = extract_id(&league_id)?;
     let new_loaded = state.engine.load_any(&league_id, force).await?;
     let mut config = state.config.lock().await;
     if !config.leagues.iter().any(|l| l.league_id == league_id) {
@@ -53,14 +64,9 @@ pub async fn set_my_username(
     state: State<'_, AppState>,
     username: String,
 ) -> Result<String, String> {
-    #[derive(serde::Deserialize)]
-    struct User {
-        user_id: String,
-    }
-    let url = format!("https://api.sleeper.app/v1/user/{username}");
-    let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-    let user: Option<User> = resp.json().await.map_err(|e| e.to_string())?;
-    let user = user.ok_or_else(|| format!("Sleeper user '{username}' not found"))?;
+    // Through the pooled client, so this call gets the same timeouts, retries
+    // and user-agent as every other Sleeper request.
+    let user = state.engine.client.user(&username).await?;
     let mut config = state.config.lock().await;
     config.my_user_id = Some(user.user_id.clone());
     state.engine.save_config(&config);
@@ -227,8 +233,7 @@ pub async fn start_polling(
     let poll_generation = state.poll_generation.clone();
 
     tauri::async_runtime::spawn(async move {
-        let mut last_count: Option<usize> = None;
-        let mut last_status = String::new();
+        let mut memory = DraftPollMemory::default();
         loop {
             if !polling.load(Ordering::SeqCst)
                 || poll_generation.load(Ordering::SeqCst) != generation
@@ -252,10 +257,7 @@ pub async fn start_polling(
                     if let Some(loaded) = loaded.as_mut() {
                         match picks {
                             Ok(picks) => {
-                                if last_count != Some(picks.len()) {
-                                    last_count = Some(picks.len());
-                                    changed = true;
-                                }
+                                changed |= memory.picks_changed(picks.len());
                                 loaded.api_picks = picks;
                                 if engine::reconcile_manual_picks(
                                     &loaded.api_picks,
@@ -272,23 +274,12 @@ pub async fn start_polling(
                         }
                         match draft {
                             Ok(draft) => {
-                                if draft.status != last_status {
-                                    last_status = draft.status.clone();
-                                    changed = true;
-                                }
+                                changed |= memory.status_changed(&draft.status);
                                 loaded.draft = draft;
                             }
                             Err(error) => errors.push(error),
                         }
-                        if errors.is_empty() {
-                            loaded.poll_last_success_at = Some(engine::now_secs());
-                            loaded.poll_consecutive_failures = 0;
-                            loaded.poll_last_error = None;
-                        } else {
-                            loaded.poll_consecutive_failures =
-                                loaded.poll_consecutive_failures.saturating_add(1);
-                            loaded.poll_last_error = Some(errors.join("; "));
-                        }
+                        record_poll_outcome(loaded, &errors);
                         health = Some(view::poll_health(loaded));
                     }
                 }
@@ -314,4 +305,51 @@ pub async fn start_polling(
 pub async fn stop_polling(state: State<'_, AppState>) -> Result<(), String> {
     state.polling.store(false, Ordering::SeqCst);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_id;
+
+    #[test]
+    fn a_bare_id_and_a_pasted_link_both_work() {
+        assert_eq!(
+            extract_id("1389710366300200960").unwrap(),
+            "1389710366300200960"
+        );
+        assert_eq!(
+            extract_id("https://sleeper.com/draft/nfl/1389710366300200960").unwrap(),
+            "1389710366300200960"
+        );
+        assert_eq!(
+            extract_id("  1389710366300200960  ").unwrap(),
+            "1389710366300200960"
+        );
+    }
+
+    #[test]
+    fn anything_without_an_id_in_it_is_refused_rather_than_sent_on() {
+        // These used to be passed through verbatim and interpolated straight
+        // into a request path.
+        for junk in [
+            "",
+            "   ",
+            "hello",
+            "../../projections/nfl/2025",
+            "12345",
+            "https://sleeper.com/leagues",
+        ] {
+            let result = extract_id(junk);
+            assert!(
+                result.is_err(),
+                "{junk:?} should be refused, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_error_tells_the_user_what_to_paste() {
+        let error = extract_id("nonsense").unwrap_err();
+        assert!(error.contains("Sleeper ID"), "unhelpful: {error}");
+    }
 }

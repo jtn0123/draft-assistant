@@ -98,28 +98,25 @@ fn age_secs(path: &PathBuf) -> Option<u64> {
     Some(now_secs().saturating_sub(at))
 }
 
+/// Sleeper's images, cached on disk.
+///
+/// A separate trait rather than more inherent methods on `Engine`: fetching
+/// player photos has nothing to do with loading a league, and stating the seam
+/// here means `Engine`'s real surface can be read off its trait list.
+pub trait ImageCache {
+    /// A player's photo as a data URL, or `None` if Sleeper has none.
+    #[allow(async_fn_in_trait)]
+    async fn headshot(&self, player_id: &str) -> Result<Option<String>, String>;
+    /// A manager's team picture as a data URL. `full` asks for the large copy.
+    #[allow(async_fn_in_trait)]
+    async fn avatar(&self, reference: &str, full: bool) -> Result<Option<String>, String>;
+    /// How many images are currently cached on disk.
+    fn headshot_count(&self) -> usize;
+}
+
 impl Engine {
     fn headshot_dir(&self) -> PathBuf {
         self.data_dir.join("headshots")
-    }
-
-    /// The player's photo as a data URL, or `None` when Sleeper has none.
-    /// Hits the network only when nothing usable is on disk.
-    pub async fn headshot(&self, player_id: &str) -> Result<Option<String>, String> {
-        if !is_player_id(player_id) {
-            return Ok(None);
-        }
-        self.cached_image(player_id, &format!("{CDN}/{player_id}.jpg"))
-            .await
-    }
-
-    /// A manager's team picture, cached the same way. `reference` is whatever
-    /// Sleeper handed us for the user; unrecognised shapes fetch nothing.
-    pub async fn avatar(&self, reference: &str, full: bool) -> Result<Option<String>, String> {
-        let Some((url, key)) = avatar_target(reference, full) else {
-            return Ok(None);
-        };
-        self.cached_image(&key, &url).await
     }
 
     async fn cached_image(&self, key: &str, url: &str) -> Result<Option<String>, String> {
@@ -171,9 +168,30 @@ impl Engine {
             }
         }
     }
+}
+
+impl ImageCache for Engine {
+    /// The player's photo as a data URL, or `None` when Sleeper has none.
+    /// Hits the network only when nothing usable is on disk.
+    async fn headshot(&self, player_id: &str) -> Result<Option<String>, String> {
+        if !is_player_id(player_id) {
+            return Ok(None);
+        }
+        self.cached_image(player_id, &format!("{CDN}/{player_id}.jpg"))
+            .await
+    }
+
+    /// A manager's team picture, cached the same way. `reference` is whatever
+    /// Sleeper handed us for the user; unrecognised shapes fetch nothing.
+    async fn avatar(&self, reference: &str, full: bool) -> Result<Option<String>, String> {
+        let Some((url, key)) = avatar_target(reference, full) else {
+            return Ok(None);
+        };
+        self.cached_image(&key, &url).await
+    }
 
     /// How many photos are on disk, for the Settings note.
-    pub fn headshot_count(&self) -> usize {
+    fn headshot_count(&self) -> usize {
         std::fs::read_dir(self.headshot_dir())
             .map(|d| {
                 d.filter_map(Result::ok)

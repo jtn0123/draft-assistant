@@ -49,8 +49,7 @@ export function applyTheme(theme: Theme): void {
 export function watchSystemTheme(onChange: (theme: Theme) => void): () => void {
   const query = media();
   if (query === null) return () => undefined;
-  const handler = (event: MediaQueryListEvent) =>
-    onChange(event.matches ? "dark" : "light");
+  const handler = (event: MediaQueryListEvent) => onChange(event.matches ? "dark" : "light");
   query.addEventListener("change", handler);
   return () => query.removeEventListener("change", handler);
 }

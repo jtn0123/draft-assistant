@@ -180,9 +180,7 @@ describe("LineupCompare", () => {
     const user = userEvent.setup();
     render(<LineupCompare matchup={matchup} winOdds={0.62} />);
     await user.click(screen.getByRole("button", { name: "Scoreboard" }));
-    const heads = document.querySelectorAll(
-      ".scoreboard .headshot, .scoreboard .team-logo",
-    );
+    const heads = document.querySelectorAll(".scoreboard .headshot, .scoreboard .team-logo");
     expect(heads).toHaveLength(2 * matchup.rows.length);
   });
 });
@@ -222,8 +220,6 @@ describe("Waivers", () => {
 
   it("explains an empty list instead of showing a blank panel", () => {
     render(<Waivers waivers={[]} budgetLeft={38} budgetTotal={100} />);
-    expect(
-      screen.getByText(/No free agent would crack your starting lineup/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/No free agent would crack your starting lineup/)).toBeInTheDocument();
   });
 });

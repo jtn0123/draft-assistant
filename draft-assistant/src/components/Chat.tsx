@@ -49,13 +49,7 @@ const THINKING_NOTE: Record<string, string> = {
   Max: "Simulating the rest of the round…",
 };
 
-function ApiKeyPrompt({
-  hint,
-  onSaved,
-}: {
-  hint: string | null;
-  onSaved: () => void;
-}) {
+function ApiKeyPrompt({ hint, onSaved }: { hint: string | null; onSaved: () => void }) {
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,12 +89,7 @@ function ApiKeyPrompt({
         }}
         aria-label="Anthropic API key"
       />
-      <button
-        type="button"
-        className="btn-primary"
-        disabled={!key.trim() || busy}
-        onClick={save}
-      >
+      <button type="button" className="btn-primary" disabled={!key.trim() || busy} onClick={save}>
         {busy ? "Saving…" : "Save key"}
       </button>
       {error && <div className="error">{error}</div>}
@@ -346,7 +335,10 @@ export function Chat({
 
       <div className={compact ? "chat-thread is-compact" : "chat-thread"} ref={threadRef}>
         {showKeyForm ? (
-          <ApiKeyPrompt hint={settings?.key_hint ?? null} onSaved={() => setSettingsToken((n) => n + 1)} />
+          <ApiKeyPrompt
+            hint={settings?.key_hint ?? null}
+            onSaved={() => setSettingsToken((n) => n + 1)}
+          />
         ) : entries.length === 0 ? (
           <div className="chat-empty">
             <span className="chat-empty-title">New chat</span>

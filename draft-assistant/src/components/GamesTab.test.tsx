@@ -16,8 +16,24 @@ function game(): LiveGame {
     flag: null,
     channel: "Netflix",
     chips: [
-      { player_id: "a", name: "McCaffrey", slot: "RB", team: "SF", points: 0, is_mine: true, state: "pre" },
-      { player_id: "b", name: "Nacua", slot: "WR", team: "LAR", points: 0, is_mine: false, state: "pre" },
+      {
+        player_id: "a",
+        name: "McCaffrey",
+        slot: "RB",
+        team: "SF",
+        points: 0,
+        is_mine: true,
+        state: "pre",
+      },
+      {
+        player_id: "b",
+        name: "Nacua",
+        slot: "WR",
+        team: "LAR",
+        points: 0,
+        is_mine: false,
+        state: "pre",
+      },
     ],
   };
 }
@@ -35,7 +51,9 @@ function live(byeTeams: string[]): LiveSection {
 
 describe("GamesTab", () => {
   it("says which network is showing each game, until it is over", () => {
-    render(<GamesTab live={live([])} myProjected={120} oppProjected={110} opponentName="punt_god" />);
+    render(
+      <GamesTab live={live([])} myProjected={120} oppProjected={110} opponentName="punt_god" />,
+    );
     // Once in the window list, once on the this-week row.
     expect(screen.getAllByText("Netflix").length).toBeGreaterThan(0);
   });
@@ -43,13 +61,20 @@ describe("GamesTab", () => {
   it("drops the network once the game is final", () => {
     const section = live([]);
     for (const g of [...section.games, ...section.windows[0].games]) g.state = "final";
-    render(<GamesTab live={section} myProjected={120} oppProjected={110} opponentName="punt_god" />);
+    render(
+      <GamesTab live={section} myProjected={120} oppProjected={110} opponentName="punt_god" />,
+    );
     expect(screen.queryByText("Netflix")).not.toBeInTheDocument();
   });
 
   it("names the opponent on the roster line and lists the byes in the footer", () => {
     render(
-      <GamesTab live={live(["DEN", "LAC"])} myProjected={120} oppProjected={110} opponentName="punt_god" />,
+      <GamesTab
+        live={live(["DEN", "LAC"])}
+        myProjected={120}
+        oppProjected={110}
+        opponentName="punt_god"
+      />,
     );
     expect(screen.getByText(/You: RB McCaffrey.*punt_god: WR Nacua/)).toBeInTheDocument();
     expect(

@@ -41,9 +41,13 @@ beforeEach(() => {
 describe("Chat copy", () => {
   it("names the model and effort in the context line and tips each model", async () => {
     mocks.chatSettings.mockResolvedValue(settings({}));
-    render(<Chat screen="draft" contextNote="Sees this draft · pick 3.04" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" contextNote="Sees this draft · pick 3.04" onClose={() => undefined} />,
+    );
     await waitFor(() => expect(screen.getByLabelText("Anthropic API key")).toBeInTheDocument());
-    expect(screen.getByText(/Sees this draft · pick 3\.04 · Opus 5 · high effort/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Sees this draft · pick 3\.04 · Opus 5 · high effort/),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Opus 5" })).toHaveAttribute("title");
     expect(screen.getByRole("button", { name: "Fable 5" })).toHaveAttribute("title");
   });
@@ -57,7 +61,9 @@ describe("Chat copy", () => {
 
 describe("Chat routing", () => {
   it("asks for a key only when the API route has none", async () => {
-    mocks.chatSettings.mockResolvedValue(settings({ cli_available: true, provider: "claude_code" }));
+    mocks.chatSettings.mockResolvedValue(
+      settings({ cli_available: true, provider: "claude_code" }),
+    );
     render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
     await waitFor(() => expect(screen.getByRole("group", { name: "Route" })).toBeInTheDocument());
     expect(screen.queryByLabelText("Anthropic API key")).not.toBeInTheDocument();
@@ -225,9 +231,7 @@ describe("API key form", () => {
 
     await userEvent.type(field, "sk-ant-test{Enter}");
     expect(mocks.setApiKey).toHaveBeenCalledWith("sk-ant-test");
-    await waitFor(() =>
-      expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled());
   });
 
   it("surfaces a save failure without losing the form", async () => {

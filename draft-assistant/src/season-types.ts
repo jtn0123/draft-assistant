@@ -259,12 +259,7 @@ export interface SeasonView {
 }
 
 /** Which side panel tab the season screen is showing. */
-export type SeasonTab =
-  | "Standings"
-  | "Games"
-  | "My team"
-  | "Trends" | "League"
-  | "Last season";
+export type SeasonTab = "Standings" | "Games" | "My team" | "Trends" | "League" | "Last season";
 
 export const SEASON_TABS: SeasonTab[] = [
   "Standings",

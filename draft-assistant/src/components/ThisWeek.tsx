@@ -44,8 +44,8 @@ export function CallsToMake({
     <div className="calls">
       <div className="calls-head">
         <span className="calls-title">
-          {calls.length} call{calls.length === 1 ? "" : "s"} to make — {fmt(pointsOnTable, 1)} points
-          on the table
+          {calls.length} call{calls.length === 1 ? "" : "s"} to make — {fmt(pointsOnTable, 1)}{" "}
+          points on the table
         </span>
         <button
           type="button"
@@ -70,7 +70,11 @@ export function CallsToMake({
             >
               <span className="eyebrow">{call.slot}</span>
               <span className="call-players">
-                <PlayerName name={call.player_in} team={call.player_in_team} playerId={call.player_in_id} />
+                <PlayerName
+                  name={call.player_in}
+                  team={call.player_in_team}
+                  playerId={call.player_in_id}
+                />
                 <span className="muted small">over</span>
                 <span className="mid ellipsis">{call.player_out}</span>
               </span>
@@ -192,13 +196,21 @@ export function LineupCompare({
             <div className="lineup-row" key={`${row.slot}-${i}`}>
               <span className="eyebrow">{row.slot}</span>
               <span className="lineup-player">
-                <PlayerName name={row.my_name || "—"} team={row.my_team} playerId={row.my_player_id} />
+                <PlayerName
+                  name={row.my_name || "—"}
+                  team={row.my_team}
+                  playerId={row.my_player_id}
+                />
               </span>
               <span className="right strong">{fmt(row.my_points, 1)}</span>
               <Lean margin={row.margin} />
               <span className="mid strong">{fmt(row.opp_points, 1)}</span>
               <span className="lineup-player mid">
-                <PlayerName name={row.opp_name || "—"} team={row.opp_team} playerId={row.opp_player_id} />
+                <PlayerName
+                  name={row.opp_name || "—"}
+                  team={row.opp_team}
+                  playerId={row.opp_player_id}
+                />
               </span>
             </div>
           ))}
@@ -237,9 +249,7 @@ export function LineupCompare({
  * so a plus is a slot I am winning and a minus is one I am losing. */
 function Lean({ margin }: { margin: number }) {
   if (Math.abs(margin) < 0.05) return <span className="lean is-even">—</span>;
-  return (
-    <span className={margin > 0 ? "lean is-mine" : "lean is-theirs"}>{signed(margin)}</span>
-  );
+  return <span className={margin > 0 ? "lean is-mine" : "lean is-theirs"}>{signed(margin)}</span>;
 }
 
 /** "$38 of $100 left" — or just what's left when the total is unknown. */
@@ -268,9 +278,7 @@ export function Waivers({
     <section className="waivers">
       <PanelHead title="Worth a claim" note={budgetNote(budgetLeft, budgetTotal)} />
       {waivers.length === 0 ? (
-        <Empty>
-          No free agent would crack your starting lineup — nothing worth spending on.
-        </Empty>
+        <Empty>No free agent would crack your starting lineup — nothing worth spending on.</Empty>
       ) : (
         <div className="waiver-list">
           {waivers.map((w) => (

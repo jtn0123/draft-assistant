@@ -30,6 +30,15 @@ pub(crate) fn fresh_enough<T>(hit: Option<(u64, T)>, ttl: u64) -> Option<(u64, T
     (now_secs().saturating_sub(fetched_at) <= ttl).then_some((fetched_at, data))
 }
 
+/// Strip anything that could steer a path out of the cache directory. Sleeper
+/// ids are alphanumeric, so this is lossless for real input and refuses `..`
+/// and separators outright.
+pub(crate) fn safe_key(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect()
+}
+
 /// Wrap a payload in its envelope and serialize it.
 pub(crate) fn envelope_json<T: Serialize>(fetched_at: u64, data: &T) -> Result<String, String> {
     serde_json::to_string(&Cached { fetched_at, data }).map_err(|e| format!("serialize: {e}"))
@@ -94,6 +103,15 @@ mod tests {
         std::fs::write(&broken, "{not json").unwrap();
         assert!(read_cached::<Vec<u32>>(broken).is_none());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn safe_key_refuses_anything_that_could_leave_the_cache_directory() {
+        assert_eq!(safe_key("1389710366300200960"), "1389710366300200960");
+        assert_eq!(safe_key("draft-1_a"), "draft-1_a");
+        assert_eq!(safe_key("../../etc/passwd"), "etcpasswd");
+        assert_eq!(safe_key("a/b\\c"), "abc");
+        assert_eq!(safe_key(""), "");
     }
 
     #[test]

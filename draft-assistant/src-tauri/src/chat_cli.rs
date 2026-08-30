@@ -28,10 +28,33 @@ pub fn find_cli() -> Option<PathBuf> {
     }
     candidates.push(PathBuf::from("/opt/homebrew/bin/claude"));
     candidates.push(PathBuf::from("/usr/local/bin/claude"));
-    if let Some(path) = std::env::var_os("PATH") {
-        candidates.extend(std::env::split_paths(&path).map(|dir| dir.join("claude")));
+    if let Some(found) = candidates.iter().find(|p| p.is_file()) {
+        return Some(found.clone());
     }
-    candidates.into_iter().find(|p| p.is_file())
+    // Only now fall back to PATH, and refuse any entry in a directory the
+    // whole machine can write to — that is how a planted `claude` would get
+    // executed with this app's privileges.
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .filter(|dir| !is_world_writable(dir))
+        .map(|dir| dir.join("claude"))
+        .find(|p| p.is_file())
+}
+
+/// True when anyone on the machine can write to `dir`. The sticky bit (as on
+/// `/tmp`) does not make it safe: a file there is still someone else's to
+/// create first.
+#[cfg(unix)]
+fn is_world_writable(dir: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(dir)
+        .map(|meta| meta.mode() & 0o002 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_world_writable(_dir: &Path) -> bool {
+    false
 }
 
 /// One prompt from a whole thread. The CLI takes a single prompt per run, so
@@ -194,6 +217,18 @@ pub async fn ask(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_world_writable_directory_is_never_trusted_for_the_cli() {
+        use super::is_world_writable;
+        // /tmp is the canonical world-writable directory on macOS and Linux.
+        assert!(is_world_writable(std::path::Path::new("/tmp")));
+        assert!(!is_world_writable(std::path::Path::new("/usr/bin")));
+        // A path that does not exist is not a reason to bail out.
+        assert!(!is_world_writable(std::path::Path::new(
+            "/nonexistent-dir-for-test"
+        )));
+    }
+
     use super::*;
 
     fn msg(role: &str, content: &str) -> ChatMessage {

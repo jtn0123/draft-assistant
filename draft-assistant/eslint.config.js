@@ -21,10 +21,7 @@ export default tseslint.config(
       "react-refresh": reactRefresh,
     },
     rules: {
-      "react-refresh/only-export-components": [
-        "error",
-        { allowConstantExport: true },
-      ],
+      "react-refresh/only-export-components": ["error", { allowConstantExport: true }],
     },
   },
 );

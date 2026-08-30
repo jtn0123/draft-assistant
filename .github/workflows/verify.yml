@@ -24,15 +24,15 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: draft-assistant/.nvmrc
           cache: npm
           cache-dependency-path: draft-assistant/package-lock.json
 
+      # Reads draft-assistant/src-tauri/rust-toolchain.toml, so CI and a local
+      # build cannot disagree about which clippy is running.
       - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
-
-      - name: Use stable Rust
-        run: rustup override set stable
+        run: rustup show active-toolchain || rustup toolchain install
+        working-directory: draft-assistant/src-tauri
 
       # Without this the whole Tauri dependency graph is rebuilt on every run,
       # on a runner billed at ten times the Linux rate.
@@ -46,3 +46,33 @@ jobs:
 
       - name: Verify project
         run: npm run verify
+
+      # Coverage is a floor, not a target: this fails only if it drops.
+      - name: Rust coverage
+        run: |
+          cargo install cargo-llvm-cov --locked || true
+          cargo llvm-cov --manifest-path src-tauri/Cargo.toml --summary-only --fail-under-lines 68
+
+  audit:
+    name: Dependency advisories
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: draft-assistant
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: draft-assistant/.nvmrc
+
+      - name: npm advisories
+        run: npm audit --audit-level=high
+
+      - name: Cargo advisories
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

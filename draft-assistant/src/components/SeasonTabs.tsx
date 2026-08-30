@@ -7,7 +7,9 @@ import type {
   LastSeasonRow,
   RosterRow,
   StandingsRow,
-  TradeIdea, TradeDone } from "../season-types";
+  TradeIdea,
+  TradeDone,
+} from "../season-types";
 import { dateLabel, fmt, ordinal, pct, signed } from "../format";
 import { Headshot, PlayerName, PosBadge, SortHead, TeamAvatar, Empty } from "./bits";
 
@@ -24,7 +26,13 @@ const STANDINGS_COLUMNS: {
 }[] = [
   { key: "seed", label: "#", right: true, initial: "asc", value: (r) => r.seed },
   { key: "name", label: "Team", right: false, initial: "asc", value: (r) => r.name },
-  { key: "rec", label: "W–L", right: true, initial: "desc", value: (r) => r.wins * 1000 - r.losses },
+  {
+    key: "rec",
+    label: "W–L",
+    right: true,
+    initial: "desc",
+    value: (r) => r.wins * 1000 - r.losses,
+  },
   { key: "proj", label: "Proj", right: true, initial: "desc", value: (r) => r.projected_points },
   { key: "post", label: "Post", right: true, initial: "desc", value: (r) => r.playoff_odds },
 ];
@@ -47,7 +55,8 @@ export function Standings({
       if (column === undefined) return 0;
       const x = column.value(a);
       const y = column.value(b);
-      const cmp = typeof x === "string" && typeof y === "string" ? x.localeCompare(y) : Number(x) - Number(y);
+      const cmp =
+        typeof x === "string" && typeof y === "string" ? x.localeCompare(y) : Number(x) - Number(y);
       return cmp * sign;
     });
   }, [rows, key, direction]);
@@ -93,8 +102,8 @@ export function Standings({
         </div>
       ))}
       <span className="muted small tab-foot">
-        Proj: best lineup each week from this roster, byes honoured. Post: simulated on the
-        league schedule.
+        Proj: best lineup each week from this roster, byes honoured. Post: simulated on the league
+        schedule.
       </span>
     </div>
   );
@@ -132,8 +141,8 @@ export function TeamRoster({ rows }: { rows: RosterRow[] }) {
         </div>
       ))}
       <span className="muted small tab-foot">
-        Wk is this week's projection; Season is points to date. Bench points are dimmed; bye
-        weeks show instead of a projection.
+        Wk is this week's projection; Season is points to date. Bench points are dimmed; bye weeks
+        show instead of a projection.
       </span>
     </div>
   );
@@ -141,13 +150,7 @@ export function TeamRoster({ rows }: { rows: RosterRow[] }) {
 
 // ---------- league ----------
 
-function RecentTrades({
-  deals,
-  avatars,
-}: {
-  deals: TradeDone[];
-  avatars: Record<string, string>;
-}) {
+function RecentTrades({ deals, avatars }: { deals: TradeDone[]; avatars: Record<string, string> }) {
   const waiting = deals.filter((d) => d.pending).length;
   const note =
     deals.length === 0
@@ -247,7 +250,9 @@ export function LeagueTab({
                 </span>
               )}
             </span>
-            <span className="muted small activity-time">{dateLabel(item.created / 1000, true)}</span>
+            <span className="muted small activity-time">
+              {dateLabel(item.created / 1000, true)}
+            </span>
           </div>
         ))
       )}
@@ -266,11 +271,16 @@ export function LastSeason({ rows, season }: { rows: LastSeasonRow[]; season: st
   return (
     <div className="tab-body">
       <div className="tab-head">
-        <span className="eyebrow">{Number.isNaN(previous) ? "Last season" : `${previous} final`}</span>
+        <span className="eyebrow">
+          {Number.isNaN(previous) ? "Last season" : `${previous} final`}
+        </span>
         {mine && <span className="muted small">you finished {ordinal(mine.place)}</span>}
       </div>
       {rows.map((row) => (
-        <div className={row.is_mine ? "last-row is-mine" : "last-row"} key={`${row.place}-${row.name}`}>
+        <div
+          className={row.is_mine ? "last-row is-mine" : "last-row"}
+          key={`${row.place}-${row.name}`}
+        >
           <span className="muted right">{row.place}</span>
           <span className="ellipsis">{row.name}</span>
           <span className="right mid">{row.record}</span>
@@ -287,4 +297,3 @@ function tagClass(tag: string | null): string {
   if (tag === "Most pts") return "right last-tag is-most";
   return "right last-tag";
 }
-
