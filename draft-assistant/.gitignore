@@ -36,3 +36,6 @@ src-tauri/fuzz/target/
 
 # Vitest coverage output (bun run coverage:frontend)
 coverage/
+
+# Written by src-tauri/build.rs when --features wdio is on (desktop e2e only).
+src-tauri/capabilities/wdio.json

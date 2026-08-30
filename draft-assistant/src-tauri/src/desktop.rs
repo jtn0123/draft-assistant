@@ -195,8 +195,18 @@ async fn stop_polling(state: State<'_, AppState>) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    // Only in a build made for the desktop e2e suite (`--features wdio`).
+    #[cfg(feature = "wdio")]
+    {
+        builder = builder
+            .plugin(tauri_plugin_wdio::init())
+            // The WebDriver server itself: macOS has no external driver for
+            // a WKWebView, so the app hosts one.
+            .plugin(tauri_plugin_wdio_webdriver::init());
+    }
+    builder
         .setup(|app| {
             // The log goes where macOS keeps logs, not into the data dir, so
             // it can be found (and sent on) without hunting through caches.
@@ -204,7 +214,13 @@ pub fn run() {
                 Ok(dir) => log::init(&dir),
                 Err(error) => eprintln!("no log dir: {error}"),
             }
-            let data_dir = app.path().app_data_dir().expect("no app data dir");
+            // The e2e suite (and anyone debugging) points the app at a
+            // scratch directory instead of the real one, the same override
+            // `dump_state` has always honoured.
+            let data_dir = match std::env::var("DRAFT_ASSISTANT_DATA_DIR") {
+                Ok(dir) if !dir.is_empty() => std::path::PathBuf::from(dir),
+                _ => app.path().app_data_dir().expect("no app data dir"),
+            };
             log::info(format!(
                 "starting draft-assistant {} (data {})",
                 env!("CARGO_PKG_VERSION"),
