@@ -54,6 +54,8 @@ export interface DraftStatus {
   my_next_picks: number[];
   total_picks_made: number;
   manual_picks_active: boolean;
+  /** Epoch ms when the current pick's timer expires; null when no clock runs. */
+  clock_deadline_ms: number | null;
 }
 
 export interface TierAlert {
@@ -85,6 +87,14 @@ export interface RecentPick {
   player_id: string;
   name: string;
   position: string;
+  team: string | null;
+}
+
+/** A position taken `count` times in the last `window` picks. */
+export interface PositionRun {
+  position: string;
+  count: number;
+  window: number;
 }
 
 export interface LeagueSummary {
@@ -123,7 +133,7 @@ export interface DraftView {
   rosters: TeamRoster[];
   available: AvailablePlayer[];
   tier_alerts: TierAlert[];
-  position_run: string | null;
+  position_run: PositionRun | null;
   recommendations: Recommendation[];
   recent_picks: RecentPick[];
   replacement_baselines: Record<string, number>;

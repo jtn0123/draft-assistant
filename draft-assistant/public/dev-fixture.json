@@ -23,7 +23,13 @@
       "BN",
       "BN"
     ],
-    "draftable_positions": ["QB", "RB", "WR", "TE", "DEF"],
+    "draftable_positions": [
+      "QB",
+      "RB",
+      "WR",
+      "TE",
+      "DEF"
+    ],
     "scoring_settings": {
       "pass_td": 6.0,
       "bonus_pass_yd_300": 3.0,
@@ -110,7 +116,8 @@
       198
     ],
     "total_picks_made": 26,
-    "manual_picks_active": true
+    "manual_picks_active": true,
+    "clock_deadline_ms": null
   },
   "my_roster": {
     "slot": 2,
@@ -3777,7 +3784,7 @@
       "team": "LV",
       "bye_week": 13,
       "points": 97.5000014028939,
-      "bonus_points": 5.46077135177292e-7,
+      "bonus_points": 5.46077135177292e-07,
       "vorp": -59.443930099261195,
       "tier": 8,
       "position_rank": 45,
@@ -3879,7 +3886,7 @@
       "team": "MIA",
       "bye_week": 6,
       "points": 94.80004245733107,
-      "bonus_points": 0.000041819561377831604,
+      "bonus_points": 4.1819561377831604e-05,
       "vorp": -63.05925329035992,
       "tier": 4,
       "position_rank": 79,
@@ -4865,7 +4872,7 @@
       "team": "KC",
       "bye_week": 5,
       "points": 62.600057826076934,
-      "bonus_points": 0.00005737010140183241,
+      "bonus_points": 5.737010140183241e-05,
       "vorp": -95.25923792161406,
       "tier": 4,
       "position_rank": 109,
@@ -7483,7 +7490,8 @@
       "slot_name": "adaigle",
       "player_id": "10229",
       "name": "Rashee Rice",
-      "position": "WR"
+      "position": "WR",
+      "team": "KC"
     },
     {
       "pick_no": 25,
@@ -7492,7 +7500,8 @@
       "slot_name": "djenks225",
       "player_id": "7569",
       "name": "Nico Collins",
-      "position": "WR"
+      "position": "WR",
+      "team": "HOU"
     },
     {
       "pick_no": 24,
@@ -7501,7 +7510,8 @@
       "slot_name": "ChrisWitz",
       "player_id": "8137",
       "name": "George Pickens",
-      "position": "WR"
+      "position": "WR",
+      "team": "DAL"
     },
     {
       "pick_no": 23,
@@ -7510,7 +7520,8 @@
       "slot_name": "MeatballMike09",
       "player_id": "11604",
       "name": "Brock Bowers",
-      "position": "TE"
+      "position": "TE",
+      "team": "LV"
     },
     {
       "pick_no": 22,
@@ -7519,7 +7530,8 @@
       "slot_name": "ocrevo",
       "player_id": "4984",
       "name": "Josh Allen",
-      "position": "QB"
+      "position": "QB",
+      "team": "BUF"
     },
     {
       "pick_no": 21,
@@ -7528,7 +7540,8 @@
       "slot_name": "fisher23",
       "player_id": "8130",
       "name": "Trey McBride",
-      "position": "TE"
+      "position": "TE",
+      "team": "ARI"
     },
     {
       "pick_no": 20,
@@ -7537,7 +7550,8 @@
       "slot_name": "Clemmy20",
       "player_id": "3198",
       "name": "Derrick Henry",
-      "position": "RB"
+      "position": "RB",
+      "team": "BAL"
     },
     {
       "pick_no": 19,
@@ -7546,7 +7560,8 @@
       "slot_name": "tbonsey",
       "player_id": "8151",
       "name": "Kenneth Walker",
-      "position": "RB"
+      "position": "RB",
+      "team": "KC"
     },
     {
       "pick_no": 18,
@@ -7555,7 +7570,8 @@
       "slot_name": "skoLinNH",
       "player_id": "5859",
       "name": "A.J. Brown",
-      "position": "WR"
+      "position": "WR",
+      "team": "NE"
     },
     {
       "pick_no": 17,
@@ -7564,7 +7580,8 @@
       "slot_name": "AllDay21",
       "player_id": "8112",
       "name": "Drake London",
-      "position": "WR"
+      "position": "WR",
+      "team": "ATL"
     }
   ],
   "replacement_baselines": {

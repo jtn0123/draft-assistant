@@ -1,9 +1,13 @@
+// Draft-screen panels: the three recommendation cards and the left rail
+// (roster, at-risk players, tier alerts, recent picks).
+
 import { useState } from "react";
 import { api } from "../api";
 import type { DraftView, Recommendation } from "../types";
-import { fmt, pct } from "../format";
+import { fmt, pct, pickLabel, posRank } from "../format";
+import { PlayerName, PosBadge, PanelHead, Empty } from "./bits";
 
-// ---------- setup screen ----------
+// ---------- setup ----------
 
 export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
   const [username, setUsername] = useState("");
@@ -18,9 +22,8 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
         setBusy("Looking up your Sleeper account…");
         await api.setMyUsername(username.trim());
       }
-      setBusy("Pulling league, players, and projections… (first load takes ~10 seconds)");
-      const view = await api.addLeague(leagueId.trim());
-      onReady(view);
+      setBusy("Pulling league, players, and projections…");
+      onReady(await api.addLeague(leagueId.trim()));
     } catch (e) {
       setError(String(e));
       setBusy(null);
@@ -28,172 +31,272 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
   };
 
   return (
-    <div className="setup">
-      <h1>Draft Assistant</h1>
-      <p className="muted">
-        Read-only Sleeper second screen. You draft in Sleeper; this tracks every
-        pick and tells you who to take.
-      </p>
-      <label>
+    <div className="card-screen">
+      <div className="card-screen-intro">
+        <h1>Draft Assistant</h1>
+        <p className="mid">
+          A read-only second screen for Sleeper. You draft in Sleeper; this tracks every
+          pick and says who to take.
+        </p>
+      </div>
+      <label className="field">
         Sleeper username
         <input
+          className="text-input"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          placeholder="e.g. mcsleeper26"
+          placeholder="mcsleeper26"
           autoFocus
         />
       </label>
-      <label>
+      <label className="field">
         League ID
         <input
+          className="text-input"
           value={leagueId}
           onChange={(e) => setLeagueId(e.target.value)}
-          placeholder="e.g. 1389710366300200960"
+          placeholder="1389710366300200960"
         />
       </label>
-      <button disabled={!leagueId.trim() || busy !== null} onClick={submit}>
+      <button
+        type="button"
+        className="btn-primary card-screen-submit"
+        disabled={!leagueId.trim() || busy !== null}
+        onClick={submit}
+      >
         {busy ?? "Load league"}
       </button>
+      <span className="muted small">
+        First load pulls league, players and projections — about 10 seconds.
+      </span>
       {error && <div className="error">{error}</div>}
     </div>
   );
 }
 
-// ---------- clock banner ----------
+// ---------- launch / reconnect ----------
 
-export function ClockBanner({ view }: { view: DraftView }) {
-  const d = view.draft;
-  const preDraft = d.status === "pre_draft" && d.total_picks_made === 0;
-  const complete = d.status === "complete";
-  const cls = d.is_my_pick ? "clock mine" : "clock";
+export function LaunchScreen({
+  leagueName,
+  leagueId,
+  attempt,
+  maxAttempts,
+  lastError,
+  onRetry,
+  onDifferentLeague,
+}: {
+  leagueName: string | null;
+  leagueId: string | null;
+  attempt: number;
+  maxAttempts: number;
+  lastError: string | null;
+  onRetry: () => void;
+  onDifferentLeague: () => void;
+}) {
+  const reconnecting = lastError === null;
   return (
-    <div className={cls}>
-      <div className="clock-cell">
-        <span className="clock-label">Round</span>
-        <span className="clock-big">{d.current_round}</span>
-      </div>
-      <div className="clock-cell">
-        <span className="clock-label">Pick</span>
-        <span className="clock-big">{d.current_pick}</span>
-      </div>
-      <div className="clock-main">
-        {complete ? (
-          <span className="clock-status">Draft complete</span>
-        ) : preDraft ? (
-          <span className="clock-status">Draft has not started</span>
-        ) : d.is_my_pick ? (
-          <span className="clock-status you">YOU ARE ON THE CLOCK</span>
-        ) : (
-          <>
-            <span className="clock-status">
-              On the clock: {d.on_clock_name ?? `Slot ${d.on_clock_slot}`}
-            </span>
-            {d.picks_until_mine !== null && (
-              <span className="muted">
-                {d.picks_until_mine} pick{d.picks_until_mine === 1 ? "" : "s"} until you
-              </span>
-            )}
-          </>
-        )}
-      </div>
-      <div className="clock-cell next-picks">
-        <span className="clock-label">Your picks</span>
-        <span className="next-pick-list">
-          {d.my_next_picks.slice(0, 4).join(" · ") || "–"}
+    <div className="card-screen">
+      <h1>Draft Assistant</h1>
+      <div className="launch-status">
+        <span className="launch-dot" />
+        <span>
+          {reconnecting
+            ? "Connecting to Sleeper"
+            : `Reconnecting to Sleeper — attempt ${attempt} of ${maxAttempts}`}
         </span>
       </div>
+      <span className="muted small launch-detail">
+        {leagueName === null ? (
+          leagueId === null ? "Restoring your last league." : `Restoring league ${leagueId}.`
+        ) : (
+          <>
+            Restoring <strong className="mid">{leagueName}</strong>
+            {leagueId !== null && ` (${leagueId})`}.
+          </>
+        )}
+        {lastError !== null && ` Last error: ${lastError}`}
+      </span>
+      {!reconnecting && (
+        <div className="launch-actions">
+          <button type="button" className="btn-primary" onClick={onRetry}>
+            Try again
+          </button>
+          <button type="button" className="btn-ghost" onClick={onDifferentLeague}>
+            Enter a different league
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 // ---------- recommendation cards ----------
 
-export function RecCard({ rec, onDraft }: { rec: Recommendation; onDraft: (id: string, name: string) => void }) {
+/** The design labels the three modes Safe / Balanced / Upside. */
+const MODE_LABEL: Record<string, string> = {
+  safe: "Safe",
+  balanced: "Balanced",
+  upside: "Upside",
+};
+
+export function RecCard({
+  rec,
+  featured,
+  positionRank,
+  onDraft,
+}: {
+  rec: Recommendation;
+  featured: boolean;
+  positionRank: number | null;
+  onDraft: (id: string, name: string) => void;
+}) {
   return (
-    <div className={`rec ${rec.mode}`}>
+    <div className={featured ? "rec is-featured" : "rec"}>
       <div className="rec-head">
-        <span className="rec-mode">{rec.mode}</span>
-        <span className={`pos-badge pos-${rec.position}`}>{rec.position}</span>
+        <span className={featured ? "rec-mode is-featured" : "rec-mode"}>
+          {MODE_LABEL[rec.mode] ?? rec.mode}
+        </span>
+        <span className={`pos-badge pos-${rec.position}`}>
+          {posRank(rec.position, positionRank)}
+        </span>
       </div>
-      <div className="rec-name">{rec.name}</div>
-      <div className="rec-stats">
-        {fmt(rec.points)} pts · VORP {fmt(rec.vorp)} · Tier {rec.tier}
-        {rec.survival_next !== null && <> · survives {pct(rec.survival_next)}</>}
-      </div>
+      <span className="rec-name">
+        <PlayerName name={rec.name} team={rec.team} playerId={rec.player_id} />
+      </span>
+      <span className="mid rec-stats num">
+        {fmt(rec.points)} pts · VORP {fmt(rec.vorp)} · tier {rec.tier}
+        {rec.survival_next !== null && ` · survives ${pct(rec.survival_next)}`}
+      </span>
       <ul className="rec-reasons">
-        {rec.reasons.slice(0, 3).map((r, i) => (
-          <li key={i}>{r}</li>
+        {rec.reasons.slice(0, 2).map((reason, i) => (
+          <li key={i}>{reason}</li>
         ))}
       </ul>
-      <button className="ghost" onClick={() => onDraft(rec.player_id, rec.name)}>
+      <button
+        type="button"
+        className={featured ? "btn-primary rec-action" : "btn-ghost rec-action"}
+        onClick={() => onDraft(rec.player_id, rec.name)}
+      >
         Mark drafted
       </button>
     </div>
   );
 }
 
-// ---------- side panel ----------
+// ---------- left rail ----------
 
 export function SidePanel({ view }: { view: DraftView }) {
   const roster = view.my_roster;
-  const starters = view.league.roster_positions.filter((s) => s !== "BN");
-  const benchSize = view.league.roster_positions.filter((s) => s === "BN").length;
+  const rounds = view.draft.rounds;
+  const atRisk = view.available
+    .filter((p) => p.survival_next !== null && p.survival_next < 0.5)
+    .sort((a, b) => (a.survival_next ?? 1) - (b.survival_next ?? 1))
+    .slice(0, 5);
+  // Survival is judged at my next pick AFTER the one I'm making now, which is
+  // what the backend computed `survival_next` against — the label has to name
+  // the same pick, in the same round.pick form used everywhere else.
+  const survivalPick =
+    (view.draft.is_my_pick
+      ? view.draft.my_next_picks[1]
+      : view.draft.my_next_picks[0]) ?? null;
+
   return (
-    <aside className="side">
-      <section>
-        <h3>My roster</h3>
+    <aside className="rail">
+      <section className="panel">
+        <PanelHead
+          title="My roster"
+          note={roster === null ? undefined : `${roster.players.length} of ${rounds}`}
+        />
         {roster === null ? (
-          <p className="muted">Set your Sleeper username to track your team.</p>
+          <Empty>Set your Sleeper username to track your team.</Empty>
         ) : roster.players.length === 0 ? (
-          <p className="muted">No picks yet.</p>
+          <Empty>No picks yet.</Empty>
         ) : (
-          <ul className="roster">
+          <ul className="roster-list">
             {roster.players.map((p) => (
               <li key={p.player_id}>
-                <span className={`pos-badge pos-${p.position}`}>{p.position}</span>
-                <span>{p.name}</span>
+                <span className="roster-player">
+                  <PosBadge position={p.position} />
+                  <PlayerName name={p.name} team={p.team} playerId={p.player_id} />
+                </span>
                 <span className="muted">R{p.round}</span>
               </li>
             ))}
           </ul>
         )}
         {roster !== null && roster.open_starters.length > 0 && (
-          <p className="muted small-text">
-            Open starters:{" "}
-            {roster.open_starters.map(([slot, n]) => `${slot}×${n}`).join(", ")} ·{" "}
-            {starters.length} starters + {benchSize} bench
-          </p>
+          <span className="muted small">
+            Open starters: {roster.open_starters.map(([slot, n]) => `${slot}×${n}`).join(", ")}
+          </span>
         )}
       </section>
-      <section>
-        <h3>Tier alerts</h3>
-        <ul className="alerts">
+
+      {atRisk.length > 0 && (
+        <section className="panel">
+          <PanelHead
+            title={
+              survivalPick === null
+                ? "Won't last"
+                : `Won't last to ${pickLabel(survivalPick, view.draft.teams)}`
+            }
+          />
+          <div className="risk-list">
+            {atRisk.map((p) => (
+              <div className="risk-row" key={p.player_id}>
+                <PosBadge position={p.position} />
+                <PlayerName name={p.name} team={p.team} playerId={p.player_id} />
+                <span className={riskClass(p.survival_next)}>{pct(p.survival_next)}</span>
+                <span className="mid num">−{fmt(p.vorp)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="panel">
+        <PanelHead title="Tier alerts" />
+        <div className="alert-list">
           {view.tier_alerts.map((a) => (
-            <li key={a.position} className={a.players_left <= 2 ? "urgent" : ""}>
-              <span className={`pos-badge pos-${a.position}`}>{a.position}</span>
-              <span>Tier {a.tier}</span>
-              <span className={a.players_left <= 2 ? "strong" : "muted"}>
+            <div className="alert-row" key={a.position}>
+              <PosBadge position={a.position} />
+              <span>
+                Top tier <span className="muted">T{a.tier}</span>
+              </span>
+              <span className={a.players_left <= 2 ? "alert-count is-urgent" : "mid"}>
                 {a.players_left > 25 ? "25+" : a.players_left} left
               </span>
-            </li>
+            </div>
           ))}
-        </ul>
+          {view.tier_alerts.length === 0 && <Empty>No players left on the board.</Empty>}
+        </div>
         {view.position_run && (
-          <p className="run">🔥 {view.position_run} run in progress</p>
+          <span className="run-note">
+            {view.position_run.position} run in progress — {view.position_run.count} of the last{" "}
+            {view.position_run.window}
+          </span>
         )}
       </section>
-      <section>
-        <h3>Recent picks</h3>
-        <ul className="recent">
+
+      <section className="panel">
+        <PanelHead title="Recent picks" />
+        <div className="recent-list">
           {view.recent_picks.map((p) => (
-            <li key={p.pick_no}>
-              <span className="muted">{p.pick_no}.</span> {p.name}
-              <span className="muted"> · {p.position} · slot {p.slot}</span>
-            </li>
+            <span className="recent-row" key={p.pick_no}>
+              <span className="muted num">{pickLabel(p.pick_no, view.draft.teams)}</span>{" "}
+              <PlayerName name={p.name} team={p.team} playerId={p.player_id} />{" "}
+              <span className="muted">
+                · {p.position} · {p.slot_name ?? `slot ${p.slot}`}
+              </span>
+            </span>
           ))}
-          {view.recent_picks.length === 0 && <li className="muted">None yet.</li>}
-        </ul>
+          {view.recent_picks.length === 0 && <Empty>None yet.</Empty>}
+        </div>
       </section>
     </aside>
   );
+}
+
+/** The design only alarms a survival chance once it drops to a quarter. */
+function riskClass(survival: number | null): string {
+  return survival !== null && survival <= 0.25 ? "num risk-surv is-low" : "num risk-surv mid";
 }

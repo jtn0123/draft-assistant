@@ -81,5 +81,9 @@ pub(crate) fn synthesize_league(draft: &Draft) -> League {
         roster_positions,
         scoring_settings,
         draft_id: Some(draft.draft_id.clone()),
+        // A mock draft has no league behind it, so there is no prior season
+        // and none of the in-season settings apply.
+        previous_league_id: None,
+        settings: crate::sleeper::LeagueSettings::default(),
     }
 }

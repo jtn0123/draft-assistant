@@ -1,0 +1,257 @@
+/* The Games tab: live scoring bars, game rows, player chips, windows. */
+
+/* ---------- live games ---------- */
+
+.live-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--act);
+  animation: dcBlink 1.6s ease-in-out infinite;
+  flex: 0 0 7px;
+}
+
+.live-score {
+  border: 1px solid var(--rule2);
+  background: var(--panel);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.live-score-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.8em;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.live-score-num {
+  text-align: right;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.live-score-num.is-them {
+  color: var(--mid);
+  font-weight: 650;
+}
+
+.live-track {
+  height: 5px;
+  background: var(--hair);
+}
+
+.live-fill {
+  height: 5px;
+}
+
+.live-fill.is-mine {
+  background: var(--pos);
+}
+
+.live-fill.is-theirs {
+  background: var(--rule2);
+}
+
+.game-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.game-row {
+  display: grid;
+  grid-template-columns: 5.6em minmax(0, 1fr);
+  gap: 14px;
+  padding: 11px 0;
+  border-top: 1px solid var(--rule);
+  align-items: start;
+}
+
+.game-row.is-compact {
+  padding: 9px 0;
+  border-top-color: var(--hair);
+}
+
+.game-status {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  padding-top: 1px;
+  color: var(--mid);
+}
+
+.game-status.is-live {
+  color: var(--act);
+}
+
+.game-status.is-final {
+  color: var(--faint);
+}
+
+.game-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.game-teams {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.game-at {
+  padding: 0 2px;
+}
+
+/* Who is showing the game. Recessive: it is a where, not a what. */
+.game-channel {
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.game-flag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--act);
+  border: 1px solid var(--actrule);
+  padding: 1px 5px;
+}
+
+.game-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  border: 1px dashed var(--rule2);
+  color: var(--faint);
+}
+
+.chip.is-mine {
+  border-style: solid;
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.chip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: 0 0 5px;
+  background: var(--rule2);
+}
+
+.chip-dot.is-playing {
+  background: var(--act);
+}
+
+.chip-dot.is-done {
+  background: var(--pos);
+}
+
+.chip-pts {
+  font-weight: 700;
+  color: var(--faint);
+}
+
+.chip-pts.is-live {
+  color: var(--ink);
+}
+
+.live-counts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  margin-top: 6px;
+}
+
+.live-count {
+  background: var(--paper);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.live-count-num {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.live-count-num.is-live {
+  color: var(--act);
+}
+
+.live-count-num.is-done {
+  color: var(--pos);
+}
+
+.window {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.window-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--rule2);
+  padding-bottom: 5px;
+}
+
+.window-game {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5.2em;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--hair);
+  align-items: center;
+}
+
+.window-game-when {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.window-game-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}

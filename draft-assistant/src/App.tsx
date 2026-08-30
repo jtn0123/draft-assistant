@@ -1,37 +1,104 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import type { DraftView, PollHealth } from "./types";
-import { Board } from "./components/Board";
-import { ClockBanner, RecCard, SidePanel, Setup } from "./components/Panels";
+import { setAvatarMode, useAvatarMode } from "./avatars";
+import type { DraftView, PollHealth, StoredLeague } from "./types";
+import type { SeasonView } from "./season-types";
+import { Header, type Screen, type SettingsRow } from "./components/Header";
+import { DraftScreen } from "./components/DraftScreen";
+import { SeasonScreen } from "./components/SeasonScreen";
+import { LaunchScreen, Setup } from "./components/Panels";
+import { ConfirmDialog, Toast } from "./components/Overlays";
+import { Chat } from "./components/Chat";
+import { pickLabel, age, scoringFormat } from "./format";
+import {
+  applyTheme,
+  resolveTheme,
+  savePreference,
+  storedPreference,
+  watchSystemTheme,
+  type ThemePreference,
+} from "./theme";
+import "./theme.css";
 import "./App.css";
 import "./components.css";
+import "./board.css";
+import "./season.css";
+import "./season-tabs.css";
+import "./trends.css";
+import "./zoom.css";
+import "./live.css";
+import "./chat.css";
 
-// ---------- app ----------
+const MAX_RECONNECT_ATTEMPTS = 4;
 
 type Confirm = { playerId: string; name: string } | null;
 
+const SCREEN_KEY = "da.screen";
+
 export default function App() {
   const [view, setView] = useState<DraftView | null>(null);
+  const [season, setSeason] = useState<SeasonView | null>(null);
+  // Season is the everyday screen; the draft is a few hours a year. The last
+  // choice is remembered so a draft-night user lands back on the board.
+  const [screen, setScreen] = useState<Screen>(() => {
+    try {
+      return localStorage.getItem(SCREEN_KEY) === "draft" ? "draft" : "season";
+    } catch {
+      return "season";
+    }
+  });
   const [polling, setPolling] = useState(false);
+  const avatars = useAvatarMode();
   const [pollHealth, setPollHealth] = useState<PollHealth | null>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
+  const [seasonError, setSeasonError] = useState<string | null>(null);
+  /// Bumped to re-run the restore effect after a failed connection.
+  const [reloadToken, setReloadToken] = useState(0);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(1);
+  /// The saved league being restored, named on the launch screen.
+  const [restoring, setRestoring] = useState<StoredLeague | null>(null);
+  const [showSetup, setShowSetup] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chime, setChime] = useState(true);
+  const [preference, setPreference] = useState<ThemePreference>(storedPreference);
   const toastTimer = useRef<number | undefined>(undefined);
+  const wasMyPick = useRef(false);
+
+  // ---------- theme ----------
+
+  useEffect(() => {
+    applyTheme(resolveTheme(preference));
+    savePreference(preference);
+  }, [preference]);
+
+  useEffect(() => {
+    if (preference !== "system") return undefined;
+    return watchSystemTheme(applyTheme);
+  }, [preference]);
+
+  const theme = resolveTheme(preference);
+
+  // ---------- toasts ----------
 
   const showToast = useCallback((message: string) => {
     setToast(message);
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 4000);
+    toastTimer.current = window.setTimeout(() => setToast(null), 5000);
   }, []);
+
+  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+
+  // ---------- data ----------
 
   const applyView = useCallback((next: DraftView) => {
     setView(next);
     setPollHealth({
-      last_success_at:
-        next.data_health.poll_last_success_at ?? next.generated_at,
-      consecutive_failures:
-        next.data_health.poll_consecutive_failures ?? 0,
+      last_success_at: next.data_health.poll_last_success_at ?? next.generated_at,
+      consecutive_failures: next.data_health.poll_consecutive_failures ?? 0,
       last_error: next.data_health.poll_last_error ?? null,
     });
   }, []);
@@ -45,26 +112,52 @@ export default function App() {
     }
   }, [showToast]);
 
-  // Restore last league on launch; live sync starts automatically.
+  // Restore the last league on mount, and again whenever the user retries.
+  // State is set from the promise callbacks, never synchronously in the body.
   useEffect(() => {
-    (async () => {
-      try {
-        const config = await api.getConfig();
-        if (config.active_league_id) {
-          setBusy(true);
-          const v = await api.addLeague(config.active_league_id);
-          applyView(v);
-          await startLive();
+    let cancelled = false;
+    api
+      .getConfig()
+      .then((config) => {
+        if (cancelled) return null;
+        const leagueId = config.active_league_id;
+        if (leagueId === null) {
+          setShowSetup(true);
+          return null;
         }
-      } catch (e) {
-        showToast(String(e));
-      } finally {
-        setBusy(false);
-      }
-    })();
-  }, [showToast, startLive, applyView]);
+        setRestoring(
+          config.leagues.find((l) => l.league_id === leagueId) ?? {
+            league_id: leagueId,
+            name: "",
+            season: "",
+          },
+        );
+        return api.addLeague(leagueId);
+      })
+      .then((restored) => {
+        if (cancelled || restored === null) return;
+        applyView(restored);
+        return startLive();
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setLaunchError(String(e));
+        setAttempt((n) => Math.min(n + 1, MAX_RECONNECT_ATTEMPTS));
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [applyView, startLive, reloadToken]);
 
-  // Live updates from the poller.
+  const retry = () => {
+    setBusy(true);
+    setLaunchError(null);
+    setReloadToken((n) => n + 1);
+  };
+
   useEffect(() => {
     const un = api.onDraftUpdated(applyView);
     return () => {
@@ -78,6 +171,47 @@ export default function App() {
       un.then((f) => f()).catch(() => undefined);
     };
   }, []);
+
+  useEffect(() => {
+    const un = api.onSeasonUpdated(setSeason);
+    return () => {
+      un.then((f) => f()).catch(() => undefined);
+    };
+  }, []);
+
+  // Load season data the first time the tab is opened, then keep it live.
+  useEffect(() => {
+    if (screen !== "season" || view === null) return undefined;
+    let cancelled = false;
+    if (season === null) {
+      api
+        .loadSeason(false)
+        .then((s) => {
+          if (!cancelled) setSeason(s);
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setSeasonError(String(e));
+          showToast(String(e));
+        });
+    }
+    api.startSeasonPolling(30).catch(() => undefined);
+    return () => {
+      cancelled = true;
+      api.stopSeasonPolling().catch(() => undefined);
+    };
+  }, [screen, view, season, showToast]);
+
+  // Chime when the clock reaches you — the one moment worth interrupting for.
+  useEffect(() => {
+    const isMine = view?.draft.is_my_pick ?? false;
+    if (isMine && !wasMyPick.current && chime) {
+      void playChime();
+    }
+    wasMyPick.current = isMine;
+  }, [view?.draft.is_my_pick, chime, view]);
+
+  // ---------- actions ----------
 
   const togglePolling = async () => {
     try {
@@ -95,11 +229,10 @@ export default function App() {
 
   const doDraft = async (playerId: string) => {
     try {
-      const v = await api.recordManualPick(playerId);
-      applyView(v);
-      setConfirm(null);
+      applyView(await api.recordManualPick(playerId));
     } catch (e) {
       showToast(String(e));
+    } finally {
       setConfirm(null);
     }
   };
@@ -107,25 +240,34 @@ export default function App() {
   const doUndo = async () => {
     try {
       applyView(await api.undoManualPick());
+      showToast("Last recorded pick undone");
     } catch (e) {
       showToast(String(e));
     }
   };
 
   const doExport = async () => {
+    setSettingsOpen(false);
     try {
-      const path = await api.exportState();
-      showToast(`State exported: ${path}`);
+      showToast(`State exported: ${await api.exportState()}`);
     } catch (e) {
       showToast(String(e));
     }
   };
 
   const doRefreshData = async () => {
+    setSettingsOpen(false);
     setBusy(true);
     try {
-      applyView(await api.refreshData());
-      showToast("Projections refreshed and board rebuilt");
+      const refreshed = await api.refreshData();
+      applyView(refreshed);
+      if (screen === "season") {
+        setSeasonError(null);
+        setSeason(await api.loadSeason(true));
+      }
+      showToast(
+        `Projections refreshed — board rebuilt from ${refreshed.data_health.board_size} players`,
+      );
     } catch (e) {
       showToast(String(e));
     } finally {
@@ -133,125 +275,210 @@ export default function App() {
     }
   };
 
-  if (view === null) {
-    return busy ? (
-      <div className="setup">
-        <h1>Draft Assistant</h1>
-        <p className="muted">Loading your league…</p>
+  // ---------- screens without a league ----------
+
+  if (showSetup) {
+    return (
+      <div className="app">
+        <Setup
+          onReady={(v) => {
+            applyView(v);
+            setShowSetup(false);
+            void startLive();
+          }}
+        />
       </div>
-    ) : (
-      <Setup
-        onReady={(v) => {
-          applyView(v);
-          void startLive();
-        }}
-      />
     );
   }
 
+  if (view === null) {
+    return (
+      <div className="app">
+        <LaunchScreen
+          leagueName={restoring === null || restoring.name === "" ? null : restoring.name}
+          leagueId={restoring?.league_id ?? null}
+          attempt={attempt}
+          maxAttempts={MAX_RECONNECT_ATTEMPTS}
+          lastError={busy ? null : launchError}
+          onRetry={retry}
+          onDifferentLeague={() => setShowSetup(true)}
+        />
+      </div>
+    );
+  }
+
+  // ---------- the app ----------
+
+  const d = view.draft;
+  const subtitle =
+    screen === "season"
+      ? season === null
+        ? `${view.league.season} season`
+        : `Week ${season.week} · ${myRecord(season)}`
+      : `Round ${d.current_round} of ${d.rounds} · ${d.total_picks_made} picks in`;
+
+  const settingsRows: SettingsRow[] = [
+    {
+      label: "Pick chime",
+      note: "Sound when you're on the clock",
+      value: chime ? "On" : "Off",
+      on: chime,
+      onSelect: () => setChime((c) => !c),
+    },
+    {
+      label: "Live sync",
+      note: polling
+        ? `Last sync ${age(pollHealth?.last_success_at ?? null)}`
+        : "Not polling Sleeper",
+      value: polling ? "On" : "Off",
+      on: polling,
+      onSelect: () => void togglePolling(),
+    },
+    {
+      label: "Refresh data",
+      note: "Re-fetch projections and rebuild the board",
+      value: busy ? "…" : "Sync",
+      on: false,
+      onSelect: () => void doRefreshData(),
+    },
+    {
+      label: "Export state",
+      note: "Full JSON dump of everything on screen",
+      value: "JSON",
+      on: false,
+      onSelect: () => void doExport(),
+    },
+    {
+      label: "Player pictures",
+      note:
+        avatars === "headshots"
+          ? "Headshots from Sleeper, saved on this Mac after the first look"
+          : "Team logos only — no photo downloads",
+      value: avatars === "headshots" ? "Headshots" : "Team logos",
+      on: avatars === "headshots",
+      onSelect: () => setAvatarMode(avatars === "headshots" ? "logos" : "headshots"),
+    },
+    {
+      label: "Appearance",
+      note:
+        preference === "system"
+          ? "Following your system setting"
+          : "Overriding your system setting",
+      value: preference === "system" ? `System (${theme})` : theme === "dark" ? "Dark" : "Light",
+      on: theme === "dark",
+      onSelect: () =>
+        setPreference((p) =>
+          // system -> light -> dark -> back to system
+          p === "system" ? "light" : p === "light" ? "dark" : "system",
+        ),
+    },
+  ];
+
   return (
     <div className="app">
-      <header>
-        <div className="brand">
-          <h1>{view.league.name}</h1>
-          <span className="muted">
-            {view.league.season} · {view.draft.teams} teams · {view.draft.rounds} rounds
-            {view.draft.manual_picks_active && " · manual picks active"}
-          </span>
-        </div>
-        <div className="actions">
-          <button
-            className={`live ${syncClass(polling, pollHealth)}`}
-            onClick={togglePolling}
-            title={pollHealth?.last_error ?? undefined}
-          >
-            {syncLabel(polling, pollHealth)}
-          </button>
-          {polling && pollHealth?.last_success_at && (
-            <span className="sync-age">
-              Last sync {formatAge(pollHealth.last_success_at)}
-            </span>
+      <div className={chatOpen ? "shell has-chat" : "shell"}>
+        <div className="shell-main">
+          <Header
+            leagueName={view.league.name}
+            subtitle={subtitle}
+            meta={`${d.teams}-team ${scoringFormat(view.league.scoring_settings.rec)} · ${d.rounds} rounds${d.manual_picks_active ? " · manual picks active" : ""}`}
+            screen={screen}
+            onScreen={(next) => {
+              setScreen(next);
+              try {
+                localStorage.setItem(SCREEN_KEY, next);
+              } catch {
+                // Private mode or a sandboxed webview: the choice just isn't remembered.
+              }
+            }}
+            polling={polling}
+            pollHealth={pollHealth}
+            chime={chime}
+            onToggleChime={() => setChime((c) => !c)}
+            onUndo={() => void doUndo()}
+            chatOpen={chatOpen}
+            onToggleChat={() => setChatOpen((c) => !c)}
+            settingsOpen={settingsOpen}
+            onToggleSettings={() => setSettingsOpen((s) => !s)}
+            settingsRows={settingsRows}
+            footerNote={`${view.league.name} · league ${view.league.league_id} · read-only connection`}
+          />
+
+          {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+
+          {screen === "draft" ? (
+            <DraftScreen
+              view={view}
+              busy={busy}
+              onDraft={(playerId, name) => setConfirm({ playerId, name })}
+            />
+          ) : season === null ? (
+            <div className="season-loading">
+              {seasonError ?? "Loading this week…"}
+            </div>
+          ) : (
+            <SeasonScreen view={season} />
           )}
-          <button className="ghost" onClick={doUndo} title="Undo last manual pick">
-            Undo
-          </button>
-          <button className="ghost" onClick={doExport} title="Write full draft state JSON for the AI">
-            Export state
-          </button>
-          <button className="ghost" onClick={doRefreshData} disabled={busy} title="Re-fetch projections and rebuild the board">
-            {busy ? "Refreshing…" : "Refresh data"}
-          </button>
         </div>
-      </header>
 
-      <ClockBanner view={view} />
-
-      {view.data_health.warnings.length > 0 && (
-        <div className="warnings">{view.data_health.warnings.join(" · ")}</div>
-      )}
-
-      <div className="recs">
-        {view.recommendations
-          .filter(
-            (r, i, all) =>
-              i === all.findIndex((x) => x.player_id === r.player_id),
-          )
-          .map((r) => (
-            <RecCard key={r.mode} rec={r} onDraft={(id, name) => setConfirm({ playerId: id, name })} />
-          ))}
+        {chatOpen && (
+          <Chat
+            screen={screen}
+            contextNote={
+              screen === "season" && season !== null
+                ? `Sees week ${season.week} · your lineup and the league`
+                : `Sees this draft · pick ${pickLabel(d.current_pick, d.teams)}`
+            }
+            onClose={() => setChatOpen(false)}
+          />
+        )}
       </div>
 
-      <main>
-        <SidePanel view={view} />
-        <Board
-          players={view.available}
-          positions={view.league.draftable_positions}
-          onDraft={(id, name) => setConfirm({ playerId: id, name })}
-        />
-      </main>
-
       {confirm && (
-        <div className="modal-backdrop" onClick={() => setConfirm(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <p>
-              Mark <strong>{confirm.name}</strong> as drafted at pick{" "}
-              {view.draft.current_pick} (slot {view.draft.on_clock_slot})?
-            </p>
-            <p className="muted small-text">
-              Manual picks are a fallback — live sync from Sleeper overrides them.
-            </p>
-            <div className="modal-actions">
-              <button onClick={() => doDraft(confirm.playerId)}>Confirm</button>
-              <button className="ghost" onClick={() => setConfirm(null)}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          pickLabel={`Pick ${pickLabel(d.current_pick, d.teams)} · slot ${d.on_clock_slot}`}
+          playerName={confirm.name}
+          onConfirm={() => void doDraft(confirm.playerId)}
+          onCancel={() => setConfirm(null)}
+        />
       )}
-
-      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
 
-function syncClass(polling: boolean, health: PollHealth | null): string {
-  if (!polling) return "";
-  if ((health?.consecutive_failures ?? 0) >= 2) return "stale";
-  if ((health?.consecutive_failures ?? 0) === 1) return "retrying";
-  return "on";
+function myRecord(season: SeasonView): string {
+  const mine = season.standings.find((s) => s.is_mine);
+  if (mine === undefined) return `${season.standings.length} teams`;
+  return `${mine.record} · ${ordinal(mine.seed)} of ${season.standings.length}`;
 }
 
-function syncLabel(polling: boolean, health: PollHealth | null): string {
-  if (!polling) return "○ Live sync off";
-  const failures = health?.consecutive_failures ?? 0;
-  if (failures >= 2) return `● Sync stale · ${failures} failures`;
-  if (failures === 1) return "● Sync retrying";
-  return "● Live sync on";
+function ordinal(n: number): string {
+  const rest = n % 100;
+  if (rest >= 11 && rest <= 13) return `${n}th`;
+  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 }
 
-function formatAge(timestamp: number): string {
-  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
-  if (seconds < 60) return `${seconds}s ago`;
-  return `${Math.floor(seconds / 60)}m ago`;
+/** A short two-tone chime via WebAudio — no asset to ship or fail to load. */
+async function playChime(): Promise<void> {
+  try {
+    const Ctor = window.AudioContext ?? window.webkitAudioContext;
+    if (Ctor === undefined) return;
+    const ctx = new Ctor();
+    const now = ctx.currentTime;
+    for (const [i, freq] of [880, 1320].entries()) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0.0001, now + i * 0.16);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + i * 0.16 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.16 + 0.15);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + i * 0.16);
+      osc.stop(now + i * 0.16 + 0.16);
+    }
+    window.setTimeout(() => void ctx.close(), 600);
+  } catch {
+    // An audio failure must never interrupt the draft.
+  }
 }

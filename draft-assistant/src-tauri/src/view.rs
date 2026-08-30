@@ -26,6 +26,9 @@ pub struct DraftStatus {
     pub my_next_picks: Vec<u32>,
     pub total_picks_made: usize,
     pub manual_picks_active: bool,
+    /// Epoch milliseconds when the current pick's timer expires. Present only
+    /// while drafting with a pick timer and a recorded last pick.
+    pub clock_deadline_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -44,6 +47,15 @@ pub struct RecentPick {
     pub player_id: String,
     pub name: String,
     pub position: String,
+    pub team: Option<String>,
+}
+
+/// A position taken `count` times in the last `window` picks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PositionRun {
+    pub position: String,
+    pub count: u32,
+    pub window: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -56,7 +68,7 @@ pub struct DraftView {
     pub rosters: Vec<TeamRoster>,
     pub available: Vec<AvailablePlayer>,
     pub tier_alerts: Vec<TierAlert>,
-    pub position_run: Option<String>,
+    pub position_run: Option<PositionRun>,
     pub recommendations: Vec<Recommendation>,
     pub recent_picks: Vec<RecentPick>,
     pub replacement_baselines: HashMap<String, f64>,
@@ -113,6 +125,38 @@ fn validated_slot(slot: Option<u32>, teams: u32) -> (Option<u32>, Option<String>
         ),
         _ => (slot, None),
     }
+}
+
+/// When the current pick's timer runs out, from Sleeper's `last_picked`
+/// stamp and the draft's `pick_timer`. Only meaningful mid-draft.
+pub fn clock_deadline_ms(
+    status: &str,
+    last_picked: Option<u64>,
+    pick_timer: Option<u32>,
+) -> Option<u64> {
+    if status != "drafting" {
+        return None;
+    }
+    Some(last_picked? + u64::from(pick_timer.filter(|t| *t > 0)?) * 1000)
+}
+
+/// The position taken at least `min_count` times in the last `window` picks.
+pub fn position_run(positions: &[String], window: u32, min_count: u32) -> Option<PositionRun> {
+    let mut counts: HashMap<&str, u32> = HashMap::new();
+    for pos in positions.iter().rev().take(window as usize) {
+        if !pos.is_empty() {
+            *counts.entry(pos.as_str()).or_insert(0) += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .filter(|(_, c)| *c >= min_count)
+        .max_by_key(|(_, c)| *c)
+        .map(|(pos, count)| PositionRun {
+            position: pos.to_string(),
+            count,
+            window,
+        })
 }
 
 /// Merge API picks with manual fallback picks. API picks are authoritative;
@@ -263,19 +307,8 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
     // Position run: 4+ of the same position in the last 6 picks.
     let position_run = {
-        let recent: Vec<&Pick> = picks.iter().rev().take(6).collect();
-        let mut counts: HashMap<String, u32> = HashMap::new();
-        for p in &recent {
-            let (_, pos, _) = name_of(&p.player_id);
-            if !pos.is_empty() {
-                *counts.entry(pos).or_insert(0) += 1;
-            }
-        }
-        counts
-            .into_iter()
-            .filter(|(_, c)| *c >= 4)
-            .map(|(pos, _)| pos)
-            .next()
+        let positions: Vec<String> = picks.iter().map(|p| name_of(&p.player_id).1).collect();
+        position_run(&positions, 6, 4)
     };
 
     let recommendations = recommend(
@@ -292,7 +325,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         .rev()
         .take(10)
         .map(|p| {
-            let (name, position, _) = name_of(&p.player_id);
+            let (name, position, team) = name_of(&p.player_id);
             RecentPick {
                 pick_no: p.pick_no,
                 round: p.round,
@@ -301,6 +334,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
                 player_id: p.player_id.clone(),
                 name,
                 position,
+                team,
             }
         })
         .collect();
@@ -340,6 +374,12 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             my_next_picks,
             total_picks_made: total_picks,
             manual_picks_active: !loaded.manual_picks.is_empty(),
+            clock_deadline_ms: clock_deadline_ms(
+                &draft.status,
+                draft.last_picked,
+                draft.settings.pick_timer,
+            )
+            .filter(|_| !draft_over),
         },
         my_roster,
         rosters,
@@ -365,12 +405,42 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
 #[cfg(test)]
 mod reliability_tests {
-    use super::validated_slot;
+    use super::{clock_deadline_ms, position_run, validated_slot};
 
     #[test]
     fn invalid_user_slots_are_rejected_before_roster_indexing() {
         assert_eq!(validated_slot(Some(0), 14).0, None);
         assert_eq!(validated_slot(Some(15), 14).0, None);
         assert_eq!(validated_slot(Some(2), 14).0, Some(2));
+    }
+
+    #[test]
+    fn clock_deadline_is_last_pick_plus_timer_only_while_drafting() {
+        assert_eq!(
+            clock_deadline_ms("drafting", Some(1_000), Some(90)),
+            Some(91_000)
+        );
+        assert_eq!(clock_deadline_ms("pre_draft", Some(1_000), Some(90)), None);
+        assert_eq!(clock_deadline_ms("complete", Some(1_000), Some(90)), None);
+        assert_eq!(clock_deadline_ms("drafting", None, Some(90)), None);
+        assert_eq!(clock_deadline_ms("drafting", Some(1_000), None), None);
+        assert_eq!(clock_deadline_ms("drafting", Some(1_000), Some(0)), None);
+    }
+
+    #[test]
+    fn position_run_carries_the_count_and_window() {
+        let picks: Vec<String> = ["WR", "RB", "RB", "QB", "RB", "RB", "TE"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        // Last six: RB RB QB RB RB TE -> four RBs.
+        let run = position_run(&picks, 6, 4).expect("run");
+        assert_eq!((run.position.as_str(), run.count, run.window), ("RB", 4, 6));
+        assert_eq!(position_run(&picks, 6, 5), None);
+        // Nothing before the window counts: only the first pick is a WR.
+        assert_eq!(
+            position_run(&picks, 4, 2).map(|r| r.position),
+            Some("RB".into())
+        );
     }
 }

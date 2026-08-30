@@ -7,16 +7,17 @@
 use crate::board::{build_board, BoardPlayer};
 use crate::mock_league::synthesize_league;
 use crate::roster::RosterRules;
-use crate::sleeper::{Draft, League, Pick, PlayerMeta, ProjectionRow, SleeperClient};
+use crate::sleeper::{Draft, League, Pick, PlayerMeta, SleeperClient};
 use crate::valuation::ReplacementModel;
+use crate::weekly::WeeklyPoints;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const PLAYERS_TTL_SECS: u64 = 24 * 3600;
-const PROJECTIONS_TTL_SECS: u64 = 6 * 3600;
-const WEEKS: u32 = 18;
+pub(crate) const PLAYERS_TTL_SECS: u64 = 24 * 3600;
+pub(crate) const PROJECTIONS_TTL_SECS: u64 = 6 * 3600;
+pub(crate) const WEEKS: u32 = 18;
 
 pub(crate) fn now_secs() -> u64 {
     SystemTime::now()
@@ -33,6 +34,15 @@ pub struct AppConfig {
     pub active_league_id: Option<String>,
     #[serde(default)]
     pub leagues: Vec<StoredLeague>,
+    /// Key for the Ask Claude panel. Stored in the app's own data directory
+    /// and never sent anywhere except api.anthropic.com.
+    #[serde(default)]
+    pub anthropic_api_key: Option<String>,
+    /// How Ask Claude reaches Claude: "api" (the key above) or "claude_code"
+    /// (the Claude Code CLI, signed in with a subscription). Unset means
+    /// whichever is available, preferring the CLI when there is no key.
+    #[serde(default)]
+    pub chat_provider: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +67,8 @@ pub struct LoadedLeague {
     pub draft: Draft,
     /// user_id -> display name, from /league/{id}/users.
     pub user_names: HashMap<String, String>,
+    /// user_id -> avatar hash or custom image URL, same call.
+    pub user_avatars: HashMap<String, String>,
     pub board: Vec<BoardPlayer>,
     pub board_index: HashMap<String, usize>,
     pub replacement_model: ReplacementModel,
@@ -71,6 +83,9 @@ pub struct LoadedLeague {
     pub weekly_fetched_at: u64,
     pub warnings: Vec<String>,
     pub player_meta: HashMap<String, PlayerMeta>,
+    /// Per-week projected points under this league's scoring. Built once here
+    /// so the season screen never re-scores raw stat lines.
+    pub weekly_points: WeeklyPoints,
 }
 
 pub struct Engine {
@@ -91,7 +106,11 @@ impl Engine {
         self.data_dir.join(name)
     }
 
-    fn read_cache<T: serde::de::DeserializeOwned>(&self, name: &str, ttl: u64) -> Option<(u64, T)> {
+    pub(crate) fn read_cache<T: serde::de::DeserializeOwned>(
+        &self,
+        name: &str,
+        ttl: u64,
+    ) -> Option<(u64, T)> {
         let (fetched_at, data) = self.read_cache_any(name)?;
         if now_secs().saturating_sub(fetched_at) > ttl {
             return None;
@@ -99,13 +118,16 @@ impl Engine {
         Some((fetched_at, data))
     }
 
-    fn read_cache_any<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<(u64, T)> {
+    pub(crate) fn read_cache_any<T: serde::de::DeserializeOwned>(
+        &self,
+        name: &str,
+    ) -> Option<(u64, T)> {
         let raw = std::fs::read_to_string(self.cache_path(name)).ok()?;
         let cached: Cached<T> = serde_json::from_str(&raw).ok()?;
         Some((cached.fetched_at, cached.data))
     }
 
-    fn write_cache<T: Serialize>(&self, name: &str, data: &T) -> u64 {
+    pub(crate) fn write_cache<T: Serialize>(&self, name: &str, data: &T) -> u64 {
         let fetched_at = now_secs();
         let env = Cached { fetched_at, data };
         if let Ok(json) = serde_json::to_string(&env) {
@@ -146,142 +168,75 @@ impl Engine {
         Ok(())
     }
 
+    /// Read the config, falling back to the last good copy if the live file
+    /// is missing or unreadable. A key still sitting in the file from before
+    /// Keychain storage existed is moved there on the way in.
     pub fn load_config(&self) -> AppConfig {
-        std::fs::read_to_string(self.cache_path("config.json"))
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
-    }
-
-    pub fn save_config(&self, config: &AppConfig) {
-        if let Ok(json) = serde_json::to_string_pretty(config) {
-            std::fs::write(self.cache_path("config.json"), json).ok();
-        }
-    }
-
-    async fn players(
-        &self,
-        force: bool,
-    ) -> Result<(u64, HashMap<String, PlayerMeta>, Option<String>), String> {
-        if !force {
-            if let Some(hit) = self.read_cache("players.json", PLAYERS_TTL_SECS) {
-                return Ok((hit.0, hit.1, None));
-            }
-        }
-        let stale = self.read_cache_any("players.json");
-        match self.client.players().await {
-            Ok(data) => {
-                let at = self.write_cache("players.json", &data);
-                Ok((at, data, None))
-            }
-            Err(error) => stale
-                .map(|(at, data)| {
-                    let age = now_secs().saturating_sub(at);
-                    (
-                        at,
-                        data,
-                        Some(format!(
-                            "players refresh failed; using cache aged {}h ({error})",
-                            age / 3600
-                        )),
-                    )
-                })
-                .ok_or(error),
-        }
-    }
-
-    async fn season_projections(
-        &self,
-        season: u32,
-        force: bool,
-    ) -> Result<(u64, Vec<ProjectionRow>, Option<String>), String> {
-        let name = format!("projections_{season}.json");
-        if !force {
-            if let Some(hit) = self.read_cache(&name, PROJECTIONS_TTL_SECS) {
-                return Ok((hit.0, hit.1, None));
-            }
-        }
-        let stale = self.read_cache_any(&name);
-        match self.client.season_projections(season).await {
-            Ok(data) => {
-                let at = self.write_cache(&name, &data);
-                Ok((at, data, None))
-            }
-            Err(error) => stale
-                .map(|(at, data)| {
-                    let age = now_secs().saturating_sub(at);
-                    (
-                        at,
-                        data,
-                        Some(format!(
-                            "projections refresh failed; using cache aged {}h ({error})",
-                            age / 3600
-                        )),
-                    )
-                })
-                .ok_or(error),
-        }
-    }
-
-    async fn weekly_projections(
-        &self,
-        season: u32,
-        force: bool,
-    ) -> Result<(u64, Vec<ProjectionRow>, Option<String>), String> {
-        let name = format!("weekly_{season}.json");
-        if !force {
-            if let Some(hit) = self.read_cache(&name, PROJECTIONS_TTL_SECS) {
-                return Ok((hit.0, hit.1, None));
-            }
-        }
-        let stale = self.read_cache_any(&name);
-        let mut all = Vec::new();
-        let mut failures = Vec::new();
-        for week in 1..=WEEKS {
-            match self.client.weekly_projections(season, week).await {
-                Ok(mut rows) => {
-                    for r in &mut rows {
-                        r.week = Some(week);
-                    }
-                    all.extend(rows);
-                }
-                Err(e) => {
-                    // A missing week degrades bonus precision, not correctness.
-                    eprintln!("weekly projections week {week} failed: {e}");
-                    failures.push(week);
-                }
-            }
-        }
-        if failures.len() == WEEKS as usize {
-            let error = "all weekly projection requests failed".to_string();
-            return stale
-                .map(|(at, data)| {
-                    let age = now_secs().saturating_sub(at);
-                    (
-                        at,
-                        data,
-                        Some(format!(
-                            "weekly projections refresh failed; using cache aged {}h",
-                            age / 3600
-                        )),
-                    )
-                })
-                .ok_or(error);
-        }
-        let at = self.write_cache(&name, &all);
-        let warning = if failures.is_empty() {
-            None
-        } else {
-            Some(format!(
-                "weekly projections unavailable for weeks {}",
-                failures
-                    .iter()
-                    .map(u32::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))
+        let read = |name: &str| {
+            std::fs::read_to_string(self.cache_path(name))
+                .ok()
+                .and_then(|s| serde_json::from_str::<AppConfig>(&s).ok())
         };
-        Ok((at, all, warning))
+        let mut config = read("config.json")
+            .or_else(|| read("config.json.bak"))
+            .unwrap_or_default();
+        if let Some(key) = config.anthropic_api_key.take() {
+            if crate::secrets::available() && crate::secrets::store(&key).is_ok() {
+                self.save_config(&config);
+            } else {
+                config.anthropic_api_key = Some(key);
+            }
+        }
+        config
+    }
+
+    /// Write the config atomically: to a temp file first, then swapped into
+    /// place, with the previous copy kept as `config.json.bak`. A crash
+    /// mid-write can never leave a half-written config behind.
+    pub fn save_config(&self, config: &AppConfig) {
+        let Ok(json) = serde_json::to_string_pretty(config) else {
+            return;
+        };
+        let live = self.cache_path("config.json");
+        let tmp = self.cache_path("config.json.tmp");
+        if std::fs::write(&tmp, json).is_err() {
+            return;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600)).ok();
+        }
+        if live.exists() {
+            std::fs::copy(&live, self.cache_path("config.json.bak")).ok();
+        }
+        std::fs::rename(&tmp, &live).ok();
+    }
+
+    /// The Anthropic key, wherever it is kept.
+    pub fn api_key(&self, config: &AppConfig) -> Option<String> {
+        if crate::secrets::available() {
+            if let Some(key) = crate::secrets::load() {
+                return Some(key);
+            }
+        }
+        config.anthropic_api_key.clone()
+    }
+
+    /// Store (or, with `None`, clear) the key: Keychain when there is one,
+    /// the config file otherwise.
+    pub fn store_api_key(&self, config: &mut AppConfig, key: Option<String>) -> Result<(), String> {
+        if crate::secrets::available() {
+            match &key {
+                Some(k) => crate::secrets::store(k)?,
+                None => crate::secrets::clear()?,
+            }
+            config.anthropic_api_key = None;
+        } else {
+            config.anthropic_api_key = key;
+        }
+        self.save_config(config);
+        Ok(())
     }
 
     /// Load a league end-to-end and build its scored board.
@@ -292,15 +247,21 @@ impl Engine {
             .clone()
             .ok_or_else(|| "league has no draft".to_string())?;
         let draft = self.client.draft(&draft_id).await?;
-        let user_names: HashMap<String, String> = self
+        let users = self
             .client
             .league_users(league_id)
             .await
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|u| u.display_name.map(|n| (u.user_id, n)))
+            .unwrap_or_default();
+        let user_names: HashMap<String, String> = users
+            .iter()
+            .filter_map(|u| u.label().map(|n| (u.user_id.clone(), n)))
             .collect();
-        self.assemble(league, draft, user_names, force).await
+        let user_avatars: HashMap<String, String> = users
+            .iter()
+            .filter_map(|u| u.avatar_ref().map(|a| (u.user_id.clone(), a)))
+            .collect();
+        self.assemble(league, draft, user_names, user_avatars, force)
+            .await
     }
 
     /// Load a bare draft ID (mock drafts have no league): synthesize the
@@ -312,7 +273,9 @@ impl Engine {
     ) -> Result<LoadedLeague, String> {
         let draft = self.client.draft(draft_id).await?;
         let league = synthesize_league(&draft);
-        let mut loaded = self.assemble(league, draft, HashMap::new(), force).await?;
+        let mut loaded = self
+            .assemble(league, draft, HashMap::new(), HashMap::new(), force)
+            .await?;
         loaded
             .warnings
             .push("mock draft: league settings synthesized from draft settings".into());
@@ -334,6 +297,7 @@ impl Engine {
         league: League,
         draft: Draft,
         user_names: HashMap<String, String>,
+        user_avatars: HashMap<String, String>,
         force: bool,
     ) -> Result<LoadedLeague, String> {
         let (api_picks, poll_last_success_at, poll_consecutive_failures, poll_last_error) =
@@ -362,6 +326,7 @@ impl Engine {
         if let Some(error) = &poll_last_error {
             warnings.push(format!("initial picks refresh failed: {error}"));
         }
+        let scoring_map = league.scoring_settings.clone();
         let roster_rules = RosterRules::new(&league.roster_positions);
         let board_build = build_board(
             &league,
@@ -389,6 +354,7 @@ impl Engine {
             league,
             draft,
             user_names,
+            user_avatars,
             board,
             board_index,
             replacement_model: board_build.replacement,
@@ -402,6 +368,7 @@ impl Engine {
             projections_fetched_at: proj_at,
             weekly_fetched_at: weekly_at,
             warnings,
+            weekly_points: WeeklyPoints::build(&weekly_rows, &scoring_map),
             player_meta,
         })
     }

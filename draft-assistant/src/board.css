@@ -1,0 +1,212 @@
+/* The player board: controls, sortable header, rows, and its states. */
+
+/* ---------- board ---------- */
+
+.board {
+  flex: 3 1 560px;
+  border: 1px solid var(--rule2);
+  min-width: 0;
+}
+
+.board-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--rule);
+  flex-wrap: wrap;
+}
+
+.board-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.board-tab {
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mid);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.board-tab:hover {
+  color: var(--ink);
+  background: var(--panel);
+}
+
+.board-tab.is-on {
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 650;
+}
+
+.board-search {
+  font-size: 13px;
+  padding: 6px 10px;
+  width: 220px;
+}
+
+.board-count {
+  margin-left: auto;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.board-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 52px 74px 36px 44px 44px 34px 44px 47px 60px;
+  gap: 8px;
+  align-items: center;
+}
+
+.board-head {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--rule2);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sort-head {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  user-select: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: var(--faint);
+}
+
+.sort-head.is-right {
+  justify-content: flex-end;
+}
+
+.sort-head.is-active {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.sort-arrow {
+  font-size: 8px;
+  line-height: 1;
+}
+
+.board-body {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--hair);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.board-body:hover {
+  background: var(--panel);
+}
+
+.board-player {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.board-team {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.right {
+  text-align: right;
+}
+
+.center {
+  text-align: center;
+}
+
+.tier {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--faint);
+}
+
+.tier-1 {
+  color: var(--act);
+}
+
+.tier-2 {
+  color: var(--wrc);
+}
+
+.tier-3 {
+  color: var(--tec);
+}
+
+.surv-low {
+  color: var(--act);
+}
+
+.surv-high {
+  color: var(--pos);
+}
+
+.board-skeleton {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hair);
+  animation: dcPulse 1.4s ease-in-out infinite;
+}
+
+.skel {
+  height: 9px;
+  background: var(--rule);
+}
+
+.skel.is-faint {
+  background: var(--hair);
+}
+
+.board-loading-note {
+  padding: 12px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.board-empty {
+  padding: 44px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.board-empty-title {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.board-empty-note {
+  font-size: 13px;
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.board-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--rule);
+  font-size: 12px;
+}

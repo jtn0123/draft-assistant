@@ -1,0 +1,235 @@
+/* Trends tab: strength-over-time chart, legend, and the change feed. */
+
+.trend-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trend-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trend-chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+.trend-grid {
+  stroke: var(--hair);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.trend-tick {
+  font-size: 9px;
+  fill: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-crosshair {
+  stroke: var(--rule2);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+/* Every other team is recessive; identity comes from the legend, not a hue. */
+.trend-line {
+  fill: none;
+  stroke: var(--rule2);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  cursor: pointer;
+  transition: stroke 120ms ease;
+}
+
+.trend-line.is-focus {
+  stroke: var(--act);
+  stroke-width: 2;
+}
+
+.trend-line.is-mine {
+  stroke: var(--pos);
+  stroke-width: 2.5;
+}
+
+.trend-dot {
+  stroke: var(--paper);
+  stroke-width: 2;
+}
+
+.trend-dot.is-mine {
+  fill: var(--pos);
+}
+
+.trend-dot.is-focus {
+  fill: var(--act);
+}
+
+.trend-tip {
+  display: flex;
+  gap: 14px;
+  min-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-legend {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.trend-legend-row {
+  display: grid;
+  grid-template-columns: 10px 1fr 52px 48px;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 4px;
+  border: none;
+  border-bottom: 1px solid var(--hair);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-legend-row:hover,
+.trend-legend-row.is-focus {
+  background: var(--panel);
+}
+
+.trend-legend-row.is-mine {
+  background: var(--mine);
+  font-weight: 600;
+}
+
+.trend-swatch {
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--rule2);
+}
+
+.trend-legend-row.is-focus .trend-swatch {
+  background: var(--act);
+}
+
+.trend-legend-row.is-mine .trend-swatch {
+  background: var(--pos);
+}
+
+/* ---------- the no-movement view: one dot per team on a shared scale ---------- */
+
+/* No inner scroller: the rail already scrolls, and a box inside a box that
+   both scroll is a trap for the wheel. */
+.trend-ranked {
+  display: flex;
+  flex-direction: column;
+}
+
+.trend-rank-row {
+  display: grid;
+  grid-template-columns: 1fr 120px 52px 44px;
+  gap: 10px;
+  align-items: center;
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--hair);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-rank-row.is-mine {
+  background: var(--mine);
+  font-weight: 600;
+}
+
+.trend-track {
+  position: relative;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--hair);
+}
+
+/* How far the team has moved since the first reading. */
+.trend-tail {
+  position: absolute;
+  top: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--rule2);
+}
+
+.trend-rank-row.is-mine .trend-tail {
+  background: var(--pos);
+  opacity: 0.45;
+}
+
+.trend-mark {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.trend-rank-row.is-mine .trend-mark {
+  background: var(--pos);
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+}
+
+.trend-scale {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 4px 0;
+}
+
+.trend-right {
+  text-align: right;
+}
+
+.trend-pos {
+  color: var(--pos);
+}
+
+.trend-act {
+  color: var(--act);
+}
+
+.trend-feed {
+  display: flex;
+  flex-direction: column;
+}
+
+.trend-change {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--hair);
+}
+
+.trend-change.is-mine {
+  background: var(--mine);
+}
+
+.trend-change-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}

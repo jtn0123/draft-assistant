@@ -2,9 +2,10 @@ use draft_assistant_lib::board::{AvailablePlayer, BoardPlayer};
 use draft_assistant_lib::engine::{AppConfig, LoadedLeague};
 use draft_assistant_lib::roster::RosterRules;
 use draft_assistant_lib::simulation::apply_simulated_pick;
-use draft_assistant_lib::sleeper::{Draft, DraftSettings, League, PlayerMeta};
+use draft_assistant_lib::sleeper::{Draft, DraftSettings, League, LeagueSettings, PlayerMeta};
 use draft_assistant_lib::valuation::ReplacementModel;
 use draft_assistant_lib::view::build_view;
+use draft_assistant_lib::weekly::WeeklyPoints;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 
@@ -81,6 +82,8 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         roster_positions: fixture.league.roster_positions,
         scoring_settings: fixture.league.scoring_settings,
         draft_id: Some(fixture.draft.draft_id.clone()),
+        previous_league_id: None,
+        settings: LeagueSettings::default(),
     };
     let draft = Draft {
         draft_id: fixture.draft.draft_id,
@@ -104,16 +107,20 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         season: Some(league.season.clone()),
         metadata: None,
         creators: None,
+        last_picked: None,
     };
     let config = AppConfig {
         my_user_id: Some(my_user_id.clone()),
         active_league_id: Some(league.league_id.clone()),
         leagues: Vec::new(),
+        anthropic_api_key: None,
+        chat_provider: None,
     };
     let loaded = LoadedLeague {
         league,
         draft,
         user_names: HashMap::from([(my_user_id, "Simulation User".into())]),
+        user_avatars: HashMap::new(),
         board,
         board_index,
         replacement_model: ReplacementModel {
@@ -131,6 +138,9 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         weekly_fetched_at: 0,
         warnings: Vec::new(),
         player_meta,
+        // The simulation exercises the draft board only; no weekly projections
+        // are needed and none are loaded.
+        weekly_points: WeeklyPoints::default(),
     };
     (loaded, config)
 }

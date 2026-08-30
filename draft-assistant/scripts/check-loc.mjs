@@ -16,6 +16,7 @@ const excludedFiles = new Set([
   "Cargo.lock",
   "package-lock.json",
   `draft-assistant${sep}public${sep}dev-fixture.json`,
+  `draft-assistant${sep}public${sep}dev-season-fixture.json`,
 ]);
 
 async function filesUnder(directory) {

@@ -1,0 +1,2026 @@
+{
+  "schema_version": "1.0",
+  "generated_at": 1788127760,
+  "league": {
+    "league_id": "1389710366300200960",
+    "name": "UMass Wrestling Fantasy Football League",
+    "season": "2026",
+    "total_rosters": 14,
+    "roster_positions": [
+      "QB",
+      "RB",
+      "WR",
+      "TE",
+      "FLEX",
+      "FLEX",
+      "FLEX",
+      "FLEX",
+      "DEF",
+      "BN",
+      "BN",
+      "BN",
+      "BN",
+      "BN",
+      "BN"
+    ],
+    "draftable_positions": [
+      "QB",
+      "RB",
+      "WR",
+      "TE",
+      "DEF"
+    ],
+    "scoring_settings": {
+      "def_st_ff": 0.0,
+      "fgm_0_19": 3.0,
+      "fgm_50p": 5.0,
+      "rec_yd": 0.10000000149011612,
+      "pts_allow_7_13": 6.0,
+      "sack": 1.0,
+      "pts_allow_0": 12.0,
+      "pts_allow_21_27": 1.0,
+      "xpmiss": -1.0,
+      "pass_2pt": 2.0,
+      "st_td": 6.0,
+      "rush_td": 6.0,
+      "def_pr_td": 6.0,
+      "bonus_pass_yd_400": 4.0,
+      "rush_yd": 0.10000000149011612,
+      "st_ff": 1.0,
+      "rec_td": 6.0,
+      "fgm_30_39": 3.0,
+      "pts_allow_35p": -4.0,
+      "fgm_20_29": 3.0,
+      "bonus_pass_yd_300": 3.0,
+      "int": 2.0,
+      "pts_allow_1_6": 8.0,
+      "fgmiss_0_19": -1.0,
+      "fum_rec_td": 6.0,
+      "fgmiss": -1.0,
+      "rec": 1.0,
+      "fum_lost": -2.0,
+      "bonus_rush_yd_100": 3.0,
+      "st_fum_rec": 1.0,
+      "bonus_rec_yd_100": 3.0,
+      "fgmiss_20_29": -1.0,
+      "rec_2pt": 2.0,
+      "def_td": 6.0,
+      "blk_kick": 2.0,
+      "def_kr_td": 6.0,
+      "fum": 0.0,
+      "ff": 0.0,
+      "def_st_td": 6.0,
+      "safe": 4.0,
+      "pass_yd": 0.03999999910593033,
+      "bonus_rush_yd_200": 4.0,
+      "def_2pt": 3.0,
+      "def_st_fum_rec": 2.0,
+      "pts_allow_14_20": 4.0,
+      "fgm_40_49": 4.0,
+      "rush_2pt": 2.0,
+      "pass_int": -2.0,
+      "fum_rec": 2.0,
+      "bonus_rec_yd_200": 4.0,
+      "xpm": 1.0,
+      "pass_td": 6.0,
+      "pts_allow_28_34": -1.0
+    }
+  },
+  "week": 1,
+  "season": "2026",
+  "my_roster_id": 2,
+  "header": {
+    "opponent_name": "Mitch's Cousin ",
+    "my_projected": 135.72645803681408,
+    "opp_projected": 105.86131054489263,
+    "win_odds": 0.7397615959880579,
+    "playoff_odds": 0.76725,
+    "locks_in_ms": 1789086900000
+  },
+  "matchup": {
+    "my_name": "Witzy’s Blitzys",
+    "opp_name": "Mitch's Cousin ",
+    "my_avatar": "93bf4ccf4ee12f405f5617b95b001ab4",
+    "opp_avatar": "https://sleepercdn.com/uploads/234c700fab2da322a641ae1e28c5664c.jpg",
+    "my_projected": 135.72645803681408,
+    "opp_projected": 105.86131054489263,
+    "rows": [
+      {
+        "slot": "QB",
+        "my_player_id": "11560",
+        "my_name": "Caleb Williams",
+        "my_team": "CHI",
+        "my_points": 23.389177999861722,
+        "opp_player_id": "4984",
+        "opp_name": "Josh Allen",
+        "opp_team": "BUF",
+        "opp_points": 24.185944238188178,
+        "margin": -0.7967662383264553
+      },
+      {
+        "slot": "RB",
+        "my_player_id": "8138",
+        "my_name": "James Cook",
+        "my_team": "BUF",
+        "my_points": 17.938619793700852,
+        "opp_player_id": "8205",
+        "opp_name": "Isiah Pacheco",
+        "opp_team": "DET",
+        "opp_points": 3.8870000351220373,
+        "margin": 14.051619758578815
+      },
+      {
+        "slot": "WR",
+        "my_player_id": "8167",
+        "my_name": "Christian Watson",
+        "my_team": "GB",
+        "my_points": 14.267753145204704,
+        "opp_player_id": "6786",
+        "opp_name": "CeeDee Lamb",
+        "opp_team": "DAL",
+        "opp_points": 18.218720539356184,
+        "margin": -3.95096739415148
+      },
+      {
+        "slot": "TE",
+        "my_player_id": "12517",
+        "my_name": "Colston Loveland",
+        "my_team": "CHI",
+        "my_points": 14.664785489872447,
+        "opp_player_id": "5844",
+        "opp_name": "T.J. Hockenson",
+        "opp_team": "MIN",
+        "opp_points": 8.447144415323987,
+        "margin": 6.21764107454846
+      },
+      {
+        "slot": "FLEX",
+        "my_player_id": "4866",
+        "my_name": "Saquon Barkley",
+        "my_team": "PHI",
+        "my_points": 15.580825166177572,
+        "opp_player_id": "2216",
+        "opp_name": "Mike Evans",
+        "opp_team": "SF",
+        "opp_points": 13.0785532496448,
+        "margin": 2.502271916532772
+      },
+      {
+        "slot": "FLEX",
+        "my_player_id": "7543",
+        "my_name": "Travis Etienne",
+        "my_team": "NO",
+        "my_points": 14.336559360302584,
+        "opp_player_id": "5045",
+        "opp_name": "Courtland Sutton",
+        "opp_team": "DEN",
+        "opp_points": 10.759420253337495,
+        "margin": 3.577139106965088
+      },
+      {
+        "slot": "FLEX",
+        "my_player_id": "8146",
+        "my_name": "Garrett Wilson",
+        "my_team": "NYJ",
+        "my_points": 13.966958831079841,
+        "opp_player_id": "9754",
+        "opp_name": "Quentin Johnston",
+        "opp_team": "LAC",
+        "opp_points": 11.248967508872065,
+        "margin": 2.7179913222077765
+      },
+      {
+        "slot": "FLEX",
+        "my_player_id": "9500",
+        "my_name": "Josh Downs",
+        "my_team": "IND",
+        "my_points": 12.791778250614378,
+        "opp_player_id": "8210",
+        "opp_name": "Chig Okonkwo",
+        "opp_team": "WAS",
+        "opp_points": 9.125560305047891,
+        "margin": 3.666217945566487
+      },
+      {
+        "slot": "DEF",
+        "my_player_id": "DET",
+        "my_name": "Detroit Lions",
+        "my_team": "DET",
+        "my_points": 8.790000000000001,
+        "opp_player_id": "CHI",
+        "opp_name": "Chicago Bears",
+        "opp_team": "CHI",
+        "opp_points": 6.91,
+        "margin": 1.8800000000000008
+      }
+    ],
+    "set_rows": [
+      {
+        "slot": "QB",
+        "my_player_id": "11560",
+        "my_name": "Caleb Williams",
+        "my_team": "CHI",
+        "my_points": 23.389177999861722,
+        "opp_player_id": "4984",
+        "opp_name": "Josh Allen",
+        "opp_team": "BUF",
+        "opp_points": 24.185944238188178,
+        "margin": -0.7967662383264553
+      },
+      {
+        "slot": "RB",
+        "my_player_id": "8138",
+        "my_name": "James Cook",
+        "my_team": "BUF",
+        "my_points": 17.938619793700852,
+        "opp_player_id": "8205",
+        "opp_name": "Isiah Pacheco",
+        "opp_team": "DET",
+        "opp_points": 3.8870000351220373,
+        "margin": 14.051619758578815
+      },
+      {
+        "slot": "WR",
+        "my_player_id": "8146",
+        "my_name": "Garrett Wilson",
+        "my_team": "NYJ",
+        "my_points": 13.966958831079841,
+        "opp_player_id": "6786",
+        "opp_name": "CeeDee Lamb",
+        "opp_team": "DAL",
+        "opp_points": 18.218720539356184,
+        "margin": -4.251761708276343
+      },
+      {
+        "slot": "TE",
+        "my_player_id": "12517",
+        "my_name": "Colston Loveland",
+        "my_team": "CHI",
+        "my_points": 14.664785489872447,
+        "opp_player_id": "5844",
+        "opp_name": "T.J. Hockenson",
+        "opp_team": "MIN",
+        "opp_points": 8.447144415323987,
+        "margin": 6.21764107454846
+      },
+      {
+        "slot": "FLEX",
+        "my_player_id": "4866",
+        "my_name": "Saquon Barkley",
+        "my_team": "PHI",
+        "my_points": 15.580825166177572,
+        "opp_player_id": "2216",
+        "opp_name": "Mike Evans",
+        "opp_team": "SF",
+        "opp_points": 13.0785532496448,
+        "margin": 2.502271916532772
+      },
+      {
+        "slot": "FLEX",
+        "my_player_id": "7543",
+        "my_name": "Travis Etienne",
+        "my_team": "NO",
+        "my_points": 14.336559360302584,
+        "opp_player_id": "5045",
+        "opp_name": "Courtland Sutton",
+        "opp_team": "DEN",
+        "opp_points": 10.759420253337495,
+        "margin": 3.577139106965088
+      },
+      {
+        "slot": "FLEX",
+        "my_player_id": "5967",
+        "my_name": "Tony Pollard",
+        "my_team": "TEN",
+        "my_points": 10.024916534639125,
+        "opp_player_id": "9754",
+        "opp_name": "Quentin Johnston",
+        "opp_team": "LAC",
+        "opp_points": 11.248967508872065,
+        "margin": -1.2240509742329397
+      },
+      {
+        "slot": "FLEX",
+        "my_player_id": "8167",
+        "my_name": "Christian Watson",
+        "my_team": "GB",
+        "my_points": 14.267753145204704,
+        "opp_player_id": "8210",
+        "opp_name": "Chig Okonkwo",
+        "opp_team": "WAS",
+        "opp_points": 9.125560305047891,
+        "margin": 5.142192840156813
+      },
+      {
+        "slot": "DEF",
+        "my_player_id": "DET",
+        "my_name": "Detroit Lions",
+        "my_team": "DET",
+        "my_points": 8.790000000000001,
+        "opp_player_id": "CHI",
+        "opp_name": "Chicago Bears",
+        "opp_team": "CHI",
+        "opp_points": 6.91,
+        "margin": 1.8800000000000008
+      }
+    ],
+    "set_projected": 132.95959632083887
+  },
+  "calls": [
+    {
+      "slot": "FLEX",
+      "player_in": "Josh Downs",
+      "player_in_id": "9500",
+      "player_in_team": "IND",
+      "player_out": "Tony Pollard",
+      "player_out_id": "5967",
+      "gain": 2.766861715975253,
+      "why": "Josh Downs projects 12.8 against 10.0 for Tony Pollard — a +2.8 swing on this week's projection."
+    }
+  ],
+  "points_on_table": 2.766861715975253,
+  "waivers": [
+    {
+      "player_id": "TEN",
+      "name": "Tennessee Titans",
+      "position": "DEF",
+      "team": "TEN",
+      "gain_points": 1.6299999999999955,
+      "gain_fraction": 0.012009449178714136,
+      "suggested_bid": 60,
+      "rivals": 7
+    }
+  ],
+  "waiver_budget_left": 1000.0,
+  "waiver_budget_total": 1000.0,
+  "standings": [
+    {
+      "roster_id": 3,
+      "seed": 1,
+      "name": "Northern CT Hedgehogs  ",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1915.0300725206519,
+      "playoff_odds": 0.93325,
+      "is_mine": false
+    },
+    {
+      "roster_id": 12,
+      "seed": 2,
+      "name": "CrabRider",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1729.8977914644415,
+      "playoff_odds": 0.7185,
+      "is_mine": false
+    },
+    {
+      "roster_id": 2,
+      "seed": 3,
+      "name": "Witzy’s Blitzys",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1697.6085961707056,
+      "playoff_odds": 0.76725,
+      "is_mine": true
+    },
+    {
+      "roster_id": 4,
+      "seed": 4,
+      "name": "fisher23",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1690.5527602579082,
+      "playoff_odds": 0.67075,
+      "is_mine": false
+    },
+    {
+      "roster_id": 14,
+      "seed": 5,
+      "name": "197lbsleanmeandadbod",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1656.8288356516887,
+      "playoff_odds": 0.58975,
+      "is_mine": false
+    },
+    {
+      "roster_id": 9,
+      "seed": 6,
+      "name": "Ruggs and Tuggs",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1654.3890052689862,
+      "playoff_odds": 0.561,
+      "is_mine": false
+    },
+    {
+      "roster_id": 13,
+      "seed": 7,
+      "name": "McSleeper26",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1610.5611872227598,
+      "playoff_odds": 0.4415,
+      "is_mine": false
+    },
+    {
+      "roster_id": 8,
+      "seed": 8,
+      "name": "Meatball",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1597.751126341969,
+      "playoff_odds": 0.40925,
+      "is_mine": false
+    },
+    {
+      "roster_id": 10,
+      "seed": 9,
+      "name": "Team Iceland",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1545.9393606842925,
+      "playoff_odds": 0.32325,
+      "is_mine": false
+    },
+    {
+      "roster_id": 1,
+      "seed": 10,
+      "name": "AllDay21",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1487.1744917247024,
+      "playoff_odds": 0.2995,
+      "is_mine": false
+    },
+    {
+      "roster_id": 11,
+      "seed": 11,
+      "name": "Stompthatass",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1432.72686929862,
+      "playoff_odds": 0.112,
+      "is_mine": false
+    },
+    {
+      "roster_id": 6,
+      "seed": 12,
+      "name": "ocrevo",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1380.9226713333833,
+      "playoff_odds": 0.064,
+      "is_mine": false
+    },
+    {
+      "roster_id": 5,
+      "seed": 13,
+      "name": "ClemDawg Millionaires",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1347.503810263527,
+      "playoff_odds": 0.05975,
+      "is_mine": false
+    },
+    {
+      "roster_id": 7,
+      "seed": 14,
+      "name": "Mitch's Cousin ",
+      "record": "0–0",
+      "wins": 0,
+      "losses": 0,
+      "ties": 0,
+      "points_for": 0.0,
+      "projected_points": 1345.3893408199397,
+      "playoff_odds": 0.05025,
+      "is_mine": false
+    }
+  ],
+  "live": {
+    "games": [
+      {
+        "game_id": "202610132",
+        "away": "SF",
+        "home": "LAR",
+        "away_score": null,
+        "home_score": null,
+        "state": "pre",
+        "status": "",
+        "kickoff_ms": 1789086900000,
+        "flag": null,
+        "channel": "Netflix",
+        "chips": [
+          {
+            "player_id": "2216",
+            "name": "Mike Evans",
+            "slot": "FLEX",
+            "team": "SF",
+            "points": 0.0,
+            "is_mine": false,
+            "state": "pre"
+          }
+        ]
+      },
+      {
+        "game_id": "202610113",
+        "away": "BUF",
+        "home": "HOU",
+        "away_score": null,
+        "home_score": null,
+        "state": "pre",
+        "status": "",
+        "kickoff_ms": 1789318800000,
+        "flag": null,
+        "channel": "CBS",
+        "chips": [
+          {
+            "player_id": "8138",
+            "name": "James Cook",
+            "slot": "RB",
+            "team": "BUF",
+            "points": 0.0,
+            "is_mine": true,
+            "state": "pre"
+          },
+          {
+            "player_id": "4984",
+            "name": "Josh Allen",
+            "slot": "QB",
+            "team": "BUF",
+            "points": 0.0,
+            "is_mine": false,
+            "state": "pre"
+          }
+        ]
+      },
+      {
+        "game_id": "202610105",
+        "away": "CHI",
+        "home": "CAR",
+        "away_score": null,
+        "home_score": null,
+        "state": "pre",
+        "status": "",
+        "kickoff_ms": 1789318800000,
+        "flag": null,
+        "channel": "FOX",
+        "chips": [
+          {
+            "player_id": "11560",
+            "name": "Caleb Williams",
+            "slot": "QB",
+            "team": "CHI",
+            "points": 0.0,
+            "is_mine": true,
+            "state": "pre"
+          },
+          {
+            "player_id": "12517",
+            "name": "Colston Loveland",
+            "slot": "TE",
+            "team": "CHI",
+            "points": 0.0,
+            "is_mine": true,
+            "state": "pre"
+          },
+          {
+            "player_id": "CHI",
+            "name": "Chicago Bears",
+            "slot": "DEF",
+            "team": "CHI",
+            "points": 0.0,
+            "is_mine": false,
+            "state": "pre"
+          }
+        ]
+      },
+      {
+        "game_id": "202610111",
+        "away": "NO",
+        "home": "DET",
+        "away_score": null,
+        "home_score": null,
+        "state": "pre",
+        "status": "",
+        "kickoff_ms": 1789318800000,
+        "flag": null,
+        "channel": "FOX",
+        "chips": [
+          {
+            "player_id": "7543",
+            "name": "Travis Etienne",
+            "slot": "FLEX",
+            "team": "NO",
+            "points": 0.0,
+            "is_mine": true,
+            "state": "pre"
+          },
+          {
+            "player_id": "DET",
+            "name": "Detroit Lions",
+            "slot": "DEF",
+            "team": "DET",
+            "points": 0.0,
+            "is_mine": true,
+            "state": "pre"
+          },
+          {
+            "player_id": "8205",
+            "name": "Isiah Pacheco",
+            "slot": "RB",
+            "team": "DET",
+            "points": 0.0,
+            "is_mine": false,
+            "state": "pre"
+          }
+        ]
+      },
+      {
+        "game_id": "202610134",
+        "away": "NYJ",
+        "home": "TEN",
+        "away_score": null,
+        "home_score": null,
+        "state": "pre",
+        "status": "",
+        "kickoff_ms": 1789318800000,
+        "flag": null,
+        "channel": "CBS",
+        "chips": [
+          {
+            "player_id": "8146",
+            "name": "Garrett Wilson",
+            "slot": "WR",
+            "team": "NYJ",
+            "points": 0.0,
+            "is_mine": true,
+            "state": "pre"
+          },
+          {
+            "player_id": "5967",
+            "name": "Tony Pollard",
+            "slot": "FLEX",
+            "team": "TEN",
+            "points": 0.0,
+            "is_mine": true,
+            "state": "pre"
+          }
+        ]
+      },
+      {
+        "game_id": "202610129",
+        "away": "ARI",
+        "home": "LAC",
+        "away_score": null,
+        "home_score": null,
+        "state": "pre",
+        "status": "",
+        "kickoff_ms": 1789331100000,
+        "flag": null,
+        "channel": "CBS",
+        "chips": [
+          {
+            "player_id": "9754",
+            "name": "Quentin Johnston",
+            "slot": "FLEX",
+            "team": "LAC",
+            "points": 0.0,
+            "is_mine": false,
+            "state": "pre"
+          }
+        ]
+      },
+      {
+        "game_id": "202610120",
+        "away": "GB",
+        "home": "MIN",
+        "away_score": null,
+        "home_score": null,
+        "state": "pre",
+        "status": "",
+        "kickoff_ms": 1789331100000,
+        "flag": null,
+        "channel": "CBS",
+        "chips": [
+          {
+            "player_id": "8167",
+            "name": "Christian Watson",
+            "slot": "FLEX",
+            "team": "GB",
+            "points": 0.0,
+            "is_mine": true,
+            "state": "pre"
+          },
+          {
+            "player_id": "5844",
+            "name": "T.J. Hockenson",
+            "slot": "TE",
+            "team": "MIN",
+            "points": 0.0,
+            "is_mine": false,
+            "state": "pre"
+          }
+        ]
+      },
+      {
+        "game_id": "202610126",
+        "away": "WAS",
+        "home": "PHI",
+        "away_score": null,
+        "home_score": null,
+        "state": "pre",
+        "status": "",
+        "kickoff_ms": 1789331100000,
+        "flag": null,
+        "channel": "FOX",
+        "chips": [
+          {
+            "player_id": "4866",
+            "name": "Saquon Barkley",
+            "slot": "FLEX",
+            "team": "PHI",
+            "points": 0.0,
+            "is_mine": true,
+            "state": "pre"
+          },
+          {
+            "player_id": "8210",
+            "name": "Chig Okonkwo",
+            "slot": "FLEX",
+            "team": "WAS",
+            "points": 0.0,
+            "is_mine": false,
+            "state": "pre"
+          }
+        ]
+      },
+      {
+        "game_id": "202610123",
+        "away": "DAL",
+        "home": "NYG",
+        "away_score": null,
+        "home_score": null,
+        "state": "pre",
+        "status": "",
+        "kickoff_ms": 1789345200000,
+        "flag": null,
+        "channel": "NBC/Peacock",
+        "chips": [
+          {
+            "player_id": "6786",
+            "name": "CeeDee Lamb",
+            "slot": "WR",
+            "team": "DAL",
+            "points": 0.0,
+            "is_mine": false,
+            "state": "pre"
+          }
+        ]
+      },
+      {
+        "game_id": "202610116",
+        "away": "DEN",
+        "home": "KC",
+        "away_score": null,
+        "home_score": null,
+        "state": "pre",
+        "status": "",
+        "kickoff_ms": 1789431300000,
+        "flag": null,
+        "channel": "ABC",
+        "chips": [
+          {
+            "player_id": "5045",
+            "name": "Courtland Sutton",
+            "slot": "FLEX",
+            "team": "DEN",
+            "points": 0.0,
+            "is_mine": false,
+            "state": "pre"
+          }
+        ]
+      }
+    ],
+    "windows": [
+      {
+        "kickoff_ms": 1789086900000,
+        "my_starters": 0,
+        "games": [
+          {
+            "game_id": "202610132",
+            "away": "SF",
+            "home": "LAR",
+            "away_score": null,
+            "home_score": null,
+            "state": "pre",
+            "status": "",
+            "kickoff_ms": 1789086900000,
+            "flag": null,
+            "channel": "Netflix",
+            "chips": [
+              {
+                "player_id": "2216",
+                "name": "Mike Evans",
+                "slot": "FLEX",
+                "team": "SF",
+                "points": 0.0,
+                "is_mine": false,
+                "state": "pre"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kickoff_ms": 1789318800000,
+        "my_starters": 7,
+        "games": [
+          {
+            "game_id": "202610113",
+            "away": "BUF",
+            "home": "HOU",
+            "away_score": null,
+            "home_score": null,
+            "state": "pre",
+            "status": "",
+            "kickoff_ms": 1789318800000,
+            "flag": null,
+            "channel": "CBS",
+            "chips": [
+              {
+                "player_id": "8138",
+                "name": "James Cook",
+                "slot": "RB",
+                "team": "BUF",
+                "points": 0.0,
+                "is_mine": true,
+                "state": "pre"
+              },
+              {
+                "player_id": "4984",
+                "name": "Josh Allen",
+                "slot": "QB",
+                "team": "BUF",
+                "points": 0.0,
+                "is_mine": false,
+                "state": "pre"
+              }
+            ]
+          },
+          {
+            "game_id": "202610105",
+            "away": "CHI",
+            "home": "CAR",
+            "away_score": null,
+            "home_score": null,
+            "state": "pre",
+            "status": "",
+            "kickoff_ms": 1789318800000,
+            "flag": null,
+            "channel": "FOX",
+            "chips": [
+              {
+                "player_id": "11560",
+                "name": "Caleb Williams",
+                "slot": "QB",
+                "team": "CHI",
+                "points": 0.0,
+                "is_mine": true,
+                "state": "pre"
+              },
+              {
+                "player_id": "12517",
+                "name": "Colston Loveland",
+                "slot": "TE",
+                "team": "CHI",
+                "points": 0.0,
+                "is_mine": true,
+                "state": "pre"
+              },
+              {
+                "player_id": "CHI",
+                "name": "Chicago Bears",
+                "slot": "DEF",
+                "team": "CHI",
+                "points": 0.0,
+                "is_mine": false,
+                "state": "pre"
+              }
+            ]
+          },
+          {
+            "game_id": "202610111",
+            "away": "NO",
+            "home": "DET",
+            "away_score": null,
+            "home_score": null,
+            "state": "pre",
+            "status": "",
+            "kickoff_ms": 1789318800000,
+            "flag": null,
+            "channel": "FOX",
+            "chips": [
+              {
+                "player_id": "7543",
+                "name": "Travis Etienne",
+                "slot": "FLEX",
+                "team": "NO",
+                "points": 0.0,
+                "is_mine": true,
+                "state": "pre"
+              },
+              {
+                "player_id": "DET",
+                "name": "Detroit Lions",
+                "slot": "DEF",
+                "team": "DET",
+                "points": 0.0,
+                "is_mine": true,
+                "state": "pre"
+              },
+              {
+                "player_id": "8205",
+                "name": "Isiah Pacheco",
+                "slot": "RB",
+                "team": "DET",
+                "points": 0.0,
+                "is_mine": false,
+                "state": "pre"
+              }
+            ]
+          },
+          {
+            "game_id": "202610134",
+            "away": "NYJ",
+            "home": "TEN",
+            "away_score": null,
+            "home_score": null,
+            "state": "pre",
+            "status": "",
+            "kickoff_ms": 1789318800000,
+            "flag": null,
+            "channel": "CBS",
+            "chips": [
+              {
+                "player_id": "8146",
+                "name": "Garrett Wilson",
+                "slot": "WR",
+                "team": "NYJ",
+                "points": 0.0,
+                "is_mine": true,
+                "state": "pre"
+              },
+              {
+                "player_id": "5967",
+                "name": "Tony Pollard",
+                "slot": "FLEX",
+                "team": "TEN",
+                "points": 0.0,
+                "is_mine": true,
+                "state": "pre"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kickoff_ms": 1789331100000,
+        "my_starters": 2,
+        "games": [
+          {
+            "game_id": "202610129",
+            "away": "ARI",
+            "home": "LAC",
+            "away_score": null,
+            "home_score": null,
+            "state": "pre",
+            "status": "",
+            "kickoff_ms": 1789331100000,
+            "flag": null,
+            "channel": "CBS",
+            "chips": [
+              {
+                "player_id": "9754",
+                "name": "Quentin Johnston",
+                "slot": "FLEX",
+                "team": "LAC",
+                "points": 0.0,
+                "is_mine": false,
+                "state": "pre"
+              }
+            ]
+          },
+          {
+            "game_id": "202610120",
+            "away": "GB",
+            "home": "MIN",
+            "away_score": null,
+            "home_score": null,
+            "state": "pre",
+            "status": "",
+            "kickoff_ms": 1789331100000,
+            "flag": null,
+            "channel": "CBS",
+            "chips": [
+              {
+                "player_id": "8167",
+                "name": "Christian Watson",
+                "slot": "FLEX",
+                "team": "GB",
+                "points": 0.0,
+                "is_mine": true,
+                "state": "pre"
+              },
+              {
+                "player_id": "5844",
+                "name": "T.J. Hockenson",
+                "slot": "TE",
+                "team": "MIN",
+                "points": 0.0,
+                "is_mine": false,
+                "state": "pre"
+              }
+            ]
+          },
+          {
+            "game_id": "202610126",
+            "away": "WAS",
+            "home": "PHI",
+            "away_score": null,
+            "home_score": null,
+            "state": "pre",
+            "status": "",
+            "kickoff_ms": 1789331100000,
+            "flag": null,
+            "channel": "FOX",
+            "chips": [
+              {
+                "player_id": "4866",
+                "name": "Saquon Barkley",
+                "slot": "FLEX",
+                "team": "PHI",
+                "points": 0.0,
+                "is_mine": true,
+                "state": "pre"
+              },
+              {
+                "player_id": "8210",
+                "name": "Chig Okonkwo",
+                "slot": "FLEX",
+                "team": "WAS",
+                "points": 0.0,
+                "is_mine": false,
+                "state": "pre"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kickoff_ms": 1789345200000,
+        "my_starters": 0,
+        "games": [
+          {
+            "game_id": "202610123",
+            "away": "DAL",
+            "home": "NYG",
+            "away_score": null,
+            "home_score": null,
+            "state": "pre",
+            "status": "",
+            "kickoff_ms": 1789345200000,
+            "flag": null,
+            "channel": "NBC/Peacock",
+            "chips": [
+              {
+                "player_id": "6786",
+                "name": "CeeDee Lamb",
+                "slot": "WR",
+                "team": "DAL",
+                "points": 0.0,
+                "is_mine": false,
+                "state": "pre"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kickoff_ms": 1789431300000,
+        "my_starters": 0,
+        "games": [
+          {
+            "game_id": "202610116",
+            "away": "DEN",
+            "home": "KC",
+            "away_score": null,
+            "home_score": null,
+            "state": "pre",
+            "status": "",
+            "kickoff_ms": 1789431300000,
+            "flag": null,
+            "channel": "ABC",
+            "chips": [
+              {
+                "player_id": "5045",
+                "name": "Courtland Sutton",
+                "slot": "FLEX",
+                "team": "DEN",
+                "points": 0.0,
+                "is_mine": false,
+                "state": "pre"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "my_playing": 0,
+      "my_pre": 9,
+      "my_done": 0,
+      "my_live_points": 0.0,
+      "opp_live_points": 0.0
+    },
+    "next_kickoff_ms": 1789086900000,
+    "bye_teams": []
+  },
+  "roster": [
+    {
+      "player_id": "11560",
+      "name": "Caleb Williams",
+      "position": "QB",
+      "team": "CHI",
+      "role": "Start",
+      "points": 0.0,
+      "projected": 23.389177999861722
+    },
+    {
+      "player_id": "12517",
+      "name": "Colston Loveland",
+      "position": "TE",
+      "team": "CHI",
+      "role": "Start",
+      "points": 0.0,
+      "projected": 14.664785489872447
+    },
+    {
+      "player_id": "4866",
+      "name": "Saquon Barkley",
+      "position": "RB",
+      "team": "PHI",
+      "role": "Start",
+      "points": 0.0,
+      "projected": 15.580825166177572
+    },
+    {
+      "player_id": "5967",
+      "name": "Tony Pollard",
+      "position": "RB",
+      "team": "TEN",
+      "role": "Start",
+      "points": 0.0,
+      "projected": 10.024916534639125
+    },
+    {
+      "player_id": "7543",
+      "name": "Travis Etienne",
+      "position": "RB",
+      "team": "NO",
+      "role": "Start",
+      "points": 0.0,
+      "projected": 14.336559360302584
+    },
+    {
+      "player_id": "8138",
+      "name": "James Cook",
+      "position": "RB",
+      "team": "BUF",
+      "role": "Start",
+      "points": 0.0,
+      "projected": 17.938619793700852
+    },
+    {
+      "player_id": "8146",
+      "name": "Garrett Wilson",
+      "position": "WR",
+      "team": "NYJ",
+      "role": "Start",
+      "points": 0.0,
+      "projected": 13.966958831079841
+    },
+    {
+      "player_id": "8167",
+      "name": "Christian Watson",
+      "position": "WR",
+      "team": "GB",
+      "role": "Start",
+      "points": 0.0,
+      "projected": 14.267753145204704
+    },
+    {
+      "player_id": "DET",
+      "name": "Detroit Lions",
+      "position": "DEF",
+      "team": "DET",
+      "role": "Start",
+      "points": 0.0,
+      "projected": 8.790000000000001
+    },
+    {
+      "player_id": "11586",
+      "name": "Blake Corum",
+      "position": "RB",
+      "team": "LAR",
+      "role": "Bench",
+      "points": 0.0,
+      "projected": 8.564888849939924
+    },
+    {
+      "player_id": "11618",
+      "name": "Jalen McMillan",
+      "position": "WR",
+      "team": "TB",
+      "role": "Bench",
+      "points": 0.0,
+      "projected": 7.347810571190063
+    },
+    {
+      "player_id": "11646",
+      "name": "Jalen Coker",
+      "position": "WR",
+      "team": "CAR",
+      "role": "Bench",
+      "points": 0.0,
+      "projected": 12.369104689350461
+    },
+    {
+      "player_id": "12487",
+      "name": "Terrance Ferguson",
+      "position": "TE",
+      "team": "LAR",
+      "role": "Bench",
+      "points": 0.0,
+      "projected": 3.6780000223219393
+    },
+    {
+      "player_id": "4217",
+      "name": "George Kittle",
+      "position": "TE",
+      "team": "SF",
+      "role": "Bench",
+      "points": 0.0,
+      "projected": 10.148798272428273
+    },
+    {
+      "player_id": "6819",
+      "name": "Michael Pittman",
+      "position": "WR",
+      "team": "PIT",
+      "role": "Bench",
+      "points": 0.0,
+      "projected": 10.874988388364605
+    },
+    {
+      "player_id": "8161",
+      "name": "Malik Willis",
+      "position": "QB",
+      "team": "MIA",
+      "role": "Bench",
+      "points": 0.0,
+      "projected": 18.467952420813937
+    },
+    {
+      "player_id": "9500",
+      "name": "Josh Downs",
+      "position": "WR",
+      "team": "IND",
+      "role": "Bench",
+      "points": 0.0,
+      "projected": 12.791778250614378
+    },
+    {
+      "player_id": "9508",
+      "name": "Tyjae Spears",
+      "position": "RB",
+      "team": "TEN",
+      "role": "Bench",
+      "points": 0.0,
+      "projected": 7.360000052750111
+    }
+  ],
+  "trades": [
+    {
+      "roster_id": 7,
+      "partner": "Mitch's Cousin ",
+      "get_id": "6786",
+      "get_name": "CeeDee Lamb",
+      "get_position": "WR",
+      "give_id": "7543",
+      "give_name": "Travis Etienne",
+      "give_position": "RB",
+      "my_edge": 3.882161179053611,
+      "their_edge": 0.5480472040659521,
+      "note": "Mitch's Cousin  gains +0.5/wk too — both sides start a better lineup"
+    },
+    {
+      "roster_id": 1,
+      "partner": "AllDay21",
+      "get_id": "JAX",
+      "get_name": "Jacksonville Jaguars",
+      "get_position": "DEF",
+      "give_id": "11646",
+      "give_name": "Jalen Coker",
+      "give_position": "WR",
+      "my_edge": 2.7600000000000193,
+      "their_edge": 2.137131584813318,
+      "note": "AllDay21 gains +2.1/wk too — both sides start a better lineup"
+    },
+    {
+      "roster_id": 5,
+      "partner": "ClemDawg Millionaires",
+      "get_id": "LV",
+      "get_name": "Las Vegas Raiders",
+      "get_position": "DEF",
+      "give_id": "9500",
+      "give_name": "Josh Downs",
+      "give_position": "WR",
+      "my_edge": 1.277326438736111,
+      "their_edge": 0.9202313233633816,
+      "note": "ClemDawg Millionaires gains +0.9/wk too — both sides start a better lineup"
+    },
+    {
+      "roster_id": 4,
+      "partner": "fisher23",
+      "get_id": "LAR",
+      "get_name": "Los Angeles Rams",
+      "get_position": "DEF",
+      "give_id": "4217",
+      "give_name": "George Kittle",
+      "give_position": "TE",
+      "my_edge": 0.8000000000000114,
+      "their_edge": 1.9017922612531208,
+      "note": "fisher23 gains +1.9/wk too — both sides start a better lineup"
+    }
+  ],
+  "recent_trades": [
+    {
+      "transaction_id": "1399242803485089792",
+      "at": 1787967990327,
+      "sides": [
+        {
+          "roster_id": 11,
+          "team": "Stompthatass",
+          "gets": [
+            "Xavier Worthy"
+          ]
+        },
+        {
+          "roster_id": 13,
+          "team": "McSleeper26",
+          "gets": [
+            "Philadelphia Eagles"
+          ]
+        }
+      ],
+      "involves_me": false,
+      "pending": false
+    },
+    {
+      "transaction_id": "1397443429289476096",
+      "at": 1787538986088,
+      "sides": [
+        {
+          "roster_id": 1,
+          "team": "AllDay21",
+          "gets": []
+        },
+        {
+          "roster_id": 9,
+          "team": "Ruggs and Tuggs",
+          "gets": [
+            "De'Von Achane"
+          ]
+        }
+      ],
+      "involves_me": false,
+      "pending": false
+    },
+    {
+      "transaction_id": "1396381698098200576",
+      "at": 1787285849646,
+      "sides": [
+        {
+          "roster_id": 1,
+          "team": "AllDay21",
+          "gets": []
+        },
+        {
+          "roster_id": 6,
+          "team": "ocrevo",
+          "gets": [
+            "Tyler Warren"
+          ]
+        }
+      ],
+      "involves_me": false,
+      "pending": false
+    },
+    {
+      "transaction_id": "1395615048386248704",
+      "at": 1787103066111,
+      "sides": [
+        {
+          "roster_id": 4,
+          "team": "fisher23",
+          "gets": []
+        },
+        {
+          "roster_id": 6,
+          "team": "ocrevo",
+          "gets": []
+        }
+      ],
+      "involves_me": false,
+      "pending": false
+    },
+    {
+      "transaction_id": "1391275148182585344",
+      "at": 1786068353270,
+      "sides": [
+        {
+          "roster_id": 2,
+          "team": "Witzy’s Blitzys",
+          "gets": []
+        },
+        {
+          "roster_id": 4,
+          "team": "fisher23",
+          "gets": []
+        }
+      ],
+      "involves_me": true,
+      "pending": false
+    }
+  ],
+  "activity": [
+    {
+      "kind": "Lineup",
+      "text": "Stompthatass has an empty DEF slot",
+      "created": 1788127759000,
+      "roster_id": 11,
+      "player_ids": []
+    },
+    {
+      "kind": "Lineup",
+      "text": "McSleeper26 has an empty DEF slot",
+      "created": 1788127759000,
+      "roster_id": 13,
+      "player_ids": []
+    },
+    {
+      "kind": "Add",
+      "text": "Mitch's Cousin  added Kaleb Johnson and dropped Ray Davis",
+      "created": 1788112093885,
+      "roster_id": 7,
+      "player_ids": [
+        "12504",
+        "11575"
+      ]
+    },
+    {
+      "kind": "Add",
+      "text": "ocrevo added Adonai Mitchell and dropped Antonio Williams",
+      "created": 1788111529263,
+      "roster_id": 6,
+      "player_ids": [
+        "11625",
+        "13301"
+      ]
+    },
+    {
+      "kind": "Add",
+      "text": "Ruggs and Tuggs added Devaughn Vele",
+      "created": 1788037269832,
+      "roster_id": 9,
+      "player_ids": [
+        "11834"
+      ]
+    },
+    {
+      "kind": "Add",
+      "text": "Mitch's Cousin  added Darren Waller and dropped Eli Stowers",
+      "created": 1788014467418,
+      "roster_id": 7,
+      "player_ids": [
+        "2505",
+        "13349"
+      ]
+    },
+    {
+      "kind": "Add",
+      "text": "Mitch's Cousin  added Chicago Bears",
+      "created": 1787971794671,
+      "roster_id": 7,
+      "player_ids": [
+        "CHI"
+      ]
+    },
+    {
+      "kind": "Add",
+      "text": "Mitch's Cousin  added Eli Stowers",
+      "created": 1787971775147,
+      "roster_id": 7,
+      "player_ids": [
+        "13349"
+      ]
+    },
+    {
+      "kind": "Add",
+      "text": "Mitch's Cousin  added Ray Davis",
+      "created": 1787971762725,
+      "roster_id": 7,
+      "player_ids": [
+        "11575"
+      ]
+    },
+    {
+      "kind": "Add",
+      "text": "Mitch's Cousin  added Samaje Perine",
+      "created": 1787971756570,
+      "roster_id": 7,
+      "player_ids": [
+        "4147"
+      ]
+    },
+    {
+      "kind": "Add",
+      "text": "Mitch's Cousin  added Cam Ward",
+      "created": 1787971748491,
+      "roster_id": 7,
+      "player_ids": [
+        "12522"
+      ]
+    },
+    {
+      "kind": "Add",
+      "text": "Stompthatass added Marvin Mims and dropped Najee Harris",
+      "created": 1787971735400,
+      "roster_id": 11,
+      "player_ids": [
+        "9494",
+        "7528"
+      ]
+    },
+    {
+      "kind": "Add",
+      "text": "ClemDawg Millionaires added Las Vegas Raiders and dropped Jack Bech",
+      "created": 1787969675658,
+      "roster_id": 5,
+      "player_ids": [
+        "LV",
+        "12483"
+      ]
+    },
+    {
+      "kind": "Add",
+      "text": "Stompthatass added Ryan Flournoy",
+      "created": 1787968457127,
+      "roster_id": 11,
+      "player_ids": [
+        "11783"
+      ]
+    }
+  ],
+  "last_season": [
+    {
+      "place": 1,
+      "name": "AllDay21",
+      "record": "22–6",
+      "points": 1926.0,
+      "tag": "Most pts",
+      "is_mine": false
+    },
+    {
+      "place": 1,
+      "name": "CrabRider",
+      "record": "22–6",
+      "points": 1891.42,
+      "tag": "Champ",
+      "is_mine": false
+    },
+    {
+      "place": 3,
+      "name": "Mitch's Cousin ",
+      "record": "21–7",
+      "points": 1864.86,
+      "tag": null,
+      "is_mine": false
+    },
+    {
+      "place": 4,
+      "name": "Northern CT Hedgehogs  ",
+      "record": "21–7",
+      "points": 1822.76,
+      "tag": null,
+      "is_mine": false
+    },
+    {
+      "place": 5,
+      "name": "Jets Bar no mah",
+      "record": "19–9",
+      "points": 1817.28,
+      "tag": null,
+      "is_mine": false
+    },
+    {
+      "place": 6,
+      "name": "ClemDawg Millionaires",
+      "record": "17–11",
+      "points": 1729.52,
+      "tag": null,
+      "is_mine": false
+    },
+    {
+      "place": 7,
+      "name": "197lbsleanmeandadbod",
+      "record": "14–14",
+      "points": 1671.02,
+      "tag": null,
+      "is_mine": false
+    },
+    {
+      "place": 8,
+      "name": "ocrevo",
+      "record": "14–14",
+      "points": 1644.72,
+      "tag": null,
+      "is_mine": false
+    },
+    {
+      "place": 9,
+      "name": "Team Iceland",
+      "record": "13–15",
+      "points": 1647.9,
+      "tag": null,
+      "is_mine": false
+    },
+    {
+      "place": 10,
+      "name": "Ruggs and Tuggs",
+      "record": "10–18",
+      "points": 1571.1,
+      "tag": null,
+      "is_mine": false
+    },
+    {
+      "place": 11,
+      "name": "Witzy’s Blitzys",
+      "record": "9–19",
+      "points": 1441.6,
+      "tag": null,
+      "is_mine": true
+    },
+    {
+      "place": 12,
+      "name": "Meatball",
+      "record": "5–23",
+      "points": 1430.44,
+      "tag": null,
+      "is_mine": false
+    },
+    {
+      "place": 13,
+      "name": "Da Little Bears",
+      "record": "5–23",
+      "points": 1387.92,
+      "tag": null,
+      "is_mine": false
+    },
+    {
+      "place": 14,
+      "name": "fisher23",
+      "record": "4–24",
+      "points": 1303.52,
+      "tag": null,
+      "is_mine": false
+    }
+  ],
+  "trends": {
+    "series": [
+      {
+        "roster_id": 3,
+        "name": "Northern CT Hedgehogs  ",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 147.51999888038804
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 147.51999888038804
+          }
+        ]
+      },
+      {
+        "roster_id": 12,
+        "name": "CrabRider",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 133.3532483652438
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 133.3532483652438
+          }
+        ]
+      },
+      {
+        "roster_id": 2,
+        "name": "Witzy’s Blitzys",
+        "is_mine": true,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 130.9525038719657
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 130.9525038719657
+          }
+        ]
+      },
+      {
+        "roster_id": 4,
+        "name": "fisher23",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 130.48397750050472
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 130.48397750050472
+          }
+        ]
+      },
+      {
+        "roster_id": 14,
+        "name": "197lbsleanmeandadbod",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 127.80108238492004
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 127.80108238492002
+          }
+        ]
+      },
+      {
+        "roster_id": 9,
+        "name": "Ruggs and Tuggs",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 127.3912614473735
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 127.3912614473735
+          }
+        ]
+      },
+      {
+        "roster_id": 13,
+        "name": "McSleeper26",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 124.3687581820114
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 124.36875818201142
+          }
+        ]
+      },
+      {
+        "roster_id": 8,
+        "name": "Meatball",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 123.08029393702964
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 123.08029393702964
+          }
+        ]
+      },
+      {
+        "roster_id": 10,
+        "name": "Team Iceland",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 119.11524156354078
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 119.11524156354078
+          }
+        ]
+      },
+      {
+        "roster_id": 1,
+        "name": "AllDay21",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 114.75561450892548
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 114.75561450892548
+          }
+        ]
+      },
+      {
+        "roster_id": 11,
+        "name": "Stompthatass",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 110.41464628833208
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 110.41464628833208
+          }
+        ]
+      },
+      {
+        "roster_id": 6,
+        "name": "ocrevo",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 106.61542706726932
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 106.61542706726932
+          }
+        ]
+      },
+      {
+        "roster_id": 5,
+        "name": "ClemDawg Millionaires",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 104.35716182789176
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 104.35716182789176
+          }
+        ]
+      },
+      {
+        "roster_id": 7,
+        "name": "Mitch's Cousin ",
+        "is_mine": false,
+        "points": [
+          {
+            "at": 1788112417,
+            "week": 1,
+            "strength": 103.98861795829228
+          },
+          {
+            "at": 1788112648,
+            "week": 1,
+            "strength": 103.66076081177371
+          }
+        ]
+      }
+    ],
+    "changes": [
+      {
+        "at": 1788112648,
+        "week": 1,
+        "roster_id": 7,
+        "team": "Mitch's Cousin ",
+        "is_mine": false,
+        "delta": -0.3278571465185678,
+        "reasons": [
+          "dropped Ray Davis",
+          "added Kaleb Johnson"
+        ]
+      }
+    ]
+  },
+  "team_avatars": {
+    "2": "93bf4ccf4ee12f405f5617b95b001ab4",
+    "4": "0bba60adf9bd86e9f9bae2dfdb51f67d",
+    "6": "4d029bf89fb4be9d97e5b2094b5f7cb7",
+    "8": "2c96a24c53caa6c734a119e589ad20e6",
+    "5": "https://sleepercdn.com/images/mascots_v2/29_BurningMan/idle-mobile-small.gif",
+    "9": "5465a43bf96c8b16dc460cbf1b67e29c",
+    "14": "https://sleepercdn.com/uploads/b9726ec14fb05678d87357610c4219e7.jpg",
+    "12": "8c3950ce5bfd68168d57b859e5e8eb21",
+    "1": "405213591fe488220f2f4f79d9cc28eb",
+    "3": "https://sleepercdn.com/uploads/c980da0b015929edf41c3b1182ab6b32.jpg",
+    "11": "56c292fabc7dfd4448e1356d87e71f7a",
+    "10": "https://sleepercdn.com/uploads/48043ee992091bc149e734cbcd9af06f.jpg",
+    "13": "d68a72dbcddd11b94e7c0da161c3b891",
+    "7": "https://sleepercdn.com/uploads/234c700fab2da322a641ae1e28c5664c.jpg"
+  },
+  "data_health": {
+    "fetched_at": 1788127759,
+    "warnings": []
+  }
+}

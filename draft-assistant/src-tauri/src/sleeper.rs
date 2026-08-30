@@ -11,6 +11,22 @@ use std::collections::HashMap;
 const BASE: &str = "https://api.sleeper.app/v1";
 const BASE_UNDOC: &str = "https://api.sleeper.app";
 
+/// League-wide knobs the season screen needs. All optional: a mock draft's
+/// synthesized league has none of them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LeagueSettings {
+    /// First week of the playoffs; the regular season is weeks 1..this.
+    #[serde(default)]
+    pub playoff_week_start: Option<u32>,
+    #[serde(default)]
+    pub playoff_teams: Option<u32>,
+    /// FAAB budget. Absent on leagues using waiver priority instead.
+    #[serde(default)]
+    pub waiver_budget: Option<f64>,
+    #[serde(default)]
+    pub start_week: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct League {
     pub league_id: String,
@@ -21,6 +37,22 @@ pub struct League {
     pub roster_positions: Vec<String>,
     pub scoring_settings: HashMap<String, f64>,
     pub draft_id: Option<String>,
+    /// Same league, prior season — the "Last season" tab reads this.
+    #[serde(default)]
+    pub previous_league_id: Option<String>,
+    #[serde(default)]
+    pub settings: LeagueSettings,
+}
+
+impl League {
+    /// Weeks 1..=this are regular-season matchups. Sleeper's default is 15.
+    pub fn last_regular_week(&self) -> u32 {
+        self.settings
+            .playoff_week_start
+            .filter(|w| *w > 1)
+            .unwrap_or(15)
+            .saturating_sub(1)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +109,10 @@ pub struct Draft {
     /// User ids that created the draft (mock drafts may use a guest id here).
     #[serde(default)]
     pub creators: Option<Vec<String>>,
+    /// Epoch milliseconds of the most recent pick; with `settings.pick_timer`
+    /// this gives the current pick's deadline.
+    #[serde(default)]
+    pub last_picked: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,11 +188,48 @@ impl ProjectionRow {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LeagueUserMeta {
+    /// Custom team name. Users who never set one have no key here.
+    #[serde(default)]
+    pub team_name: Option<String>,
+    /// Custom team picture, as a full sleepercdn URL.
+    #[serde(default)]
+    pub avatar: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeagueUser {
     pub user_id: String,
     #[serde(default)]
     pub display_name: Option<String>,
+    /// Sleeper avatar hash for the account itself.
+    #[serde(default)]
+    pub avatar: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<LeagueUserMeta>,
+}
+
+impl LeagueUser {
+    /// What to call this team: their custom name, else their handle.
+    pub fn label(&self) -> Option<String> {
+        self.metadata
+            .as_ref()
+            .and_then(|m| m.team_name.clone())
+            .filter(|n| !n.trim().is_empty())
+            .or_else(|| self.display_name.clone())
+    }
+
+    /// The picture to draw for this team: their custom team image when they
+    /// uploaded one, else their account avatar. `None` for the default egg.
+    pub fn avatar_ref(&self) -> Option<String> {
+        self.metadata
+            .as_ref()
+            .and_then(|m| m.avatar.clone())
+            .filter(|a| !a.trim().is_empty())
+            .or_else(|| self.avatar.clone())
+            .filter(|a| !a.trim().is_empty())
+    }
 }
 
 pub struct SleeperClient {
@@ -181,7 +254,16 @@ impl SleeperClient {
         Self { http }
     }
 
-    async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, String> {
+    /// The pooled HTTP client, reused by other callers (the chat panel) so
+    /// the app keeps one connection pool rather than several.
+    pub fn http_client(&self) -> reqwest::Client {
+        self.http.clone()
+    }
+
+    pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+    ) -> Result<T, String> {
         let resp = self
             .http
             .get(url)

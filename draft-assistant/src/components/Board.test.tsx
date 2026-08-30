@@ -34,6 +34,8 @@ describe("Board", () => {
           player("k", "Kicker", "K"),
         ]}
         positions={["QB", "K"]}
+        loading={false}
+        boardSize={2}
         onDraft={vi.fn()}
       />,
     );
@@ -50,12 +52,50 @@ describe("Board", () => {
       <Board
         players={[player("qb", "Quarterback", "QB")]}
         positions={["QB"]}
+        loading={false}
+        boardSize={1}
         onDraft={vi.fn()}
       />,
     );
 
     await user.type(screen.getByRole("textbox", { name: "Search players" }), "missing");
-    expect(screen.getByText("No matching players")).toBeInTheDocument();
+    expect(screen.getByText("No players match")).toBeInTheDocument();
     expect(screen.getByText("0 players")).toBeInTheDocument();
+  });
+
+  it("jumps to search on '/' unless already typing somewhere", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <input aria-label="Other field" />
+        <Board
+          players={[player("qb", "Quarterback", "QB")]}
+          positions={["QB"]}
+          loading={false}
+          boardSize={1}
+          onDraft={vi.fn()}
+        />
+      </>,
+    );
+    const search = screen.getByRole("textbox", { name: "Search players" });
+    expect(search).toHaveAttribute("placeholder", "Search players — press /");
+
+    await user.keyboard("/");
+    expect(search).toHaveFocus();
+    // The shortcut key itself must not land in the box.
+    expect(search).toHaveValue("");
+
+    const other = screen.getByRole("textbox", { name: "Other field" });
+    await user.click(other);
+    await user.keyboard("/");
+    expect(other).toHaveFocus();
+    expect(other).toHaveValue("/");
+  });
+
+  it("names the player count while projections load", () => {
+    render(
+      <Board players={[]} positions={["QB"]} loading={true} boardSize={312} onDraft={vi.fn()} />,
+    );
+    expect(screen.getByText("Pulling projections for 312 players…")).toBeInTheDocument();
   });
 });

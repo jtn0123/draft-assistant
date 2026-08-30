@@ -1,0 +1,280 @@
+/* The season screen's right rail: tab bar, standings, roster, league, history. */
+
+/* ---------- rail tabs ---------- */
+
+.rail-tabs {
+  display: flex;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--rule);
+  flex-wrap: wrap;
+}
+
+.rail-tab {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 11px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--faint);
+  border-bottom: 2px solid transparent;
+}
+
+.rail-tab:hover {
+  color: var(--ink);
+}
+
+.rail-tab.is-on {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.tab-body {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tab-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--rule2);
+  padding-bottom: 6px;
+}
+
+.tab-head-spaced {
+  margin-top: 14px;
+}
+
+.tab-foot {
+  padding-top: 8px;
+  border-top: 1px solid var(--hair);
+  margin-top: 4px;
+}
+
+/* ---------- standings ---------- */
+
+.standings-row {
+  display: grid;
+  grid-template-columns: 21px minmax(0, 1fr) 44px 48px 42px;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  align-items: baseline;
+  color: var(--ink);
+  border-bottom: 1px solid var(--hair);
+}
+
+.standings-head {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule2);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.standings-row.is-mine {
+  background: var(--mine);
+  padding: 6px 4px;
+  margin: 0 -4px;
+  font-weight: 650;
+  border-bottom: none;
+}
+
+/* ---------- my team ---------- */
+
+.team-row {
+  display: grid;
+  grid-template-columns: 2.6em minmax(0, 1fr) 3.6em 44px 3.4em;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--hair);
+  align-items: baseline;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.team-points {
+  font-weight: 650;
+}
+
+.team-row.is-bench .team-points {
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.team-row.is-bye .team-points {
+  color: var(--act);
+  font-weight: 400;
+}
+
+/* ---------- league ---------- */
+
+.trade-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hair);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.trade-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.trade-edge {
+  color: var(--pos);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.activity-row {
+  display: grid;
+  grid-template-columns: 4.6em minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--hair);
+  font-size: 13px;
+  color: var(--ink);
+  align-items: baseline;
+}
+
+/* The kind is a small tinted chip, so a trade is findable at a glance in a
+   column that is otherwise all sentences. */
+.activity-kind {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: center;
+  padding: 2px 0;
+  color: var(--faint);
+  background: var(--hair);
+}
+
+.activity-kind.is-trade {
+  color: var(--pos);
+  background: var(--mine);
+}
+
+.activity-kind.is-waiver,
+.activity-kind.is-lineup {
+  color: var(--act);
+  background: var(--actbg);
+}
+
+.activity-main {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.activity-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.5;
+}
+
+/* The faces in the move, so the feed reads as people rather than prose. */
+.activity-faces {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ---------- last season ---------- */
+
+.last-row {
+  display: grid;
+  grid-template-columns: 21px minmax(0, 1fr) 44px 50px 52px;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  align-items: baseline;
+  color: var(--ink);
+  border-bottom: 1px solid var(--hair);
+}
+
+.last-row.is-mine {
+  background: var(--mine);
+  padding: 6px 4px;
+  margin: 0 -4px;
+  font-weight: 650;
+  border-bottom: none;
+}
+
+.last-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--faint);
+}
+
+.last-tag.is-champ {
+  color: var(--pos);
+}
+
+.last-tag.is-most {
+  color: var(--act);
+}
+
+.team-row-head {
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--rule2);
+}
+
+.team-season {
+  color: var(--mid);
+  font-weight: 400;
+}
+
+.activity-time {
+  white-space: nowrap;
+}
+
+/* ---------- completed trades ---------- */
+
+.trade-players {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.trade-partner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.trade-done {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hair);
+  font-size: 13px;
+}
+
+.trade-done.is-mine {
+  background: var(--mine);
+  margin: 0 -18px;
+  padding: 8px 18px;
+}
+
+.trade-done-side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+}

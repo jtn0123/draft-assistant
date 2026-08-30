@@ -1,8 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppConfig, DraftView, PollHealth } from "./types";
+import type { SeasonView } from "./season-types";
+import type { ChatMessage, ChatReply, ChatSettings } from "./chat-types";
 
 const DRAFT_VIEW_SCHEMA_VERSION = "1.1";
+const SEASON_VIEW_SCHEMA_VERSION = "1.0";
 
 export function validateDraftView(value: DraftView): DraftView {
   if (value.schema_version !== DRAFT_VIEW_SCHEMA_VERSION) {
@@ -13,8 +16,21 @@ export function validateDraftView(value: DraftView): DraftView {
   return value;
 }
 
+export function validateSeasonView(value: SeasonView): SeasonView {
+  if (value.schema_version !== SEASON_VIEW_SCHEMA_VERSION) {
+    throw new Error(
+      `Incompatible season data: expected schema ${SEASON_VIEW_SCHEMA_VERSION}, received ${value.schema_version || "missing"}. Update and restart the app.`,
+    );
+  }
+  return value;
+}
+
 async function invokeView(command: string, args?: Record<string, unknown>): Promise<DraftView> {
   return validateDraftView(await invoke<DraftView>(command, args));
+}
+
+async function invokeSeason(command: string, args?: Record<string, unknown>): Promise<SeasonView> {
+  return validateSeasonView(await invoke<SeasonView>(command, args));
 }
 
 /** True when running inside the Tauri shell (vs a plain browser tab). */
@@ -30,10 +46,30 @@ interface Api {
   recordManualPick(playerId: string): Promise<DraftView>;
   undoManualPick(): Promise<DraftView>;
   exportState(): Promise<string>;
+  /** Player photo as a data URL, cached on disk by the backend; null if none. */
+  headshot(playerId: string): Promise<string | null>;
+  /** Manager's team picture as a data URL, cached on disk; null if none. */
+  avatar(reference: string, full: boolean): Promise<string | null>;
   startPolling(intervalSecs?: number): Promise<void>;
   stopPolling(): Promise<void>;
   onDraftUpdated(handler: (view: DraftView) => void): Promise<UnlistenFn>;
   onPollHealth(handler: (health: PollHealth) => void): Promise<UnlistenFn>;
+  loadSeason(force?: boolean): Promise<SeasonView>;
+  getSeason(): Promise<SeasonView>;
+  refreshSeason(): Promise<SeasonView>;
+  startSeasonPolling(intervalSecs?: number): Promise<void>;
+  stopSeasonPolling(): Promise<void>;
+  onSeasonUpdated(handler: (view: SeasonView) => void): Promise<UnlistenFn>;
+  setApiKey(key: string): Promise<boolean>;
+  setChatProvider(provider: "api" | "claude_code"): Promise<"api" | "claude_code">;
+  chatSettings(): Promise<ChatSettings>;
+  chatSuggestions(screen: string): Promise<string[]>;
+  askClaude(args: {
+    screen: string;
+    model: string;
+    effort: string;
+    messages: ChatMessage[];
+  }): Promise<ChatReply>;
 }
 
 const tauriApi: Api = {
@@ -48,6 +84,8 @@ const tauriApi: Api = {
     invokeView("record_manual_pick", { playerId }),
   undoManualPick: () => invokeView("undo_manual_pick"),
   exportState: () => invoke<string>("export_state"),
+  headshot: (playerId) => invoke<string | null>("headshot", { playerId }),
+  avatar: (reference, full) => invoke<string | null>("avatar", { reference, full }),
   startPolling: (intervalSecs = 3) =>
     invoke<void>("start_polling", { intervalSecs }),
   stopPolling: () => invoke<void>("stop_polling"),
@@ -55,6 +93,22 @@ const tauriApi: Api = {
     listen<DraftView>("draft-updated", (event) => handler(validateDraftView(event.payload))),
   onPollHealth: (handler) =>
     listen<PollHealth>("poll-health", (event) => handler(event.payload)),
+  loadSeason: (force = false) => invokeSeason("load_season", { force }),
+  getSeason: () => invokeSeason("get_season"),
+  refreshSeason: () => invokeSeason("refresh_season"),
+  startSeasonPolling: (intervalSecs = 30) =>
+    invoke<void>("start_season_polling", { intervalSecs }),
+  stopSeasonPolling: () => invoke<void>("stop_season_polling"),
+  onSeasonUpdated: (handler) =>
+    listen<SeasonView>("season-updated", (event) =>
+      handler(validateSeasonView(event.payload)),
+    ),
+  setApiKey: (key) => invoke<boolean>("set_api_key", { key }),
+  setChatProvider: (provider) =>
+    invoke<"api" | "claude_code">("set_chat_provider", { provider }),
+  chatSettings: () => invoke<ChatSettings>("chat_settings"),
+  chatSuggestions: (screen) => invoke<string[]>("chat_suggestions", { screen }),
+  askClaude: (args) => invoke<ChatReply>("ask_claude", args),
 };
 
 /**
@@ -64,6 +118,19 @@ const tauriApi: Api = {
  */
 function browserApi(): Api {
   let cached: DraftView | null = null;
+  let cachedSeason: SeasonView | null = null;
+  const seasonFixture = async (): Promise<SeasonView> => {
+    if (cachedSeason === null) {
+      const resp = await fetch("/dev-season-fixture.json");
+      if (!resp.ok) {
+        throw new Error(
+          "season fixture missing (browser preview needs public/dev-season-fixture.json)",
+        );
+      }
+      cachedSeason = validateSeasonView((await resp.json()) as SeasonView);
+    }
+    return cachedSeason;
+  };
   const fixture = async (): Promise<DraftView> => {
     if (cached === null) {
       const resp = await fetch("/dev-fixture.json");
@@ -99,12 +166,48 @@ function browserApi(): Api {
       throw new Error("browser preview is read-only — run the desktop app to draft");
     },
     exportState: async () => "browser preview — no export",
+    headshot: async (playerId) =>
+      /^\d+$/.test(playerId)
+        ? `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg`
+        : null,
+    avatar: async (reference, full) =>
+      reference.startsWith("https://sleepercdn.com/")
+        ? reference
+        : /^[0-9a-f]+$/.test(reference)
+          ? `https://sleepercdn.com/avatars/${full ? "" : "thumbs/"}${reference}`
+          : null,
     startPolling: async () => {
       throw new Error("browser preview is read-only — live sync requires the desktop app");
     },
     stopPolling: async () => undefined,
     onDraftUpdated: async () => () => undefined,
     onPollHealth: async () => () => undefined,
+    loadSeason: seasonFixture,
+    getSeason: seasonFixture,
+    refreshSeason: seasonFixture,
+    startSeasonPolling: async () => {
+      throw new Error("browser preview is read-only — live scoring requires the desktop app");
+    },
+    stopSeasonPolling: async () => undefined,
+    onSeasonUpdated: async () => () => undefined,
+    setApiKey: async () => false,
+    setChatProvider: async () => "api",
+    chatSettings: async () => ({
+      has_key: false,
+      key_hint: null,
+      cli_available: false,
+      provider: "api",
+      models: ["Opus 5", "Fable 5"],
+      efforts: {
+        "Opus 5": ["Off", "Low", "Medium", "High", "xhigh", "Max"],
+        "Fable 5": ["Low", "Medium", "High", "xhigh", "Max"],
+      },
+      notes: {},
+    }),
+    chatSuggestions: async () => [],
+    askClaude: async () => {
+      throw new Error("browser preview is read-only — Ask Claude requires the desktop app");
+    },
   };
 }
 

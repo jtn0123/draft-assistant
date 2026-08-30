@@ -1,0 +1,298 @@
+/* Design tokens. Warm paper by default, with a matched dark set.
+   Values come straight from the Claude Design source (LIGHT / DARK maps). */
+
+:root {
+  --page: #e6e2da;
+  --paper: #faf8f5;
+  --panel: #f4f1ec;
+  --ink: #191c1f;
+  --mid: #565e67;
+  --faint: #8b939c;
+  --rule: #dedad2;
+  --rule2: #c9c3b8;
+  --hair: #ebe7e0;
+  --pos: #2c6a4a;
+  --posrule: #b9cbbe;
+  --act: #9a5a24;
+  --actbg: #f8f0e6;
+  --actrule: #e2d5c2;
+  --mine: #e6ece7;
+  --qbc: #7a4b6b;
+  --rbc: #2c6a4a;
+  --wrc: #2f5d7a;
+  --tec: #8a6a2b;
+  /* Positions the design leaves unstyled fall back to body text. */
+  --kc: #565e67;
+  --defc: #565e67;
+  --shadow: rgba(20, 18, 14, 0.16);
+  --scrim: rgba(20, 18, 14, 0.5);
+  --body-bg: #d9d5cc;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --page: #101215;
+  --paper: #1a1d21;
+  --panel: #22262b;
+  --ink: #e9e6e1;
+  --mid: #a4aab2;
+  --faint: #767d86;
+  --rule: #31363d;
+  --rule2: #454b53;
+  --hair: #272b31;
+  --pos: #79c493;
+  --posrule: #365243;
+  --act: #d9a05f;
+  --actbg: #26200f;
+  --actrule: #443a25;
+  --mine: #1e2b24;
+  --qbc: #c79ab8;
+  --rbc: #79c493;
+  --wrc: #7fb0d1;
+  --tec: #cfa860;
+  --kc: #a4aab2;
+  --defc: #a4aab2;
+  --shadow: rgba(0, 0, 0, 0.5);
+  --scrim: rgba(0, 0, 0, 0.62);
+  --body-bg: #0b0d10;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--body-bg);
+  color: var(--ink);
+  font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--pos);
+  text-decoration: none;
+}
+
+a:hover {
+  color: #1e4f36;
+}
+
+[data-theme="dark"] a:hover {
+  color: var(--pos);
+}
+
+@keyframes dcPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@keyframes dcBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* The design is square-cornered throughout; only pills are rounded. */
+button,
+input {
+  font: inherit;
+  border-radius: 0;
+}
+
+button:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--act);
+  outline-offset: 1px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------- shared primitives ---------- */
+
+.btn-primary {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border: none;
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.86;
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn-ghost {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border: 1px solid var(--rule2);
+  background: transparent;
+  color: var(--mid);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  border-color: var(--ink);
+  color: var(--ink);
+  background: var(--panel);
+}
+
+.btn-ghost:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn-ghost.is-on {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.btn-row {
+  font-size: 11px;
+  padding: 3px 9px;
+}
+
+.btn-row:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.btn-icon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+}
+
+.btn-square {
+  display: flex;
+  align-items: center;
+  padding: 5px 8px;
+}
+
+.text-input {
+  font-size: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--rule2);
+  background: var(--page);
+  color: var(--ink);
+}
+
+.text-input::placeholder {
+  color: var(--faint);
+}
+
+.label {
+  font-size: 10px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.eyebrow {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--faint);
+}
+
+.muted {
+  color: var(--faint);
+}
+
+.mid {
+  color: var(--mid);
+}
+
+.strong {
+  font-weight: 700;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Position colours, used by badges across draft and season screens. */
+.pos-QB {
+  color: var(--qbc);
+}
+.pos-RB {
+  color: var(--rbc);
+}
+.pos-WR {
+  color: var(--wrc);
+}
+.pos-TE {
+  color: var(--tec);
+}
+.pos-K {
+  color: var(--kc);
+}
+.pos-DEF {
+  color: var(--defc);
+}
+
+.pos-badge {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.team-logo {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  object-fit: contain;
+  vertical-align: -3px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

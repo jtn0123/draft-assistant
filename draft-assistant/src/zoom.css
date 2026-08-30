@@ -1,0 +1,67 @@
+/* Pictures, clicked: any face opens its larger copy over the app. */
+
+/* Any picture is a button that opens the bigger copy; it must not disturb
+   the row it sits in, so the button is the image and nothing more. */
+.zoomable {
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+  line-height: 0;
+  flex: 0 0 auto;
+}
+
+.zoomable:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+.zoom-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 55%);
+  cursor: zoom-out;
+}
+
+.zoom-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 18px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  cursor: default;
+  max-width: min(90vw, 360px);
+}
+
+.zoom-image {
+  width: 240px;
+  height: 240px;
+  object-fit: contain;
+  background: var(--panel);
+  border: 1px solid var(--hair);
+}
+
+.zoom-card figcaption {
+  font-size: 14px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.zoom-close {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--rule2);
+  cursor: pointer;
+}
