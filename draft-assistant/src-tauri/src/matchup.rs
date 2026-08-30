@@ -18,19 +18,34 @@ use std::collections::HashMap;
 /// Week-to-week spread of a fantasy player around his projection, as a
 /// fraction of it, by position. Wide, because a weekly projection is a mean
 /// over boom and bust games: a quarterback's week is the steadiest, a
-/// defense's the wildest. The team-level sigma this produces (about 20
-/// points for nine starters) matches what real fantasy scores do.
+/// defense's the wildest.
+///
+/// Measured, not guessed: every starter projected four points or more in
+/// last season's league, 1,746 player-weeks, root mean square of
+/// (actual - projected) / projected (`bin/backtest.rs`).
 pub fn position_cv(position: &str) -> f64 {
     match position {
-        "QB" => 0.35,
-        "RB" => 0.5,
-        "WR" => 0.6,
-        "TE" => 0.65,
+        "QB" => 0.44,
+        "RB" => 0.57,
+        "WR" => 0.63,
+        "TE" => 0.62,
         "K" => 0.6,
-        "DEF" | "DST" => 0.7,
-        _ => 0.5,
+        "DEF" | "DST" => 0.77,
+        _ => 0.6,
     }
 }
+
+/// The spread a season of real games wanted, over the one the starters'
+/// own spreads add up to. Above 1 because a projection can be wrong about
+/// the week in ways a scoring distribution does not cover — a benched back,
+/// a game script, an injury in the first quarter — and those upsets land in
+/// the tails, where the normal is thin.
+///
+/// Fitted on last season: 1.3 on the first half of the year cut the log
+/// loss of the second half from 0.626 to 0.605, so it is not the fit
+/// flattering itself. Held a notch under the 1.5 the whole season asked for,
+/// on 98 games of evidence.
+pub const SPREAD_CALIBRATION: f64 = 1.3;
 
 /// Two starters on the same NFL team rise and fall together — a quarterback
 /// and his receiver most of all. Correlation applied between same-team
@@ -187,7 +202,7 @@ pub fn lineup_check(starters: &[String], week: &[Candidate], rules: &RosterRules
 
 /// A side's spread: each starter's own, plus the covariance of starters who
 /// share an NFL team.
-fn team_variance(starters: &[Starter], teams: &Teams) -> f64 {
+pub fn team_variance(starters: &[Starter], teams: &Teams) -> f64 {
     let sigmas: Vec<f64> = starters
         .iter()
         .map(|s| position_cv(&s.position) * s.points)
@@ -228,8 +243,8 @@ pub fn preview(
         (set.iter().map(|s| s.points).sum(), set)
     };
     let margin = my_points - opponent_points;
-    let sigma =
-        (team_variance(&my_starters, teams) + team_variance(&opponent_starters, teams)).sqrt();
+    let sigma = SPREAD_CALIBRATION
+        * (team_variance(&my_starters, teams) + team_variance(&opponent_starters, teams)).sqrt();
     let win_probability = if sigma > 0.0 {
         norm_cdf(margin / sigma)
     } else if margin > 0.0 {

@@ -85,6 +85,15 @@ describe("SeasonScreen", () => {
     expect(banner).toHaveTextContent("12%");
   });
 
+  it("says what the odds are worth right under them", () => {
+    render(<SeasonScreen view={inSeason()} />);
+    // The number is a model fitted on last season, and the banner says so:
+    // see src/odds.ts and src-tauri/src/bin/backtest.rs.
+    expect(screen.getByLabelText("Week 1 summary")).toHaveTextContent(
+      "calibrated on last season · its 70%+ calls went 81%",
+    );
+  });
+
   it("shouts once about a lineup that is not the best, and lays both lineups out", () => {
     render(<SeasonScreen view={inSeason()} />);
     expect(screen.getByRole("status")).toHaveTextContent(

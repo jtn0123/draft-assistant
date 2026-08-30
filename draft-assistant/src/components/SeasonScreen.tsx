@@ -1,5 +1,6 @@
 import type { DraftView, LineupCheck } from "../types";
 import { fmt, ordinal, pct } from "../format";
+import { ODDS_NOTE } from "../odds";
 import { ThisWeek } from "./ThisWeek";
 import { MatchupTable } from "./MatchupTable";
 import { Waivers } from "./Waivers";
@@ -92,6 +93,7 @@ function WeekBanner({ view }: { view: DraftView }) {
                 {fmt(m.my_points, 1)} – {fmt(m.opponent_points, 1)} · {pct(m.win_probability)} to
                 win
               </span>
+              <span className="muted small-text">{ODDS_NOTE}</span>
             </>
           ) : (
             <span className="clock-status">No matchup this week</span>

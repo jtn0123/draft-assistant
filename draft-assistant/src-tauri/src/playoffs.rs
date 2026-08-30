@@ -84,11 +84,15 @@ fn strength(
         from_rows
     };
     let (mean, starters) = lineup::best_lineup(&candidates, rules);
-    let sigma = starters
-        .iter()
-        .map(|s| (crate::matchup::position_cv(&s.position) * s.points).powi(2))
-        .sum::<f64>()
-        .sqrt();
+    // Same spread the week's matchup uses, calibrated the same way, so the
+    // playoff odds and the win probability cannot disagree about how sure
+    // any one week is.
+    let sigma = crate::matchup::SPREAD_CALIBRATION
+        * starters
+            .iter()
+            .map(|s| (crate::matchup::position_cv(&s.position) * s.points).powi(2))
+            .sum::<f64>()
+            .sqrt();
     WeekStrength { mean, sigma }
 }
 

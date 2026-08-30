@@ -1,6 +1,7 @@
 /// The application behind the desktop commands, Tauri-free and tested.
 pub mod app;
 pub mod app_season;
+pub mod backtest;
 pub mod board;
 pub mod chat;
 /// The Tauri desktop shell. Optional so the domain library above can be built
@@ -18,6 +19,7 @@ pub mod log;
 pub mod manual;
 pub mod matchup;
 mod mock_league;
+pub mod pick_value;
 pub mod picks;
 pub mod playoffs;
 pub mod recommend;
