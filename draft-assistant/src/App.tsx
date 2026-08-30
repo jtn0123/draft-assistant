@@ -366,11 +366,11 @@ export default function App() {
         </div>
         <div className="actions">
           <button
-            className={`live ${syncClass(polling, pollHealth, now)}`}
+            className={`live ${syncClass(polling, pollHealth, now, mode === "season")}`}
             onClick={togglePolling}
             title={pollHealth?.last_error ?? undefined}
           >
-            {syncLabel(polling, pollHealth, now)}
+            {syncLabel(polling, pollHealth, now, mode === "season")}
           </button>
           {polling && pollHealth?.last_success_at && (
             <span className="sync-age">
