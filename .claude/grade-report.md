@@ -1,376 +1,458 @@
 # Codebase Grade Report
 
 **Project:** draft-assistant
-**Audited:** 2026-08-27 (Claude — independent audit, baselined on `.Codex/grade-report.md`)
-**Stack:** Tauri 2 desktop app — Rust/Tokio core + React 19/TypeScript-strict/Vite frontend, ~3,700 LOC
+**Audited:** 2026-08-30 (rerun; supersedes the 2026-08-27 report, which predates the ~17k-line season-mode commit `25b1c38`)
+**Stack:** Tauri 2 desktop app — Rust/Tokio backend + React 19 / TypeScript-strict / Vite frontend, ~18.4k LOC first-party
 
 ## Summary
 
 | ID | Category | Grade | Items |
 |----|----------|-------|-------|
-| A | Architecture & Design | B− | 3 |
-| B | Backend Quality | C | 8 |
-| C | Frontend Quality | C+ | 6 |
-| D | Testing & Reliability | C | 4 |
-| E | Security | B | 3 |
-| F | Dependencies & Tech Currency | B− | 3 |
-| G | Performance & Scalability | B− | 3 |
-| H | Documentation & Onboarding | B− | 3 |
-| I | Developer Experience & Tooling | C− | 4 |
-| **Overall** | | **C+** | **37** |
+| A | Architecture & Design | B− | 6 |
+| B | Backend Quality | B− | 7 |
+| C | Frontend Quality | B | 7 |
+| D | Testing & Reliability | B− | 6 |
+| E | Security | A− | 5 |
+| F | Dependencies & Tech Currency | A− | 4 |
+| G | Performance & Scalability | C+ | 8 |
+| H | Documentation & Onboarding | C+ | 5 |
+| I | Developer Experience & Tooling | B− | 6 |
+| **Overall** | | **B−** | **54** |
 
-**Top 5 highest-leverage fixes:** I1, B1, B2, B3, B4
+**Top 5 highest-leverage fixes:** B1, D1, B2, G5, E1
 
-### How this differs from the Codex audit
+**Vs. the 2026-08-27 audit (overall C+):** version control now exists and is CI-gated, the deadlock finding no longer reproduces in the current module layout, and Security/Deps improved materially. New season-mode analysis code introduced most of the Performance findings.
 
-I first read `.Codex/grade-report.md`, verified every claim in it, and argued its **C+ was too harsh — B−** for a single-user local-first tool. Then I audited independently and found two problems that report missed: **a reachable deadlock** (B1) and **no version control at all** (I1). Those pull it back to **C+ — the same letter as Codex, for entirely different and better-founded reasons.** Their *ranking* is still wrong: their Top 5 leads with test infrastructure while the items that can actually break draft night sit at #3 and #5.
-
-Corrections to that report (detail in its appended addendum): its `glib` RustSec finding is a **false positive** (0 of 13 GTK crates are in the macOS build graph), its two CI items are graded against a team and repo that don't exist, its Vite 8 / TypeScript 7 recommendation is **actively harmful** before a hard deadline, and its kicker finding is right about the symptom but wrong about the mechanism.
-
-### Validation snapshot
-
-- `cargo test`: 13 pass. All 13 live in `draft.rs`, `scoring.rs`, `recommend.rs`, `valuation.rs` — **zero** in `board.rs`, `view.rs`, `engine.rs`, `sleeper.rs`, `lib.rs`.
-- `cargo clippy`: clean, zero warnings. `cargo fmt --check`: **fails, 39 files**.
-- `npm run build`: passes — 206.63 kB JS / 64.82 kB gzip, 6.47 kB CSS.
-- `npm audit`: 0 vulnerabilities / 133 packages. `cargo audit`: 2 advisories + 17 warnings, **all in crates absent from the macOS build**.
-- Cold load **measured at 9.9s**; warm 2.6s. The UI claims "~a minute" (`Panels.tsx:21`).
-- 210-pick autopilot simulation passes post-mock-draft-changes: 0 duplicate picks, 0 drafted-still-available, all starters filled.
-- `git status` → **fatal: not a git repository.**
+**Measured coverage at audit time:** Rust 57.3% lines (cargo-llvm-cov; 104 tests + 2 integration), frontend 71.8% lines / 69.8% statements (vitest v8; 81 tests). Excluding entry-point glue (`main.rs`, `lib.rs`, `bin/`), Rust is materially higher; per-file detail under D.
 
 ---
 
 ## A — Architecture & Design — B−
 
-The module split is genuinely good: scoring is a data-driven dot product over the league's own `scoring_settings` key space (`scoring.rs:73-82`), which makes exact custom-league scoring nearly free; one `DraftView` serves the UI and the AI export identically. What holds it back is that the dependency graph has **two cycles** and that roster-slot semantics are re-implemented in four places.
+Layering intent is real and documented: `sleeper.rs`/`season_api.rs` are pure HTTP clients, `engine.rs` owns caching + assembly, `view.rs`/`season.rs` are pure view assembly, `commands_*.rs` sit on top; dependency direction is one-way with no cycles, and the 500-LOC cap keeps every file readable. Dragged down by: `Engine` as a de-facto god object extended from five files, the season layer reaching back down into the transport layer, non-thin commands, and no frontend state layer.
 
-#### ~~A1~~ ✓ done 2026-08-27 — Break the two circular module dependencies
-- **Where:** `engine.rs:331` ↔ `view.rs:5`; `recommend.rs:4` ↔ `view.rs:7`; type defined at `view.rs:33`
-- **What's wrong:** `engine.rs:331` re-exports `build_view`/`merged_picks`/`DraftView` from `view`, while `view.rs:5` imports `LoadedLeague`/`AppConfig`/`now_secs` from `engine` — a cycle. Second cycle: `recommend.rs:4` imports `AvailablePlayer` from `view`, while `view.rs:7` imports `recommend`. Root cause is layering inversion — `AvailablePlayer` is a domain type (a board player plus survival odds) but lives in the top presentation layer, and `engine` re-exports `view`'s API purely as a convenience façade.
-- **Fix:** Move `AvailablePlayer` from `view.rs:33` to `board.rs` beside `BoardPlayer`. Delete the `pub use` at `engine.rs:331` and import from `crate::view` at the three call sites (`lib.rs:10`, `lib.rs:26`, `lib.rs:137`, `bin/dump_state.rs:10`). Both cycles disappear.
+#### A1 — `Engine` is extended from 5 files, so its real surface is invisible
+- **Where:** `src-tauri/src/engine.rs:96`, `projections.rs:12`, `headshots.rs:101`, `season_engine.rs:75`, `season_history.rs:130`
+- **What's wrong:** Five `impl Engine` blocks bolt unrelated concerns (image CDN, league sweep) onto one struct; all share private access to `read_cache`/`write_cache`. Nothing states what `Engine` is.
+- **Fix:** Keep `Engine` as thin `{ client, data_dir, cache }`; express the rest as traits (`ImageCache`, `SeasonLoader`) or free functions taking `&Cache` so seams are declared and mockable.
+- **Effort:** M
+- **Grade lift:** B− → B (the largest structural ambiguity in the backend)
+
+#### A2 — Inverted dependency: the season layer extends the transport layer
+- **Where:** `src-tauri/src/season_api.rs:255` (and duplicated `BASE`/`BASE_UNDOC` at `season_api.rs:11-12` vs `sleeper.rs:11-12`)
+- **What's wrong:** A season-screen module opens `impl SleeperClient` and owns HTTP methods, splitting the client's route list across two files with duplicated base URLs.
+- **Fix:** Move the six methods (`nfl_state`, `rosters`, `matchups`, `transactions`, `winners_bracket`, `nfl_scores`) into `sleeper.rs`, or define an explicit `SeasonEndpoints` extension trait.
 - **Effort:** S
-- **Grade lift:** B− → B (restores a strict one-way dependency graph)
+- **Grade lift:** B− → B− (clarity; removes duplicate constants)
 
-#### ~~A2~~ ✓ done 2026-08-27 — Make roster-slot semantics one shared domain model
-- **Where:** `valuation.rs:27-36` and `:80`, `draft.rs:44-94`, `recommend.rs:90`, `board.rs:43-64`, `src/components/Board.tsx:5`
-- **What's wrong:** Four independent interpretations of slot eligibility that disagree. `valuation.rs` understands `FLEX`/`WRRB_FLEX`/`REC_FLEX`/`SUPER_FLEX` but then uses only `flex_slots[0]` for *all* flex demand (`valuation.rs:80`, with an in-code comment admitting it). `recommend.rs:90` hardcodes `RB|WR|TE`, so superflex QBs never score as flex-eligible. `Board.tsx:5` omits `K` from the filter list.
-- **Fix:** Introduce a `RosterRules`/`SlotKind` type owning eligibility and per-slot demand. Allocate each flex slot type against its own eligible pool. Serialize the league's actual positions into `DraftView` so the frontend builds its filter from state instead of a literal.
+#### A3 — Commands are not thin: 100-line polling loops inline
+- **Where:** `src-tauri/src/commands_draft.rs:207-305` (`start_polling`), `commands_season.rs:82-142` (`start_season_polling`)
+- **What's wrong:** Each embeds a full spawn-loop with change detection, error aggregation, reconciliation and emit logic; the tick logic has zero tests because it's welded to Tauri state.
+- **Fix:** Extract `async fn poll_once(&engine, &state) -> Option<PollOutcome>` into a `poll.rs`; command becomes spawn + generation bookkeeping; unit-test the tick.
+- **Effort:** M
+- **Grade lift:** B− → B (also unlocks D coverage of the poll path)
+
+#### A4 — The Sleeper client is bypassed inside a command
+- **Where:** `src-tauri/src/commands_draft.rs:60-62` (`set_my_username`)
+- **What's wrong:** Bare `reqwest::get` with an inline `struct User` skips the pooled client, its 3s/8s timeouts, gzip, and user-agent.
+- **Fix:** Add `SleeperClient::user(&self, username)` next to `league()`/`draft()`; call through `state.engine.client`.
+- **Effort:** S
+- **Grade lift:** B− → B− (consistency; also see E4)
+
+#### A5 — `season.rs` is the season god-module; `season_view_parts.rs` is an LOC-cap artifact
+- **Where:** `src-tauri/src/season.rs:4-18` (15 crate imports), `season_view_parts.rs:56-99`
+- **What's wrong:** `build_season_view` couples to 15 modules (2× anything else); `season_view_parts.rs`'s only theme is "helpers that didn't fit."
+- **Fix:** Split `build_season_view` by section (matchup / waivers / standings) so each sub-builder imports 2-3 modules; rehome `matchup_for`/`opponent_of` → `season_api.rs`, `why_start` → `season_lineup.rs`.
+- **Effort:** M
+- **Grade lift:** B− → B
+
+#### A6 — No frontend state layer; `App.tsx` is the store
+- **Where:** `src/App.tsx:39-67` (~16-20 `useState`), `:73-206` (9 `useEffect`s)
+- **What's wrong:** Every panel gets its slice via prop drilling through `DraftScreen`/`SeasonScreen`; the polling/refresh state machine is untestable in isolation.
+- **Fix:** Extract `useDraftSession()` / `useSeasonSession()` hooks (view + polling + error + reload token) into `src/session.ts`, matching the existing `avatars.ts`/`zoom.ts` store pattern.
+- **Effort:** M
+- **Grade lift:** B− → B
+
+---
+
+## B — Backend Quality — B−
+
+Production error handling is disciplined: essentially every `unwrap`/`expect` is inside `#[cfg(test)]`, serde structs degrade gracefully via `#[serde(default)]`/`Option`, cache filenames are sanitized (`engine.rs:152-158`), writes are tmp-then-rename atomic, and `headshots.rs:32-47` refuses any non-Sleeper URL. Against that: one live division-by-zero panic path fed by remote data, a refresh that reports success when every request failed, all disk I/O blocking inside async fns (including a ~14.6 MB JSON parse), and zero retries anywhere.
+
+#### B1 — Panic on remote data: division by zero in the hot render path
+- **Where:** `src-tauri/src/draft.rs:10-11`; fed from `sleeper.rs:59` (`DraftSettings.teams`), called at `view.rs:187`
+- **What's wrong:** `(pick_no - 1) / teams` with no zero guard; `teams: 0` panics the command task on every view build. `(pick_no - 1)` also underflows with `overflow-checks = true` in release.
+- **Fix:** Validate once in `Engine::assemble` (`engine.rs:295`): `teams == 0 || rounds == 0` → `Err("draft has no teams/rounds")`; make `slot_for_pick` return `Option<u32>`.
+- **Effort:** S
+- **Grade lift:** B− → B (removes the only known remote-data panic)
+
+#### B2 — `refresh_live` cannot fail, and lies about freshness
+- **Where:** `src-tauri/src/season_engine.rs:325-346`; downstream `:353-356` (`live_is_stale`), `commands_season.rs:115`
+- **What's wrong:** All three fetch results consumed with `if let Ok(..)`, then `fetched_at = now_secs(); Ok(())` unconditionally — a total outage still resets the staleness clock and the health badge stays green.
+- **Fix:** Collect errors; stamp `fetched_at` only if ≥1 succeeded; return `Err(errors.join("; "))` when all fail.
+- **Effort:** S
+- **Grade lift:** B− → B (truthful health reporting during games)
+
+#### B3 — Blocking file I/O on the async runtime, including a ~14.6 MB parse
+- **Where:** `src-tauri/src/engine.rs:125-140`, called from async `projections.rs:18,22,25`; also `headshots.rs:127,132,162,169`, `commands_draft.rs:201`
+- **What's wrong:** `std::fs` + `serde_json::from_str` of the full `players/nfl` dictionary on the runtime thread; no `spawn_blocking` anywhere in the tree.
+- **Fix:** Wrap `read_cache`/`write_cache` bodies in `tokio::task::spawn_blocking` (cheapest; keeps sync helpers).
+- **Effort:** S
+- **Grade lift:** B− → B−
+
+#### B4 — No retries/backoff; long sequential request chains
+- **Where:** `src-tauri/src/sleeper.rs:258-276` (`get_json`), `projections.rs:91-105` (18 sequential weekly requests), `season_engine.rs:105-120` (~15 sequential matchup requests)
+- **What's wrong:** First transient error is permanent; a flaky network makes `load_league` hang for minutes at the 8s timeout per call.
+- **Fix:** Add `get_json_retry` (2 retries, 250ms→1s jitter, transport errors + 5xx only); replace both loops with `buffer_unordered(6)`.
+- **Effort:** M
+- **Grade lift:** B− → B (load time ~5× better on the sweep, resilient to blips)
+
+#### B5 — Tauri commands accept unbounded/unvalidated input
+- **Where:** `src-tauri/src/commands_chat.rs:114-121` (`ask_claude`), `commands_draft.rs:139` (`record_manual_pick`), `commands_draft.rs:11-18` (`extract_id`)
+- **What's wrong:** Unbounded `messages` forwarded to Anthropic/CLI; `record_manual_pick` persists ids that don't exist on the board; `extract_id` falls through to raw input (see E2).
+- **Fix:** Cap messages (~40 turns / 200 KB); `record_manual_pick` → `Err("unknown player")` unless in `board_index`; `extract_id` rejects non-`[0-9]{8,20}`.
+- **Effort:** S
+- **Grade lift:** B− → B−
+
+#### B6 — API key passed on the process command line
+- **Where:** `src-tauri/src/secrets.rs:23` (`["-w", key]`), `:36-39`; `panic!` in a pub fn at `:19`
+- **What's wrong:** The raw `sk-ant-…` key is visible in `ps aux` during the `/usr/bin/security` call; unknown-op arm panics.
+- **Fix:** Pipe the secret over stdin (`security … -w` from `Stdio::piped()`); return `Result` from `args_for` or make the op an enum.
+- **Effort:** S
+- **Grade lift:** B− → B−
+
+#### B7 — Tests absent exactly where the risk is
+- **Where:** `src-tauri/src/sleeper.rs` (0 tests), `season.rs` (0), `board.rs` (0), `projections.rs` (0), `commands_draft.rs`/`commands_season.rs` (0), `engine.rs` (2 for a 16 KB module)
+- **What's wrong:** The wire-parsing and view-assembly layers — where a Sleeper field rename silently zeroes the board — have no direct tests.
+- **Fix:** Fixture-deserialize tests for `sleeper.rs`; golden test of `build_season_view` against `public/dev-season-fixture.json`; temp-dir table tests for `projections.rs` stale-fallback branches. (Tracked as the D-category coverage push.)
+- **Effort:** M
+- **Grade lift:** B− → B
+
+---
+
+## C — Frontend Quality — B
+
+Unusually disciplined for hobby scale: small single-purpose components, `useSyncExternalStore` stores (`avatars.ts`, `zoom.ts`) instead of prop-threading, consistent real-button semantics, fully strict TypeScript with zero `any`/`@ts-ignore`, and every `localStorage` access try/caught. Held back by ARIA that is applied but often incorrect, a modal with no focus management, and ~2,900 lines of unscoped global CSS with cross-file selector coupling.
+
+#### C1 — `aria-sort` on a `<button>` is invalid and announces nothing
+- **Where:** `src/components/bits.tsx:251`; consumers `Board.tsx:194`, `SeasonTabs.tsx:71`
+- **What's wrong:** `aria-sort` is only valid on `columnheader`/`rowheader`; on a plain button in a div-grid, screen readers get no sort state.
+- **Fix:** Wrap header rows in `role="row"` with `<span role="columnheader" aria-sort={...}>` around each `SortHead`, or move boards to `role="grid"` with proper cells.
+- **Effort:** S
+- **Grade lift:** B → B+
+
+#### C2 — Tablist is half-built with no keyboard model
+- **Where:** `src/components/SeasonScreen.tsx:63-101`
+- **What's wrong:** `role="tablist"`/`tab`/`aria-selected` present, but no `role="tabpanel"`, no `aria-controls`/`id` pairs, no arrow-key navigation, no roving tabindex.
+- **Fix:** Add id/controls pairs, wrap panels in `role="tabpanel"`, roving `tabIndex`, ArrowLeft/Right/Home/End handler.
+- **Effort:** S
+- **Grade lift:** B → B+
+
+#### C3 — Modal dialogs have no focus trap or focus restore
+- **Where:** `src/components/bits.tsx:68-89` (`ZoomLayer`), `Overlays.tsx:29` (`ConfirmDialog`)
+- **What's wrong:** `role="dialog" aria-modal="true"` but focus never moves in, Tab isn't trapped, and focus isn't returned to the opener.
+- **Fix:** On open store `document.activeElement`, focus the close button, bound Tab cycling to the figure, restore on close.
+- **Effort:** S
+- **Grade lift:** B → B+
+
+#### C4 — `ordinal()` duplicated, and the copies disagree
+- **Where:** `src/App.tsx:455-459` vs `src/components/SeasonTabs.tsx:291-296`
+- **What's wrong:** Two implementations of the same suffix logic; one guard is dead code — a maintenance trap.
+- **Fix:** Export a single `ordinal()` from `format.ts`; delete both copies.
+- **Effort:** S
+- **Grade lift:** B → B
+
+#### C5 — 16+ `useState` hooks in `App.tsx`, several feeding one child
+- **Where:** `src/App.tsx:39-68`, `settingsRows` at `:320-375`
+- **What's wrong:** `chime`/`polling`/`settingsOpen`/`chatOpen`/`preference` exist only to build `settingsRows`, which is rebuilt on every 3-second draft tick and pushed through 8 `Header` props.
+- **Fix:** Move theme/chime/settings-menu state into a `useSyncExternalStore` module beside `avatars.ts`; `Header` subscribes directly. (Overlaps A6.)
+- **Effort:** M
+- **Grade lift:** B → B+
+
+#### C6 — Season error state renders as a loading state
+- **Where:** `src/App.tsx:415-418` (render), `:193` (rejection path)
+- **What's wrong:** When `loadSeason` rejects, the error string is shown inside `.season-loading` with no retry affordance; recovery requires finding Settings → Refresh.
+- **Fix:** Branch on `seasonError !== null` first; render an error block with "Try again" calling `api.loadSeason(true)`, mirroring `LaunchScreen.onRetry`.
+- **Effort:** S
+- **Grade lift:** B → B+
+
+#### C7 — Ten unscoped global stylesheets with cross-file selector coupling
+- **Where:** imports at `src/App.tsx:21-30`; e.g. `.board-row` in `board.css:58` vs `.board-row .avatar` in `components.css:486`
+- **What's wrong:** Nothing is scoped; any new `.chip`/`.bar` class silently collides across files split by screen, not component.
+- **Fix:** Keep `theme.css` as token/atom layer; convert component sheets to CSS Modules (zero-config in Vite), imported by their owning component.
 - **Effort:** L
-- **Grade lift:** B− → B+ (removes the largest source of divergent business rules)
-
-#### ~~A3~~ ✓ done 2026-08-27 — Enforce the Rust↔TypeScript contract that already has a version field
-- **Where:** `view.rs:60-61` and `:285-286`, `src/types.ts`, `src/api.ts:24-39` and `:53`
-- **What's wrong:** `types.ts` hand-mirrors the Rust structs; `invoke<DraftView>` and the fixture `as DraftView` cast are assertions with no runtime validation. A renamed Rust field compiles cleanly on both sides and fails at render. `schema_version` is emitted at `view.rs:285` and **never read anywhere** — the one field designed to catch this is dead weight.
-- **Fix:** Either generate the TS types from the Rust structs, or minimally: check `schema_version` in `api.ts` before accepting a view and throw a legible error on mismatch. The second is 10 lines and closes most of the risk.
-- **Effort:** M
-- **Grade lift:** B− → B (turns a manual boundary into a checked one)
+- **Grade lift:** B → B+
 
 ---
 
-## B — Backend Quality — C
+## D — Testing & Reliability — B−
 
-The pure logic is the strongest part of this codebase — `valuation.rs:100-104` constructs its baseline window so `lo < hi` holds for every pool size including 1; `board.rs:70-104` infers bye weeks by *counting* opponent coverage so one stale row can't poison a team; `view.rs:184-197` has a three-tier name fallback so an unknown `player_id` can never break the view. But the concurrency and failure handling around that logic have a reachable deadlock, no timeouts anywhere, and a poller that lies when it fails. Those are draft-night-fatal, and they set the grade.
+What exists is the good kind: 104 Rust tests that are property-flavored (lineup fill order, odds monotonicity/determinism, trade one-sidedness — `season_lineup.rs:250-434`, `season_odds.rs:275-332`, `season_trades.rs:165-245`), a full-draft invariant simulation (`tests/simulation.rs:149`), and 81 behavior-driven Testing Library tests that mock only the IPC boundary. But measured coverage tells the honest story: **Rust 57.3% lines, frontend 71.8% lines**, and the untested set is load-bearing — `sleeper.rs` at 12% (every wire type in the app), `season.rs` at 0% (the 400-line view assembly), `engine.rs` at 36%, `api.ts` at 18% [FE], `SeasonTabs.tsx` at 44% [FE]. No coverage gate exists on either side, so this can only drift down.
 
-#### ~~B1~~ ✓ done 2026-08-27 — Fix the lock-order inversion that can permanently freeze the app
-- **Where:** `lib.rs:236-237` vs `lib.rs:51/62` and `lib.rs:121/123`
-- **What's wrong:** Two opposite lock orders exist. The poll loop takes **`loaded` → `config`**: it holds `loaded` (`lib.rs:236`) and then awaits `config` (`:237`). Two commands take **`config` → `loaded`**: `refresh_data` holds `config` from `:121` across `view_from` and then awaits `loaded` at `:123`; `add_league` holds `config` from `:51` across a synchronous config file write (`:60`) *and* a full `view_from` (`:61`) before awaiting `loaded` at `:62`. That is a textbook cycle, and Tokio's fair mutex does not break it. When it hits, the app wedges permanently — no picks, no recommendations, no recovery but a restart.
-- **Impact:** **Critical.** Reachable with one click. "Refresh data" (`App.tsx:105-115`) and re-adding a league are exactly what a user reaches for when the board looks stale — i.e. precisely when the poll loop is also running. `add_league` has the wider window because it holds `config` across a file write.
-- **Fix:** Standardize on `loaded` → `config` everywhere. In `refresh_data` and `add_league`, clone the small values needed out of `config` and drop the guard (`drop(config)`) before awaiting `state.loaded.lock()`. Add a comment stating the canonical order.
+#### D1 — [BE] Wire-parsing layer (`sleeper.rs`) has zero direct tests
+- **Where:** `src-tauri/src/sleeper.rs:145-189` (`PlayerMeta`/`ProjectionRow`), `:49-55` (`last_regular_week`)
+- **What's wrong:** 330 lines of `#[serde(default)]` deserialization against an undocumented endpoint; a Sleeper field rename silently yields `None`/`0.0` and mis-scores the entire board.
+- **Fix:** Checked-in raw-response fixture; assert `stat("pass_yd")`, `adp_ppr`, bye-week `opponent: None`; three-case test for `last_regular_week`.
 - **Effort:** S
-- **Grade lift:** C → C+ (removes the single most likely way the app dies mid-draft)
+- **Grade lift:** B− → B
 
-#### ~~B2~~ ✓ done 2026-08-27 — Add HTTP timeouts and stop holding a lock across network awaits
-- **Where:** `sleeper.rs:174-178`; `lib.rs:101-110`; `lib.rs:213-214`
-- **What's wrong:** The client sets only `user_agent` and `gzip` — reqwest applies **no default timeout**, and the only `Duration` in the whole crate is the poll sleep. Two consequences: (a) `refresh_picks` acquires `loaded` at `lib.rs:101` and holds it across **two** HTTP awaits (`:104`, `:106`), so a stalled socket freezes `get_state`, the poll loop, manual picks, undo, and export — indefinitely; (b) the poll loop itself never reaches its sleep, so it stops re-checking the stop/generation flags, meaning live sync dies silently and even `stop_polling` has no effect.
-- **Fix:** `.connect_timeout(3s).timeout(8s)` on the client builder. In `refresh_picks`, fetch into locals *before* acquiring `loaded`. Optionally `tokio::join!` the two poll requests.
-- **Effort:** S
-- **Grade lift:** C → C+ (bounds every failure mode that currently has no bound)
-
-#### ~~B3~~ ✓ done 2026-08-27 — Fall back to stale cache instead of failing the load
-- **Where:** `engine.rs:80-87`, `engine.rs:222-224`
-- **What's wrong:** `read_cache` returns `None` past TTL (players 24h, projections 6h), and `assemble` then propagates fetch failure with `?`. There is **no stale-cache fallback**. If the undocumented projections endpoint is unavailable once the cache has expired, `load_league` fails outright — no board, no recommendations, no app. That endpoint is undocumented, unversioned, carries the entire valuation model, and has no fallback and no schema-drift detection. With a 6h TTL, an outage at 4 PM against a 9 AM cache produces exactly this at exactly the wrong moment.
-- **Fix:** On fetch failure, retry `read_cache` with an effectively infinite TTL, use it, and push a `warnings` entry naming the age. Fail only when there is no cache at all.
-- **Effort:** S
-- **Grade lift:** C → C+ (removes a single point of failure on the critical path)
-
-#### ~~B4~~ ✓ done 2026-08-27 — Report poll failures instead of swallowing them
-- **Where:** `lib.rs:219`, `lib.rs:226`, `lib.rs:240`; `view.rs:87-94`
-- **What's wrong:** Both fetches use `if let Ok(...)` with no error arm, and the emit result is discarded with `.ok()`. `DataHealth` has no `last_poll_ok`/`last_poll_at`/`last_error`. So a 500, a rate-limit, or a dead network leaves the board frozen while the UI keeps showing "● Live sync on". During a draft, "nobody has picked in 90 seconds" and "we lost the API 90 seconds ago" demand opposite reactions and are currently indistinguishable.
-- **Fix:** Track consecutive failures and last success in `DataHealth`; emit a typed status event on failure and recovery; flip the banner after ~2 consecutive failures. Preserve the last good view — make the staleness unmistakable, don't blank the screen.
+#### D2 — [BE] View assembly (`season.rs`, `season_view_parts.rs`, `engine.rs::assemble`) untested
+- **Where:** `src-tauri/src/season.rs` (0%), `season_view_parts.rs` (0%), `engine.rs:295` (`assemble`, incl. warning accumulation `:327,:342`)
+- **What's wrong:** The largest single behavior in the app — assembling every screen — is exercised only indirectly.
+- **Fix:** Golden test of `build_season_view` from constructed inputs; `assemble` test asserting warnings surface instead of failing the load.
 - **Effort:** M
-- **Grade lift:** C → C+ (a stale board can no longer masquerade as a live one)
+- **Grade lift:** B− → B+
 
-#### ~~B5~~ ✓ done 2026-08-27 — Persist manual picks across refresh and restart
-- **Where:** `engine.rs:254`, `lib.rs:62`, `lib.rs:123`
-- **What's wrong:** `assemble` always sets `manual_picks: Vec::new()`, and both `add_league` and `refresh_data` replace the whole `LoadedLeague`. Clicking "Refresh data" silently erases every manual fallback pick. The failure is self-reinforcing: you only *have* manual picks because the API was lagging, and "Refresh data" is the next thing you'd click.
-- **Fix:** Persist manual picks per draft ID via the existing atomic `write_cache` path; reload in `assemble` and reconcile against authoritative API picks, dropping only those the API has caught up on.
-- **Effort:** M
-- **Grade lift:** C → C+ (closes the documented-but-false fallback promise)
-
-#### B6 — Gate the mock-draft slot fallback on an explicit signal
-- **Where:** `view.rs:145-161`, `engine.rs:183`
-- **What's wrong:** The mock-draft fallback engages when `user_names.is_empty()`, and `engine.rs:183` builds that map with `.unwrap_or_default()`. So a **transient failure of `/league/{id}/users` in a real league** satisfies the fallback's guard, and the app can adopt the *commissioner's* slot as yours — showing their roster as "my roster" and generating recommendations for their needs, silently, all draft. Requires `my_user_id` to also be unresolved, which is the default first-run state. (Not reachable for the currently configured user, whose ID resolves directly.)
-- **Fix:** Carry an explicit `is_mock: bool` on `LoadedLeague`, set only by `load_draft_only`, and gate the fallback on that instead of on an empty map. Add a `warnings` entry whenever the users fetch fails.
+#### D3 — [FE] `api.ts` at 18% — the entire IPC surface
+- **Where:** `src/api.ts` (17.9% statements at audit)
+- **What's wrong:** Only `validateDraftView` was tested; command routing, event validation, and the browser-fixture arm were dark.
+- **Fix:** Mock `invoke`/`listen`; assert command names/args per wrapper, payload validation on events, fixture caching and read-only errors in the browser arm.
 - **Effort:** S
-- **Grade lift:** C → C+ (removes a silent wrong-team failure introduced with mock support)
+- **Grade lift:** B− → B
 
-#### B7 — Honor `draft_type` and `reversal_round`
-- **Where:** `sleeper.rs:65-66` (parsed, zero readers), `draft.rs:8-16`, `sleeper.rs:27-50`
-- **What's wrong:** `draft_type` is deserialized and never read; `slot_for_pick` hardcodes snake. For a **linear** draft, `on_clock_slot`, `is_my_pick`, `my_next_picks`, `picks_until_mine`, and the `draft_slot` written by `record_manual_pick` are all wrong. `reversal_round` (3rd-round reversal — an ordinary Sleeper setting) isn't even in `DraftSettings`. Because `build_rosters` uses the API's own `pick.draft_slot`, rosters stay *correct* while the clock goes wrong — a confusing half-broken UI rather than an obviously broken one.
-- **Fix:** Short term, warn loudly when `draft_type != "snake"` or `reversal_round` is set. Longer term, implement both in `slot_for_pick` with tests.
-- **Effort:** M
-- **Grade lift:** C → C+ (stops silently-wrong output in ordinary league configs)
-
-#### ~~B8~~ ✓ done 2026-08-27 — Guard the one unchecked index on the live path
-- **Where:** `view.rs:200`
-- **What's wrong:** `rosters[(slot - 1) as usize].clone()` — `my_slot` comes from `draft_order` values and is never validated against `settings.teams`. Slot `0` underflows to `u32::MAX` in release (no overflow checks configured) and panics on index; slot > teams panics directly. Notably, `draft.rs:126-129` **already guards exactly this** for pick slots — the check exists, `my_slot` just bypasses it.
-- **Fix:** `rosters.get((slot.saturating_sub(1)) as usize).cloned()`, and add a warning when a slot falls outside `1..=teams`.
+#### D4 — [FE] `SeasonTabs.tsx` 44%, `Chat.tsx` 54% despite having test files
+- **Where:** `src/components/SeasonTabs.tsx`, `src/components/Chat.tsx`
+- **What's wrong:** Tab-switching branches, standings sorting, LastSeason rendering, and most Chat interaction paths unexercised.
+- **Fix:** Per-tab render assertions, sort toggling, pending-trade badge, ordinal edge cases; Chat send/error/settings flows with a mocked api.
 - **Effort:** S
-- **Grade lift:** C → C+ (removes the only reachable panic on the hot path)
+- **Grade lift:** B− → B
+
+#### D5 — No coverage gate on either side
+- **Where:** `vitest.config.ts` (no `coverage.thresholds`), `package.json:19` (`verify` lacks coverage), CI has no `cargo llvm-cov`
+- **What's wrong:** Coverage can silently regress; it took this audit to notice 57%/72%.
+- **Fix:** `coverage.thresholds` in vitest at the achieved level; add `cargo llvm-cov --fail-under-lines <N>` to CI (locally optional — it doubles test time).
+- **Effort:** S
+- **Grade lift:** B− → B
+
+#### D6 — [BE] Poll loops untestable and untested
+- **Where:** `src-tauri/src/commands_draft.rs:207-305`, `commands_season.rs:82-142`
+- **What's wrong:** Change detection, error aggregation, and emit gating — the logic that runs all draft night — has zero tests because it's welded to Tauri `State`.
+- **Fix:** Same refactor as A3; then table-test `poll_once`.
+- **Effort:** M
+- **Grade lift:** B− → B
 
 ---
 
-## C — Frontend Quality — C+
+## E — Security — A−
 
-The type discipline is genuinely uncommon: `strict` plus `noUnusedLocals`/`noUnusedParameters`, and **zero** `any`, `as unknown`, non-null assertions, or `@ts-ignore` anywhere in `src/`. Semantic landmarks and a real `<table>` are used correctly, effect dependencies are honest with no suppression comments, and the Tauri unlisten teardown resolves the promise inside cleanup — the thing most codebases get wrong. Against that: there is not a single `aria-*`, `role=`, or `htmlFor` in the entire application source, and the live-sync indicator can lie.
+Unusually disciplined for a local-first desktop app. Minimal Tauri capability set (`capabilities/default.json:7-10` — no fs/shell/http exposed to the webview). `headshots.rs:32-47` refuses everything but a bare hex hash on a hardcoded `sleepercdn.com` base or an `uploads/` URL with a hex stem — `https://evil.example/x.jpg` and traversal are refused with a test proving it (`headshots.rs:244-248`). All fetched hosts are compile-time constants. No secrets in the repo; `npm audit` clean (0 vulns / 319 deps). Key storage uses absolute-path `/usr/bin/security` with argv arrays; the chat CLI is spawned with `--tools ""` and prompt over stdin. Remaining gaps are defense-in-depth.
 
-#### ~~C1~~ ✓ done 2026-08-27 — Make the "Live sync on" indicator falsifiable
-- **Where:** `App.tsx:144-146`, `App.tsx:15`, `api.ts:20`, `types.ts:109`
-- **What's wrong:** `polling` is pure local UI state, set once when the user clicks and never reconciled with reality. There is no error channel from the backend (`api.ts` defines only `draft-updated`), and `generated_at` is emitted by Rust but never rendered. A dead poller looks identical to "nobody has picked yet" — the exact failure this app most needs to surface. Pairs with **B4**; both halves are required.
-- **Fix:** Consume the poll-health event from B4; show "last updated Ns ago" from `generated_at`; turn the pill amber/red past a failure threshold.
-- **Effort:** M
-- **Grade lift:** C+ → B− (the app's most important status signal becomes trustworthy)
-
-#### C2 — Give the confirmation modal real dialog semantics
-- **Where:** `App.tsx:181-199`, `components.css:259-283`
-- **What's wrong:** Two plain `<div>`s. No `role="dialog"`, `aria-modal`, or accessible name; no focus trap, no initial focus, no Escape handler, no focus restore. Because the modal renders last in the DOM with the background still tabbable, reaching "Confirm" by keyboard means tabbing through up to 200 board rows first. The backdrop click handler is on a non-interactive div with no keyboard equivalent.
-- **Fix:** Use native `<dialog>` with `showModal()` — that provides the focus trap, Escape, and background inertness for free. Label it, focus Confirm on open, restore focus to the triggering button on close.
-- **Effort:** M
-- **Grade lift:** C+ → B− (the only destructive action becomes keyboard-safe)
-
-#### C3 — Add live regions for time-sensitive state
-- **Where:** `Panels.tsx:69-105` and `:85`, `App.tsx:201`, `App.tsx:161-163`, `Panels.tsx:57`
-- **What's wrong:** "YOU ARE ON THE CLOCK" changes purely from the 3s poll with no user action to prompt a re-read, and has no `aria-live`. The toast is the *only* error channel (7 call sites) and is a bare div with no `role="status"` — so all error feedback is visual-only. Warnings `.join(" · ")` into one unpunctuated run-on.
-- **Fix:** `aria-live="assertive"` on the clock banner, `role="status"` on the toast and warnings, `role="alert"` on the setup error with `aria-describedby` to the input. Scope them tightly so the poll doesn't re-announce the page.
+#### E1 — CSP is disabled entirely
+- **Where:** `src-tauri/tauri.conf.json:24` (`"csp": null`)
+- **What's wrong:** The webview may load script/image/connect from any origin while rendering remote-derived strings (team/player names).
+- **Fix:** `"csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"` — the data-URL headshot design already accommodates it.
 - **Effort:** S
-- **Grade lift:** C+ → B− (critical live state stops being vision-only)
+- **Grade lift:** A− → A
 
-#### ~~C4~~ ✓ done 2026-08-27 — Complete board control semantics and the empty state
-- **Where:** `Board.tsx:32-46`, `Board.tsx:64-94`, `Board.tsx:24`
-- **What's wrong:** Position filters convey selection by CSS class only — no `aria-pressed`, no group label. Search relies solely on `placeholder` for its name (the Setup screen does this correctly with real `<label>`s at `Panels.tsx:37-53` — the Board is the inconsistent one). A filter matching nothing renders a header above an empty void. `.slice(0, 200)` truncates with no "showing 200 of N".
-- **Fix:** `aria-pressed` + a labeled group on the filters, `aria-label` on search, a single full-width "No matching players" row, and a truncation count.
+#### E2 — `extract_id` falls through to raw input — a latent SSRF-path primitive
+- **Where:** `src-tauri/src/commands_draft.rs:11-18`; reaches `format!("{BASE}/league/{league_id}")` at `sleeper.rs:282`
+- **What's wrong:** With no ≥15-digit run, `input.trim()` passes verbatim; a pasted `../../projections/nfl/2025` normalizes out of `/v1/`. Harmless today (same host, public GETs), one refactor from mattering.
+- **Fix:** Reject unless all-ASCII-digits: `Err("that doesn't look like a Sleeper ID")`.
 - **Effort:** S
-- **Grade lift:** C+ → B− (completes the primary interaction surface)
+- **Grade lift:** A− → A−
 
-#### ~~C5~~ ✓ done 2026-08-27 — Stop the Setup screen flashing on every launch
-- **Where:** `App.tsx:14`, `App.tsx:18`, `App.tsx:41-42`
-- **What's wrong:** Initial state is `view: null, busy: false`, and `setBusy(true)` only runs *after* `await api.getConfig()` resolves. Every launch with a saved league paints the Setup form first — including firing `autoFocus` on the username input — then swaps to "Loading…". Anything typed in that window is discarded.
-- **Fix:** Initialize `busy` to `true`; clear it in the branch that decides no league is configured.
+#### E3 — One cache filename skips the sanitizer
+- **Where:** `src-tauri/src/season_history.rs:132-133` vs the filtered versions at `engine.rs:152-157`, `season_engine.rs:81-85`
+- **What's wrong:** `history_name` interpolates `league_id` unsanitized — inconsistency is exactly how a traversal lands later.
+- **Fix:** Extract one `fn safe_key(&str)` in `engine.rs`; call from all three sites.
 - **Effort:** S
-- **Grade lift:** C+ → B− (removes a visible wrong-screen flash on every start)
+- **Grade lift:** A− → A−
 
-#### C6 — Order the writes to `view`
-- **Where:** `App.tsx:57`, `App.tsx:80/90/108`, `types.ts:109`
-- **What's wrong:** `setView` is written by the poll listener and by four awaited handlers with no ordering guard, so a poll landing mid-`await` is overwritten by a stale handler response or vice versa. `generated_at` would identify the newer view and is never read. Related: the open modal reads live `view` while holding a click-time snapshot, so its text mutates under the user and it will still offer "Confirm" for a player live sync has already drafted to someone else.
-- **Fix:** Accept a view only if its `generated_at` exceeds the current one. Close the modal if its player leaves `available`.
+#### E4 — Raw username interpolated into a URL path via bare `reqwest::get`
+- **Where:** `src-tauri/src/commands_draft.rs:60-61`
+- **What's wrong:** Skips pooled-client timeouts/user-agent and does no encoding/validation of the username.
+- **Fix:** Validate `[A-Za-z0-9_]{1,32}` (Sleeper's own rule) and route through `state.engine.client` (same change as A4).
 - **Effort:** S
-- **Grade lift:** C+ → B− (removes last-write-wins races on the primary state)
+- **Grade lift:** A− → A−
+
+#### E5 — Chat CLI discovery trusts `PATH`
+- **Where:** `src-tauri/src/chat_cli.rs:23-34` (`find_cli`)
+- **What's wrong:** Executes the first `claude` on `PATH` with no ownership check; low risk on a single-user Mac.
+- **Fix:** Prefer the known absolute paths; require the PATH fallback to live outside world-writable dirs.
+- **Effort:** S
+- **Grade lift:** A− → A−
 
 ---
 
-## D — Testing & Reliability — C
+## F — Dependencies & Tech Currency — A−
 
-13 tests pass and they are well-chosen — `draft.rs` checks `picks_for_slot` against the real league document, `recommend.rs` pins the disqualification rules that a simulation caught failing. A genuine 210-pick autopilot simulation with an invariant validator exists and passes. But **every one of the 13 tests covers pure math**: there are zero tests in `board.rs`, `view.rs`, `engine.rs`, `sleeper.rs`, and `lib.rs` — the entire ingestion, assembly, and state-transition surface, which is where all eight B-items live. Not one of B1–B8 would be caught by the current suite.
+Current and unusually lean: 4 production npm deps, 6 direct Cargo deps, all at or near latest (React 19.2, Vite 7.3, Vitest 4.1, ESLint 10.9, TS 5.8, Tauri 2.11, Tokio 1.53, reqwest 0.12). Both lockfiles committed; CI runs `npm ci` against the full verify gate. `npm audit`: zero vulnerabilities. Hand-rolling base64 (`headshots.rs:64-88`, tested against RFC vectors) instead of adding a dep was a defensible call.
 
-#### ~~D1~~ ✓ done 2026-08-27 — Wire the existing simulation into `cargo test`
-- **Where:** `bin/dump_state.rs:76-106`; create `src-tauri/tests/`
-- **What's wrong:** The strongest verification asset in the project is a CLI binary, so it only runs when someone remembers to run it. It is not a regression gate.
-- **Fix:** Move the simulation loop and invariant checks into `tests/simulation.rs` against a checked-in fixture (no network). Assert the invariants already validated manually: no duplicate picks, drafted ∉ available, survival ∈ [0,1], roster counts, recommendations non-empty mid-draft.
+#### F1 — Two major versions of reqwest in the binary
+- **Where:** `src-tauri/Cargo.lock` (0.12.28 direct + 0.13.4 transitive), `Cargo.toml:23`
+- **What's wrong:** Two TLS/HTTP stacks compile into the binary.
+- **Fix:** Bump the direct dep to `0.13` and re-lock, or confirm via `cargo tree -d` the duplicate is unavoidable.
+- **Effort:** S
+- **Grade lift:** A− → A−
+
+#### F2 — Bare-major version ranges on the framework
+- **Where:** `src-tauri/Cargo.toml:20-23`
+- **What's wrong:** `tauri = "2"` means `cargo update` can jump minors unreviewed.
+- **Fix:** Pin tested minors (`tauri = "2.11"`, `reqwest = "0.12.28"`) so upgrades are explicit commits.
+- **Effort:** S
+- **Grade lift:** A− → A−
+
+#### F3 — No supply-chain job in CI
+- **Where:** `.github/workflows/verify.yml`
+- **What's wrong:** RustSec advisories on transitives would go unnoticed; `npm audit` never runs in CI.
+- **Fix:** Add `cargo audit` + `npm audit --audit-level=high` as a step or weekly scheduled job.
+- **Effort:** S
+- **Grade lift:** A− → A
+
+#### F4 — `coverage/` not gitignored
+- **Where:** `.gitignore` (missing entry); `coverage/` appears untracked after test runs
+- **What's wrong:** Generated HTML will eventually get committed.
+- **Fix:** Add `coverage` to `.gitignore` alongside `dist`.
+- **Effort:** S
+- **Grade lift:** A− → A−
+
+---
+
+## G — Performance & Scalability — C+
+
+The caching design is good (`avatars.ts:46-57` memoizes in-flight promises; backend gates emissions on real score changes). But the season poll does heroic amounts of discarded work: every 30 seconds `build_season_view` runs a 4,000-iteration Monte Carlo, ~1,600 lineup solves, and a triple-nested trade search — to redraw a scoreboard whose totals moved 0.1 points. The frontend has zero `React.memo` and a 200-row board that fully re-renders on every 3-second tick.
+
+#### G1 — Rival candidate lists rebuilt inside the free-agent loop, ~780×/poll
+- **Where:** `src-tauri/src/season_moves.rs:94-97` (`CANDIDATE_POOL=60` × ~13 rivals)
+- **What's wrong:** Identical `Vec<Candidate>` reconstructed per (agent × rival) pair, each triggering two lineup solves.
+- **Fix:** Hoist `rival_pools: Vec<(Vec<Candidate>, f64)>` (pool + baseline) above the loop; index in.
+- **Effort:** S
+- **Grade lift:** C+ → B− (60× fewer constructions, half the solves)
+
+#### G2 — `marginal_gain` recomputes a baseline the caller has
+- **Where:** `src-tauri/src/season_moves.rs:63-64` vs baseline at `:79`
+- **What's wrong:** ~840 identical `lineup_total` recomputations per poll.
+- **Fix:** Pass `baseline: f64` into `marginal_gain`.
+- **Effort:** S
+- **Grade lift:** C+ → B− (with G1)
+
+#### G3 — Trade search: ~2,900 iterations × 2 full-roster clones each
+- **Where:** `src-tauri/src/season_trades.rs:76-86` (`total_after_swap` clones), `MAX_TRADES=4` truncate at `:133`
+- **What's wrong:** On the order of a million `String` allocations per poll to keep 4 results.
+- **Fix:** Prune pairs where `theirs.points - ours.points < MIN_EDGE` at the same position before solving; consider `Arc<str>` for `Candidate` fields.
 - **Effort:** M
-- **Grade lift:** C → C+ (converts existing work into an automatic gate — best ratio in this category)
+- **Grade lift:** C+ → B−
 
-#### D2 ◐ partial 2026-08-27 — Add fixture-driven tests for the data path
-- **Where:** `board.rs`, `engine.rs`, `sleeper.rs`, `view.rs`; create `src-tauri/tests/fixtures/`
-- **What's wrong:** No test covers Sleeper response parsing, cache TTL/refresh behavior, board assembly, bye inference, or `merged_picks`. Upstream payload drift breaks draft night with all 13 tests green.
-- **Fix:** Check in sanitized fixtures — standard league, mock draft, partial weekly data, API outage, manual-pick catch-up. Snapshot `DraftView`. Test the cache against a temp dir, including the B3 stale-fallback path.
-- **Effort:** L
-- **Grade lift:** C → C+ (covers the surface where the real bugs are)
-- **Progress:** Added a sanitized Sleeper-shaped board fixture plus cache-expiry, manual-pick reconciliation, full `DraftView`, and 210-pick simulation coverage. Mock-draft and partial-week/mock-HTTP outage fixtures remain.
+#### G4 — Odds simulation runs through `HashMap` in the hot loop
+- **Where:** `src-tauri/src/season_odds.rs:142-186` (4,000 sims × ~90 games; three HashMaps + a re-sort per sim)
+- **What's wrong:** ~4-5M hash lookups per call for what could be flat vector indexing.
+- **Fix:** Map teams to 0..n once; replace `wins`/`points` maps with `Vec<f64>` indexed by slot.
+- **Effort:** S
+- **Grade lift:** C+ → B− (~10× on the sim)
 
-#### ~~D3~~ ✓ done 2026-08-27 — Add a frontend test runner and cover the live path
-- **Where:** no runner configured; `package.json:6-10`
-- **What's wrong:** Zero frontend tests and no runner. Filtering, modal actions, poll handling, and error states are entirely unverified.
-- **Fix:** Vitest + React Testing Library + user-event, mocking the `api` boundary. Cover setup success/failure, live update handling, filters, manual-pick confirm/undo, and the C1 staleness indicator.
-- **Effort:** L
-- **Grade lift:** C → C+ (first coverage of the visible product)
-
-#### ~~D4~~ ✓ done 2026-08-27 — Add CI once a repository exists
-- **Where:** blocked on **I1**; create `.github/workflows/`
-- **What's wrong:** No automation gates build, tests, clippy, fmt, or audit. Genuinely blocked — there is no repo and no remote for CI to attach to.
-- **Fix:** After I1, add a macOS workflow running the I2 verify script.
+#### G5 — The full season view is rebuilt every 30s when only live scores changed
+- **Where:** `src-tauri/src/commands_season.rs:116-133` (poll refreshes live only; emit-gate at `:133` suppresses emit, not computation), `season.rs:244,313,343`
+- **What's wrong:** G1-G4's work — waivers, trades, odds — cannot change from a touchdown, yet is recomputed and thrown away every tick.
+- **Fix:** Split the view into cheap live + expensive analysis sections; cache analysis in `AppState` on `load_season`/`refresh_season`; merge on tick.
 - **Effort:** M
-- **Grade lift:** C → C+ (makes local checks continuous) — **do not attempt before I1**
+- **Grade lift:** C+ → B (makes G1-G4 mostly moot on the poll path)
 
----
-
-## E — Security — B
-
-The attack surface is small and deliberately so, and it holds up under inspection: **every** outbound request is a GET to `api.sleeper.app` (verified by enumerating all URLs in the crate), there are **zero** POST/PUT/PATCH/DELETE calls anywhere, no credentials, no tokens, no telemetry, no third-party endpoints, and the frontend's only `fetch` is a local fixture. npm audit is clean across 133 packages. The remaining gaps are real but modest for a local read-only app.
-
-#### E1 — Define a production CSP
-- **Where:** `tauri.conf.json:23`
-- **What's wrong:** `"csp": null` removes the primary browser-layer defense in a privileged webview that can invoke every Tauri command.
-- **Fix:** Restrict `default-src` to `'self'`, disallow `object`/`embed`, permit only the Vite HMR exception in dev. Verify both dev and packaged builds.
-- **Effort:** S
-- **Grade lift:** B → B+ (adds the main missing hardening control)
-
-#### E2 — Remove the unused opener plugin
-- **Where:** `package.json:16`, `Cargo.toml:17`, `capabilities/default.json:8`, `lib.rs` setup
-- **What's wrong:** The plugin is installed, initialized, and granted `opener:default` permission, but grep finds **zero** references in `src/`. Unnecessary privileged surface plus dependency weight.
-- **Fix:** Remove the npm dep, the crate, the capability entry, and the `.plugin()` call.
-- **Effort:** S
-- **Grade lift:** B → B+ (least privilege, smaller graph)
-
-#### E3 — URL-encode the username before interpolating it into a path
-- **Where:** `lib.rs:73`, `bin/dump_state.rs:47`
-- **What's wrong:** `format!("https://api.sleeper.app/v1/user/{username}")` with no encoding — a username containing `/`, `?`, or `..` alters the request path. Low impact (fixed host, read-only public API, self-supplied input), but it's unvalidated input reaching a URL. Both sites also use bare `reqwest::get`, bypassing the shared client — so they get no gzip, no user agent, and (per B2) no timeout.
-- **Fix:** Percent-encode the segment, reject non-alphanumeric usernames, and route both through `SleeperClient`.
-- **Effort:** S
-- **Grade lift:** B → B+ (closes the only untrusted-input-to-URL path)
-
----
-
-## F — Dependencies & Tech Currency — B−
-
-Healthier than the Codex report concluded. Both lockfiles are present, Tauri resolves to 2.11.5 and React to 19 within declared ranges, and npm audit is clean. **The `glib` advisories are not a real exposure here** — 13 GTK/glib crates sit in `Cargo.lock`, but `cargo tree --target aarch64-apple-darwin` shows **0** in the macOS build graph (Tauri uses WKWebView on macOS). Remaining items are hygiene, not risk.
-
-#### F1 — Record an audit policy instead of carrying 17 silent warnings
-- **Where:** `src-tauri/` — no `audit.toml`
-- **What's wrong:** `cargo audit` emits 2 advisories and 17 warnings on every run, all from crates not in the shipped build. Noise at that level is how a *real* advisory gets missed.
-- **Fix:** Add `audit.toml` ignoring the Linux-only IDs with a one-line rationale and review date. Keep everything else failing.
-- **Effort:** S
-- **Grade lift:** B− → B (makes future advisories visible)
-
-#### F2 — Pin the toolchains
-- **Where:** no `.nvmrc`, no `rust-toolchain.toml`
-- **What's wrong:** Nothing declares the versions that produced the working build (currently rustc 1.88.0, Node 26.7.0, npm 11.19.0).
-- **Fix:** Add `rust-toolchain.toml` and `.nvmrc`; note them in the README.
-- **Effort:** S
-- **Grade lift:** B− → B (reproducible builds)
-
-#### F3 — Defer the frontend major upgrades until after the draft
-- **Where:** `package.json:18-24`
-- **What's wrong:** Three majors behind — `@vitejs/plugin-react` 4.7.0→6.1.0, Vite 7.3.6→8.2.2, TypeScript 5.8.3→7.0.2. Also two `reqwest` majors (0.12.28 and 0.13.4) resolve simultaneously in `Cargo.lock`.
-- **Fix:** **Explicitly deferred.** With no frontend tests (D3) and no version control (I1), these migrations are a net risk increase before a hard deadline. Do Vite + plugin together after the draft, then TypeScript 7 separately.
+#### G6 — 200 unmemoized board rows re-render on every 3s tick
+- **Where:** `src/components/Board.tsx:243-284`; `Headshot` subscriptions via `bits.tsx:105-115`
+- **What's wrong:** ~400 store-subscribing leaves churn per `draft-updated`; "Show all" unbounds it entirely.
+- **Fix:** `memo`-wrapped `BoardRow`, `useCallback` the draft handler, pass `avatarMode` down instead of 400 subscriptions; window the "Show all" path.
 - **Effort:** M
-- **Grade lift:** B− → B (deliberate currency) — **after 2026-08-28**
+- **Grade lift:** C+ → B−
 
----
-
-## G — Performance & Scalability — B−
-
-Measured, not assumed: cold load **9.9s**, warm **2.6s**, bundle 65 kB gzipped, ~133 kB per IPC emit. The `changed` gate is the right design — the view is rebuilt ~210 times over three hours rather than 3,600. The Codex report's "first load takes about a minute" premise doesn't hold; the real defect there is that the *UI says* a minute.
-
-#### ~~G1~~ ✓ done 2026-08-27 — Cache the replacement model instead of recomputing it every view
-- **Where:** `view.rs:270-282`, `board.rs:178-187`
-- **What's wrong:** `build_view` allocates a fresh `Vec<ScoredPlayer>` (~370 String clones) and re-runs `compute_replacement`, re-bucketing and re-sorting every position pool — on **every** emit. It operates on the full board including drafted players, so the result is byte-identical every time and identical to what `build_board` already computed at load. Beyond the waste, it's a correctness hazard: two independent sites computing the baselines means the numbers behind `vorp` and those reported in `replacement_baselines` can silently drift apart if either is edited.
-- **Fix:** Store the `ReplacementModel` in `LoadedLeague` at build time; copy it into `DraftView`.
+#### G7 — Board filter+sort re-runs every tick with an O(n log n × getter) comparator
+- **Where:** `src/components/Board.tsx:131-142`
+- **What's wrong:** `view.available` is a fresh identity each event, so the memo never hits; `column.value()` runs per comparison.
+- **Fix:** Precompute sort keys, then sort; memoize on `total_picks_made` + length instead of array identity.
 - **Effort:** S
-- **Grade lift:** B− → B (removes duplicate work *and* a drift hazard)
+- **Grade lift:** C+ → C+
 
-#### G2 ◐ partial 2026-08-27 — Fetch the 18 weekly endpoints concurrently, and fix the load message
-- **Where:** `engine.rs:152-166`, `src/components/Panels.tsx:21`
-- **What's wrong:** 18 requests run strictly sequentially; one slow week delays all the rest. Measured at 9.9s total — real but far from the "~a minute" the UI promises, which is its own defect: the app overstates its own slowness by 6×.
-- **Fix:** Bounded concurrency (semaphore of ~6), preserving per-week degradation warnings; sort deterministically after collection. Correct the message to "~10 seconds".
+#### G8 — Avatars cross the IPC bridge as base64 data URLs; no build target set
+- **Where:** `src-tauri/src/headshots.rs:90-92`; `vite.config.ts` (no `build.target`/`sourcemap`/analyze script)
+- **What's wrong:** ~33% size penalty + JSON round-trip per image; nothing would catch a heavy dep being added.
+- **Fix:** Serve cached files via Tauri's `asset:` protocol; set `build: { target: "es2021", sourcemap: true }`; add `rollup-plugin-visualizer` behind `npm run analyze`.
 - **Effort:** M
-- **Grade lift:** B− → B (cuts load to ~2s and stops misinforming the user)
-- **Progress:** The misleading “~a minute” copy now says “~10 seconds.” Bounded-concurrency fetching remains intentionally deferred from the pre-draft batch.
-
-#### G3 — Precompute tier counts and stop cloning the whole board per emit
-- **Where:** `recommend.rs:156-159`, `view.rs:203-212`
-- **What's wrong:** `tier_left` rescans all of `available` for every candidate inside both mode loops — ≈100 × 370 × 2 ≈ 74k string comparisons. `build_view` clones ~370 `BoardPlayer` structs (4-5 heap strings each) into `available`, ~2,000 allocations per emit. Sub-millisecond in absolute terms; listed for accuracy, not urgency.
-- **Fix:** Build a `HashMap<(&str, u32), usize>` of tier counts once before the loops. Consider borrowing rather than cloning for `available`.
-- **Effort:** S
-- **Grade lift:** B− → B (removes the only super-linear work on the live path)
+- **Grade lift:** C+ → B−
 
 ---
 
-## H — Documentation & Onboarding — B−
+## H — Documentation & Onboarding — C+
 
-The README is well above typical for this stage — it explains the product, the data sources including the undocumented endpoint, cache locations and TTLs, the file layout, and the browser fixture mode. It loses ground on accuracy: three claims don't match the code, and there's no troubleshooting or verification guidance.
+`draft-assistant/README.md` is genuinely well-written for what it covers (domain model, run/build/dump commands, cache TTLs, browser-preview fixtures), and 41 of 43 Rust files carry `//!` module headers. The fatal gap is drift: the README describes a draft-only app while half the tree — 20 `season_*.rs` files, the chat feature, and the entire Season frontend — is never mentioned. No root README, no `docs/`.
 
-#### H1 — Document the supported roster/scoring matrix and the known gaps
-- **Where:** `README.md:12-35`
-- **What's wrong:** It claims exact adherence to league settings without disclosing that kickers are never fetched (`sleeper.rs:230,242`) so a K slot can never be filled, that mixed-flex and superflex are valued off `flex_slots[0]` only, that linear and 3RR drafts compute the clock wrongly (B7), and that manual picks don't survive a refresh (B5).
-- **Fix:** Add a support matrix — supported / degraded / unsupported — and tighten the claims until B5/B7 and A2 land.
+#### H1 — README layout block covers 9 of 43 Rust files
+- **Where:** `draft-assistant/README.md:77-92`
+- **What's wrong:** `season*.rs`, `chat*.rs`, `commands_*.rs`, `state.rs`, `secrets.rs`, `roster.rs`, `projections.rs` are invisible to a newcomer.
+- **Fix:** Regenerate the layout block; add "Season screen" and "Ask Claude" architecture paragraphs parallel to the draft one.
 - **Effort:** S
-- **Grade lift:** B− → B (expectations match behavior)
+- **Grade lift:** C+ → B−
 
-#### H2 — Fix the multi-league claim
-- **Where:** `README.md:34-35`
-- **What's wrong:** "Multi-league. Leagues are stored in config; switching is a config value" — but there is no league list or switcher in the UI (grep finds zero frontend references to `leagues`) and no `set_active_league` command. The only way to switch is to re-enter a league ID, which also triggers a full reload.
-- **Fix:** Either add a switcher backed by the stored list, or restate it as "re-enter a league ID to switch."
+#### H2 — Season fixture and `dump_season` undocumented
+- **Where:** `draft-assistant/README.md:61-65` vs `src/api.ts:124-127` and `src-tauri/src/bin/dump_season.rs`
+- **What's wrong:** Someone regenerating fixtures will silently ship a stale season screen.
+- **Fix:** Document `cargo run --bin dump_season -- <league_id> [username] [out.json]` beside `dump_state`; note both fixtures regenerate together.
 - **Effort:** S
-- **Grade lift:** B− → B (removes a feature claim with no implementation)
+- **Grade lift:** C+ → B−
 
-#### H3 — Add troubleshooting and a verification section
-- **Where:** `README.md:37-75`
-- **What's wrong:** No canonical "is this change ready?" command, and no recovery guidance for stale projections, corrupted cache, partial weekly data, or a live-sync outage near draft time.
-- **Fix:** Document the I2 verify script and add a symptom → signal → action table, including how to reset local state and what is lost.
+#### H3 — No root README
+- **Where:** repo root (ships `TRACKER.md`, `draft-assistant-prompt.md`, two grade reports, no orientation)
+- **What's wrong:** A clone lands on four ambiguous markdown files; nothing says the app lives in `draft-assistant/`.
+- **Fix:** ~15-line root README: what this is, `cd draft-assistant && npm install && npm run tauri dev`, what TRACKER.md is.
 - **Effort:** S
-- **Grade lift:** B− → B (external failures become recoverable)
+- **Grade lift:** C+ → B−
+
+#### H4 — No CLAUDE.md codifying the project's hard conventions
+- **Where:** repo root / `draft-assistant/`
+- **What's wrong:** The 500-LOC cap, the verify gate, and fixture-regeneration rules live only in prose or a contributor's head.
+- **Fix:** Add `CLAUDE.md` codifying LOC cap, verify gate, fixture rules.
+- **Effort:** S
+- **Grade lift:** C+ → B−
+
+#### H5 — Ask Claude has zero setup documentation
+- **Where:** `draft-assistant/README.md` (absent); auth routes in `src-tauri/src/chat_cli.rs:25-31` and `secrets.rs`
+- **What's wrong:** The feature appears broken to anyone without the CLI or an API key.
+- **Fix:** "Ask Claude" README section covering both auth routes and where the key is stored.
+- **Effort:** S
+- **Grade lift:** C+ → B−
 
 ---
 
-## I — Developer Experience & Tooling — C−
+## I — Developer Experience & Tooling — B−
 
-The declared foundations are good — TypeScript strict with unused-locals/params, clippy clean under `-D warnings`, a 343ms production build, a browser fixture mode, and a headless `dump_state` CLI. One fact dominates all of it: **there is no version control.**
+The core loop is real: one `verify` script chains LOC cap → fmt → tsc → build → both test suites → eslint `--max-warnings=0` → clippy `-D warnings`, and CI (`verify.yml:36-37`) runs exactly that, so local and CI can't diverge. The browser-fixture dev loop (`api.ts:116-137`) is a genuine strength — full-fidelity UI with no Rust compile. Weak at the edges: no Rust caching in CI on a macOS runner, no TS formatter, ESLint scoped to `src/` only, nothing pinning toolchains locally.
 
-#### I1 — Put this project under version control
-- **Where:** project root — `git status` → `fatal: not a git repository`
-- **What's wrong:** ~3,700 lines of hand-written source on a **removable flash volume** (`/Volumes/512Flash`), with no history, no branches, no backup, and no way to revert a bad edit. Every fix in this report — several touching the live draft path, several rated L — would be made with no undo, the day before the draft. A `.gitignore` already exists at `draft-assistant/.gitignore`; nothing else is needed. The Codex audit graded the absence of *CI* as Major twice while never noticing there is nothing for CI to run against.
-- **Impact:** **Critical**, and it blocks D4 and gates the safety of everything else.
-- **Fix:**
-  ```bash
-  git init && git add -A && git commit -m "Working draft assistant before hardening"
-  ```
-  Then consider a remote or a copy off the flash volume.
-- **Effort:** S (about 30 seconds)
-- **Grade lift:** C− → C+ (makes every other change reversible)
-
-#### ~~I2~~ ✓ done 2026-08-27 — Add one all-up verification command
-- **Where:** `package.json:6-10`
-- **What's wrong:** Only `dev`/`build`/`preview`/`tauri` exist. Verification means remembering four commands across two toolchains, so checks get skipped — `cargo fmt` already has.
-- **Fix:** Add `typecheck`, `test`, `test:rust`, `lint`, and a `verify` that chains fmt check → tsc → frontend build → cargo test → clippy, failing loudly.
+#### I1 — CI rebuilds the full Tauri dependency graph every run on macOS minutes
+- **Where:** `.github/workflows/verify.yml:25-31` (npm cached, Rust not)
+- **What's wrong:** 27 dependency trees compiled from scratch per run at 10× minute billing; realistically 10-20 min per PR.
+- **Fix:** `Swatinem/rust-cache@v2` with `workspaces: draft-assistant/src-tauri` after the toolchain step.
 - **Effort:** S
-- **Grade lift:** C− → C (one repeatable gate)
+- **Grade lift:** B− → B+
 
-#### ~~I3~~ ✓ done 2026-08-27 — Enforce formatting and add a frontend linter
-- **Where:** 39 files fail `cargo fmt --check`; no ESLint/Prettier config
-- **What's wrong:** Formatting drift across most of the Rust source obscures real diffs, and React/TS has no semantic linter — no exhaustive-deps rule, no hooks rules. The effect dependencies are currently correct by hand, with nothing enforcing that.
-- **Fix:** Run `cargo fmt --all` as one isolated commit (after I1), then add ESLint with `react-hooks` and TypeScript rules, exposed via I2's scripts.
-- **Effort:** M
-- **Grade lift:** C− → C (consistency stops being manual)
-
-#### ~~I4~~ ✓ done 2026-08-27 — Configure a release profile with overflow checks on the live path
-- **Where:** `Cargo.toml` — no `[profile.release]`
-- **What's wrong:** Release builds run with `overflow-checks = false`, so the underflows noted in B8 and `view.rs:119-122` wrap silently into garbage numbers rather than failing loudly. For a tool whose entire output is derived arithmetic, silent wrong numbers are worse than a crash.
-- **Fix:** Add `[profile.release]` with `overflow-checks = true` (negligible cost at this workload), plus `lto = "thin"` and `strip = true` to offset the 12 MB binary.
+#### I2 — `verify` runs the fastest-failing checks last
+- **Where:** `draft-assistant/package.json:19`
+- **What's wrong:** A one-character clippy violation costs the full test compile before surfacing.
+- **Fix:** Reorder to loc → fmt → lint → typecheck → test → build, or add a `verify:fast` subset.
 - **Effort:** S
-- **Grade lift:** C− → C (arithmetic corruption becomes detectable)
+- **Grade lift:** B− → B
 
----
+#### I3 — No formatter for 37 TS files and 9 CSS files
+- **Where:** `draft-assistant/package.json:11` (`format:check` is cargo-fmt only)
+- **What's wrong:** Frontend formatting enforced by nothing but discipline.
+- **Fix:** Add prettier + `.prettierrc`; chain `prettier --check src scripts` into `format:check`.
+- **Effort:** S
+- **Grade lift:** B− → B
 
-## Draft-night triage — the only ordering that matters before 2026-08-28 17:00 PDT
+#### I4 — Config files unlinted and untypechecked
+- **Where:** `eslint.config.js:11` (`files: ["src/**"]`), `tsconfig.json:33` (`include: ["src"]`)
+- **What's wrong:** `scripts/check-loc.mjs`, `vite.config.ts`, `vitest.config.ts`, and the eslint config itself are checked by nothing.
+- **Fix:** Widen the ESLint glob (+`globals.node`); use `tsc --build --noEmit` so the node tsconfig is checked.
+- **Effort:** S
+- **Grade lift:** B− → B−
 
-| Order | Item | Why now | Effort |
-|-------|------|---------|--------|
-| 1 | **I1** | 30 seconds, and every other change becomes reversible | S |
-| 2 | **B1** | One button click can permanently freeze the app mid-draft | S |
-| 3 | **B2** | A stalled socket has no bound and wedges the poll loop and UI | S |
-| 4 | **B3** | Stale cache + endpoint outage = no board at all | S |
-| 5 | **B4 + C1** | A dead poller currently looks identical to a quiet draft | M |
-| 6 | **B5** | "Refresh data" erases exactly the fallback you needed it for | M |
+#### I5 — No local toolchain pinning
+- **Where:** CI pins stable Rust + Node 22; no `rust-toolchain.toml`, `.nvmrc`, or `engines`
+- **What's wrong:** A dev on Node 20 or newer Rust gets lints CI didn't have, or vice-versa.
+- **Fix:** Add `rust-toolchain.toml` (channel + rustfmt/clippy components) and `.nvmrc`; have CI read them.
+- **Effort:** S
+- **Grade lift:** B− → B−
 
-Everything else in this report — accessibility, CSP, the flex/superflex model, tests, CI, formatting, toolchain currency — is genuine and worth doing, and none of it belongs before the draft.
-
-The three simulation-discovered recommendation bugs fixed earlier (positional discipline, VORP normalization, per-position candidate pool) remain fixed; the 210-pick autopilot still produces a valid roster with all starters filled and every invariant passing after today's mock-draft changes.
+#### I6 — No pre-commit hook
+- **Where:** `.git/hooks/` (samples only); no husky/lefthook
+- **What's wrong:** Every mistake round-trips through a 10-20 min CI run.
+- **Fix:** `.githooks/pre-commit` running the sub-15-second subset (loc + eslint + tsc) with `core.hooksPath` documented.
+- **Effort:** S
+- **Grade lift:** B− → B−

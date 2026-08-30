@@ -3,8 +3,12 @@
 
 use crate::engine::LoadedLeague;
 use crate::roster::RosterRules;
+use crate::season::SeasonView;
 use crate::season_api::Matchup;
 use crate::season_lineup::LineupSlot;
+use crate::season_moves::WaiverTarget;
+use crate::season_odds::StandingsRow;
+use crate::season_trades::TradeIdea;
 use crate::weekly::WeeklyPoints;
 
 /// dictionary — DEF entries live only in the latter.
@@ -125,4 +129,29 @@ pub fn why_start(
         lookup.name(player_out),
         in_points - out_points
     )
+}
+
+/// The parts of a season view that cost real time to compute and cannot change
+/// from live scoring: rest-of-season projections and playoff odds, waiver
+/// targets, and trade ideas.
+///
+/// Rebuilding these means roughly 1,600 lineup solves plus a playoff
+/// simulation plus a trade search — none of which a touchdown can affect. The
+/// live poller computes them once and hands them back on every later tick.
+#[derive(Debug, Clone)]
+pub struct SeasonAnalysis {
+    pub standings: Vec<StandingsRow>,
+    pub waivers: Vec<WaiverTarget>,
+    pub trades: Vec<TradeIdea>,
+}
+
+impl SeasonAnalysis {
+    /// Lift the reusable parts back out of a freshly built view.
+    pub fn of(view: &SeasonView) -> Self {
+        Self {
+            standings: view.standings.clone(),
+            waivers: view.waivers.clone(),
+            trades: view.trades.clone(),
+        }
+    }
 }

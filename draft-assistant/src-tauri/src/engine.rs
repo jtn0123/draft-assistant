@@ -5,6 +5,7 @@
 //! and the model can see.
 
 use crate::board::{build_board, BoardPlayer};
+use crate::cache::{envelope_json, fresh_enough, read_cached, replace_file, write_atomic};
 use crate::mock_league::synthesize_league;
 use crate::roster::RosterRules;
 use crate::sleeper::{Draft, League, Pick, PlayerMeta, SleeperClient};
@@ -18,6 +19,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) const PLAYERS_TTL_SECS: u64 = 24 * 3600;
 pub(crate) const PROJECTIONS_TTL_SECS: u64 = 6 * 3600;
 pub(crate) const WEEKS: u32 = 18;
+/// How many Sleeper requests to have in flight at once. Enough to hide the
+/// round trips, well short of anything that looks like hammering.
+pub(crate) const REQUEST_CONCURRENCY: usize = 6;
 
 pub(crate) fn now_secs() -> u64 {
     SystemTime::now()
@@ -50,14 +54,6 @@ pub struct StoredLeague {
     pub league_id: String,
     pub name: String,
     pub season: String,
-}
-
-// ---------- cache envelope ----------
-
-#[derive(Serialize, Deserialize)]
-struct Cached<T> {
-    fetched_at: u64,
-    data: T,
 }
 
 // ---------- engine ----------
@@ -111,41 +107,65 @@ impl Engine {
         name: &str,
         ttl: u64,
     ) -> Option<(u64, T)> {
-        let (fetched_at, data) = self.read_cache_any(name)?;
-        if now_secs().saturating_sub(fetched_at) > ttl {
-            return None;
-        }
-        Some((fetched_at, data))
+        fresh_enough(self.read_cache_any(name), ttl)
     }
 
     pub(crate) fn read_cache_any<T: serde::de::DeserializeOwned>(
         &self,
         name: &str,
     ) -> Option<(u64, T)> {
-        let raw = std::fs::read_to_string(self.cache_path(name)).ok()?;
-        let cached: Cached<T> = serde_json::from_str(&raw).ok()?;
-        Some((cached.fetched_at, cached.data))
+        read_cached(self.cache_path(name))
+    }
+
+    /// `read_cache_any` off the async runtime.
+    ///
+    /// The players dictionary is ~15 MB of JSON; parsing it on the runtime
+    /// thread stalls every other task, including the poll loop, for as long
+    /// as it takes.
+    pub(crate) async fn read_cache_any_off_thread<T>(&self, name: &str) -> Option<(u64, T)>
+    where
+        T: serde::de::DeserializeOwned + Send + 'static,
+    {
+        let path = self.cache_path(name);
+        tokio::task::spawn_blocking(move || read_cached(path))
+            .await
+            .ok()?
+    }
+
+    /// `read_cache` off the async runtime. See `read_cache_any_off_thread`.
+    pub(crate) async fn read_cache_off_thread<T>(&self, name: &str, ttl: u64) -> Option<(u64, T)>
+    where
+        T: serde::de::DeserializeOwned + Send + 'static,
+    {
+        fresh_enough(self.read_cache_any_off_thread(name).await, ttl)
+    }
+
+    /// `write_cache` off the async runtime. Takes the value by reference and
+    /// serializes it here, then hands only the finished bytes to the blocking
+    /// pool, so callers keep ownership of what they just fetched.
+    pub(crate) async fn write_cache_off_thread<T: Serialize>(&self, name: &str, data: &T) -> u64 {
+        let fetched_at = now_secs();
+        let Ok(json) = envelope_json(fetched_at, data) else {
+            return fetched_at;
+        };
+        let tmp = self.cache_path(&format!("{name}.tmp"));
+        let final_path = self.cache_path(name);
+        let _ = tokio::task::spawn_blocking(move || replace_file(tmp, final_path, json)).await;
+        fetched_at
     }
 
     pub(crate) fn write_cache<T: Serialize>(&self, name: &str, data: &T) -> u64 {
         let fetched_at = now_secs();
-        let env = Cached { fetched_at, data };
-        if let Ok(json) = serde_json::to_string(&env) {
-            let tmp = self.cache_path(&format!("{name}.tmp"));
-            if std::fs::write(&tmp, json).is_ok() {
-                std::fs::rename(tmp, self.cache_path(name)).ok();
-            }
-        }
+        let tmp = self.cache_path(&format!("{name}.tmp"));
+        write_atomic(tmp, self.cache_path(name), fetched_at, data).ok();
         fetched_at
     }
 
     fn write_cache_checked<T: Serialize>(&self, name: &str, data: &T) -> Result<u64, String> {
         let fetched_at = now_secs();
-        let env = Cached { fetched_at, data };
-        let json = serde_json::to_string(&env).map_err(|e| format!("serialize {name}: {e}"))?;
         let tmp = self.cache_path(&format!("{name}.tmp"));
-        std::fs::write(&tmp, json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, self.cache_path(name)).map_err(|e| format!("replace {name}: {e}"))?;
+        write_atomic(tmp, self.cache_path(name), fetched_at, data)
+            .map_err(|e| format!("{name}: {e}"))?;
         Ok(fetched_at)
     }
 
@@ -309,6 +329,15 @@ impl Engine {
         if reconcile_manual_picks(&api_picks, &mut manual_picks) {
             self.save_manual_picks(&draft.draft_id, &manual_picks)?;
         }
+        // Every pick calculation divides by the team count and counts up to
+        // teams * rounds, so a draft that reports neither is refused here
+        // rather than panicking on the next view build.
+        if draft.settings.teams == 0 || draft.settings.rounds == 0 {
+            return Err(format!(
+                "draft {} reports {} teams and {} rounds — it has not been set up yet",
+                draft.draft_id, draft.settings.teams, draft.settings.rounds
+            ));
+        }
         let season: u32 = league
             .season
             .parse()
@@ -386,6 +415,7 @@ pub(crate) fn reconcile_manual_picks(api: &[Pick], manual: &mut Vec<Pick>) -> bo
 #[cfg(test)]
 mod reliability_tests {
     use super::*;
+    use crate::cache::Cached;
     use crate::sleeper::Pick;
 
     fn test_dir(label: &str) -> PathBuf {

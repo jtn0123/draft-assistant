@@ -247,6 +247,74 @@ describe("App live workflow", () => {
     // the header strip and once in the standings row.
     expect(screen.getAllByText("88%")).toHaveLength(2);
   });
+
+  it("drives the league tabs from the keyboard, as the tablist role promises", async () => {
+    const user = userEvent.setup();
+    const initial = fixture();
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+    testState.api.loadSeason.mockResolvedValue(seasonFixture());
+
+    render(<App />);
+    await screen.findByText(initial.league.name);
+    await user.click(screen.getByRole("button", { name: "Season" }));
+    await screen.findByText("vs punt_god · 122.4 – 108.9");
+
+    const standings = screen.getByRole("tab", { name: "Standings" });
+    expect(standings).toHaveAttribute("aria-selected", "true");
+    // Only the selected tab is in the tab order.
+    expect(standings).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("tab", { name: "Games" })).toHaveAttribute("tabindex", "-1");
+
+    standings.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Games" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Games" })).toHaveFocus();
+
+    await user.keyboard("{End}");
+    expect(screen.getByRole("tab", { name: "Last season" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // Wraps around rather than stopping at the end.
+    await user.keyboard("{ArrowRight}");
+    expect(standings).toHaveAttribute("aria-selected", "true");
+
+    // The panel is announced and points back at its tab.
+    const panel = screen.getByRole("tabpanel");
+    expect(panel).toHaveAttribute("aria-labelledby", standings.id);
+    expect(standings).toHaveAttribute("aria-controls", panel.id);
+  });
+
+  it("shows a season load failure as an error with a working retry", async () => {
+    const user = userEvent.setup();
+    const initial = fixture();
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+    testState.api.loadSeason
+      .mockRejectedValueOnce(new Error("Sleeper timed out"))
+      .mockResolvedValueOnce(seasonFixture());
+
+    render(<App />);
+    await screen.findByText(initial.league.name);
+    await user.click(screen.getByRole("button", { name: "Season" }));
+
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    // Once in the toast, once in the error block itself.
+    expect(screen.getAllByText(/Sleeper timed out/)).toHaveLength(2);
+
+    await user.click(retry);
+    expect(await screen.findByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
+    expect(testState.api.loadSeason).toHaveBeenLastCalledWith(true);
+  });
 });
 
 function seasonFixture(): SeasonView {

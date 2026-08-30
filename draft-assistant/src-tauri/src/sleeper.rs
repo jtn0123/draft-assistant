@@ -7,9 +7,12 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 
 const BASE: &str = "https://api.sleeper.app/v1";
 const BASE_UNDOC: &str = "https://api.sleeper.app";
+/// Total attempts per request, including the first.
+const RETRIES: u32 = 3;
 
 /// League-wide knobs the season screen needs. All optional: a mock draft's
 /// synthesized league has none of them.
@@ -247,8 +250,8 @@ impl SleeperClient {
         let http = reqwest::Client::builder()
             .user_agent("draft-assistant/0.1 (local second-screen tool)")
             .gzip(true)
-            .connect_timeout(std::time::Duration::from_secs(3))
-            .timeout(std::time::Duration::from_secs(8))
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(Duration::from_secs(8))
             .build()
             .expect("failed to build http client");
         Self { http }
@@ -260,22 +263,48 @@ impl SleeperClient {
         self.http.clone()
     }
 
-    pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(
+    /// One attempt, no retry. `Err(retryable)` says whether trying again
+    /// could plausibly help: a transport error or a 5xx, but never a 404.
+    async fn get_json_once<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
-    ) -> Result<T, String> {
+    ) -> Result<T, (String, bool)> {
         let resp = self
             .http
             .get(url)
             .send()
             .await
-            .map_err(|e| format!("request failed: {url}: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("HTTP {} for {url}", resp.status()));
+            .map_err(|e| (format!("request failed: {url}: {e}"), true))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err((format!("HTTP {status} for {url}"), status.is_server_error()));
         }
         resp.json::<T>()
             .await
-            .map_err(|e| format!("bad JSON from {url}: {e}"))
+            .map_err(|e| (format!("bad JSON from {url}: {e}"), false))
+    }
+
+    /// A GET that survives a blip. Sleeper drops the occasional request during
+    /// Sunday traffic, and a single failure used to blank a whole week of
+    /// data until the next manual refresh.
+    pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+    ) -> Result<T, String> {
+        let mut backoff = Duration::from_millis(250);
+        for attempt in 0..RETRIES {
+            match self.get_json_once(url).await {
+                Ok(value) => return Ok(value),
+                Err((error, retryable)) => {
+                    if !retryable || attempt + 1 == RETRIES {
+                        return Err(error);
+                    }
+                }
+            }
+            tokio::time::sleep(backoff).await;
+            backoff *= 2;
+        }
+        Err(format!("request failed: {url}"))
     }
 
     pub async fn league(&self, league_id: &str) -> Result<League, String> {

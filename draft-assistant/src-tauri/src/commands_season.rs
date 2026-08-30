@@ -1,6 +1,6 @@
 //! Tauri commands for the in-season screen.
 
-use crate::season::{build_season_view, SeasonView};
+use crate::season::{build_season_view_cached, SeasonAnalysis, SeasonView};
 use crate::state::{season_view_from, AppState};
 use std::sync::atomic::Ordering;
 use tauri::{Emitter, State};
@@ -77,6 +77,10 @@ pub async fn refresh_season(state: State<'_, AppState>) -> Result<SeasonView, St
     season_view_from(&state).await
 }
 
+/// How many polls to reuse the cached analysis before rebuilding it. At the
+/// default 30s interval that is roughly ten minutes.
+const ANALYSIS_EVERY: u32 = 20;
+
 /// Poll live scoring every `interval_secs` (default 30). Emits "season-updated"
 /// with a fresh SeasonView whenever the totals move.
 #[tauri::command]
@@ -98,6 +102,12 @@ pub async fn start_season_polling(
 
     tauri::async_runtime::spawn(async move {
         let mut last_totals: Option<(u64, u64)> = None;
+        // Computed on the first tick and reused after: the poll only refreshes
+        // live scoring, which cannot move playoff odds, waivers or trades.
+        // Rebuilt every ANALYSIS_EVERY ticks so a waiver claim or a trade
+        // elsewhere in the league still works its way in.
+        let mut analysis: Option<SeasonAnalysis> = None;
+        let mut ticks: u32 = 0;
         loop {
             if !polling.load(Ordering::SeqCst)
                 || season_generation.load(Ordering::SeqCst) != generation
@@ -121,7 +131,19 @@ pub async fn start_season_polling(
                     let season = season_ref.lock().await;
                     let config = config_ref.lock().await;
                     if let (Some(loaded), Some(season)) = (loaded.as_ref(), season.as_ref()) {
-                        let view = build_season_view(loaded, season, config.my_user_id.as_deref());
+                        let view = build_season_view_cached(
+                            loaded,
+                            season,
+                            config.my_user_id.as_deref(),
+                            analysis.as_ref(),
+                        );
+                        if analysis.is_none() {
+                            analysis = Some(SeasonAnalysis::of(&view));
+                        }
+                        ticks += 1;
+                        if ticks % ANALYSIS_EVERY == 0 {
+                            analysis = None;
+                        }
                         // Emit only when a score actually moved: this view is
                         // large and the panel re-renders on every event.
                         let totals = (

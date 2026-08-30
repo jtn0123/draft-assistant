@@ -5,6 +5,7 @@ const repositoryRoot = resolve(process.cwd(), "..");
 const maxLines = 500;
 const excludedDirectories = new Set([
   ".git",
+  "coverage",
   "dist",
   "gen",
   "icons",

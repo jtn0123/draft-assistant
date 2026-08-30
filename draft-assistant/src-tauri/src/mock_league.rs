@@ -3,7 +3,7 @@
 use crate::sleeper::{Draft, League};
 use std::collections::HashMap;
 
-pub(crate) fn synthesize_league(draft: &Draft) -> League {
+pub fn synthesize_league(draft: &Draft) -> League {
     let settings = &draft.settings;
     let mut roster_positions = Vec::new();
     let mut push_slots = |position: &str, count: Option<u32>| {

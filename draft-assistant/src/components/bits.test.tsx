@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ headshot: vi.fn() }));
@@ -37,6 +38,58 @@ describe("clicking a picture", () => {
       screen.getByRole("button", { name: "Close" }).click();
     });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("the zoom dialog and the keyboard", () => {
+  const open = async () => {
+    mocks.headshot.mockResolvedValue("data:image/png;base64,AAAA");
+    render(
+      <>
+        <PlayerName name="Josh Downs" team="IND" playerId="11560" />
+        <ZoomLayer />
+      </>,
+    );
+    const button = await screen.findByRole("button", {
+      name: "Show a larger picture of Josh Downs",
+    });
+    button.focus();
+    await act(async () => {
+      button.click();
+    });
+    return button;
+  };
+
+  it("moves focus into the dialog and back to the picture on close", async () => {
+    const opener = await open();
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close).toHaveFocus();
+
+    await act(async () => {
+      close.click();
+    });
+    // Back where they were in the table, not at the top of the page.
+    expect(opener).toHaveFocus();
+  });
+
+  it("keeps Tab inside the dialog instead of leaking to the page behind", async () => {
+    await open();
+    const close = screen.getByRole("button", { name: "Close" });
+    const user = userEvent.setup();
+
+    await user.tab();
+    expect(close).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(close).toHaveFocus();
+  });
+
+  it("closes on Escape and restores focus", async () => {
+    const opener = await open();
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
   });
 });
 

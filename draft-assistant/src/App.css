@@ -411,6 +411,14 @@
   font-size: 13px;
 }
 
+.season-loading.is-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink);
+}
+
 .empty-note {
   margin: 0;
   font-size: 12px;

@@ -1,4 +1,5 @@
 pub mod board;
+pub mod cache;
 pub mod chat;
 pub mod chat_cli;
 pub mod chat_context;
@@ -8,7 +9,7 @@ pub mod commands_season;
 pub mod draft;
 pub mod engine;
 pub mod headshots;
-mod mock_league;
+pub mod mock_league;
 pub mod projections;
 pub mod recommend;
 pub mod roster;

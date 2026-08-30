@@ -57,12 +57,28 @@ pub struct SeasonView {
 }
 
 use crate::season_view_parts::{current_lineup, matchup_for, opponent_of, why_start, Lookup};
+// SeasonAnalysis lives beside the other view helpers to stay inside the
+// file-size cap, but it belongs to this module's public surface.
+pub use crate::season_view_parts::SeasonAnalysis;
 
 /// Assemble the whole in-season view.
+/// Build the whole view from scratch.
 pub fn build_season_view(
     loaded: &LoadedLeague,
     season: &LoadedSeason,
     my_user_id: Option<&str>,
+) -> SeasonView {
+    build_season_view_cached(loaded, season, my_user_id, None)
+}
+
+/// Build a view, optionally reusing the expensive analysis from a previous
+/// one. Pass `None` whenever rosters, projections or the schedule may have
+/// moved — that is, anywhere except the live-scoring poll.
+pub fn build_season_view_cached(
+    loaded: &LoadedLeague,
+    season: &LoadedSeason,
+    my_user_id: Option<&str>,
+    cached: Option<&SeasonAnalysis>,
 ) -> SeasonView {
     let lookup = Lookup { loaded };
     let rules = &loaded.roster_rules;
@@ -193,62 +209,71 @@ pub fn build_season_view(
     });
 
     // ---------- standings and odds ----------
-    let last_regular = loaded.league.last_regular_week();
-    let teams: Vec<TeamSeason> = season
-        .rosters
-        .iter()
-        .map(|r| TeamSeason {
-            roster_id: r.roster_id,
-            wins: r.settings.wins,
-            losses: r.settings.losses,
-            ties: r.settings.ties,
-            points_for: r.settings.points_for(),
-            weekly_projection: ((week + 1)..=last_regular)
-                .map(|w| {
-                    let candidates = candidates_for(r.player_ids(), &position_of, weekly, w);
-                    (
-                        w,
-                        optimal_lineup(rules, &candidates)
-                            .iter()
-                            .map(|s| s.points)
-                            .sum(),
-                    )
+    // Rebuilding this means ~1,600 lineup solves plus the playoff
+    // simulation. None of it can change from a touchdown being scored,
+    // so the poller hands back what it computed on the last real load.
+    let standings = match cached {
+        Some(analysis) => analysis.standings.clone(),
+        None => {
+            let last_regular = loaded.league.last_regular_week();
+            let teams: Vec<TeamSeason> = season
+                .rosters
+                .iter()
+                .map(|r| TeamSeason {
+                    roster_id: r.roster_id,
+                    wins: r.settings.wins,
+                    losses: r.settings.losses,
+                    ties: r.settings.ties,
+                    points_for: r.settings.points_for(),
+                    weekly_projection: ((week + 1)..=last_regular)
+                        .map(|w| {
+                            let candidates =
+                                candidates_for(r.player_ids(), &position_of, weekly, w);
+                            (
+                                w,
+                                optimal_lineup(rules, &candidates)
+                                    .iter()
+                                    .map(|s| s.points)
+                                    .sum(),
+                            )
+                        })
+                        .collect(),
                 })
-                .collect(),
-        })
-        .collect();
+                .collect();
 
-    let schedule: Vec<ScheduledGame> = season
-        .schedule
-        .iter()
-        .filter(|(w, _)| *w > week)
-        .flat_map(|(w, pairs)| {
-            pairs.iter().map(move |(home, away)| ScheduledGame {
-                week: *w,
-                home: *home,
-                away: *away,
-            })
-        })
-        .collect();
+            let schedule: Vec<ScheduledGame> = season
+                .schedule
+                .iter()
+                .filter(|(w, _)| *w > week)
+                .flat_map(|(w, pairs)| {
+                    pairs.iter().map(move |(home, away)| ScheduledGame {
+                        week: *w,
+                        home: *home,
+                        away: *away,
+                    })
+                })
+                .collect();
 
-    let playoff_teams = loaded.league.settings.playoff_teams.unwrap_or(6);
-    // Seeded from league identity plus how far the season has progressed, so
-    // odds stay put between refreshes but do move as results land.
-    let seed = season
-        .rosters
-        .iter()
-        .map(|r| r.settings.wins as u64 * 31 + r.settings.fpts as u64)
-        .fold(week as u64, |acc, x| {
-            acc.wrapping_mul(1_000_003).wrapping_add(x)
-        });
-    let standings = season_odds::standings(
-        &teams,
-        &schedule,
-        playoff_teams,
-        &team_name,
-        my_roster_id,
-        seed,
-    );
+            let playoff_teams = loaded.league.settings.playoff_teams.unwrap_or(6);
+            // Seeded from league identity plus how far the season has progressed, so
+            // odds stay put between refreshes but do move as results land.
+            let seed = season
+                .rosters
+                .iter()
+                .map(|r| r.settings.wins as u64 * 31 + r.settings.fpts as u64)
+                .fold(week as u64, |acc, x| {
+                    acc.wrapping_mul(1_000_003).wrapping_add(x)
+                });
+            season_odds::standings(
+                &teams,
+                &schedule,
+                playoff_teams,
+                &team_name,
+                my_roster_id,
+                seed,
+            )
+        }
+    };
 
     // ---------- live scoreboard ----------
     let mut tracked: Vec<TrackedPlayer> = Vec::new();
@@ -285,64 +310,75 @@ pub fn build_season_view(
     let next_kickoff_ms = season_live::next_window(&windows).map(|w| w.kickoff_ms);
 
     // ---------- waivers ----------
-    let rostered = season_moves::rostered_ids(season.rosters.iter().map(Roster::player_ids));
-    let free_agents: Vec<FreeAgent> = loaded
-        .board
-        .iter()
-        .filter(|p| !rostered.contains(&p.player_id))
-        .map(|p| FreeAgent {
-            player_id: p.player_id.clone(),
-            name: p.name.clone(),
-            position: p.position.clone(),
-            team: p.team.clone(),
-            weekly_points: weekly.get_or_zero(&p.player_id, week),
-        })
-        .collect();
-    let rival_rosters: Vec<RivalRoster> = season
-        .rosters
-        .iter()
-        .filter(|r| Some(r.roster_id) != my_roster_id)
-        .map(|r| RivalRoster {
-            roster_id: r.roster_id,
-            player_ids: r.player_ids(),
-        })
-        .collect();
     let waiver_budget_total = loaded.league.settings.waiver_budget;
     let waiver_budget_left = waiver_budget_total
         .and_then(|budget| my_roster.map(|r| (budget - r.settings.waiver_budget_used).max(0.0)));
-    let waivers = season_moves::waiver_targets(
-        rules,
-        &my_candidates,
-        &free_agents,
-        &rival_rosters,
-        &|ids: &[String]| candidates_for(ids, &position_of, weekly, week),
-        waiver_budget_left,
-    );
+    let waivers = match cached {
+        Some(analysis) => analysis.waivers.clone(),
+        None => {
+            let rostered =
+                season_moves::rostered_ids(season.rosters.iter().map(Roster::player_ids));
+            let free_agents: Vec<FreeAgent> = loaded
+                .board
+                .iter()
+                .filter(|p| !rostered.contains(&p.player_id))
+                .map(|p| FreeAgent {
+                    player_id: p.player_id.clone(),
+                    name: p.name.clone(),
+                    position: p.position.clone(),
+                    team: p.team.clone(),
+                    weekly_points: weekly.get_or_zero(&p.player_id, week),
+                })
+                .collect();
+            let rival_rosters: Vec<RivalRoster> = season
+                .rosters
+                .iter()
+                .filter(|r| Some(r.roster_id) != my_roster_id)
+                .map(|r| RivalRoster {
+                    roster_id: r.roster_id,
+                    player_ids: r.player_ids(),
+                })
+                .collect();
+            season_moves::waiver_targets(
+                rules,
+                &my_candidates,
+                &free_agents,
+                &rival_rosters,
+                &|ids: &[String]| candidates_for(ids, &position_of, weekly, week),
+                waiver_budget_left,
+            )
+        }
+    };
 
     // ---------- trades ----------
-    let partner_candidates: Vec<(u32, String, Vec<Candidate>)> = season
-        .rosters
-        .iter()
-        .filter(|r| Some(r.roster_id) != my_roster_id)
-        .map(|r| {
-            (
-                r.roster_id,
-                team_name(r.roster_id),
-                candidates_for(r.player_ids(), &position_of, weekly, week),
-            )
-        })
-        .collect();
-    let partners: Vec<TradePartner> = partner_candidates
-        .iter()
-        .map(|(roster_id, name, candidates)| TradePartner {
-            roster_id: *roster_id,
-            name: name.clone(),
-            candidates,
-        })
-        .collect();
-    let trades = season_trades::trade_ideas(rules, &my_candidates, &partners, &|id| {
-        (lookup.name(id), lookup.position(id).unwrap_or_default())
-    });
+    let trades = match cached {
+        Some(analysis) => analysis.trades.clone(),
+        None => {
+            let partner_candidates: Vec<(u32, String, Vec<Candidate>)> = season
+                .rosters
+                .iter()
+                .filter(|r| Some(r.roster_id) != my_roster_id)
+                .map(|r| {
+                    (
+                        r.roster_id,
+                        team_name(r.roster_id),
+                        candidates_for(r.player_ids(), &position_of, weekly, week),
+                    )
+                })
+                .collect();
+            let partners: Vec<TradePartner> = partner_candidates
+                .iter()
+                .map(|(roster_id, name, candidates)| TradePartner {
+                    roster_id: *roster_id,
+                    name: name.clone(),
+                    candidates,
+                })
+                .collect();
+            season_trades::trade_ideas(rules, &my_candidates, &partners, &|id| {
+                (lookup.name(id), lookup.position(id).unwrap_or_default())
+            })
+        }
+    };
 
     // ---------- my roster ----------
     let starting_ids: HashSet<&str> = my_current

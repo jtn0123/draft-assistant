@@ -9,7 +9,7 @@ import { SeasonScreen } from "./components/SeasonScreen";
 import { LaunchScreen, Setup } from "./components/Panels";
 import { ConfirmDialog, Toast } from "./components/Overlays";
 import { Chat } from "./components/Chat";
-import { pickLabel, age, scoringFormat } from "./format";
+import { ordinal, pickLabel, age, scoringFormat } from "./format";
 import {
   applyTheme,
   resolveTheme,
@@ -54,6 +54,12 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [seasonError, setSeasonError] = useState<string | null>(null);
+  // Stable across renders so the memoised board rows are not invalidated by a
+  // fresh closure on every 3-second poll.
+  const askToDraft = useCallback(
+    (playerId: string, name: string) => setConfirm({ playerId, name }),
+    [],
+  );
   /// Bumped to re-run the restore effect after a failed connection.
   const [reloadToken, setReloadToken] = useState(0);
   const [launchError, setLaunchError] = useState<string | null>(null);
@@ -410,14 +416,29 @@ export default function App() {
             <DraftScreen
               view={view}
               busy={busy}
-              onDraft={(playerId, name) => setConfirm({ playerId, name })}
+              onDraft={askToDraft}
             />
-          ) : season === null ? (
-            <div className="season-loading">
-              {seasonError ?? "Loading this week…"}
+          ) : season !== null ? (
+            <SeasonScreen view={season} />
+          ) : seasonError !== null ? (
+            <div className="season-loading is-error">
+              <span>{seasonError}</span>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  setSeasonError(null);
+                  api
+                    .loadSeason(true)
+                    .then(setSeason)
+                    .catch((e) => setSeasonError(String(e)));
+                }}
+              >
+                Try again
+              </button>
             </div>
           ) : (
-            <SeasonScreen view={season} />
+            <div className="season-loading">Loading this week…</div>
           )}
         </div>
 
@@ -450,12 +471,6 @@ function myRecord(season: SeasonView): string {
   const mine = season.standings.find((s) => s.is_mine);
   if (mine === undefined) return `${season.standings.length} teams`;
   return `${mine.record} · ${ordinal(mine.seed)} of ${season.standings.length}`;
-}
-
-function ordinal(n: number): string {
-  const rest = n % 100;
-  if (rest >= 11 && rest <= 13) return `${n}th`;
-  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 }
 
 /** A short two-tone chime via WebAudio — no asset to ship or fail to load. */

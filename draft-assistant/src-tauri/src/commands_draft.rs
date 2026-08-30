@@ -143,6 +143,12 @@ pub async fn record_manual_pick(
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
     let teams = loaded.draft.settings.teams;
+    // A manual pick is a correction typed under time pressure; an id that is
+    // not on this league's board would be written to disk and reloaded as a
+    // ghost pick, so refuse it here.
+    if !loaded.board_index.contains_key(&player_id) {
+        return Err(format!("player {player_id} is not on this league's board"));
+    }
     let picks = view::merged_picks(&loaded.api_picks, &loaded.manual_picks);
     if picks.iter().any(|p| p.player_id == player_id) {
         return Err("player already drafted".into());
@@ -154,7 +160,7 @@ pub async fn record_manual_pick(
     loaded.manual_picks.push(Pick {
         round: (pick_no - 1) / teams + 1,
         pick_no,
-        draft_slot: draft::slot_for_pick(pick_no, teams),
+        draft_slot: draft::slot_for_pick(pick_no, teams).unwrap_or(1),
         player_id,
         picked_by: None,
         metadata: None,

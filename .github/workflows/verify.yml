@@ -34,6 +34,13 @@ jobs:
       - name: Use stable Rust
         run: rustup override set stable
 
+      # Without this the whole Tauri dependency graph is rebuilt on every run,
+      # on a runner billed at ten times the Linux rate.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: draft-assistant/src-tauri
+
       - name: Install frontend dependencies
         run: npm ci
 

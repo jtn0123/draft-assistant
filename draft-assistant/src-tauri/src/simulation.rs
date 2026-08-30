@@ -15,7 +15,7 @@ pub fn apply_simulated_pick(
     let teams = loaded.draft.settings.teams;
     let view = build_view(loaded, config);
     let slot = slot_for_pick(pick_no, teams);
-    let player_id = if view.draft.my_slot == Some(slot) {
+    let player_id = if view.draft.my_slot == slot {
         view.recommendations
             .iter()
             .find(|recommendation| recommendation.mode == "balanced")
@@ -36,7 +36,7 @@ pub fn apply_simulated_pick(
     loaded.manual_picks.push(Pick {
         round: (pick_no - 1) / teams + 1,
         pick_no,
-        draft_slot: slot,
+        draft_slot: slot?,
         player_id: player_id.clone(),
         picked_by: None,
         metadata: None,

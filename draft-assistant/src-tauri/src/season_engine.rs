@@ -5,11 +5,12 @@
 //! matchup sweep only changes when a week ends, and last season never changes
 //! at all. Each is cached with a TTL that matches.
 
-use crate::engine::{now_secs, Engine};
+use crate::engine::{now_secs, Engine, REQUEST_CONCURRENCY};
 use crate::season::LastSeasonRow;
 use crate::season_api::{Matchup, Roster, ScoreGame, Transaction};
 use crate::season_history::History;
 use crate::sleeper::League;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -102,8 +103,19 @@ impl Engine {
         let mut schedule = Vec::new();
         let mut season_points: HashMap<String, f64> = HashMap::new();
         let mut failed = Vec::new();
-        for w in 1..=last_regular_week.max(week) {
-            match self.client.matchups(league_id, w).await {
+
+        // Fifteen-odd weeks, six requests at a time rather than one after
+        // another; the results come back out of order, so sort before use.
+        let mut fetched: Vec<(u32, Result<Vec<Matchup>, String>)> =
+            futures_util::stream::iter(1..=last_regular_week.max(week))
+                .map(|w| async move { (w, self.client.matchups(league_id, w).await) })
+                .buffer_unordered(REQUEST_CONCURRENCY)
+                .collect()
+                .await;
+        fetched.sort_by_key(|(w, _)| *w);
+
+        for (w, result) in fetched {
+            match result {
                 Ok(matchups) => {
                     schedule.push((w, pairs_from(&matchups)));
                     // Only weeks already played contribute points.
@@ -332,14 +344,25 @@ impl Engine {
             self.client.nfl_scores(season.season, season.week),
             self.client.rosters(league_id)
         );
-        if let Ok(matchups) = matchups {
-            season.matchups = matchups;
+        // A partial refresh still counts as fresh — one dead endpoint should
+        // not blank the screen. But if all three fail we must say so and leave
+        // `fetched_at` alone, or the staleness clock resets and the health
+        // badge reports live data that never arrived.
+        let mut errors = Vec::new();
+        match matchups {
+            Ok(matchups) => season.matchups = matchups,
+            Err(error) => errors.push(format!("matchups: {error}")),
         }
-        if let Ok(scores) = scores {
-            season.scores = scores;
+        match scores {
+            Ok(scores) => season.scores = scores,
+            Err(error) => errors.push(format!("scores: {error}")),
         }
-        if let Ok(rosters) = rosters {
-            season.rosters = rosters;
+        match rosters {
+            Ok(rosters) => season.rosters = rosters,
+            Err(error) => errors.push(format!("rosters: {error}")),
+        }
+        if errors.len() == 3 {
+            return Err(errors.join("; "));
         }
         season.fetched_at = now_secs();
         Ok(())

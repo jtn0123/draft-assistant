@@ -8,7 +8,7 @@ import type {
   RosterRow,
   StandingsRow,
   TradeIdea, TradeDone } from "../season-types";
-import { dateLabel, fmt, pct, signed } from "../format";
+import { dateLabel, fmt, ordinal, pct, signed } from "../format";
 import { Headshot, PlayerName, PosBadge, SortHead, TeamAvatar, Empty } from "./bits";
 
 // ---------- standings ----------
@@ -288,9 +288,3 @@ function tagClass(tag: string | null): string {
   return "right last-tag";
 }
 
-function ordinal(n: number): string {
-  const rest = n % 100;
-  if (rest >= 11 && rest <= 13) return `${n}th`;
-  const suffix = ["th", "st", "nd", "rd"][n % 10] ?? "th";
-  return `${n}${n % 10 <= 3 ? suffix : "th"}`;
-}

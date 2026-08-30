@@ -6,20 +6,23 @@ use crate::sleeper::Pick;
 use serde::Serialize;
 
 /// Which slot (1-based) is on the clock at a given overall pick (1-based)?
-pub fn slot_for_pick(pick_no: u32, teams: u32) -> u32 {
+///
+/// `None` when the draft has no teams or the pick is before the first one —
+/// both would divide by zero or underflow, and neither is worth a panic on
+/// data we do not control.
+pub fn slot_for_pick(pick_no: u32, teams: u32) -> Option<u32> {
+    if teams == 0 || pick_no == 0 {
+        return None;
+    }
     let round = (pick_no - 1) / teams; // 0-based round
     let idx = (pick_no - 1) % teams; // 0-based index within round
-    if round % 2 == 0 {
-        idx + 1
-    } else {
-        teams - idx
-    }
+    Some(if round % 2 == 0 { idx + 1 } else { teams - idx })
 }
 
 /// All overall pick numbers (1-based) belonging to a slot.
 pub fn picks_for_slot(slot: u32, teams: u32, rounds: u32) -> Vec<u32> {
-    (1..=teams * rounds)
-        .filter(|&p| slot_for_pick(p, teams) == slot)
+    (1..=teams.saturating_mul(rounds))
+        .filter(|&p| slot_for_pick(p, teams) == Some(slot))
         .collect()
 }
 
@@ -100,14 +103,24 @@ mod tests {
 
     #[test]
     fn snake_order_14_teams() {
-        assert_eq!(slot_for_pick(1, 14), 1);
-        assert_eq!(slot_for_pick(2, 14), 2);
-        assert_eq!(slot_for_pick(14, 14), 14);
-        assert_eq!(slot_for_pick(15, 14), 14); // snake turn
-        assert_eq!(slot_for_pick(27, 14), 2);
-        assert_eq!(slot_for_pick(28, 14), 1);
-        assert_eq!(slot_for_pick(29, 14), 1); // next turn
-        assert_eq!(slot_for_pick(30, 14), 2);
+        assert_eq!(slot_for_pick(1, 14), Some(1));
+        assert_eq!(slot_for_pick(2, 14), Some(2));
+        assert_eq!(slot_for_pick(14, 14), Some(14));
+        assert_eq!(slot_for_pick(15, 14), Some(14)); // snake turn
+        assert_eq!(slot_for_pick(27, 14), Some(2));
+        assert_eq!(slot_for_pick(28, 14), Some(1));
+        assert_eq!(slot_for_pick(29, 14), Some(1)); // next turn
+        assert_eq!(slot_for_pick(30, 14), Some(2));
+    }
+
+    #[test]
+    fn pick_math_is_total_on_a_draft_that_reports_nothing() {
+        // Sleeper has handed us `teams: 0` before; dividing by it used to
+        // panic the whole command task on every view build.
+        assert_eq!(slot_for_pick(1, 0), None);
+        assert_eq!(slot_for_pick(0, 14), None);
+        assert!(picks_for_slot(1, 0, 15).is_empty());
+        assert!(picks_for_slot(1, 14, 0).is_empty());
     }
 
     #[test]

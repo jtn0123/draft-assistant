@@ -124,3 +124,10 @@ export function clockLabel(deadlineMs: number | null, nowMs: number): string | n
   const seconds = Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
+
+/** "1st", "2nd", "11th" — a place with its ordinal suffix. */
+export function ordinal(n: number): string {
+  const rest = n % 100;
+  if (rest >= 11 && rest <= 13) return `${n}th`;
+  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+}

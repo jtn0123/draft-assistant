@@ -1,7 +1,7 @@
 // The player board: sortable on every column, filterable by position, with
 // the loading and empty states the design specifies.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { AvailablePlayer, Position } from "../types";
 import { fmt, pct } from "../format";
 import { PlayerName, SortHead } from "./bits";
@@ -94,6 +94,52 @@ function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
 }
+
+/** One board row.
+ *
+ * Memoised because the whole board re-renders on every 3-second poll, and
+ * each row carries two `PlayerName`s whose headshots subscribe to the avatar
+ * store — 200 rows meant ~400 subscribers churning per tick for a list whose
+ * contents usually did not change.
+ */
+const BoardRow = memo(function BoardRow({
+  player: p,
+  onDraft,
+}: {
+  player: AvailablePlayer;
+  onDraft: (id: string, name: string) => void;
+}) {
+  return (
+    <div className="board-row board-body">
+      <span className="muted right">{p.overall_rank}</span>
+      <span className="board-player">
+        <PlayerName name={p.name} team={p.team} tag={p.injury_status} playerId={p.player_id} />
+      </span>
+      <span className={`pos-badge pos-${p.position}`}>
+        <span>{p.position}</span>
+        <span className="pos-rank">{p.position_rank}</span>
+      </span>
+      <span className="mid board-team">
+        <PlayerName name={p.team ?? "–"} team={p.team} />
+      </span>
+      <span className="mid right">{p.bye_week ?? "–"}</span>
+      <span className="strong right">{fmt(p.points)}</span>
+      <span className="mid right">{fmt(p.vorp)}</span>
+      <span className={`right tier tier-${Math.min(p.tier, 3)}`}>T{p.tier}</span>
+      <span className="mid right">{fmt(p.adp)}</span>
+      <span className={`right ${survClass(p.survival_next)}`}>{pct(p.survival_next)}</span>
+      <span className="right">
+        <button
+          type="button"
+          className="btn-ghost btn-row"
+          onClick={() => onDraft(p.player_id, p.name)}
+        >
+          Draft
+        </button>
+      </span>
+    </div>
+  );
+});
 
 export function Board({
   players,
@@ -240,36 +286,7 @@ export function Board({
           )}
         </div>
       ) : (
-        visible.map((p) => (
-          <div className="board-row board-body" key={p.player_id}>
-            <span className="muted right">{p.overall_rank}</span>
-            <span className="board-player">
-              <PlayerName name={p.name} team={p.team} tag={p.injury_status} playerId={p.player_id} />
-            </span>
-            <span className={`pos-badge pos-${p.position}`}>
-              <span>{p.position}</span>
-              <span className="pos-rank">{p.position_rank}</span>
-            </span>
-            <span className="mid board-team">
-              <PlayerName name={p.team ?? "–"} team={p.team} />
-            </span>
-            <span className="mid right">{p.bye_week ?? "–"}</span>
-            <span className="strong right">{fmt(p.points)}</span>
-            <span className="mid right">{fmt(p.vorp)}</span>
-            <span className={`right tier tier-${Math.min(p.tier, 3)}`}>T{p.tier}</span>
-            <span className="mid right">{fmt(p.adp)}</span>
-            <span className={`right ${survClass(p.survival_next)}`}>{pct(p.survival_next)}</span>
-            <span className="right">
-              <button
-                type="button"
-                className="btn-ghost btn-row"
-                onClick={() => onDraft(p.player_id, p.name)}
-              >
-                Draft
-              </button>
-            </span>
-          </div>
-        ))
+        visible.map((p) => <BoardRow key={p.player_id} player={p} onDraft={onDraft} />)
       )}
 
       <div className="board-foot">

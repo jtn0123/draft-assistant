@@ -55,9 +55,16 @@ fn lineup_total(rules: &RosterRules, candidates: &[Candidate]) -> f64 {
         .sum()
 }
 
-/// Marginal value of adding one player to a roster's best lineup.
-fn marginal_gain(rules: &RosterRules, base: &[Candidate], addition: &Candidate) -> f64 {
-    let baseline = lineup_total(rules, base);
+/// Marginal value of adding one player to a roster's best lineup, given that
+/// roster's baseline total. The caller passes the baseline because it is the
+/// same for every candidate considered against the same roster — recomputing
+/// it per candidate doubled the number of lineup solves.
+fn marginal_gain(
+    rules: &RosterRules,
+    base: &[Candidate],
+    baseline: f64,
+    addition: &Candidate,
+) -> f64 {
     let mut with = base.to_vec();
     with.push(addition.clone());
     (lineup_total(rules, &with) - baseline).max(0.0)
@@ -78,6 +85,17 @@ pub fn waiver_targets(
     budget_left: Option<f64>,
 ) -> Vec<WaiverTarget> {
     let baseline = lineup_total(rules, my_candidates);
+    // Each rival's roster and baseline are identical for every free agent we
+    // consider, so build them once instead of once per (agent, rival) pair —
+    // that was 60 x 13 reconstructions per refresh.
+    let rival_pools: Vec<(Vec<Candidate>, f64)> = rivals
+        .iter()
+        .map(|r| {
+            let candidates = rival_candidates(r.player_ids);
+            let total = lineup_total(rules, &candidates);
+            (candidates, total)
+        })
+        .collect();
     let mut scored: Vec<WaiverTarget> = free_agents
         .iter()
         .take(CANDIDATE_POOL)
@@ -87,13 +105,15 @@ pub fn waiver_targets(
                 position: fa.position.clone(),
                 points: fa.weekly_points,
             };
-            let gain = marginal_gain(rules, my_candidates, &addition);
+            let gain = marginal_gain(rules, my_candidates, baseline, &addition);
             if gain <= 0.05 {
                 return None;
             }
-            let rival_count = rivals
+            let rival_count = rival_pools
                 .iter()
-                .filter(|r| marginal_gain(rules, &rival_candidates(r.player_ids), &addition) > 0.05)
+                .filter(|(candidates, total)| {
+                    marginal_gain(rules, candidates, *total, &addition) > 0.05
+                })
                 .count();
             let fraction = if baseline > 0.0 { gain / baseline } else { 0.0 };
             Some(WaiverTarget {

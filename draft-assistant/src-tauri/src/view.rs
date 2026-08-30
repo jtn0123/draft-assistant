@@ -234,7 +234,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
                 .collect()
         })
         .unwrap_or_default();
-    let is_my_pick = !draft_over && my_slot == Some(on_clock_slot);
+    let is_my_pick = !draft_over && my_slot == on_clock_slot;
     let picks_until_mine = my_next_picks.first().map(|&p| p - current_pick);
     // Survival is judged at my next pick AFTER the one I'm making now (or the
     // upcoming one if I'm not on the clock).
@@ -366,8 +366,9 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             pick_timer: draft.settings.pick_timer,
             current_pick,
             current_round,
-            on_clock_slot,
-            on_clock_name: slot_names.get(&on_clock_slot).cloned(),
+            // assemble() refuses a draft with no teams, so this is always Some.
+            on_clock_slot: on_clock_slot.unwrap_or(1),
+            on_clock_name: on_clock_slot.and_then(|slot| slot_names.get(&slot).cloned()),
             my_slot,
             is_my_pick,
             picks_until_mine,

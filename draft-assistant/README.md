@@ -1,15 +1,18 @@
 # Draft Assistant
 
-Local-first fantasy football draft assistant for Sleeper leagues. You draft in
-Sleeper as normal; this app is a read-only second screen that polls the public
-Sleeper API, tracks every pick live, and tells you who to take under **your
-league's exact scoring rules**.
+Local-first fantasy football assistant for Sleeper leagues, with two screens:
+a **draft board** for draft night and a **season screen** for the rest of the
+year. You play in Sleeper as normal; this app is a read-only second screen that
+polls the public Sleeper API and answers under **your league's exact scoring
+rules**.
 
 Built with Tauri 2: Rust core engine + React/TypeScript-strict frontend.
 Desktop (macOS) now; the same core compiles into an Android build later — no
 server anywhere.
 
 ## What it does
+
+### Draft screen
 
 - **Custom scoring from data, not code.** The league's `scoring_settings` map
   is dot-multiplied with Sleeper's raw-stat projections (same key space), so
@@ -33,6 +36,27 @@ server anywhere.
   same struct the UI renders. Point an LLM at it; nothing needs to scrape the UI.
 - **Multi-league.** Leagues are stored in config; switching is a config value,
   never a code change.
+
+### Season screen
+
+- **This week's matchup**, slot by slot against your opponent, with the gap
+  signed from your side. Toggle **Best / Set** to compare the lineup you have
+  set against the best one available, so points left on the bench are visible
+  before kickoff, not after.
+- **Live scoreboard** on a 30s poll during games, with each game's TV network.
+- **Standings and playoff odds** from a simulation over the remaining
+  schedule, using best-lineup projections per team.
+- **Waiver targets** ranked by what they would actually add to your starting
+  lineup — a high scorer who still would not crack your eleven scores zero —
+  with a suggested FAAB bid and how many rivals the same player would help.
+- **Trade ideas** that improve both rosters, plus every completed trade in the
+  league (including ones still in review) and a league activity feed.
+- **Trends**: each team's projected strength over time.
+
+### Ask Claude
+
+A chat panel on either screen that sees the current board or matchup. See
+[Ask Claude](#ask-claude) below for the two ways it can connect.
 
 ## Run (dev)
 
@@ -61,8 +85,17 @@ the balanced recommendation) to exercise mid-draft state without a live draft.
 ## Browser preview
 
 The UI degrades to a read-only preview when opened in a plain browser (vite dev
-server on :1420): it renders `public/dev-fixture.json`, a captured state dump.
-Regenerate the fixture with `dump_state`.
+server on :1420). It renders two captured dumps, and **both must be regenerated
+together** or the preview shows a current draft board beside a stale season
+screen:
+
+```
+cargo run --bin dump_state  -- <league_id> [username] ../public/dev-fixture.json
+cargo run --bin dump_season -- <league_id> [username] ../public/dev-season-fixture.json
+```
+
+The season dump reads through the same on-disk cache as the app, so delete
+`/tmp/draft-assistant-cli` first if you want genuinely fresh data.
 
 ## Data sources
 
@@ -77,18 +110,64 @@ com.justin.draft-assistant/`): players 24h TTL, projections 6h TTL.
 ## Layout
 
 ```
-src/                 React + TS strict UI (App.tsx, api.ts, types.ts)
+src/                        React + TS strict UI
+  App.tsx                   screen switching, polling, shared state
+  api.ts                    the IPC surface (+ browser-fixture fallback)
+  components/               Board, ThisWeek, SeasonTabs, Trends, Games, Chat
+  avatars.ts, zoom.ts       useSyncExternalStore modules
 src-tauri/src/
-  sleeper.rs         API client + response types
-  scoring.rs         data-driven scorer + per-game bonus model
-  valuation.rs       replacement levels, VORP, tiers
-  draft.rs           snake math, rosters, survival probabilities
-  board.rs           scored board assembly (incl. bye inference)
-  view.rs            DraftView: the one state struct (UI + AI dump)
-  recommend.rs       deterministic recommendation modes
-  engine.rs          caching, config, league loading
-  lib.rs             Tauri commands + 3s pick poller
-  bin/dump_state.rs  headless dump + draft simulator
+  shared
+    sleeper.rs              API client + response types
+    engine.rs               caching, config, league loading
+    projections.rs          projection fetch + stale-cache fallback
+    roster.rs               slot rules (flex eligibility, draftable positions)
+    scoring.rs              data-driven scorer + per-game bonus model
+    headshots.rs            on-disk image cache (players + manager avatars)
+    secrets.rs              API key in the macOS Keychain
+    state.rs                Tauri-managed app state
+  draft screen
+    draft.rs                snake math, rosters, survival probabilities
+    board.rs                scored board assembly (incl. bye inference)
+    valuation.rs            replacement levels, VORP, tiers
+    recommend.rs            deterministic recommendation modes
+    view.rs                 DraftView: the one state struct (UI + AI dump)
+    simulation.rs           deterministic draft simulation
+  season screen
+    season.rs               build_season_view + SeasonAnalysis
+    season_view_parts.rs    lookup, current lineup, start/sit reasons
+    season_api.rs           season-only Sleeper endpoints + DTOs
+    season_engine.rs        season load, week sweep, live refresh
+    season_lineup.rs        optimal lineup solver
+    season_odds.rs          playoff-odds simulation
+    season_moves.rs         waiver targets by marginal lineup gain
+    season_trades.rs        trade ideas; season_deals.rs completed trades
+    season_activity.rs      league activity feed
+    season_live.rs          live scoreboard; season_history.rs trends
+    weekly.rs               weekly projection lookup
+  ask claude
+    chat.rs                 Anthropic Messages API route
+    chat_cli.rs             Claude Code CLI route
+    chat_context.rs         what Claude is shown per screen
+  commands_draft.rs         draft commands + 3s pick poller
+  commands_season.rs        season commands + 30s live poller
+  commands_chat.rs          chat commands
+  lib.rs                    command registration
+  bin/dump_state.rs         headless draft dump + simulator
+  bin/dump_season.rs        headless season dump
 ```
 
-All files ≤ 500 LOC by project convention.
+All files ≤ 500 LOC by project convention, enforced by `scripts/check-loc.mjs`
+in `npm run verify`.
+
+## Ask Claude
+
+The chat panel reaches Claude one of two ways, picked in the panel itself:
+
+- **Claude Code** — runs the `claude` CLI already installed on this Mac, signed
+  in with your Claude subscription. No API key needed. Only offered when the
+  CLI is found.
+- **API key** — calls the Anthropic API directly. The key is stored in the
+  macOS Keychain (`secrets.rs`), never in the repo or the config file.
+
+Either way the conversation is read-only with respect to Sleeper: Claude is
+shown the current board or matchup and never writes anything back.

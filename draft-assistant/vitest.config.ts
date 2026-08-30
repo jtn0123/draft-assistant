@@ -8,5 +8,10 @@ export default defineConfig({
     globals: true,
     setupFiles: "./src/test/setup.ts",
     css: true,
+    coverage: {
+      provider: "v8",
+      // The floor, not the goal — raise these as coverage climbs.
+      thresholds: { lines: 80, statements: 80, functions: 75, branches: 70 },
+    },
   },
 });

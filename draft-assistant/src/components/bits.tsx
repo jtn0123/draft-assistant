@@ -1,7 +1,7 @@
 // Small shared primitives. Everything visual that appears in more than one
 // screen lives here so the two screens can't drift apart.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { headshotSrc, teamAvatarSrc, useAvatarMode } from "../avatars";
 import { teamLogo } from "../format";
 import { closeZoom, openZoom, useZoom, type Zoomed } from "../zoom";
@@ -56,10 +56,45 @@ export function ZoomLayer() {
     };
   }, [wanted]);
 
+  // The picture that opened this, so focus can go back where it came from.
+  const opener = useRef<HTMLElement | null>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const card = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (zoomed === null) return;
+    opener.current = document.activeElement as HTMLElement | null;
+    closeButton.current?.focus();
+    return () => {
+      // Returning focus to the thumbnail keeps a keyboard user where they
+      // were in the table instead of dropping them at the top of the page.
+      opener.current?.focus();
+      opener.current = null;
+    };
+  }, [zoomed]);
+
   useEffect(() => {
     if (zoomed === null) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeZoom();
+      if (e.key === "Escape") {
+        closeZoom();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      // A modal must not leak focus to the page behind it. Close is the only
+      // stop in here, so Tab and Shift+Tab both land back on it.
+      const stops = card.current?.querySelectorAll<HTMLElement>("button, [href], [tabindex]:not([tabindex='-1'])");
+      if (stops === undefined || stops.length === 0) return;
+      const first = stops[0];
+      const last = stops[stops.length - 1];
+      if (first === undefined || last === undefined) return;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -74,14 +109,14 @@ export function ZoomLayer() {
       aria-label={zoomed.label}
       onClick={closeZoom}
     >
-      <figure className="zoom-card" onClick={(e) => e.stopPropagation()}>
+      <figure className="zoom-card" ref={card} onClick={(e) => e.stopPropagation()}>
         <img
           className="zoom-image"
           src={(big !== null && big.reference === wanted ? big.url : null) ?? zoomed.src}
           alt={zoomed.label}
         />
         <figcaption>{zoomed.label}</figcaption>
-        <button type="button" className="zoom-close" onClick={closeZoom}>
+        <button type="button" className="zoom-close" ref={closeButton} onClick={closeZoom}>
           Close
         </button>
       </figure>
@@ -242,13 +277,22 @@ export function SortHead({
   onClick: () => void;
   title?: string;
 }) {
+  // `aria-sort` belongs on a columnheader cell, and these boards are CSS
+  // grids of buttons rather than tables — set there it announces nothing at
+  // all. Putting the state in the accessible name is what actually reaches a
+  // screen reader, and it keeps the arrow purely decorative.
+  const sortState = active
+    ? direction === "asc"
+      ? "sorted ascending"
+      : "sorted descending"
+    : "not sorted";
   return (
     <button
       type="button"
       className={`sort-head${active ? " is-active" : ""}${align === "right" ? " is-right" : ""}`}
       onClick={onClick}
       title={title}
-      aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}
+      aria-label={`${label}, ${sortState}`}
     >
       {label}
       <span className="sort-arrow" aria-hidden="true">
