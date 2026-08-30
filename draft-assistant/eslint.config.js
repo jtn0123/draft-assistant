@@ -6,6 +6,17 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   { ignores: ["coverage", "dist", "src-tauri/target"] },
+  // The build and lint configs themselves, plus the guard scripts. Previously
+  // nothing checked these at all: they sat outside both the ESLint glob and
+  // the typechecked project.
+  {
+    files: ["scripts/**/*.mjs", "*.config.{ts,js}", "eslint.config.js"],
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 2022,
+      globals: globals.node,
+    },
+  },
   {
     files: ["src/**/*.{ts,tsx}"],
     extends: [

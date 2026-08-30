@@ -8,7 +8,7 @@
     "build": "vite build",
     "analyze": "vite build --mode analyze && open dist/stats.html",
     "check:loc": "node scripts/check-loc.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --build",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.mjs\" \"*.{ts,js,json}\" && cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
     "test": "npm run test:frontend && npm run test:rust",
     "test:frontend": "vitest run",

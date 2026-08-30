@@ -3,7 +3,11 @@ import { relative, resolve, sep } from "node:path";
 
 const repositoryRoot = resolve(process.cwd(), "..");
 const maxLines = 500;
+// The cap is about keeping source readable. Generated audit reports and
+// coverage output are neither source nor hand-maintained.
 const excludedDirectories = new Set([
+  ".Codex",
+  ".claude",
   ".git",
   "coverage",
   "dist",

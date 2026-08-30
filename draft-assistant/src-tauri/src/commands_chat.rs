@@ -109,6 +109,28 @@ pub async fn chat_settings(state: State<'_, AppState>) -> Result<ChatSettings, S
 }
 
 /// Ask Claude about the board or the week. `screen` selects which view is
+/// The most turns and the most text one question may carry.
+const MAX_TURNS: usize = 60;
+const MAX_THREAD_BYTES: usize = 200_000;
+
+/// Refuse a thread that is too long to send, with a message the panel can show.
+fn check_thread_size(messages: &[ChatMessage]) -> Result<(), String> {
+    if messages.len() > MAX_TURNS {
+        return Err(format!(
+            "this conversation is {} turns long — start a new chat to keep asking",
+            messages.len()
+        ));
+    }
+    let bytes: usize = messages.iter().map(|m| m.content.len()).sum();
+    if bytes > MAX_THREAD_BYTES {
+        return Err(format!(
+            "this conversation is too long to send ({} KB) — start a new chat",
+            bytes / 1024
+        ));
+    }
+    Ok(())
+}
+
 /// summarised into the system prompt.
 #[tauri::command]
 pub async fn ask_claude(
@@ -118,6 +140,10 @@ pub async fn ask_claude(
     effort: String,
     messages: Vec<ChatMessage>,
 ) -> Result<ChatReply, String> {
+    // The whole thread is forwarded to Anthropic or written to the CLI's
+    // stdin, so it is bounded here rather than discovered as a bill or a
+    // rejected request.
+    check_thread_size(&messages)?;
     let cli = chat_cli::find_cli();
     let (provider, api_key) = {
         let config = state.config.lock().await;
@@ -199,5 +225,31 @@ mod tests {
             resolve_provider(&config(Some(PROVIDER_API)), false, true),
             PROVIDER_API
         );
+    }
+
+    fn turn(content: &str) -> ChatMessage {
+        ChatMessage {
+            role: "user".into(),
+            content: content.into(),
+        }
+    }
+
+    #[test]
+    fn an_ordinary_conversation_goes_through() {
+        let thread: Vec<ChatMessage> = (0..10).map(|i| turn(&format!("question {i}"))).collect();
+        assert!(check_thread_size(&thread).is_ok());
+    }
+
+    #[test]
+    fn too_many_turns_is_refused_with_something_the_user_can_act_on() {
+        let thread: Vec<ChatMessage> = (0..=MAX_TURNS).map(|_| turn("hi")).collect();
+        let error = check_thread_size(&thread).unwrap_err();
+        assert!(error.contains("new chat"), "unhelpful: {error}");
+    }
+
+    #[test]
+    fn one_enormous_turn_is_refused_even_though_the_count_is_small() {
+        let thread = vec![turn(&"x".repeat(MAX_THREAD_BYTES + 1))];
+        assert!(check_thread_size(&thread).is_err());
     }
 }
