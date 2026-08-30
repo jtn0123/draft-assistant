@@ -86,11 +86,13 @@ describe("Activity prices a trade idea in one tap", () => {
       my_week_before: 120,
       my_week_after: 121,
       their_week_before: 130,
+      give_picks: [],
+      get_picks: [],
       their_week_after: 131,
     });
     render(<Activity view={v} />);
     await user.click(screen.getByRole("button", { name: "Price Chase Brown for Khalil Shakir" }));
-    expect(testState.api.evaluateTrade).toHaveBeenCalledWith(them.slot, ["g1", "g2"], ["t1"]);
+    expect(testState.api.evaluateTrade).toHaveBeenCalledWith(them.slot, ["g1", "g2"], ["t1"], [], []);
     const out = await screen.findByRole("status");
     expect(out).toHaveTextContent("Me +18");
     expect(out).toHaveTextContent("Both sides gain");

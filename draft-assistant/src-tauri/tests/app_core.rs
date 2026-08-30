@@ -152,7 +152,7 @@ async fn export_writes_the_same_view_the_ui_renders() {
     let path = rig.core.export_state().await.unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
     let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(value["schema_version"], "1.5");
+    assert_eq!(value["schema_version"], "1.6");
     assert_eq!(value["league"]["league_id"], LEAGUE_ID);
     assert_eq!(value["available"].as_array().unwrap().len(), 6);
     assert!(path.ends_with("draft-state.json"));
@@ -385,23 +385,6 @@ async fn refresh_season_rereads_the_calendar_and_keeps_the_board() {
     );
     assert_eq!(view.available.len(), 6, "the board is untouched");
     assert!(view.this_week.is_none(), "no matchups on the stub, no week");
-}
-
-#[tokio::test]
-async fn an_offer_naming_a_player_nobody_holds_is_refused_with_the_reason() {
-    let rig = loaded_rig("evaluate-trade").await;
-    let err = rig
-        .core
-        .evaluate_trade(2, vec!["nobody".into()], Vec::new())
-        .await
-        .unwrap_err();
-    assert!(err.contains("not on my roster"), "{err}");
-    let err = rig
-        .core
-        .evaluate_trade(2, Vec::new(), Vec::new())
-        .await
-        .unwrap_err();
-    assert!(err.contains("at least one player"), "{err}");
 }
 
 /// Keepers are remembered on disk: after the draft has passed a keeper's

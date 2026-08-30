@@ -97,6 +97,9 @@ pub struct DraftView {
     /// (0 on a bye or with no row), for every rostered player and waiver
     /// target. What a player card draws its season shape from.
     pub player_weeks: HashMap<String, Vec<f64>>,
+    /// What a draft pick costs, by round, in points over replacement —
+    /// the currency last season's trades were actually settled in.
+    pub pick_prices: Vec<crate::pick_value::PickPrice>,
     pub replacement_baselines: HashMap<String, f64>,
     /// position -> number of league-wide startable players (incl. flex share)
     pub replacement_demand: HashMap<String, usize>,

@@ -315,11 +315,21 @@ button.standings-toggle {
   font-size: 12px;
 }
 
+.offer-side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .offer-sides fieldset {
   border: 1px solid var(--border, #333);
   border-radius: 6px;
   padding: 4px 6px;
   display: grid;
+  /* Rows keep their own height and the box scrolls; without this the grid
+     squeezes fifteen names into fourteen ems and clips every one of them. */
+  grid-auto-rows: min-content;
+  align-content: start;
   gap: 2px;
   max-height: 14em;
   overflow-y: auto;

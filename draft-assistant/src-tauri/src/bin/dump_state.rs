@@ -3,6 +3,7 @@
 //!
 //! Usage: dump_state <league_id> [username] [out.json] [--simulate N]
 //!                   [--ask "question"]... [--chat-out session.json]
+//!                   [--price "<slot>|<give ids>|<get ids>|<give rounds>|<get rounds>"]
 //!
 //! --simulate N fakes the first N picks (market drafts by ADP; my own slots
 //! take the engine's balanced recommendation) to exercise mid-draft state.
@@ -29,6 +30,7 @@ struct Args {
     simulate: u32,
     questions: Vec<String>,
     chat_out: Option<String>,
+    price: Option<String>,
 }
 
 fn usage_exit() -> ! {
@@ -44,6 +46,7 @@ fn parse_args() -> Args {
     let mut simulate = 0u32;
     let mut questions = Vec::new();
     let mut chat_out = None;
+    let mut price = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -55,6 +58,7 @@ fn parse_args() -> Args {
             }
             "--ask" => questions.push(args.next().unwrap_or_else(|| usage_exit())),
             "--chat-out" => chat_out = Some(args.next().unwrap_or_else(|| usage_exit())),
+            "--price" => price = Some(args.next().unwrap_or_else(|| usage_exit())),
             _ => positional.push(arg),
         }
     }
@@ -68,7 +72,40 @@ fn parse_args() -> Args {
         simulate,
         questions,
         chat_out,
+        price,
     }
+}
+
+/// "2|9509,4034|4046|3|1" — partner slot, ids out, ids in, rounds out,
+/// rounds in. Empty fields are allowed and mean nothing on that side.
+fn parse_offer(spec: &str) -> (u32, Vec<String>, Vec<String>, Vec<u32>, Vec<u32>) {
+    let mut parts = spec.split('|');
+    let mut next = || parts.next().unwrap_or("").trim().to_string();
+    let slot: u32 = next().parse().unwrap_or_else(|_| {
+        eprintln!("--price starts with the partner's slot");
+        std::process::exit(2);
+    });
+    let ids = |field: String| -> Vec<String> {
+        field
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let rounds = |field: String| -> Vec<u32> {
+        field
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect()
+    };
+    (
+        slot,
+        ids(next()),
+        ids(next()),
+        rounds(next()),
+        rounds(next()),
+    )
 }
 
 /// Run each question in turn, printing the answer as it streams, and return
@@ -165,8 +202,62 @@ async fn main() {
             std::fs::write(path, &json).expect("write failed");
             eprintln!("wrote {path} ({} bytes)", json.len());
         }
-        None if args.questions.is_empty() => println!("{json}"),
+        // With --ask or --price the interesting output is below, not a
+        // 300 KB dump on top of it.
+        None if args.questions.is_empty() && args.price.is_none() => println!("{json}"),
         None => {}
+    }
+
+    if let Some(spec) = &args.price {
+        let (slot, give, get, give_picks, get_picks) = parse_offer(spec);
+        let offer = draft_assistant_lib::trade::Offer {
+            my_slot: view
+                .draft
+                .my_slot
+                .expect("set a username to price an offer"),
+            partner_slot: slot,
+            give: &give,
+            get: &get,
+            give_picks: &give_picks,
+            get_picks: &get_picks,
+            week: view.this_week.as_ref().map_or(1, |w| w.week),
+        };
+        match draft_assistant_lib::trade::evaluate(
+            &loaded,
+            &view.rosters,
+            &offer,
+            &loaded.roster_rules,
+        ) {
+            Ok(v) => {
+                let picks = |ps: &[draft_assistant_lib::pick_value::PickPrice]| {
+                    ps.iter()
+                        .map(|p| format!("R{} {:.0}", p.round, p.points))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                let mine = v.my_season_after - v.my_season_before
+                    + draft_assistant_lib::pick_value::total(&v.get_picks)
+                    - draft_assistant_lib::pick_value::total(&v.give_picks);
+                let theirs = v.their_season_after - v.their_season_before
+                    + draft_assistant_lib::pick_value::total(&v.give_picks)
+                    - draft_assistant_lib::pick_value::total(&v.get_picks);
+                println!(
+                    "with {} — me {mine:+.1}, them {theirs:+.1}\n  out: {} [{}]\n  in:  {} [{}]\n  week {}: me {:.1} -> {:.1}",
+                    v.partner_name.as_deref().unwrap_or("?"),
+                    v.give.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "),
+                    picks(&v.give_picks),
+                    v.get.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "),
+                    picks(&v.get_picks),
+                    v.week,
+                    v.my_week_before,
+                    v.my_week_after
+                );
+            }
+            Err(error) => {
+                eprintln!("price failed: {error}");
+                std::process::exit(1);
+            }
+        }
     }
 
     if !args.questions.is_empty() {

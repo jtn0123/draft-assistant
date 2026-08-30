@@ -76,8 +76,13 @@ async fn evaluate_trade(
     partner_slot: u32,
     give: Vec<String>,
     get: Vec<String>,
+    give_picks: Vec<u32>,
+    get_picks: Vec<u32>,
 ) -> Result<crate::trade::TradeVerdict, String> {
-    state.core.evaluate_trade(partner_slot, give, get).await
+    state
+        .core
+        .evaluate_trade(partner_slot, give, get, give_picks, get_picks)
+        .await
 }
 
 #[tauri::command]

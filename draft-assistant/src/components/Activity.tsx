@@ -19,7 +19,7 @@ export function Activity({ view }: { view: DraftView }) {
     });
   return (
     <section className="activity">
-      {seasonMode && <OfferForm offer={offer} />}
+      {seasonMode && <OfferForm offer={offer} prices={view.pick_prices} />}
       {ideas.length > 0 && (
         <>
           <h2>Trade ideas</h2>

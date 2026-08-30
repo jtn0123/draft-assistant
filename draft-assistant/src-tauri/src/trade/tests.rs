@@ -164,6 +164,8 @@ fn an_offer_is_priced_both_ways_and_a_stranger_is_refused() {
         partner_slot: 2,
         give: &give,
         get: &get,
+        give_picks: &[],
+        get_picks: &[],
         week: 1,
     };
     let v = evaluate(&loaded, &rosters, &offer, &rules).unwrap();
@@ -282,4 +284,102 @@ fn a_second_piece_is_added_only_when_it_is_what_makes_them_say_yes() {
         "one receiver does not move them; two do: {two:?}"
     );
     assert!(two.their_gain >= MIN_GAIN && two.over_waiver >= MIN_GAIN);
+}
+
+#[test]
+fn a_pick_is_priced_off_the_draft_and_carried_into_the_verdict() {
+    // Last season 34 of this league's 38 trades moved a pick, so an offer
+    // has to be able to hold one. Its price is the round's median value
+    // over replacement, from this draft's own results (`pick_value`).
+    use crate::draft::RosterEntry;
+    use crate::sleeper::Pick;
+    let rules = RosterRules::new(&["RB".to_string(), "BN".to_string()]);
+    let bp = |id: &str, points: f64, vorp: f64| crate::board::BoardPlayer {
+        player_id: id.into(),
+        name: id.into(),
+        position: "RB".into(),
+        team: None,
+        bye_week: None,
+        points,
+        bonus_points: 0.0,
+        vorp,
+        tier: 1,
+        position_rank: 1,
+        overall_rank: 1,
+        adp: None,
+        injury_status: None,
+        sleeper_pts_ppr: None,
+    };
+    let board = vec![bp("rb_a", 200.0, 90.0), bp("rb_b", 120.0, 30.0)];
+    let board_index: HashMap<String, usize> = board
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.player_id.clone(), i))
+        .collect();
+    let pick = |id: &str, round: u32, pick_no: u32| Pick {
+        round,
+        pick_no,
+        draft_slot: pick_no,
+        player_id: id.into(),
+        picked_by: None,
+        metadata: None,
+        is_keeper: None,
+    };
+    let mut loaded = LoadedLeague {
+        board,
+        board_index,
+        api_picks: vec![pick("rb_a", 1, 1), pick("rb_b", 1, 2)],
+        ..LoadedLeague::empty_for_tests()
+    };
+    loaded.draft.settings.rounds = 1;
+    let entry = |id: &str| RosterEntry {
+        player_id: id.into(),
+        name: id.into(),
+        position: "RB".into(),
+        team: None,
+        pick_no: 1,
+        round: 1,
+        is_keeper: false,
+    };
+    let roster = |slot: u32, id: &str| TeamRoster {
+        slot,
+        display_name: Some(format!("T{slot}")),
+        players: vec![entry(id)],
+        open_starters: Vec::new(),
+    };
+    let rosters = vec![roster(1, "rb_a"), roster(2, "rb_b")];
+    let offer = Offer {
+        my_slot: 1,
+        partner_slot: 2,
+        give: &[],
+        get: &[],
+        give_picks: &[],
+        get_picks: &[1],
+        week: 1,
+    };
+    let v = evaluate(&loaded, &rosters, &offer, &rules).unwrap();
+    // Two picks in the round, 90 and 30 over replacement: the median is 30.
+    assert_eq!(v.get_picks.len(), 1);
+    assert!(
+        (v.get_picks[0].points - 30.0).abs() < 1e-6,
+        "{:?}",
+        v.get_picks
+    );
+    assert!(v.give_picks.is_empty());
+    // Nobody moved, so the rosters themselves are untouched.
+    assert!((v.my_season_after - v.my_season_before).abs() < 1e-6);
+
+    let unknown = Offer {
+        get_picks: &[4],
+        ..offer
+    };
+    let error = evaluate(&loaded, &rosters, &unknown, &rules).unwrap_err();
+    assert!(error.contains("no round 4"), "{error}");
+
+    let nothing = Offer {
+        get_picks: &[],
+        ..offer
+    };
+    let error = evaluate(&loaded, &rosters, &nothing, &rules).unwrap_err();
+    assert!(error.contains("player or pick"), "{error}");
 }

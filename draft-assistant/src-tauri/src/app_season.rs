@@ -120,6 +120,8 @@ impl AppCore {
         partner_slot: u32,
         give: Vec<String>,
         get: Vec<String>,
+        give_picks: Vec<u32>,
+        get_picks: Vec<u32>,
     ) -> Result<TradeVerdict, String> {
         let guard = self.loaded.lock().await;
         let loaded = guard.as_ref().ok_or("no league loaded")?;
@@ -135,13 +137,18 @@ impl AppCore {
             partner_slot,
             give: &give,
             get: &get,
+            give_picks: &give_picks,
+            get_picks: &get_picks,
             week,
         };
         let verdict = crate::trade::evaluate(loaded, &view.rosters, &offer, &loaded.roster_rules)?;
         log::info(format!(
-            "evaluate_trade with slot {partner_slot}: give {} get {} -> me {:+.0}, them {:+.0}",
+            "evaluate_trade with slot {partner_slot}: give {} get {} (picks {} for {}) \
+             -> me {:+.0}, them {:+.0}",
             give.len(),
             get.len(),
+            give_picks.len(),
+            get_picks.len(),
             verdict.my_season_after - verdict.my_season_before,
             verdict.their_season_after - verdict.their_season_before
         ));

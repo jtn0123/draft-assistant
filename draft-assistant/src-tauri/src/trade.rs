@@ -6,6 +6,7 @@
 use crate::draft::TeamRoster;
 use crate::lineup::{self, Candidate};
 use crate::loaded::LoadedLeague;
+use crate::pick_value::{self, PickPrice};
 use crate::roster::RosterRules;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -295,6 +296,10 @@ pub struct TradeVerdict {
     pub my_week_after: f64,
     pub their_week_before: f64,
     pub their_week_after: f64,
+    /// Picks leaving, priced. Kept apart from the season totals: a pick
+    /// pays off in next year's lineup, not this one's.
+    pub give_picks: Vec<PickPrice>,
+    pub get_picks: Vec<PickPrice>,
 }
 
 fn as_starters(cands: &[Candidate]) -> Vec<crate::lineup::Starter> {
@@ -320,6 +325,10 @@ pub struct Offer<'a> {
     pub give: &'a [String],
     /// Comes the other way.
     pub get: &'a [String],
+    /// Draft rounds thrown in, by round number — the currency 34 of last
+    /// season's 38 trades actually used (`pick_value`).
+    pub give_picks: &'a [u32],
+    pub get_picks: &'a [u32],
     pub week: u32,
 }
 
@@ -335,11 +344,16 @@ pub fn evaluate(
         partner_slot,
         give,
         get,
+        give_picks,
+        get_picks,
         week,
     } = *offer;
-    if give.is_empty() && get.is_empty() {
-        return Err("an offer needs at least one player".into());
+    if give.is_empty() && get.is_empty() && give_picks.is_empty() && get_picks.is_empty() {
+        return Err("an offer needs at least one player or pick".into());
     }
+    let prices = pick_value::pick_prices(loaded);
+    let giving_picks = pick_value::price_rounds(&prices, give_picks)?;
+    let getting_picks = pick_value::price_rounds(&prices, get_picks)?;
     let mine = rosters
         .get((my_slot - 1) as usize)
         .ok_or("my roster is not loaded")?;
@@ -394,6 +408,8 @@ pub fn evaluate(
         my_week_after: wk(&my_after),
         their_week_before: wk(&their_season),
         their_week_after: wk(&their_after),
+        give_picks: giving_picks,
+        get_picks: getting_picks,
     })
 }
 

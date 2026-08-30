@@ -260,6 +260,15 @@ export interface TradeVerdict {
   my_week_after: number;
   their_week_before: number;
   their_week_after: number;
+  give_picks: PickPrice[];
+  get_picks: PickPrice[];
+}
+
+/** What a round of the draft is worth, in points over replacement. */
+export interface PickPrice {
+  round: number;
+  points: number;
+  example: string | null;
 }
 
 /** One week where someone on my roster is on a bye. */
@@ -388,6 +397,8 @@ export interface DraftView {
   bye_weeks: ByeWeek[];
   /** player_id -> projected points for weeks 1..17 (0 on a bye), rostered players and waiver targets. */
   player_weeks: Record<string, number[]>;
+  /** Round by round, what a pick costs. Empty before the draft has picks. */
+  pick_prices: PickPrice[];
   replacement_baselines: Record<string, number>;
   replacement_demand: Record<string, number>;
   data_health: DataHealth;

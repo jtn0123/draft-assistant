@@ -14,10 +14,10 @@ const view = (): DraftView => structuredClone(fixtureJson as unknown as DraftVie
 describe("DraftView schema guard", () => {
   it("accepts the current schema and rejects stale data with an actionable message", async () => {
     const { validateDraftView } = await import("./api");
-    const current = { schema_version: "1.5" } as DraftView;
+    const current = { schema_version: "1.6" } as DraftView;
     expect(validateDraftView(current)).toBe(current);
     expect(() => validateDraftView({ schema_version: "1.2" } as DraftView)).toThrow(
-      "expected schema 1.5, received 1.2",
+      "expected schema 1.6, received 1.2",
     );
     expect(() => validateDraftView({} as DraftView)).toThrow("received missing");
   });
@@ -105,7 +105,7 @@ describe("browser preview", () => {
     vi.resetModules();
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...view(), schema_version: "0.9" })));
     ({ api } = await import("./api"));
-    await expect(api.getState()).rejects.toThrow(/expected schema 1.5, received 0.9/);
+    await expect(api.getState()).rejects.toThrow(/expected schema 1.6, received 0.9/);
   });
 
   it("replay mode polls the source and pushes only newer dumps", async () => {
@@ -235,6 +235,17 @@ describe("Tauri bridge", () => {
     expect(invoke).toHaveBeenLastCalledWith("record_manual_pick", { playerId: "p1" });
     await api.undoManualPick();
     expect(lastCommand()).toBe("undo_manual_pick");
+    // Picks ride the same command as the players: the argument names here
+    // are the contract with `desktop::evaluate_trade`, which nothing but the
+    // desktop app can exercise.
+    await api.evaluateTrade(4, ["p1"], ["p2"], [3], [1]);
+    expect(invoke).toHaveBeenLastCalledWith("evaluate_trade", {
+      partnerSlot: 4,
+      give: ["p1"],
+      get: ["p2"],
+      givePicks: [3],
+      getPicks: [1],
+    });
 
     invoke.mockResolvedValueOnce("uid");
     expect(await api.setMyUsername("me")).toBe("uid");
@@ -250,7 +261,7 @@ describe("Tauri bridge", () => {
     expect(lastCommand()).toBe("stop_polling");
 
     invoke.mockResolvedValueOnce({ ...view(), schema_version: "2.0" });
-    await expect(api.getState()).rejects.toThrow(/expected schema 1.5, received 2.0/);
+    await expect(api.getState()).rejects.toThrow(/expected schema 1.6, received 2.0/);
   });
 
   it("streams chat text over a channel and passes compaction through", async () => {
@@ -296,7 +307,7 @@ describe("Tauri bridge", () => {
     handler({ payload: { ...view(), schema_version: "9" } });
     expect(views).toHaveLength(1);
     expect(errors).toHaveLength(1);
-    expect(String(errors[0])).toMatch(/expected schema 1.5, received 9/);
+    expect(String(errors[0])).toMatch(/expected schema 1.6, received 9/);
     off();
     expect(unlisten).toHaveBeenCalled();
 

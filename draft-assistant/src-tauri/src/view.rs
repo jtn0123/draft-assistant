@@ -385,7 +385,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     }
 
     DraftView {
-        schema_version: "1.5".into(),
+        schema_version: "1.6".into(),
         generated_at: now_secs(),
         seq: VIEW_SEQ.fetch_add(1, Ordering::Relaxed) + 1,
         league: LeagueSummary {
@@ -439,6 +439,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         history: loaded.history.clone(),
         bye_weeks,
         player_weeks,
+        pick_prices: crate::pick_value::pick_prices(loaded),
         replacement_demand: loaded.replacement_model.demand.clone(),
         replacement_baselines: loaded.replacement_model.baseline.clone(),
         data_health: DataHealth {

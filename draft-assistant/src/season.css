@@ -223,3 +223,24 @@ button.player-link:hover {
 .player-card .bar.current {
   opacity: 1;
 }
+
+/* Draft rounds as currency in an offer: one chip a round, priced. */
+.pick-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+button.pick-chip {
+  padding: 1px 6px;
+  font-size: 0.78rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+}
+button.pick-chip.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}

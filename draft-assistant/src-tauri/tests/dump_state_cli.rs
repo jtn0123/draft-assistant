@@ -44,7 +44,7 @@ fn prints_the_view_as_json_on_stdout() {
     let output = cli.run(&[LEAGUE_ID, MY_USERNAME]);
     assert!(output.status.success(), "{}", stderr(&output));
     let view: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(view["schema_version"], "1.5");
+    assert_eq!(view["schema_version"], "1.6");
     assert_eq!(view["draft"]["my_slot"], 1, "the username resolved");
     assert_eq!(view["available"].as_array().unwrap().len(), 6);
     assert!(
@@ -130,4 +130,27 @@ fn exit_codes_distinguish_usage_errors_from_load_failures() {
     let unknown_user = cli.run(&[LEAGUE_ID, "nobody"]);
     assert!(unknown_user.status.success());
     assert!(stderr(&unknown_user).contains("warning: Sleeper user 'nobody' not found"));
+}
+
+/// `--price` is the only way to run an offer without the desktop window, so
+/// it has to work from a cold start like every other flag.
+#[test]
+fn prices_an_offer_from_the_command_line() {
+    let cli = Cli::new("price");
+    // Nothing on either side of the offer: refused, with the reason.
+    let empty = cli.run(&[LEAGUE_ID, MY_USERNAME, "--price", "2|||"]);
+    assert!(!empty.status.success());
+    assert!(
+        stderr(&empty).contains("at least one player or pick"),
+        "{}",
+        stderr(&empty)
+    );
+    // A round this draft never reached is named, not silently free.
+    let unknown = cli.run(&[LEAGUE_ID, MY_USERNAME, "--price", "2|||99|"]);
+    assert!(!unknown.status.success());
+    assert!(
+        stderr(&unknown).contains("no round 99"),
+        "{}",
+        stderr(&unknown)
+    );
 }

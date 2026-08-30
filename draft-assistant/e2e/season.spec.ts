@@ -95,3 +95,15 @@ test("a trade idea fills and prices the offer in one tap", async ({ page }) => {
   await expect(form.locator(".error")).toContainText(/desktop/i);
   await expect(form.getByRole("checkbox", { checked: true })).not.toHaveCount(0);
 });
+
+test("draft picks are offerable currency, priced by round", async ({ page }) => {
+  // Last season 34 of this league's 38 trades moved a pick (src-tauri/src/pick_value.rs).
+  const form = page.locator(".trade-offer");
+  await form.getByRole("heading", { name: "Price an offer" }).click();
+  const first = form.getByRole("button", { name: /^Round 1 pick, worth \d+ points/ }).first();
+  await expect(first).toHaveAttribute("aria-pressed", "false");
+  await first.click();
+  await expect(first).toHaveAttribute("aria-pressed", "true");
+  // A pick alone is an offer: the button is live with no player ticked.
+  await expect(form.getByRole("button", { name: "Price it" })).toBeEnabled();
+});
