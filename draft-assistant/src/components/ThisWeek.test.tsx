@@ -205,21 +205,25 @@ describe("LineupCompare", () => {
     expect(leans[2].textContent).toBe("—");
   });
 
-  it("flags an injured starter with a tag that spells itself out on hover", () => {
+  it("flags an injured starter with a tag that spells itself out without hovering", () => {
     const hurt: MatchupView = {
       ...matchup,
       rows: [{ ...matchup.rows[0], my_injury: "O", opp_injury: "Q" }],
     };
     render(<LineupCompare matchup={hurt} winOdds={0.62} />);
 
-    const mine = screen.getByText("O");
+    const mine = screen.getByText("O").closest(".tag");
     expect(mine).toHaveAttribute("title", "Out");
-    expect(mine.className).toContain("tag-out");
+    expect(mine?.className).toContain("tag-out");
+    // The letter is for the eye; the word is what gets read out.
+    expect(mine).toHaveTextContent("Out");
+    expect(screen.getByText("O")).toHaveAttribute("aria-hidden", "true");
 
-    const theirs = screen.getByText("Q");
+    const theirs = screen.getByText("Q").closest(".tag");
     expect(theirs).toHaveAttribute("title", "Questionable");
+    expect(theirs).toHaveTextContent("Questionable");
     // Questionable is common enough that colouring it would be noise.
-    expect(theirs.className).not.toContain("tag-out");
+    expect(theirs?.className).not.toContain("tag-out");
   });
 
   it("leaves healthy starters untagged", () => {

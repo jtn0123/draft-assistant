@@ -17,6 +17,7 @@ export interface SettingsRow {
 
 function SyncPill({ polling, health }: { polling: boolean; health: PollHealth | null }) {
   const failures = health?.consecutive_failures ?? 0;
+  const detail = health?.last_error ?? null;
   if (!polling) {
     return (
       <span className="pill pill-off">
@@ -25,19 +26,17 @@ function SyncPill({ polling, health }: { polling: boolean; health: PollHealth | 
       </span>
     );
   }
-  if (failures >= 2) {
+  if (failures >= 1) {
+    // Why sync is failing used to live in a tooltip on a span nobody could
+    // reach with a keyboard — the only place the reason appeared at all. It
+    // is written under the pill now, where everyone can read it.
     return (
-      <span className="pill pill-stale" title={health?.last_error ?? undefined}>
-        <span className="dot" />
-        Sync stale · {failures} failures
-      </span>
-    );
-  }
-  if (failures === 1) {
-    return (
-      <span className="pill pill-stale" title={health?.last_error ?? undefined}>
-        <span className="dot" />
-        Sync retrying
+      <span className="sync-status">
+        <span className="pill pill-stale" title={detail ?? undefined}>
+          <span className="dot" />
+          {failures >= 2 ? `Sync stale · ${failures} failures` : "Sync retrying"}
+        </span>
+        {detail !== null && <span className="muted sync-detail">Last try failed: {detail}</span>}
       </span>
     );
   }

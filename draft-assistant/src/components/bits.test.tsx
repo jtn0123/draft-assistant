@@ -124,6 +124,22 @@ describe("PlayerName", () => {
     expect(mocks.headshot).toHaveBeenCalledTimes(1);
   });
 
+  it("spells out an injury code, so it is not left to a hover", () => {
+    render(<PlayerName name="Josh Downs" team="IND" tag="Q" />);
+    // The badge stays one letter wide on screen; the word is what is read out.
+    expect(screen.getByText("Q")).toHaveAttribute("aria-hidden", "true");
+    const tag = screen.getByText("Q").closest(".tag");
+    expect(tag).toHaveTextContent("Questionable");
+    expect(tag).toHaveAttribute("title", "Questionable");
+  });
+
+  it("leaves a tag that is already a word alone rather than saying it twice", () => {
+    render(<PlayerName name="Josh Downs" team="IND" tag="IR" />);
+    const tag = screen.getByText("IR");
+    expect(tag).toHaveClass("tag");
+    expect(tag.textContent).toBe("IR");
+  });
+
   it("falls back to the team logo for defences and players without a photo", () => {
     mocks.headshot.mockResolvedValue(null);
     render(<PlayerName name="Detroit Lions" team="DET" playerId="DET" />);

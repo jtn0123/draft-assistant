@@ -83,7 +83,9 @@ interface BadgeStatus {
   label: string;
   /** True when the badge should stop vouching for the data it is stamping. */
   stale: boolean;
-  /** The per-source breakdown, when the view carries one. */
+  /** One line per source, when the view carries the breakdown. */
+  lines: string[];
+  /** The same breakdown as one hover string, for a mouse. */
   title: string | undefined;
 }
 
@@ -92,8 +94,8 @@ interface BadgeStatus {
  *
  * Overall freshness alone can be a lie: two feeds answering every thirty
  * seconds keep the stamp green while the third has been down for an hour. So
- * the badge counts how many sources are actually behind, and the tooltip
- * always spells out all three.
+ * the badge counts how many sources are actually behind, and the breakdown
+ * spells out all three.
  */
 function badgeStatus(health: SeasonHealth, now: number): BadgeStatus {
   const sources = health.sources;
@@ -104,6 +106,7 @@ function badgeStatus(health: SeasonHealth, now: number): BadgeStatus {
     return {
       label: stale ? "Not updating" : `Live · ${age(health.fetched_at)}`,
       stale,
+      lines: [],
       title: undefined,
     };
   }
@@ -111,14 +114,16 @@ function badgeStatus(health: SeasonHealth, now: number): BadgeStatus {
   const behind = entries.filter(
     (e) => e.status.error !== null || now - e.status.last_success_secs > SOURCE_STALE_SECS,
   );
-  const title = entries.map((e) => sourceLine(e.label, e.status, now)).join(" · ");
+  const lines = entries.map((e) => sourceLine(e.label, e.status, now));
+  const title = lines.join(" · ");
   if (behind.length === 0) {
-    return { label: `Live · ${age(health.fetched_at)}`, stale: false, title };
+    return { label: `Live · ${age(health.fetched_at)}`, stale: false, lines, title };
   }
   const names = behind.map((e) => e.label.toLowerCase()).join(" and ");
   return {
     label: behind.length === entries.length ? "Not updating" : `Live · ${names} behind`,
     stale: true,
+    lines,
     title,
   };
 }
@@ -161,6 +166,15 @@ function LiveStatus({ health, poll }: { health: SeasonHealth; poll: PollHealth |
       {poll !== null && failing && (
         <span className="muted small season-stat-sub">{failureNote(poll, now)}</span>
       )}
+      {/* Once something is behind, which feed and for how long is the whole
+          question. It used to be a tooltip on a span with no way in from the
+          keyboard; now it is written out under the badge. */}
+      {(failing || status.stale) &&
+        status.lines.map((line) => (
+          <span key={line} className="muted small season-stat-sub">
+            {line}
+          </span>
+        ))}
     </>
   );
 }

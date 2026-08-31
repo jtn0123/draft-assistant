@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { headshotSrc, teamAvatarSrc, useAvatarMode } from "../avatars";
-import { teamLogo } from "../format";
+import { injuryWord, teamLogo } from "../format";
 import { closeZoom, openZoom, useZoom, type Zoomed } from "../zoom";
 import { useFocusTrap } from "./useFocusTrap";
 
@@ -228,7 +228,8 @@ export function PlayerName({
   name: string;
   team: string | null | undefined;
   tag?: string | null;
-  /** Spelled-out form of a short tag, shown on hover: "O" -> "Out". */
+  /** Spelled-out form of a short tag: "O" -> "Out". Worked out from the tag
+   * itself when the caller does not pass one. */
   tagTitle?: string;
   /** When given, shows the player's headshot instead of the team logo. */
   playerId?: string | null;
@@ -236,6 +237,10 @@ export function PlayerName({
   // A player who is Out or Doubtful is the one worth colouring; Questionable
   // is common enough that shouting about it would be noise.
   const alarming = tag === "Out" || tag === "O" || tag === "D";
+  // "Q" means nothing read out on its own, and hovering is not an option for
+  // everyone, so the whole word goes in the page for screen readers while the
+  // badge stays one letter wide on screen.
+  const spelled = tag ? (tagTitle ?? injuryWord(tag)) : null;
   return (
     <span className="player-name">
       {playerId === undefined ? (
@@ -245,8 +250,15 @@ export function PlayerName({
       )}
       <span className="ellipsis">{name}</span>
       {tag && (
-        <span className={alarming ? "tag tag-out" : "tag"} title={tagTitle}>
-          {tag}
+        <span className={alarming ? "tag tag-out" : "tag"} title={spelled ?? undefined}>
+          {spelled === tag ? (
+            tag
+          ) : (
+            <>
+              <span aria-hidden="true">{tag}</span>
+              <span className="sr-only">{spelled}</span>
+            </>
+          )}
         </span>
       )}
     </span>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { PollHealth } from "../types";
 import { Header, type SettingsRow } from "./Header";
 import { settle } from "../test/settle";
 
@@ -18,7 +19,13 @@ const rows = (onSelect = () => {}): SettingsRow[] => [
 ];
 
 /** The header with the settings menu wired up the way the app wires it. */
-function Harness({ onSelect }: { onSelect?: () => void }) {
+function Harness({
+  onSelect,
+  pollHealth = null,
+}: {
+  onSelect?: () => void;
+  pollHealth?: PollHealth | null;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -29,7 +36,7 @@ function Harness({ onSelect }: { onSelect?: () => void }) {
         screen="draft"
         onScreen={() => {}}
         polling
-        pollHealth={null}
+        pollHealth={pollHealth}
         chime
         onToggleChime={() => {}}
         onUndo={() => {}}
@@ -126,5 +133,32 @@ describe("the settings menu", () => {
       screen.getByRole("menuitemcheckbox", { name: /Live sync/ }).click();
     });
     expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the sync pill", () => {
+  it("writes out why sync is failing rather than hiding it in a tooltip", () => {
+    render(
+      <Harness
+        pollHealth={{
+          last_success_at: null,
+          consecutive_failures: 2,
+          last_error: "network timeout",
+        }}
+      />,
+    );
+    expect(screen.getByText("Sync stale · 2 failures")).toBeInTheDocument();
+    // Reachable by reading the page, with no mouse and no hovering.
+    expect(screen.getByText("Last try failed: network timeout")).toBeInTheDocument();
+  });
+
+  it("says nothing extra while sync is healthy", () => {
+    render(
+      <Harness
+        pollHealth={{ last_success_at: Date.now(), consecutive_failures: 0, last_error: null }}
+      />,
+    );
+    expect(screen.getByText(/^Live · /)).toHaveClass("pill-live");
+    expect(screen.queryByText(/Last try failed/)).not.toBeInTheDocument();
   });
 });

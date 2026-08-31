@@ -94,6 +94,24 @@ describe("the live badge", () => {
     expect(title).toContain("Matchups: 5 seconds ago");
   });
 
+  it("writes the source breakdown under the badge once something is behind", () => {
+    const sources = fresh();
+    sources.rosters = { last_success_secs: NOW() - 720, error: "timeout" };
+    render(
+      <SeasonScreen view={view({ data_health: { fetched_at: NOW(), warnings: [], sources } })} />,
+    );
+
+    // No hovering required: which feed, and how far behind, is on the page.
+    expect(screen.getByText("Rosters: failing for 12 minutes (timeout)")).toBeInTheDocument();
+    expect(screen.getByText("Scores: 5 seconds ago")).toBeInTheDocument();
+    expect(screen.getByText("Matchups: 5 seconds ago")).toBeInTheDocument();
+  });
+
+  it("keeps the breakdown out of the way while every source is current", () => {
+    render(<SeasonScreen view={view()} />);
+    expect(screen.queryByText("Scores: 5 seconds ago")).not.toBeInTheDocument();
+  });
+
   it("stops claiming to be live when nothing at all is arriving", () => {
     const sources: SourceHealth = {
       matchups: { last_success_secs: NOW() - 900, error: "503" },
