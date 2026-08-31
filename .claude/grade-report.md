@@ -1,594 +1,453 @@
 # Codebase Grade Report
 
 **Project:** draft-assistant
-**Audited:** 2026-08-30 · **Updated:** 2026-08-30 after the fixes below landed
-(supersedes the 2026-08-27 report, which predates the ~17k-line season-mode commit `25b1c38`)
-**Stack:** Tauri 2 desktop app — Rust/Tokio backend + React 19 / TypeScript-strict / Vite frontend, ~18.4k LOC first-party
+**Audited:** 2026-08-30 (evening — third pass, fresh eyes; supersedes the same-day
+first pass, archived as `grade-report-2026-08-30-first-pass.md`)
+**Stack:** Tauri 2 desktop app — Rust/Tokio backend + React 19 / TypeScript-strict / Vite frontend, ~19k LOC first-party
 
 ## Summary
 
-**Status (final, after the focus wave of 2026-08-30 evening): 50 of 54 items
-done, 2 partly (A2, G8 — both deliberate and argued on the item), 2 closed
-without a code change (F1 false positive, H4).** Every item below carries an
-**Outcome** line saying what happened to it. Work landed in commits `c3847e5`
-(first fifteen), `0f8ccb7` (second fifteen), and the focus wave `4cecd63`
-through `c144643`; see `TOP15.md`, `NEXT15.md` and the root `TRACKER.md`.
+This is a deeper audit than the morning pass: three explorers re-read the tree
+after the day's 12 commits, ran per-file coverage, and traced concurrency
+interleavings. The app got much better today **and** this audit holds it to a
+higher bar — the two are not in tension. Several findings below are real bugs
+that survived every prior round.
 
-| ID | Category | Grade at audit | Final grade | Items | Open |
-|----|----------|-----|-----|-------|------|
-| A | Architecture & Design | B− | **A−** | 6 | A2 (half, deliberate) |
-| B | Backend Quality | B− | **A−** | 7 | — |
-| C | Frontend Quality | B | **A−** | 7 | — |
-| D | Testing & Reliability | B− | **A−** | 6 | — |
-| E | Security | A− | **A** | 5 | — |
-| F | Dependencies & Tech Currency | A− | **A** | 4 | F1 (false positive) |
-| G | Performance & Scalability | C+ | **A−** | 8 | G8 (partly, deliberate) |
-| H | Documentation & Onboarding | C+ | **B+** | 5 | H4 |
-| I | Developer Experience & Tooling | B− | **A−** | 6 | — |
-| **Overall** | | **B−** | **A−** | **54** | **2** |
+| ID | Category | Grade | Items |
+|----|----------|-------|-------|
+| A | Architecture & Design | B+ | 4 |
+| B | Backend Quality | B | 7 |
+| C | Frontend Quality | B | 7 |
+| D | Testing & Reliability | B | 8 |
+| E | Security | A− | 3 |
+| F | Dependencies & Tech Currency | A− | 2 |
+| G | Performance & Scalability | B | 8 |
+| H | Documentation & Onboarding | B− | 4 |
+| I | Developer Experience & Tooling | B+ | 4 |
+| **Overall** | | **B+** | **47** |
 
-### The focus wave (stability · performance · lazy load · week-one assistant · status)
+**Top 5 highest-leverage fixes:** C1, B1, B2, D1, D2
 
-Landed after the second round, on top of the audit items:
-
-- **A5 done** — `build_season_view` split into six one-purpose section modules
-  (`season_view_matchup/live/standings/market/feeds` + `season_lookup`);
-  the golden tests passed **unmodified**, proving zero behavior change.
-  `season_view_parts.rs` (the grab-bag) is deleted. Took half of A2 with it.
-- **G7 done properly** — `boardIdentity.ts` deep-compares incoming players and
-  reuses the old array only when observationally identical, so no-op poll ticks
-  skip the sort and the ~400 row re-renders while staleness stays impossible
-  by construction (the concern that kept it partial is solved, not waived).
-- **Lazy loading (beyond the audit)** — entry bundle 273 → 228 KB; DraftScreen,
-  SeasonScreen, and Chat are separate chunks and Chat isn't fetched until opened.
-- **Status honesty (beyond the audit)** — per-source freshness (matchups /
-  scores / rosters) with a plain-language tooltip on the Live badge, and
-  trade/waiver ideas admit their age when served from the analysis cache.
-- **Week-one assistant (beyond the audit)** — every lineup call carries a
-  plain-English reason and a real kickoff deadline; Q/D/O injury tags on both
-  sides; Out/Doubtful starters raise their own call.
-- **Two stability fixes found along the way** — the poll now notices a
-  commissioner *replacing* a pick (`poll.rs` hashes pick ids, not just count),
-  and the pre-commit hook works from git worktrees.
-
-Final numbers: Rust coverage **74.8%** lines (gate 68), frontend **~89%**
-(gates 80/80/75/70); 160 frontend + 160+ Rust tests; `npm run verify` green.
-
-### What moved the grades
-
-- **B− → A− (Backend).** The only known remote-data panic is gone, `refresh_live`
-  no longer reports success when every request failed, the ~15 MB parse is off
-  the async runtime, requests retry and run six at a time, and command inputs
-  are bounded.
-- **C+ → B+ (Performance).** Measured, not assumed: the playoff simulation went
-  **39ms → 14ms** with identical odds; the trade search prunes before solving
-  and a randomized test proves it matches brute force; the 30-second poll reuses
-  its analysis instead of recomputing it. Held back from A− by G7 and G8, both
-  deliberate.
-- **B− → A− (Testing).** Rust 57.3% → **72.3%** lines and 106 → **197** tests;
-  frontend 71.8% → **88.6%** and 81 → **123**. Both sides now have a gate, so
-  this cannot quietly slide back.
-- **B− → B+ (Architecture).** `Engine`'s surface is declared in traits and the
-  poll logic is testable. Not higher because A2 and A5 are open by choice.
-- **A− → A (Security).** CSP set and verified in the running desktop app; the
-  API key no longer passes through argv; every path-ish input is validated.
-
-**Verification:** `npm run verify` exits 0, and the changes were confirmed in
-the **real desktop app**, not only the browser preview — avatars and logos
-render under the new CSP, live sync reports green, and the season loads through
-the new retry and parallel-sweep path.
-
-### Deliberate non-changes
-
-Four items were closed without a code change. Each carries its reasoning on the
-item itself:
-
-- **F1 (two reqwest versions) — false positive.** 0.13 only enters on targets
-  this app does not ship to; macOS compiles exactly one. Pinned 0.12.28 with the
-  reasoning in `Cargo.toml`.
-- **C7 (CSS Modules) — scope reduced on purpose.** The audit implied widespread
-  collisions; there was exactly **one** (`.board-row`). It is fixed, and
-  `scripts/check-css.mjs` now fails the build if another appears. A full
-  CSS-Modules conversion would have broken the deliberate cross-file selectors
-  this codebase relies on.
-- **H4 (CLAUDE.md).** The conventions now live in the root README instead, so
-  there is one place for them to be right.
-
-Two are partly done, both deliberately: **A2** (the six season endpoints stay
-out of `sleeper.rs` until a wider split of that file; the `matchup_for`/
-`opponent_of` half landed with A5) and **G8** (changing how every image is
-delivered is not worth ~33% on a local bridge). Both are argued on the items.
-**A5 and G7 have since landed in full** — see "The focus wave" above.
-
-### Where the remaining risk sits
-
-Nothing open is a correctness or safety issue. **A5** has since landed — the
-season view is split by section — which also took the first half of **A2**. What
-remains of **A2** is moving the six season endpoints into `sleeper.rs`, and that
-wants a wider `sleeper.rs` split to land with it.
+Baselines measured this run: Rust 74.77% lines / 212 tests; frontend 88.97%
+lines / 160 tests; `npm audit` and `cargo audit` clean; `npm run verify` green.
 
 ---
 
-## A — Architecture & Design — B−
+## A — Architecture & Design — B+
 
-Layering intent is real and documented: `sleeper.rs`/`season_api.rs` are pure HTTP clients, `engine.rs` owns caching + assembly, `view.rs`/`season.rs` are pure view assembly, `commands_*.rs` sit on top; dependency direction is one-way with no cycles, and the 500-LOC cap keeps every file readable. Dragged down by: `Engine` as a de-facto god object extended from five files, the season layer reaching back down into the transport layer, non-thin commands, and no frontend state layer.
+The big structural work landed: the season view is split into one module per
+section, `Engine`'s seams are trait-declared, and the 500-LOC cap holds
+everywhere. What remains is consistency debt: the Sleeper client's route list
+is still split across two files with duplicated constants, and the whole crate
+uses `Result<_, String>` (74 occurrences, 15 files) so callers can't tell a
+terminal error from a retryable one without string-matching.
 
-#### ~~A1~~ ✓ done 2026-08-30 — `Engine` is extended from 5 files, so its real surface is invisible
-- **Outcome:** `ImageCache`, `SeasonLoader` and `HistoryStore` declare each seam; `Engine`'s doc comment lists the whole surface.
-- **Where:** `src-tauri/src/engine.rs:96`, `projections.rs:12`, `headshots.rs:101`, `season_engine.rs:75`, `season_history.rs:130`
-- **What's wrong:** Five `impl Engine` blocks bolt unrelated concerns (image CDN, league sweep) onto one struct; all share private access to `read_cache`/`write_cache`. Nothing states what `Engine` is.
-- **Fix:** Keep `Engine` as thin `{ client, data_dir, cache }`; express the rest as traits (`ImageCache`, `SeasonLoader`) or free functions taking `&Cache` so seams are declared and mockable.
+#### A1 — The Sleeper client is still defined in two files with duplicated base URLs
+- **Where:** `src-tauri/src/season_api.rs:11-12,269-311` vs `sleeper.rs:12-13,254`
+- **What's wrong:** `BASE`/`BASE_UNDOC` are byte-identical in both files, and six client methods live in `season_api.rs` as an inherent-impl extension of a type owned by `sleeper.rs`. Changing the Sleeper host means editing two files; "where are the HTTP methods" has two answers.
+- **Fix:** Make the constants `pub(crate)` in `sleeper.rs` and import them; either move the six methods into `sleeper.rs` (splitting that file first) or define a `SeasonEndpoints` trait so the extension matches the `Engine` convention (named trait, indexed in the doc comment).
 - **Effort:** M
-- **Grade lift:** B− → B (the largest structural ambiguity in the backend)
+- **Grade lift:** B+ → A− (closes the last layering inversion)
 
-#### A2 — Inverted dependency: the season layer extends the transport layer  *(◦ not done — deliberate)*
-- **Outcome:** Partly addressed by A5 — `matchup_for`/`opponent_of` now live on `season_api.rs` beside the `Matchup` they query. The six endpoints stay put: moving them into `sleeper.rs` would push it well past the 500-line cap, and the duplicated `BASE` constants are a two-line annoyance rather than a defect. Worth doing as part of a wider `sleeper.rs` split, not on its own.
-- **Where:** `src-tauri/src/season_api.rs:255` (and duplicated `BASE`/`BASE_UNDOC` at `season_api.rs:11-12` vs `sleeper.rs:11-12`)
-- **What's wrong:** A season-screen module opens `impl SleeperClient` and owns HTTP methods, splitting the client's route list across two files with duplicated base URLs.
-- **Fix:** Move the six methods (`nfl_state`, `rosters`, `matchups`, `transactions`, `winners_bracket`, `nfl_scores`) into `sleeper.rs`, or define an explicit `SeasonEndpoints` extension trait.
+#### A2 — Stringly-typed errors everywhere: `Result<_, String>` is the only error type in the crate
+- **Where:** 74 occurrences across 15 files; the retryable bit is computed and then discarded at `sleeper.rs:288`
+- **What's wrong:** Callers cannot distinguish "league not found" (terminal) from "HTTP 503" (retryable) without matching message text. The transport layer already knows which is which and flattens it away.
+- **Fix:** Introduce a small `SleeperError { NotFound, Http(StatusCode), Transport, Decode }` with `impl Display`; the Tauri boundary keeps serialising to a string. Convert the transport layer first; let the rest migrate opportunistically.
+- **Effort:** M
+- **Grade lift:** B+ → A− (retry/UX decisions become principled instead of textual)
+
+#### A3 — Two different position resolvers can disagree about the same roster
+- **Where:** `src-tauri/src/season_history.rs:62` (uses `player_meta` directly) vs `season_view_standings.rs:24` (uses `Lookup::position`, which prefers the board)
+- **What's wrong:** When board and metadata disagree (board carries the league-scored position), Trends "strength" and the standings projection are computed from different lineups for the same team.
+- **Fix:** Pass a `Lookup` into `take_snapshot` so both paths resolve positions identically.
 - **Effort:** S
-- **Grade lift:** B− → B− (clarity; removes duplicate constants)
+- **Grade lift:** B+ → B+ (consistency; removes a silent divergence)
 
-#### ~~A3~~ ✓ done 2026-08-30 — Commands are not thin: 100-line polling loops inline
-- **Outcome:** `poll.rs` holds the tick decisions; the commands spawn and delegate.
-- **Where:** `src-tauri/src/commands_draft.rs:207-305` (`start_polling`), `commands_season.rs:82-142` (`start_season_polling`)
-- **What's wrong:** Each embeds a full spawn-loop with change detection, error aggregation, reconciliation and emit logic; the tick logic has zero tests because it's welded to Tauri state.
-- **Fix:** Extract `async fn poll_once(&engine, &state) -> Option<PollOutcome>` into a `poll.rs`; command becomes spawn + generation bookkeeping; unit-test the tick.
+#### A4 — `App.tsx` still hand-rolls persisted state the stores already know how to do
+- **Where:** `src/App.tsx:43-49,71,77-85,106,373-377`; the localStorage try/catch pattern is re-implemented in 5 places (`prefs.ts`, `avatars.ts`, `theme.ts`, `ThisWeek.tsx:9-17`, `App.tsx`)
+- **What's wrong:** Theme occupies three hooks in App.tsx though `theme.ts` owns the logic; `screen` duplicates the persistence pattern a fifth time; `chime` is read from the store only to be drilled back down as two of `Header`'s 16 props.
+- **Fix:** Add a `persisted<T>(key, parse, fallback)` helper to `prefs.ts`; build `useScreen()`, `useThemePreference()`, `useLineupView()` on it; let `Header` subscribe to `prefs.ts` directly and drop `chime`/`onToggleChime` from its props.
 - **Effort:** M
-- **Grade lift:** B− → B (also unlocks D coverage of the poll path)
-
-#### ~~A4~~ ✓ done 2026-08-30 — The Sleeper client is bypassed inside a command
-- **Outcome:** `SleeperClient::user` added; `set_my_username` goes through the pooled client.
-- **Where:** `src-tauri/src/commands_draft.rs:60-62` (`set_my_username`)
-- **What's wrong:** Bare `reqwest::get` with an inline `struct User` skips the pooled client, its 3s/8s timeouts, gzip, and user-agent.
-- **Fix:** Add `SleeperClient::user(&self, username)` next to `league()`/`draft()`; call through `state.engine.client`.
-- **Effort:** S
-- **Grade lift:** B− → B− (consistency; also see E4)
-
-#### ~~A5~~ ✓ done 2026-08-30 — `season.rs` is the season god-module; `season_view_parts.rs` is an LOC-cap artifact
-- **Outcome:** `build_season_view` split by section. `season_view_parts.rs` is gone, dissolved into `season_lookup.rs` (the `Lookup` primitive), `season_view_matchup.rs` (head-to-head, calls, live), `season_view_standings.rs`, `season_view_market.rs` (waivers + trades) and `season_view_feeds.rs` (activity, completed trades, trends). `season.rs` is now 326 lines of `SeasonView`/`SeasonAnalysis` plus a page of orchestration, down from 15 crate imports to 4 non-section ones; no section file imports more than 6. Golden tests (D2) passed unmodified.
-- **Where:** `src-tauri/src/season.rs:4-18` (15 crate imports), `season_view_parts.rs:56-99`
-- **What's wrong:** `build_season_view` couples to 15 modules (2× anything else); `season_view_parts.rs`'s only theme is "helpers that didn't fit."
-- **Fix:** Split `build_season_view` by section (matchup / waivers / standings) so each sub-builder imports 2-3 modules; rehome `matchup_for`/`opponent_of` → `season_api.rs`, `why_start` → `season_lineup.rs`.
-- **Effort:** M
-- **Grade lift:** B− → B
-
-#### ~~A6~~ ✓ done 2026-08-30 — No frontend state layer; `App.tsx` is the store
-- **Outcome:** `useSeasonSession` owns the season lifecycle (6 tests of its own); `prefs.ts` holds the chime. 499 → 466 lines.
-- **Where:** `src/App.tsx:39-67` (~16-20 `useState`), `:73-206` (9 `useEffect`s)
-- **What's wrong:** Every panel gets its slice via prop drilling through `DraftScreen`/`SeasonScreen`; the polling/refresh state machine is untestable in isolation.
-- **Fix:** Extract `useDraftSession()` / `useSeasonSession()` hooks (view + polling + error + reload token) into `src/session.ts`, matching the existing `avatars.ts`/`zoom.ts` store pattern.
-- **Effort:** M
-- **Grade lift:** B− → B
+- **Grade lift:** B+ → B+ (App.tsx stops being the store of last resort)
 
 ---
 
-## B — Backend Quality — B−
+## B — Backend Quality — B
 
-Production error handling is disciplined: essentially every `unwrap`/`expect` is inside `#[cfg(test)]`, serde structs degrade gracefully via `#[serde(default)]`/`Option`, cache filenames are sanitized (`engine.rs:152-158`), writes are tmp-then-rename atomic, and `headshots.rs:32-47` refuses any non-Sleeper URL. Against that: one live division-by-zero panic path fed by remote data, a refresh that reports success when every request failed, all disk I/O blocking inside async fns (including a ~14.6 MB JSON parse), and zero retries anywhere.
+Error handling discipline, retries, atomic writes, and input validation are all
+in place, and lock ordering was checked and found consistent (`loaded → season
+→ config` at all 12 multi-lock sites). But the deeper pass found real
+concurrency and correctness issues in the most stateful paths: the chat
+command stalls both pollers, a league switch mid-load can cross-contaminate
+files, config saves can fail silently, and the waiver search structurally
+misses the players waivers exist for.
 
-#### ~~B1~~ ✓ done 2026-08-30 — Panic on remote data: division by zero in the hot render path
-- **Outcome:** `assemble()` refuses a draft reporting 0 teams/rounds; `slot_for_pick` returns `Option`.
-- **Where:** `src-tauri/src/draft.rs:10-11`; fed from `sleeper.rs:59` (`DraftSettings.teams`), called at `view.rs:187`
-- **What's wrong:** `(pick_no - 1) / teams` with no zero guard; `teams: 0` panics the command task on every view build. `(pick_no - 1)` also underflows with `overflow-checks = true` in release.
-- **Fix:** Validate once in `Engine::assemble` (`engine.rs:295`): `teams == 0 || rounds == 0` → `Err("draft has no teams/rounds")`; make `slot_for_pick` return `Option<u32>`.
-- **Effort:** S
-- **Grade lift:** B− → B (removes the only known remote-data panic)
-
-#### ~~B2~~ ✓ done 2026-08-30 — `refresh_live` cannot fail, and lies about freshness
-- **Outcome:** Returns `Err` and leaves `fetched_at` alone when all three endpoints fail; partial success still counts as fresh.
-- **Where:** `src-tauri/src/season_engine.rs:325-346`; downstream `:353-356` (`live_is_stale`), `commands_season.rs:115`
-- **What's wrong:** All three fetch results consumed with `if let Ok(..)`, then `fetched_at = now_secs(); Ok(())` unconditionally — a total outage still resets the staleness clock and the health badge stays green.
-- **Fix:** Collect errors; stamp `fetched_at` only if ≥1 succeeded; return `Err(errors.join("; "))` when all fail.
-- **Effort:** S
-- **Grade lift:** B− → B (truthful health reporting during games)
-
-#### ~~B3~~ ✓ done 2026-08-30 — Blocking file I/O on the async runtime, including a ~14.6 MB parse
-- **Outcome:** `*_off_thread` cache helpers run reads and writes on `spawn_blocking`.
-- **Where:** `src-tauri/src/engine.rs:125-140`, called from async `projections.rs:18,22,25`; also `headshots.rs:127,132,162,169`, `commands_draft.rs:201`
-- **What's wrong:** `std::fs` + `serde_json::from_str` of the full `players/nfl` dictionary on the runtime thread; no `spawn_blocking` anywhere in the tree.
-- **Fix:** Wrap `read_cache`/`write_cache` bodies in `tokio::task::spawn_blocking` (cheapest; keeps sync helpers).
-- **Effort:** S
-- **Grade lift:** B− → B−
-
-#### ~~B4~~ ✓ done 2026-08-30 — No retries/backoff; long sequential request chains
-- **Outcome:** `get_json` retries 3× with backoff on transport errors and 5xx; both sweeps run 6 requests at a time.
-- **Where:** `src-tauri/src/sleeper.rs:258-276` (`get_json`), `projections.rs:91-105` (18 sequential weekly requests), `season_engine.rs:105-120` (~15 sequential matchup requests)
-- **What's wrong:** First transient error is permanent; a flaky network makes `load_league` hang for minutes at the 8s timeout per call.
-- **Fix:** Add `get_json_retry` (2 retries, 250ms→1s jitter, transport errors + 5xx only); replace both loops with `buffer_unordered(6)`.
+#### B1 — Asking the chat a question stalls both pollers
+- **Where:** `src-tauri/src/commands_chat.rs:154-171`
+- **What's wrong:** `ask_claude` runs the full `build_season_view` (4,000-iteration Monte Carlo, ~1,600 lineup solves, the trade search) synchronously on the async runtime thread while holding all three mutexes. Every question freezes the 30s season poller and the 3s draft poller until it finishes.
+- **Fix:** Reuse the poller's cached analysis (store the last `SeasonView` or `SeasonAnalysis` in `AppState` and hand it to `chat_context::season_context`); at minimum clone the three inputs, drop the guards, and run the build inside `tokio::task::spawn_blocking`.
 - **Effort:** M
-- **Grade lift:** B− → B (load time ~5× better on the sweep, resilient to blips)
+- **Grade lift:** B → B+ (removes the biggest interactive stall in the app)
 
-#### ~~B5~~ ✓ done 2026-08-30 — Tauri commands accept unbounded/unvalidated input
-- **Outcome:** `record_manual_pick` checks the board index; `extract_id` rejects non-numeric input; `ask_claude` caps the thread at 60 turns / 200 KB.
-- **Where:** `src-tauri/src/commands_chat.rs:114-121` (`ask_claude`), `commands_draft.rs:139` (`record_manual_pick`), `commands_draft.rs:11-18` (`extract_id`)
-- **What's wrong:** Unbounded `messages` forwarded to Anthropic/CLI; `record_manual_pick` persists ids that don't exist on the board; `extract_id` falls through to raw input (see E2).
-- **Fix:** Cap messages (~40 turns / 200 KB); `record_manual_pick` → `Err("unknown player")` unless in `board_index`; `extract_id` rejects non-`[0-9]{8,20}`.
+#### B2 — The waiver search never sees the hot streamer it exists to find
+- **Where:** `src-tauri/src/season_view_market.rs:31-41`, `season_moves.rs:101`
+- **What's wrong:** The free-agent pool is materialised in board order — sorted by *season* rank — then truncated to `CANDIDATE_POOL` before weekly evaluation. A free agent with high weekly points but a low season rank (the breakout/streamer case) is never evaluated. The other 540+ `FreeAgent` structs are allocated and thrown away.
+- **Fix:** Sort (or `select_nth_unstable_by`) free agents on `weekly_points` before truncating, and truncate in `season_view_market` so the discarded ones are never allocated. Add a test: a low-season-rank, high-week player must appear as a target.
 - **Effort:** S
-- **Grade lift:** B− → B−
+- **Grade lift:** B → B+ (a user-visible product-correctness fix)
 
-#### ~~B6~~ ✓ done 2026-08-30 — API key passed on the process command line
-- **Outcome:** Key written to `security` over stdin, never argv; op is an enum, so the `panic!` is gone. Round-tripped against the real Keychain.
-- **Where:** `src-tauri/src/secrets.rs:23` (`["-w", key]`), `:36-39`; `panic!` in a pub fn at `:19`
-- **What's wrong:** The raw `sk-ant-…` key is visible in `ps aux` during the `/usr/bin/security` call; unknown-op arm panics.
-- **Fix:** Pipe the secret over stdin (`security … -w` from `Stdio::piped()`); return `Result` from `args_for` or make the op an enum.
+#### B3 — League switch during a season load cross-contaminates state
+- **Where:** `src-tauri/src/commands_season.rs:20-35`; history write at `season_history.rs:147`
+- **What's wrong:** `load_season` clones the league, drops the lock, awaits a multi-second network load, then re-locks and records history against whatever `loaded` holds *now*. If `add_league` ran in the gap, league A's roster snapshot is written into league B's history file and `state.season` holds league A's data under league B.
+- **Fix:** Re-check `loaded.league.league_id` after the await and return `Err("league changed during load")`, or add a generation counter like the pollers already use.
 - **Effort:** S
-- **Grade lift:** B− → B−
+- **Grade lift:** B → B (removes a data-corruption path)
 
-#### ~~B7~~ ✓ done 2026-08-30 — Tests absent exactly where the risk is
-- **Outcome:** Covered by D1/D2 below — Rust 57.3% → 72.3% lines.
-- **Where:** `src-tauri/src/sleeper.rs` (0 tests), `season.rs` (0), `board.rs` (0), `projections.rs` (0), `commands_draft.rs`/`commands_season.rs` (0), `engine.rs` (2 for a 16 KB module)
-- **What's wrong:** The wire-parsing and view-assembly layers — where a Sleeper field rename silently zeroes the board — have no direct tests.
-- **Fix:** Fixture-deserialize tests for `sleeper.rs`; golden test of `build_season_view` against `public/dev-season-fixture.json`; temp-dir table tests for `projections.rs` stale-fallback branches. (Tracked as the D-category coverage push.)
-- **Effort:** M
-- **Grade lift:** B− → B
+#### B4 — `save_config` discards every failure; the league list can silently vanish
+- **Where:** `src-tauri/src/engine.rs:224-243`; callers at `commands_draft.rs:50,70`, `commands_chat.rs:70`, `engine.rs:268`
+- **What's wrong:** `fs::write` errors return early unreported, `rename(..).ok()` swallows the result. Four commands report success to the UI when the config never reached disk — the user's leagues disappear on next launch with no error.
+- **Fix:** Return `Result<(), String>` and propagate at all four call sites (`write_cache_checked` at `engine.rs:177` is the in-repo precedent).
+- **Effort:** S
+- **Grade lift:** B → B+ (truthfulness about persistence)
+
+#### B5 — The `season` mutex is held across up to ~25s of network retries
+- **Where:** `src-tauri/src/commands_season.rs:77-79,122-125`; `refresh_live` at `season_engine.rs:389-399`
+- **What's wrong:** Three requests × 8s timeout × 3 retries can hold the `season` lock for tens of seconds, blocking `get_season`, `load_season`, and `ask_claude`, and queuing the next poll tick behind the current one.
+- **Fix:** Fetch outside the lock (`tokio::join!` the three requests unlocked), then take the lock only to run `apply_refresh`.
+- **Effort:** S
+- **Grade lift:** B → B+ (keeps the UI responsive during network trouble)
+
+#### B6 — Keychain subprocess runs blocking on the runtime thread, once per chat request
+- **Where:** `src-tauri/src/secrets.rs:56-67`; reached from `commands_chat.rs:53,83,149` via `engine.rs:246-251`
+- **What's wrong:** `std::process::Command` + `wait_with_output` on the async thread — tens of milliseconds normally, unbounded if the Keychain prompts — with `config` locked, re-shelled on every `ask_claude` and `chat_settings`.
+- **Fix:** Switch to `tokio::process::Command` (already a dependency, used in `chat_cli.rs:15`) or wrap in `spawn_blocking`; cache the loaded key in `AppState`.
+- **Effort:** S
+- **Grade lift:** B → B (removes a hidden stall and a per-request subprocess)
+
+#### B7 — Weekly rollover refetches all ~15 weeks; transactions fetched sequentially with O(n²) dedupe
+- **Where:** `src-tauri/src/season_engine.rs:118-170` (`week_sweep`), `:340-355` (transactions)
+- **What's wrong:** Completed weeks' matchups are immutable, but `sweep.week != week` invalidates the whole sweep — 15 requests to learn one new week. The transaction loop is sequential where every sibling path uses `join!`, and dedupes with `.iter().any()` over a growing Vec.
+- **Fix:** Cache per-week (`season_<id>_week<N>.json`), fetch only missing weeks plus the current one; `join!` the two transaction weeks and dedupe with a `HashSet` of ids.
+- **Effort:** S
+- **Grade lift:** B → B (faster weekly rollover, less Sleeper load)
 
 ---
 
 ## C — Frontend Quality — B
 
-Unusually disciplined for hobby scale: small single-purpose components, `useSyncExternalStore` stores (`avatars.ts`, `zoom.ts`) instead of prop-threading, consistent real-button semantics, fully strict TypeScript with zero `any`/`@ts-ignore`, and every `localStorage` access try/caught. Held back by ARIA that is applied but often incorrect, a modal with no focus management, and ~2,900 lines of unscoped global CSS with cross-file selector coupling.
+Component discipline, strict TypeScript, and the store pattern remain
+strengths, and there are no hardcoded colors outside `theme.css` (verified: 0
+hits). But the deep pass found two real state bugs in the season lifecycle and
+a systematic accessibility gap: ARIA is applied but incomplete (no focus trap
+on the confirm dialog, no live announcement of the app's most important
+moment, load-bearing info in hover-only tooltips), and nothing lints for it.
 
-#### ~~C1~~ ✓ done 2026-08-30 — `aria-sort` on a `<button>` is invalid and announces nothing
-- **Outcome:** `aria-sort` was inert on a button; the state moved into the accessible name ("Proj, sorted descending").
-- **Where:** `src/components/bits.tsx:251`; consumers `Board.tsx:194`, `SeasonTabs.tsx:71`
-- **What's wrong:** `aria-sort` is only valid on `columnheader`/`rowheader`; on a plain button in a div-grid, screen readers get no sort state.
-- **Fix:** Wrap header rows in `role="row"` with `<span role="columnheader" aria-sort={...}>` around each `SortHead`, or move boards to `role="grid"` with proper cells.
+#### C1 — The season poll is torn down and restarted on every incoming update
+- **Where:** `src/session.ts:47-67`
+- **What's wrong:** `season` is in the effect's dependency array and the cleanup calls `api.stopSeasonPolling()`. Every push from `onSeasonUpdated` changes `season`, so the backend's 30s timer is cancelled and recreated on each tick — an unbounded stop/start race in which the interval never runs its own schedule.
+- **Fix:** Split into two effects: one keyed on `[active, ready]` that owns start/stop polling; one for the initial load guarded by a `useRef` instead of reading `season` from deps.
 - **Effort:** S
-- **Grade lift:** B → B+
+- **Grade lift:** B → B+ (fixes a live-polling correctness bug)
 
-#### ~~C2~~ ✓ done 2026-08-30 — Tablist is half-built with no keyboard model
-- **Outcome:** Arrow/Home/End navigation, roving tabindex, real `tabpanel`s with `aria-controls`/`aria-labelledby`.
-- **Where:** `src/components/SeasonScreen.tsx:63-101`
-- **What's wrong:** `role="tablist"`/`tab`/`aria-selected` present, but no `role="tabpanel"`, no `aria-controls`/`id` pairs, no arrow-key navigation, no roving tabindex.
-- **Fix:** Add id/controls pairs, wrap panels in `role="tabpanel"`, roving `tabIndex`, ArrowLeft/Right/Home/End handler.
+#### C2 — The Live badge freezes instead of degrading when the stream dies
+- **Where:** `src/components/SeasonScreen.tsx:64-88`; swallowed rejection at `session.ts:61,65`
+- **What's wrong:** The badge computes its age during render, and the screen only re-renders when data arrives — so if the poll dies, the badge reads "Live · 8s ago" forever. When `sources` is absent it renders `pill-live` with no staleness check. `startSeasonPolling` rejections are `.catch(() => undefined)`-ed, so a poller that never starts produces a frozen screen with zero signal.
+- **Fix:** A 10s heartbeat interval inside `LiveBadge` so age recomputes without data; apply the staleness threshold in the `sources === undefined` branch too; route the rejections through `onError`.
 - **Effort:** S
-- **Grade lift:** B → B+
+- **Grade lift:** B → B+ (the status feature becomes trustworthy under failure — its whole point)
 
-#### ~~C3~~ ✓ done 2026-08-30 — Modal dialogs have no focus trap or focus restore
-- **Outcome:** Focus moves to Close on open, Tab is trapped, focus returns to the thumbnail on close.
-- **Where:** `src/components/bits.tsx:68-89` (`ZoomLayer`), `Overlays.tsx:29` (`ConfirmDialog`)
-- **What's wrong:** `role="dialog" aria-modal="true"` but focus never moves in, Tab isn't trapped, and focus isn't returned to the opener.
-- **Fix:** On open store `document.activeElement`, focus the close button, bound Tab cycling to the figure, restore on close.
+#### C3 — "You are on the clock" is announced to nobody
+- **Where:** `src/components/ClockBanner.tsx:44`; only two `role="status"` and one `aria-live` exist in the tree
+- **What's wrong:** The app's most important state change renders as a plain styled span. A screen-reader user gets a chime (if enabled) and no text; the `is-mine` highlight is color-only.
+- **Fix:** Wrap the clock-main block in `role="status" aria-live="assertive" aria-atomic="true"` rendering a stable sentence ("You are on the clock — pick 3.07, 41 seconds left"), announced once per transition rather than every second.
 - **Effort:** S
-- **Grade lift:** B → B+
+- **Grade lift:** B → B+ (the headline moment becomes accessible)
 
-#### ~~C4~~ ✓ done 2026-08-30 — `ordinal()` duplicated, and the copies disagree
-- **Outcome:** One `ordinal()` in `format.ts`; both copies deleted.
-- **Where:** `src/App.tsx:455-459` vs `src/components/SeasonTabs.tsx:291-296`
-- **What's wrong:** Two implementations of the same suffix logic; one guard is dead code — a maintenance trap.
-- **Fix:** Export a single `ordinal()` from `format.ts`; delete both copies.
+#### C4 — `ConfirmDialog` claims `aria-modal` but doesn't trap focus
+- **Where:** `src/components/Overlays.tsx:17-50`; the working trap lives in `bits.tsx:79-105` (`ZoomLayer`)
+- **What's wrong:** Tab walks straight out of the dialog into the 200-row board behind the scrim; the pattern exists in the repo and this dialog was left out of it.
+- **Fix:** Extract `ZoomLayer`'s keydown trap into a `useFocusTrap(ref)` hook in `bits.tsx`; use it in both; set `inert`/`aria-hidden` on `.shell` while an overlay is open.
 - **Effort:** S
-- **Grade lift:** B → B
+- **Grade lift:** B → B (consistency with the app's own best practice)
 
-#### ~~C5~~ ✓ done 2026-08-30 — 16+ `useState` hooks in `App.tsx`, several feeding one child
-- **Outcome:** Chime moved to `prefs.ts`; season state moved to `useSeasonSession`. 19 → 16 `useState`.
-- **Where:** `src/App.tsx:39-68`, `settingsRows` at `:320-375`
-- **What's wrong:** `chime`/`polling`/`settingsOpen`/`chatOpen`/`preference` exist only to build `settingsRows`, which is rebuilt on every 3-second draft tick and pushed through 8 `Header` props.
-- **Fix:** Move theme/chime/settings-menu state into a `useSyncExternalStore` module beside `avatars.ts`; `Header` subscribes directly. (Overlaps A6.)
-- **Effort:** M
-- **Grade lift:** B → B+
-
-#### ~~C6~~ ✓ done 2026-08-30 — Season error state renders as a loading state
-- **Outcome:** Renders an error block with a working "Try again" instead of a spinner caption.
-- **Where:** `src/App.tsx:415-418` (render), `:193` (rejection path)
-- **What's wrong:** When `loadSeason` rejects, the error string is shown inside `.season-loading` with no retry affordance; recovery requires finding Settings → Refresh.
-- **Fix:** Branch on `seasonError !== null` first; render an error block with "Try again" calling `api.loadSeason(true)`, mirroring `LaunchScreen.onRetry`.
+#### C5 — Failed actions vanish in a 5-second toast with no retry
+- **Where:** `src/App.tsx:216-261` (`doDraft`, `doUndo`, `doExport`, `doRefreshData`, `togglePolling`); auto-dismiss at `:94`
+- **What's wrong:** Every mutating rejection becomes `showToast(String(e))` — raw Rust error text that auto-dismisses in 5s with no retry affordance. A failed "Mark drafted" during a live draft disappears before the user can react.
+- **Fix:** Extend `Toast` with an optional `{ label, onClick }` action; pass a retry that re-runs the call; suppress auto-dismiss whenever an action is present.
 - **Effort:** S
-- **Grade lift:** B → B+
+- **Grade lift:** B → B+ (draft-night failures become recoverable)
 
-#### ~~C7~~ ✓ done 2026-08-30 — Ten unscoped global stylesheets with cross-file selector coupling
-- **Outcome:** See the note below — one real collision fixed, and `scripts/check-css.mjs` added to the gate.
-- **Where:** imports at `src/App.tsx:21-30`; e.g. `.board-row` in `board.css:58` vs `.board-row .avatar` in `components.css:486`
-- **What's wrong:** Nothing is scoped; any new `.chip`/`.bar` class silently collides across files split by screen, not component.
-- **Fix:** Keep `theme.css` as token/atom layer; convert component sheets to CSS Modules (zero-config in Vite), imported by their owning component.
-- **Effort:** L
-- **Grade lift:** B → B+
+#### C6 — The settings menu has no menu semantics, state exposure, or focus management
+- **Where:** `src/components/Header.tsx:145,222-260`
+- **What's wrong:** No `aria-haspopup`/`role="menu"`; toggle state lives only in a styled span (no `aria-checked`); focus never moves in or restores; dismissal is mousedown-only so tabbing away leaves it open.
+- **Fix:** `role="menu"` on the container, `role="menuitemcheckbox" aria-checked` per row, focus first row on open / restore the gear on close, add a `focusout` handler.
+- **Effort:** S
+- **Grade lift:** B → B (completes the menu's half-built ARIA)
+
+#### C7 — Load-bearing information exists only in mouse-hover `title=`
+- **Where:** `src/components/bits.tsx:266` (injury tag), `Header.tsx:30,38` (sync error detail), `SeasonScreen.tsx:79,87` (per-source freshness)
+- **What's wrong:** The injury word ("Questionable") and the *only* diagnostics for why sync is failing live in `title` on non-focusable spans — unreachable by keyboard, unreliable for screen readers.
+- **Fix:** `aria-label` + visually-hidden text on the injury tag; make the sync pill a button that expands an inline detail line (or render source lines under the badge whenever a source is behind).
+- **Effort:** S
+- **Grade lift:** B → B+ (the new status work becomes available to everyone)
 
 ---
 
-## D — Testing & Reliability — B−
+## D — Testing & Reliability — B
 
-What exists is the good kind: 104 Rust tests that are property-flavored (lineup fill order, odds monotonicity/determinism, trade one-sidedness — `season_lineup.rs:250-434`, `season_odds.rs:275-332`, `season_trades.rs:165-245`), a full-draft invariant simulation (`tests/simulation.rs:149`), and 81 behavior-driven Testing Library tests that mock only the IPC boundary. But measured coverage tells the honest story: **Rust 57.3% lines, frontend 71.8% lines**, and the untested set is load-bearing — `sleeper.rs` at 12% (every wire type in the app), `season.rs` at 0% (the 400-line view assembly), `engine.rs` at 36%, `api.ts` at 18% [FE], `SeasonTabs.tsx` at 44% [FE]. No coverage gate exists on either side, so this can only drift down.
+The corpus is genuinely good — 212 Rust tests (74.77% lines), 160 frontend
+tests (88.97% lines), property-style coverage of the solvers, golden tests on
+the view. But the gates are weaker than they look: the frontend coverage
+thresholds are dead configuration that nothing executes, the most stateful
+backend module is at 0%, no test anywhere drives the real Tauri app, and
+today's lazy-chunk split added a failure mode (rejected `import()`) with no
+error boundary to catch it.
 
-#### ~~D1~~ ✓ done 2026-08-30 — [BE] Wire-parsing layer (`sleeper.rs`) has zero direct tests
-- **Outcome:** `tests/wire_parsing*.rs` deserialize fixture responses and assert defaults.
-- **Where:** `src-tauri/src/sleeper.rs:145-189` (`PlayerMeta`/`ProjectionRow`), `:49-55` (`last_regular_week`)
-- **What's wrong:** 330 lines of `#[serde(default)]` deserialization against an undocumented endpoint; a Sleeper field rename silently yields `None`/`0.0` and mis-scores the entire board.
-- **Fix:** Checked-in raw-response fixture; assert `stat("pass_yd")`, `adp_ppr`, bye-week `opponent: None`; three-case test for `last_regular_week`.
+#### D1 — [FE] The frontend coverage gate is dead configuration
+- **Where:** `vitest.config.ts:12` (thresholds declared) vs `package.json:12` (`vitest run`, no `--coverage`) and `.github/workflows/verify.yml:41`
+- **What's wrong:** The 80/80/75/70 thresholds only fire if a human types `--coverage` by hand. Rust is gated in CI; the frontend is not. A commit dropping `App.tsx` to 40% passes green.
+- **Fix:** Add `"test:coverage": "vitest run --coverage"`; run it in CI's verify step; keep bare `vitest run` for the fast local loop.
 - **Effort:** S
-- **Grade lift:** B− → B
+- **Grade lift:** B → B+ (turns claimed gates into real ones)
 
-#### ~~D2~~ ✓ done 2026-08-30 — [BE] View assembly (`season.rs`, `season_view_parts.rs`, `engine.rs::assemble`) untested
-- **Outcome:** `tests/season_view*.rs` and `engine_*.rs`; 106 → 197 Rust tests.
-- **Where:** `src-tauri/src/season.rs` (0%), `season_view_parts.rs` (0%), `engine.rs:295` (`assemble`, incl. warning accumulation `:327,:342`)
-- **What's wrong:** The largest single behavior in the app — assembling every screen — is exercised only indirectly.
-- **Fix:** Golden test of `build_season_view` from constructed inputs; `assemble` test asserting warnings surface instead of failing the load.
+#### D2 — [both] The season poller has no health channel; failures are silently eaten
+- **Where:** `src-tauri/src/commands_season.rs:124` (`.is_ok()` discards the error); `src/session.ts:61,65` (`.catch(() => undefined)`)
+- **What's wrong:** The draft poller aggregates errors and emits `poll-health`; the season poller emits nothing on failure. Sleeper can be down all Sunday and the UI shows a stale scoreboard with no signal. (Pairs with C2 — this is the backend half.)
+- **Fix:** Collect the error, call `poll::record_poll_outcome`, emit a `season-poll-health` event, render it in `SeasonScreen`; replace both swallowed rejections with `setError`.
 - **Effort:** M
-- **Grade lift:** B− → B+
+- **Grade lift:** B → B+ (reliability signal for the season half of the app)
 
-#### ~~D3~~ ✓ done 2026-08-30 — [FE] `api.ts` at 18% — the entire IPC surface
-- **Outcome:** `api.test.ts` covers both arms — 18% → 100%.
-- **Where:** `src/api.ts` (17.9% statements at audit)
-- **What's wrong:** Only `validateDraftView` was tested; command routing, event validation, and the browser-fixture arm were dark.
-- **Fix:** Mock `invoke`/`listen`; assert command names/args per wrapper, payload validation on events, fixture caching and read-only errors in the browser arm.
-- **Effort:** S
-- **Grade lift:** B− → B
-
-#### ~~D4~~ ✓ done 2026-08-30 — [FE] `SeasonTabs.tsx` 44%, `Chat.tsx` 54% despite having test files
-- **Outcome:** `SeasonTabs.tsx` 44% → 96%, `Chat.tsx` 54% → 96%.
-- **Where:** `src/components/SeasonTabs.tsx`, `src/components/Chat.tsx`
-- **What's wrong:** Tab-switching branches, standings sorting, LastSeason rendering, and most Chat interaction paths unexercised.
-- **Fix:** Per-tab render assertions, sort toggling, pending-trade badge, ordinal edge cases; Chat send/error/settings flows with a mocked api.
-- **Effort:** S
-- **Grade lift:** B− → B
-
-#### ~~D5~~ ✓ done 2026-08-30 — No coverage gate on either side
-- **Outcome:** vitest thresholds at 80/80/75/70; CI gates Rust at 68% lines via `cargo llvm-cov`.
-- **Where:** `vitest.config.ts` (no `coverage.thresholds`), `package.json:19` (`verify` lacks coverage), CI has no `cargo llvm-cov`
-- **What's wrong:** Coverage can silently regress; it took this audit to notice 57%/72%.
-- **Fix:** `coverage.thresholds` in vitest at the achieved level; add `cargo llvm-cov --fail-under-lines <N>` to CI (locally optional — it doubles test time).
-- **Effort:** S
-- **Grade lift:** B− → B
-
-#### ~~D6~~ ✓ done 2026-08-30 — [BE] Poll loops untestable and untested
-- **Outcome:** `DraftPollMemory`, `LiveEmitGate`, `AnalysisCache` and `record_poll_outcome` in `poll.rs`, with 9 tests.
-- **Where:** `src-tauri/src/commands_draft.rs:207-305`, `commands_season.rs:82-142`
-- **What's wrong:** Change detection, error aggregation, and emit gating — the logic that runs all draft night — has zero tests because it's welded to Tauri `State`.
-- **Fix:** Same refactor as A3; then table-test `poll_once`.
+#### D3 — [BE] `commands_season.rs` is 0.00% covered — the most stateful backend file
+- **Where:** `src-tauri/src/commands_season.rs` (190/190 regions missed); no integration test references it
+- **What's wrong:** The 30s poller loop, `LiveEmitGate`/`AnalysisCache` wiring, and the generation guard live entirely outside test reach because the loop body is welded to `tauri::async_runtime::spawn`.
+- **Fix:** Extract the loop body into `async fn season_tick(...) -> TickOutcome` in `poll.rs` (the `DraftPollMemory` precedent) and unit-test it against `mock_league.rs`. Combines naturally with D2.
 - **Effort:** M
-- **Grade lift:** B− → B
+- **Grade lift:** B → B+ (the draft poller got this treatment; the season poller never did)
+
+#### D4 — [FE] No error boundary — a failed lazy chunk blanks the whole window
+- **Where:** `src/App.tsx:395,399,415` (Suspense wrappers); zero `ErrorBoundary`/`componentDidCatch` hits in the tree
+- **What's wrong:** Suspense handles the pending promise, not a rejected one. A corrupt chunk or torn install unmounts the entire tree to a blank window — a failure mode today's split made non-hypothetical.
+- **Fix:** A ~20-line `ErrorBoundary` class around each Suspense with a "Reload" button; test by throwing from a mocked lazy import.
+- **Effort:** S
+- **Grade lift:** B → B+ (contains the new failure mode)
+
+#### D5 — [BE] Two untested pieces from today: `season_lookup.rs` (48%) and `AnalysisCache`
+- **Where:** `src-tauri/src/season_lookup.rs:18,29,47,59` (no test block; the missing-metadata fallbacks are exactly what's uncovered); `poll.rs:107-140` (`AnalysisCache` — the mod tests below it cover its two neighbors but not it)
+- **What's wrong:** Every season section resolves names through `Lookup`'s fallback layer, untested; `AnalysisCache`'s `ticks % rebuild_every` expiry and `.max(1)` clamp are off-by-one-prone and unverified.
+- **Fix:** Tests for absent id / missing position / missing team / injury None-vs-Some; three asserts on the cache (None before first observe, held through tick 19, None at tick 20).
+- **Effort:** S
+- **Grade lift:** B → B (closes today's coverage stragglers)
+
+#### D6 — [FE] The worst frontend files sit below the thresholds the config claims
+- **Where:** `src/prefs.ts` 57.9% stmts / 0% branches; `src/components/Board.tsx` 68.5% stmts; `src/App.tsx` 68.8% stmts with lines 392-423 (the whole screen-switch/Suspense/season-error branch) dark; `src/theme.ts` 53.3% branches; `src/session.ts` 64.3% functions
+- **What's wrong:** The primary screen and the persistence layer are the least-covered files in the repo — invisible until D1 lands, at which point they fail the gate.
+- **Fix:** `prefs.ts`/`theme.ts` are pure — test first; then a `Board.tsx` pass for the empty/filtered branches and an `App.tsx` test through the screen-switch path.
+- **Effort:** M
+- **Grade lift:** B → B+ (do before or with D1 so the gate lands green)
+
+#### D7 — [both] Nothing ever launches the real app — confirmed no e2e harness exists
+- **Where:** no `tauri-driver`/Playwright/WebdriverIO anywhere (checked); `lib.rs` also 0% covered
+- **What's wrong:** Command registration, the capability set, the CSP, and the bundle are never exercised together in a real WKWebView — the most likely place for a shipping break.
+- **Fix:** One smoke spec via `tauri-driver` + WebdriverIO: launch, load the committed fixture league, assert the board renders. A single test closes the "does it boot" gap.
+- **Effort:** L
+- **Grade lift:** B → B+ (the one class of regression no current test can catch)
+
+#### D8 — [FE] Time-dependent tests run against the real clock
+- **Where:** `src/format.test.ts:52,59` (`Date.now() + ms + 30_000` fudge), `SeasonTabs.test.tsx:99`, `SeasonScreen.test.tsx:6`
+- **What's wrong:** The 30s fudge makes tests less likely to fail rather than deterministic, and the interesting rollover boundary is never actually asserted. `ClockBanner.test.tsx:16` already shows the right pattern.
+- **Fix:** `vi.useFakeTimers()` + `vi.setSystemTime(...)` in the four files; assert the exact boundaries the fudge hides.
+- **Effort:** S
+- **Grade lift:** B → B (removes latent flakiness)
 
 ---
 
 ## E — Security — A−
 
-Unusually disciplined for a local-first desktop app. Minimal Tauri capability set (`capabilities/default.json:7-10` — no fs/shell/http exposed to the webview). `headshots.rs:32-47` refuses everything but a bare hex hash on a hardcoded `sleepercdn.com` base or an `uploads/` URL with a hex stem — `https://evil.example/x.jpg` and traversal are refused with a test proving it (`headshots.rs:244-248`). All fetched hosts are compile-time constants. No secrets in the repo; `npm audit` clean (0 vulns / 319 deps). Key storage uses absolute-path `/usr/bin/security` with argv arrays; the chat CLI is spawned with `--tools ""` and prompt over stdin. Remaining gaps are defense-in-depth.
+Genuinely strong for a local-first app: restrictive CSP verified in the
+running webview, key off argv with a test guarding it, no secrets in the repo,
+clean audits, host-constant fetching, validated inputs. What remains is
+defense-in-depth: CI trust, file permissions, and one unused capability.
 
-#### ~~E1~~ ✓ done 2026-08-30 — CSP is disabled entirely
-- **Outcome:** Explicit policy set in `tauri.conf.json`; verified in the running desktop app — images still load.
-- **Where:** `src-tauri/tauri.conf.json:24` (`"csp": null`)
-- **What's wrong:** The webview may load script/image/connect from any origin while rendering remote-derived strings (team/player names).
-- **Fix:** `"csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"` — the data-URL headshot design already accommodates it.
+#### E1 — CI actions on floating tags, no `permissions:` block, no job timeouts
+- **Where:** `.github/workflows/verify.yml:20,24,36,64,68,75-77`
+- **What's wrong:** Six actions pinned to mutable tags — including third-party `rustsec/audit-check@v2`, which is handed `secrets.GITHUB_TOKEN`. No top-level `permissions:` (token gets repo default, not `contents: read`); no `timeout-minutes`, so a hung build burns up to 6 hours at 10× macOS billing.
+- **Fix:** Pin all six to commit SHAs with version comments; add `permissions: { contents: read }`; `timeout-minutes: 30`/`10` on the two jobs.
 - **Effort:** S
-- **Grade lift:** A− → A
+- **Grade lift:** A− → A (closes the supply-chain gap in CI)
 
-#### ~~E2~~ ✓ done 2026-08-30 — `extract_id` falls through to raw input — a latent SSRF-path primitive
-- **Outcome:** `extract_id` returns `Result` and accepts only a 15–25 digit run.
-- **Where:** `src-tauri/src/commands_draft.rs:11-18`; reaches `format!("{BASE}/league/{league_id}")` at `sleeper.rs:282`
-- **What's wrong:** With no ≥15-digit run, `input.trim()` passes verbatim; a pasted `../../projections/nfl/2025` normalizes out of `/v1/`. Harmless today (same host, public GETs), one refactor from mattering.
-- **Fix:** Reject unless all-ASCII-digits: `Err("that doesn't look like a Sleeper ID")`.
+#### E2 — League cache written world-readable; only `config.json` gets 0600
+- **Where:** `src-tauri/src/engine.rs:106` (dir at 0755), `cache.rs:51` (files at 0644); the correct pattern exists at `engine.rs:233-237`
+- **What's wrong:** Rosters, users, league member names/ids, and the players dictionary are readable by any local process; the repo demonstrably knows the fix and applies it to one file only.
+- **Fix:** `set_permissions(0o700)` on the data dir in `Engine::new`; add the existing `#[cfg(unix)]` 0600 block to `cache::replace_file` (and `headshots.rs:124`'s dir).
 - **Effort:** S
-- **Grade lift:** A− → A−
+- **Grade lift:** A− → A− (consistency; low sensitivity but zero cost)
 
-#### ~~E3~~ ✓ done 2026-08-30 — One cache filename skips the sanitizer
-- **Outcome:** One shared `cache::safe_key` used by all three cache filenames.
-- **Where:** `src-tauri/src/season_history.rs:132-133` vs the filtered versions at `engine.rs:152-157`, `season_engine.rs:81-85`
-- **What's wrong:** `history_name` interpolates `league_id` unsanitized — inconsistency is exactly how a traversal lands later.
-- **Fix:** Extract one `fn safe_key(&str)` in `engine.rs`; call from all three sites.
+#### E3 — `tauri-plugin-opener` is registered and granted a capability nothing uses
+- **Where:** `src-tauri/src/lib.rs:67`, `capabilities/default.json` (`opener:default`); zero frontend usages (checked)
+- **What's wrong:** The webview holds a live open-url/open-path permission no code path needs — a free XSS-to-shell escalation step in a webview whose CSP permits inline styles.
+- **Fix:** Drop the plugin init, the capability entry, and both dependency entries; re-add scoped with an allowlist if a link ever needs opening.
 - **Effort:** S
-- **Grade lift:** A− → A−
-
-#### ~~E4~~ ✓ done 2026-08-30 — Raw username interpolated into a URL path via bare `reqwest::get`
-- **Outcome:** Username validated (`[A-Za-z0-9_-]{1,32}`) and routed through the pooled client.
-- **Where:** `src-tauri/src/commands_draft.rs:60-61`
-- **What's wrong:** Skips pooled-client timeouts/user-agent and does no encoding/validation of the username.
-- **Fix:** Validate `[A-Za-z0-9_]{1,32}` (Sleeper's own rule) and route through `state.engine.client` (same change as A4).
-- **Effort:** S
-- **Grade lift:** A− → A−
-
-#### ~~E5~~ ✓ done 2026-08-30 — Chat CLI discovery trusts `PATH`
-- **Outcome:** Known install paths first; the PATH fallback skips world-writable directories.
-- **Where:** `src-tauri/src/chat_cli.rs:23-34` (`find_cli`)
-- **What's wrong:** Executes the first `claude` on `PATH` with no ownership check; low risk on a single-user Mac.
-- **Fix:** Prefer the known absolute paths; require the PATH fallback to live outside world-writable dirs.
-- **Effort:** S
-- **Grade lift:** A− → A−
+- **Grade lift:** A− → A (attack-surface reduction for free)
 
 ---
 
 ## F — Dependencies & Tech Currency — A−
 
-Current and unusually lean: 4 production npm deps, 6 direct Cargo deps, all at or near latest (React 19.2, Vite 7.3, Vitest 4.1, ESLint 10.9, TS 5.8, Tauri 2.11, Tokio 1.53, reqwest 0.12). Both lockfiles committed; CI runs `npm ci` against the full verify gate. `npm audit`: zero vulnerabilities. Hand-rolling base64 (`headshots.rs:64-88`, tested against RFC vectors) instead of adding a dep was a defensible call.
+Lean and current, both lockfiles committed, audits clean, toolchain pinned and
+read by CI. Two pinning inconsistencies remain.
 
-#### F1 — Two major versions of reqwest in the binary  *(◦ not done — deliberate)*
-- **Outcome:** **Investigated and closed as a false positive.** `reqwest` 0.13 only enters the graph on targets this app does not ship to; on macOS `cargo tree` shows exactly one reqwest. Bumping to match pulls in a different rustls/aws-lc-rs chain for no benefit here. 0.12.28 is now pinned with that reasoning in `Cargo.toml`; revisit if Android becomes real.
-- **Where:** `src-tauri/Cargo.lock` (0.12.28 direct + 0.13.4 transitive), `Cargo.toml:23`
-- **What's wrong:** Two TLS/HTTP stacks compile into the binary.
-- **Fix:** Bump the direct dep to `0.13` and re-lock, or confirm via `cargo tree -d` the duplicate is unavoidable.
+#### F1 — npm side ignores the pinning rule the Cargo side documents
+- **Where:** `package.json:31-33` (`@tauri-apps/api: "^2"`, `@tauri-apps/cli: "^2"`) vs the pinning rationale at `src-tauri/Cargo.toml:19-31`; `.nvmrc`=22 but no `.npmrc`
+- **What's wrong:** A clean `npm install` can pull Tauri JS 2.99 against Rust pinned at 2.11 — exactly the IPC-ABI drift the Cargo comment exists to prevent. And `engines` isn't enforced without `engine-strict`, so Node 20 fails confusingly instead of clearly.
+- **Fix:** Pin both to `^2.11`; add `.npmrc` with `engine-strict=true`.
 - **Effort:** S
-- **Grade lift:** A− → A−
+- **Grade lift:** A− → A (one pinning philosophy, both ecosystems)
 
-#### ~~F2~~ ✓ done 2026-08-30 — Bare-major version ranges on the framework
-- **Outcome:** Minors pinned with the reasoning recorded in `Cargo.toml`.
-- **Where:** `src-tauri/Cargo.toml:20-23`
-- **What's wrong:** `tauri = "2"` means `cargo update` can jump minors unreviewed.
-- **Fix:** Pin tested minors (`tauri = "2.11"`, `reqwest = "0.12.28"`) so upgrades are explicit commits.
+#### F2 — Mobile-only crate types slow every build of a macOS-only app
+- **Where:** `src-tauri/Cargo.toml:12` (`crate-type = ["staticlib", "cdylib", "rlib"]`)
+- **What's wrong:** `staticlib`/`cdylib` exist only for iOS/Android — targets the same file's reqwest comment says aren't real — and add two link steps to every build.
+- **Fix:** Reduce to `["rlib"]` (or cfg-gate the mobile types).
 - **Effort:** S
-- **Grade lift:** A− → A−
-
-#### ~~F3~~ ✓ done 2026-08-30 — No supply-chain job in CI
-- **Outcome:** New `audit` job runs `cargo audit` and `npm audit --audit-level=high`.
-- **Where:** `.github/workflows/verify.yml`
-- **What's wrong:** RustSec advisories on transitives would go unnoticed; `npm audit` never runs in CI.
-- **Fix:** Add `cargo audit` + `npm audit --audit-level=high` as a step or weekly scheduled job.
-- **Effort:** S
-- **Grade lift:** A− → A
-
-#### ~~F4~~ ✓ done 2026-08-30 — `coverage/` not gitignored
-- **Outcome:** Added to `.gitignore`, and excluded from the LOC and ESLint checks it was breaking.
-- **Where:** `.gitignore` (missing entry); `coverage/` appears untracked after test runs
-- **What's wrong:** Generated HTML will eventually get committed.
-- **Fix:** Add `coverage` to `.gitignore` alongside `dist`.
-- **Effort:** S
-- **Grade lift:** A− → A−
+- **Grade lift:** A− → A− (faster builds, honest manifest)
 
 ---
 
-## G — Performance & Scalability — C+
+## G — Performance & Scalability — B
 
-The caching design is good (`avatars.ts:46-57` memoizes in-flight promises; backend gates emissions on real score changes). But the season poll does heroic amounts of discarded work: every 30 seconds `build_season_view` runs a 4,000-iteration Monte Carlo, ~1,600 lineup solves, and a triple-nested trade search — to redraw a scoreboard whose totals moved 0.1 points. The frontend has zero `React.memo` and a 200-row board that fully re-renders on every 3-second tick.
+The headline fixes are real (odds sim 39→14ms, board identity caching, the
+analysis cache). But the second tier is substantial: the analysis cache is
+incomplete so three sections still rebuild per tick, the board emit deep-clones
+~700 players every 3 seconds, the 14.6 MB parse still lands on the runtime
+thread via the network path, and the frontend re-renders the draft screen twice
+a second from duplicate clocks.
 
-#### ~~G1~~ ✓ done 2026-08-30 — Rival candidate lists rebuilt inside the free-agent loop, ~780×/poll
-- **Outcome:** Rival pools and baselines built once outside the free-agent loop.
-- **Where:** `src-tauri/src/season_moves.rs:94-97` (`CANDIDATE_POOL=60` × ~13 rivals)
-- **What's wrong:** Identical `Vec<Candidate>` reconstructed per (agent × rival) pair, each triggering two lineup solves.
-- **Fix:** Hoist `rival_pools: Vec<(Vec<Candidate>, f64)>` (pool + baseline) above the loop; index in.
+#### G1 — Three sections rebuild every 30s from inputs that only change at load
+- **Where:** `src-tauri/src/season.rs:277-281`; `refresh_live` writes only matchups/scores/rosters (`season_engine.rs:389-399`)
+- **What's wrong:** `activity`, `recent_trades`, and `trends` (a 40-snapshot × 12-team diff) depend solely on `transactions`/`history`, set once at load — yet run on every tick. This is the exact waste `SeasonAnalysis` exists to eliminate; the fields were never added.
+- **Fix:** Add all three to `SeasonAnalysis` and `::of`; read from `cached` in the same `match` pattern as lines 173/199/207.
 - **Effort:** S
-- **Grade lift:** C+ → B− (60× fewer constructions, half the solves)
+- **Grade lift:** B → B+ (finishes the analysis cache's own design)
 
-#### ~~G2~~ ✓ done 2026-08-30 — `marginal_gain` recomputes a baseline the caller has
-- **Outcome:** `marginal_gain` takes the baseline instead of recomputing it.
-- **Where:** `src-tauri/src/season_moves.rs:63-64` vs baseline at `:79`
-- **What's wrong:** ~840 identical `lineup_total` recomputations per poll.
-- **Fix:** Pass `baseline: f64` into `marginal_gain`.
+#### G2 — All ten stylesheets load eagerly, blunting today's code-split
+- **Where:** `src/App.tsx:22-31`; ~1,400 lines (~60% of CSS) belong to lazy screens
+- **What's wrong:** JS is split but `board.css`, `season*.css`, `trends.css`, `live.css`, `chat.css` still ship in the entry chunk and parse before first paint.
+- **Fix:** Move each sheet's import into its owning lazy component; Vite emits per-chunk CSS automatically. Keep `theme/App/components/zoom` eager.
 - **Effort:** S
-- **Grade lift:** C+ → B− (with G1)
+- **Grade lift:** B → B+ (completes the lazy-load story)
 
-#### ~~G3~~ ✓ done 2026-08-30 — Trade search: ~2,900 iterations × 2 full-roster clones each
-- **Outcome:** A sound upper bound prunes pairs before any lineup solve; a randomized test over 40 rosters proves it matches brute force.
-- **Where:** `src-tauri/src/season_trades.rs:76-86` (`total_after_swap` clones), `MAX_TRADES=4` truncate at `:133`
-- **What's wrong:** On the order of a million `String` allocations per poll to keep 4 results.
-- **Fix:** Prune pairs where `theirs.points - ours.points < MIN_EDGE` at the same position before solving; consider `Arc<str>` for `Candidate` fields.
+#### G3 — The board emit deep-clones ~700 players and rescans per position every 3s
+- **Where:** `src-tauri/src/view.rs:271-280` (clone), `:282-304` (per-position tier scan ≈ 3,600 iterations), `:308-310` (per-pick String building to inspect 6 picks) — all under lock in the poll tick
+- **What's wrong:** Four owned strings per player per tick, then a full-vector walk per draftable position, then JSON serialisation of it all.
+- **Fix:** One-pass tier map (`HashMap<&str,(u32,u32)>`); slice the last 6 picks; serialise a borrowed view struct (or emit top-N with a tail command).
 - **Effort:** M
-- **Grade lift:** C+ → B−
+- **Grade lift:** B → B+ (the draft tick's biggest remaining cost)
 
-#### ~~G4~~ ✓ done 2026-08-30 — Odds simulation runs through `HashMap` in the hot loop
-- **Outcome:** Slot-indexed vectors replace the HashMaps. **Measured 39ms → 14ms**, identical odds.
-- **Where:** `src-tauri/src/season_odds.rs:142-186` (4,000 sims × ~90 games; three HashMaps + a re-sort per sim)
-- **What's wrong:** ~4-5M hash lookups per call for what could be flat vector indexing.
-- **Fix:** Map teams to 0..n once; replace `wins`/`points` maps with `Vec<f64>` indexed by slot.
+#### G4 — The 14.6 MB players parse still blocks the runtime — via the network path
+- **Where:** `src-tauri/src/sleeper.rs:285-287` (`resp.json::<T>()` deserialises in-task); only the disk read was moved off-thread
+- **What's wrong:** Cold loads block the executor for hundreds of milliseconds on the exact parse the doc comment at `engine.rs:132-137` warns about.
+- **Fix:** `resp.bytes().await` then `spawn_blocking(|| serde_json::from_slice(...))` in `projections.rs::players` (add a `get_bytes` helper; don't change the shared path).
 - **Effort:** S
-- **Grade lift:** C+ → B− (~10× on the sim)
+- **Grade lift:** B → B (finishes B3-from-the-first-audit properly)
 
-#### ~~G5~~ ✓ done 2026-08-30 — The full season view is rebuilt every 30s when only live scores changed
-- **Outcome:** `SeasonAnalysis` computed once and reused by the poller, rebuilt every ~10 minutes.
-- **Where:** `src-tauri/src/commands_season.rs:116-133` (poll refreshes live only; emit-gate at `:133` suppresses emit, not computation), `season.rs:244,313,343`
-- **What's wrong:** G1-G4's work — waivers, trades, odds — cannot change from a touchdown, yet is recomputed and thrown away every tick.
-- **Fix:** Split the view into cheap live + expensive analysis sections; cache analysis in `AppState` on `load_season`/`refresh_season`; merge on tick.
-- **Effort:** M
-- **Grade lift:** C+ → B (makes G1-G4 mostly moot on the poll path)
-
-#### ~~G6~~ ✓ done 2026-08-30 — 200 unmemoized board rows re-render on every 3s tick
-- **Outcome:** `BoardRow` memoised with a stable `useCallback` draft handler.
-- **Where:** `src/components/Board.tsx:243-284`; `Headshot` subscriptions via `bits.tsx:105-115`
-- **What's wrong:** ~400 store-subscribing leaves churn per `draft-updated`; "Show all" unbounds it entirely.
-- **Fix:** `memo`-wrapped `BoardRow`, `useCallback` the draft handler, pass `avatarMode` down instead of 400 subscriptions; window the "Show all" path.
-- **Effort:** M
-- **Grade lift:** C+ → B−
-
-#### ~~G7~~ ✓ done 2026-08-30 (evening) — Board filter+sort re-runs every tick with an O(n log n × getter) comparator
-- **Outcome:** Fully closed in `c8ca01e`. First pass made the comparator O(1) (decorate-sort-undecorate) but left the recompute, because a memo keyed on player identity would render stale points after "Refresh data". The focus wave solved that properly: `src/boardIdentity.ts` deep-compares every field of every incoming player and splices the *old array* back in only when the two are observationally identical — so the memo key (array identity) is now meaningful, no-op ticks skip the sort and the ~400 memoized row re-renders, and staleness is impossible by construction. Tests cover both directions: changed projections always render, identical ticks never re-sort.
-- **Where:** `src/components/Board.tsx:131-142`
-- **What's wrong:** `view.available` is a fresh identity each event, so the memo never hits; `column.value()` runs per comparison.
-- **Fix:** Precompute sort keys, then sort; memoize on `total_picks_made` + length instead of array identity.
+#### G5 — League load serialises six independent fetches
+- **Where:** `src-tauri/src/engine.rs:271-292` (league → draft → users sequential), `:354-359` (players, season projections, weekly projections sequential — the third an 18-request fan-out)
+- **What's wrong:** At 8s timeout each, a cold load pays serial latency for parallel work; sibling files already use `join!`/`buffer_unordered`.
+- **Fix:** `tokio::join!` draft with users; `try_join!` the three projection loads.
 - **Effort:** S
-- **Grade lift:** C+ → C+
+- **Grade lift:** B → B+ (~one round of latency instead of several on first load)
 
-#### G8 — Avatars cross the IPC bridge as base64 data URLs; no build target set  *(⚠ partly done 2026-08-30)*
-- **Outcome:** `build.target`, sourcemaps and `npm run analyze` (with `rollup-plugin-visualizer`) landed. The base64 → `asset:` protocol change did **not**: it alters how every picture in the app is delivered, and ~33% less data on a local bridge — for images already fetched once per session — does not justify that risk.
-- **Where:** `src-tauri/src/headshots.rs:90-92`; `vite.config.ts` (no `build.target`/`sourcemap`/analyze script)
-- **What's wrong:** ~33% size penalty + JSON round-trip per image; nothing would catch a heavy dep being added.
-- **Fix:** Serve cached files via Tauri's `asset:` protocol; set `build: { target: "es2021", sourcemap: true }`; add `rollup-plugin-visualizer` behind `npm run analyze`.
+#### G6 — The waiver/standings inner loops re-clone what a scratch buffer already solved
+- **Where:** `src-tauri/src/season_moves.rs:62-70` (`base.to_vec()` per candidate ≈ 23k String allocs/rebuild); `season_view_standings.rs:39` + `season_lineup.rs:100-115` + `season_lookup.rs:17-24` (candidates rebuilt per week ≈ 10.8k allocs)
+- **What's wrong:** `season_trades.rs:47-59` established the `scratch: &mut Vec` pattern; these two call sites weren't converted. Positions are week-invariant but resolved per week.
+- **Fix:** Give `marginal_gain` the scratch parameter; hoist candidate construction per roster and overwrite only `points` per week.
+- **Effort:** S
+- **Grade lift:** B → B (applies the repo's own established fix)
+
+#### G7 — Draft screen re-renders twice a second from duplicate clocks; several unmemoized per-render scans
+- **Where:** `src/components/ClockBanner.tsx:15-23,29,115` (two independent 1s intervals + unmemoized `buildQueue`); `Panels.tsx:195-199` (`atRisk` filter/sort per render); `DraftScreen.tsx:22-26` (O(n²) dedupe + three full scans); `TrendsTab.tsx:106-224` (14 SVG paths rebuilt per mousemove; `Math.min(...spread)` will eventually throw); `Board.tsx:297` ("Show all" renders ~600 rows / ~1,800 nodes in one commit, and the loading state at `:267` lacks `role="status"`)
+- **What's wrong:** Each is small; together they undo the render work G6-from-the-first-audit paid for.
+- **Fix:** One clock in a `useSyncExternalStore` module store; `useMemo` for `buildQueue`/`atRisk`/rank-Map/chart paths (reduce instead of spread); incremental paging for Show all; `role="status"` on the loader.
 - **Effort:** M
-- **Grade lift:** C+ → B−
+- **Grade lift:** B → B+ (a bundle of S-fixes; do as one pass)
+
+#### G8 — Remaining blocking file I/O on the runtime thread
+- **Where:** `src-tauri/src/headshots.rs:123-168` (all fs ops in `cached_image`, called dozens of times concurrently per roster render); `season_history.rs:145-157` (multi-MB history read-modify-write per `load_season`)
+- **What's wrong:** The `*_off_thread` helpers exist for exactly this and these two paths don't use them.
+- **Fix:** Route both through `read_cache_any_off_thread`/`write_cache_off_thread` (or `tokio::fs` for the images).
+- **Effort:** S
+- **Grade lift:** B → B (closes the last off-thread stragglers)
 
 ---
 
-## H — Documentation & Onboarding — C+
+## H — Documentation & Onboarding — B−
 
-`draft-assistant/README.md` is genuinely well-written for what it covers (domain model, run/build/dump commands, cache TTLs, browser-preview fixtures), and 41 of 43 Rust files carry `//!` module headers. The fatal gap is drift: the README describes a draft-only app while half the tree — 20 `season_*.rs` files, the chat feature, and the entire Season frontend — is never mentioned. No root README, no `docs/`.
+The READMEs are well-written where they're current, and 41+ Rust files carry
+module headers. But today's velocity outran the docs: the module map is
+missing 9 of 49 Rust files (including three added today), the frontend map is
+one line, the poller/caching architecture has no prose anywhere, and the one
+documented fixture-regeneration step names a path that doesn't exist on macOS.
 
-#### ~~H1~~ ✓ done 2026-08-30 — README layout block covers 9 of 43 Rust files
-- **Outcome:** Regenerated from the real tree; season and Ask Claude sections added.
-- **Where:** `draft-assistant/README.md:77-92`
-- **What's wrong:** `season*.rs`, `chat*.rs`, `commands_*.rs`, `state.rs`, `secrets.rs`, `roster.rs`, `projections.rs` are invisible to a newcomer.
-- **Fix:** Regenerate the layout block; add "Season screen" and "Ask Claude" architecture paragraphs parallel to the draft one.
+#### H1 — The fixture-regeneration instructions point at the wrong path
+- **Where:** `draft-assistant/README.md` (Browser preview: "delete `/tmp/draft-assistant-cli`"); actual path is `std::env::temp_dir()` → `$TMPDIR/draft-assistant-cli` (`bin/dump_season.rs:38`, `dump_state.rs:52`)
+- **What's wrong:** Following the doc deletes nothing, so you regenerate fixtures from stale cache — precisely the failure the surrounding paragraph warns about. It's the only documented dev loop for the browser preview.
+- **Fix:** `rm -rf "${TMPDIR:-/tmp}/draft-assistant-cli"`, or better, add a `--fresh` flag to both binaries.
 - **Effort:** S
-- **Grade lift:** C+ → B−
+- **Grade lift:** B− → B (the one actively wrong instruction)
 
-#### ~~H2~~ ✓ done 2026-08-30 — Season fixture and `dump_season` undocumented
-- **Outcome:** Both `dump_state` and `dump_season` documented, with the warning to regenerate together.
-- **Where:** `draft-assistant/README.md:61-65` vs `src/api.ts:124-127` and `src-tauri/src/bin/dump_season.rs`
-- **What's wrong:** Someone regenerating fixtures will silently ship a stale season screen.
-- **Fix:** Document `cargo run --bin dump_season -- <league_id> [username] [out.json]` beside `dump_state`; note both fixtures regenerate together.
-- **Effort:** S
-- **Grade lift:** C+ → B−
-
-#### ~~H3~~ ✓ done 2026-08-30 — No root README
-- **Outcome:** Added, pointing at `draft-assistant/` and listing the conventions.
-- **Where:** repo root (ships `TRACKER.md`, `draft-assistant-prompt.md`, two grade reports, no orientation)
-- **What's wrong:** A clone lands on four ambiguous markdown files; nothing says the app lives in `draft-assistant/`.
-- **Fix:** ~15-line root README: what this is, `cd draft-assistant && npm install && npm run tauri dev`, what TRACKER.md is.
-- **Effort:** S
-- **Grade lift:** C+ → B−
-
-#### H4 — No CLAUDE.md codifying the project's hard conventions  *(◦ not done — deliberate)*
-- **Outcome:** Not done. The conventions are now stated in the root README instead. A `CLAUDE.md` would be a second place for the same rules to drift out of date.
-- **Where:** repo root / `draft-assistant/`
-- **What's wrong:** The 500-LOC cap, the verify gate, and fixture-regeneration rules live only in prose or a contributor's head.
-- **Fix:** Add `CLAUDE.md` codifying LOC cap, verify gate, fixture rules.
-- **Effort:** S
-- **Grade lift:** C+ → B−
-
-#### ~~H5~~ ✓ done 2026-08-30 — Ask Claude has zero setup documentation
-- **Outcome:** "Ask Claude" section covers both auth routes and where the key lives.
-- **Where:** `draft-assistant/README.md` (absent); auth routes in `src-tauri/src/chat_cli.rs:25-31` and `secrets.rs`
-- **What's wrong:** The feature appears broken to anyone without the CLI or an API key.
-- **Fix:** "Ask Claude" README section covering both auth routes and where the key is stored.
-- **Effort:** S
-- **Grade lift:** C+ → B−
-
----
-
-## I — Developer Experience & Tooling — B−
-
-The core loop is real: one `verify` script chains LOC cap → fmt → tsc → build → both test suites → eslint `--max-warnings=0` → clippy `-D warnings`, and CI (`verify.yml:36-37`) runs exactly that, so local and CI can't diverge. The browser-fixture dev loop (`api.ts:116-137`) is a genuine strength — full-fidelity UI with no Rust compile. Weak at the edges: no Rust caching in CI on a macOS runner, no TS formatter, ESLint scoped to `src/` only, nothing pinning toolchains locally.
-
-#### ~~I1~~ ✓ done 2026-08-30 — CI rebuilds the full Tauri dependency graph every run on macOS minutes
-- **Outcome:** `Swatinem/rust-cache@v2` added.
-- **Where:** `.github/workflows/verify.yml:25-31` (npm cached, Rust not)
-- **What's wrong:** 27 dependency trees compiled from scratch per run at 10× minute billing; realistically 10-20 min per PR.
-- **Fix:** `Swatinem/rust-cache@v2` with `workspaces: draft-assistant/src-tauri` after the toolchain step.
-- **Effort:** S
-- **Grade lift:** B− → B+
-
-#### ~~I2~~ ✓ done 2026-08-30 — `verify` runs the fastest-failing checks last
-- **Outcome:** `verify:fast` runs loc → css → format → lint → typecheck before any build.
-- **Where:** `draft-assistant/package.json:19`
-- **What's wrong:** A one-character clippy violation costs the full test compile before surfacing.
-- **Fix:** Reorder to loc → fmt → lint → typecheck → test → build, or add a `verify:fast` subset.
+#### H2 — The poll/caching architecture exists only inside the code that implements it
+- **Where:** no README-level prose for: two pollers (3s draft, 30s season), `LiveEmitGate`, `AnalysisCache`/`ANALYSIS_EVERY`, `season_generation`; "Data sources" documents disk TTLs only
+- **What's wrong:** "Why didn't the screen update" is the most likely debugging question, and its answer is undocumented.
+- **Fix:** A "How it stays live" README section — one table: two pollers, three caches, what invalidates each.
 - **Effort:** S
 - **Grade lift:** B− → B
 
-#### ~~I3~~ ✓ done 2026-08-30 — No formatter for 37 TS files and 9 CSS files
-- **Outcome:** Prettier added with `.prettierrc`, wired into `format:check`.
-- **Where:** `draft-assistant/package.json:11` (`format:check` is cargo-fmt only)
-- **What's wrong:** Frontend formatting enforced by nothing but discipline.
-- **Fix:** Add prettier + `.prettierrc`; chain `prettier --check src scripts` into `format:check`.
+#### H3 — The Rust module map is missing 9 of 49 files, including three from today
+- **Where:** `draft-assistant/README.md:130-180`; missing `season_calls.rs` (the biggest new module), `season_injury.rs`, `season_sources.rs`, `season_types.rs`, `season_trends_view.rs`, `cache.rs`, `poll.rs`, `mock_league.rs`, `main.rs`
+- **What's wrong:** The map was updated for one of today's two refactors and not the other.
+- **Fix:** Add the nine lines under the existing groupings.
 - **Effort:** S
 - **Grade lift:** B− → B
 
-#### ~~I4~~ ✓ done 2026-08-30 — Config files unlinted and untypechecked
-- **Outcome:** ESLint glob widened to `scripts/**` and the config files with `globals.node`; `typecheck` is now `tsc --build`, which walks the node-side project.
-- **Where:** `eslint.config.js:11` (`files: ["src/**"]`), `tsconfig.json:33` (`include: ["src"]`)
-- **What's wrong:** `scripts/check-loc.mjs`, `vite.config.ts`, `vitest.config.ts`, and the eslint config itself are checked by nothing.
-- **Fix:** Widen the ESLint glob (+`globals.node`); use `tsc --build --noEmit` so the node tsconfig is checked.
+#### H4 — The frontend layout map is a single line
+- **Where:** `README.md:132-136` — five entries for all of `src/`; `session.ts`, `boardIdentity.ts`, `lazyScreens.tsx`, `prefs.ts`, `theme.ts`, `format.ts`, both types files are absent
+- **What's wrong:** A newcomer can't discover that `session.ts` owns the polling lifecycle or that `boardIdentity.ts` is a subtle load-bearing cache.
+- **Fix:** Expand `src/` to the per-file granularity the Rust side gets.
 - **Effort:** S
-- **Grade lift:** B− → B−
+- **Grade lift:** B− → B
 
-#### ~~I5~~ ✓ done 2026-08-30 — No local toolchain pinning
-- **Outcome:** `rust-toolchain.toml` (1.88.0), `.nvmrc` (22) and `engines`; CI reads both files rather than hardcoding.
-- **Where:** CI pins stable Rust + Node 22; no `rust-toolchain.toml`, `.nvmrc`, or `engines`
-- **What's wrong:** A dev on Node 20 or newer Rust gets lints CI didn't have, or vice-versa.
-- **Fix:** Add `rust-toolchain.toml` (channel + rustfmt/clippy components) and `.nvmrc`; have CI read them.
-- **Effort:** S
-- **Grade lift:** B− → B−
+---
 
-#### ~~I6~~ ✓ done 2026-08-30 — No pre-commit hook
-- **Outcome:** `.githooks/pre-commit` runs the sub-15-second slice; enabled via `core.hooksPath`.
-- **Where:** `.git/hooks/` (samples only); no husky/lefthook
-- **What's wrong:** Every mistake round-trips through a 10-20 min CI run.
-- **Fix:** `.githooks/pre-commit` running the sub-15-second subset (loc + eslint + tsc) with `core.hooksPath` documented.
+## I — Developer Experience & Tooling — B+
+
+The verify chain, hooks, pinned toolchains, and CI caching are all real. The
+gaps: the lint config isn't type-aware (so the promise bugs in C1/C2 were
+invisible to it), nothing lints accessibility, the pre-commit hook runs zero
+tests, and the Rust coverage floor has 6.8 points of dead slack.
+
+#### I1 — ESLint isn't type-aware; the season-poll bugs were invisible to it
+- **Where:** `eslint.config.js:22-26` (`recommended`, not `recommendedTypeChecked`)
+- **What's wrong:** No `no-floating-promises`/`no-misused-promises` in an app whose whole data layer is async IPC; it would have flagged `session.ts:61,65` directly.
+- **Fix:** Switch to `recommendedTypeChecked` with `projectService: true`; fix the handful of real findings the first run surfaces.
+- **Effort:** M
+- **Grade lift:** B+ → A− (the highest-value rule set available to this codebase)
+
+#### I2 — Nothing lints accessibility
+- **Where:** `eslint.config.js:20-36` — no `eslint-plugin-jsx-a11y`
+- **What's wrong:** Every issue in C3/C4/C6/C7 is in the class that plugin catches automatically; `--max-warnings=0` means it becomes a gate the moment it's added.
+- **Fix:** Add `jsx-a11y` (strict preset) to the `src/**` block; fix what it finds (overlaps the C items).
+- **Effort:** M
+- **Grade lift:** B+ → A− (stops the a11y gap from regrowing)
+
+#### I3 — The pre-commit hook runs zero tests and coverage never runs locally
+- **Where:** `.githooks/pre-commit` (five lint/type steps); `package.json:23` (`verify:fast`, same set); `test:frontend` has no `--coverage`
+- **What's wrong:** The fastest behavioral signal is a full `verify` (with a vite build and full cargo test) or a CI round trip — no middle rung; no developer ever sees a coverage number locally.
+- **Fix:** Add `verify:mid` = `verify:fast` + `test:frontend` (~10s measured) and make it the hook; keep cargo tests in full verify.
 - **Effort:** S
-- **Grade lift:** B− → B−
+- **Grade lift:** B+ → B+ (a 10-second behavioral gate before every commit)
+
+#### I4 — The Rust coverage floor can't catch a regression, and the tool install swallows failures
+- **Where:** `.github/workflows/verify.yml:59-60` — `--fail-under-lines 68` vs measured 74.77%; `cargo install cargo-llvm-cov --locked || true`
+- **What's wrong:** 6.8 points of slack — enough to delete every test in `season_calls.rs` and pass; the `|| true` turns install failures into a confusing "command not found" a line later.
+- **Fix:** Raise to `--fail-under-lines 74`; pin the cargo-llvm-cov version; drop `|| true`.
+- **Effort:** S
+- **Grade lift:** B+ → B+ (the gate becomes taut)
