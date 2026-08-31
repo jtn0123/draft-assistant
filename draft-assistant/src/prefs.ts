@@ -1,49 +1,63 @@
-// Small preferences that several components read but nothing owns: kept in a
-// module store, like the avatar mode, so they do not have to be threaded
-// through App.tsx and down as props.
+// Small preferences that several components read but nothing owns: kept in
+// module stores, like the avatar mode, so they do not have to be threaded
+// through App.tsx and down as props. The read/guard/write of each one lives
+// in persisted.ts; the keys and the stored words are unchanged, so upgrading
+// keeps whatever the user had chosen.
 
-import { useSyncExternalStore } from "react";
+import { persisted, usePersisted } from "./persisted";
 
-const CHIME_KEY = "da.chime";
-const listeners = new Set<() => void>();
+/** Which of the two main screens the window is showing. */
+export type Screen = "draft" | "season";
+/** How the head-to-head lineup is laid out. */
+export type LineupView = "Table" | "Scoreboard";
 
-function readChime(): boolean {
-  try {
-    return localStorage.getItem(CHIME_KEY) !== "off";
-  } catch {
-    return true;
-  }
-}
+const chime = persisted<"on" | "off">("da.chime", (raw) => (raw === "off" ? "off" : "on"), "on");
 
-let chime = readChime();
+// Season is the everyday screen; the draft is a few hours a year. The last
+// choice is remembered so a draft-night user lands back on the board.
+const screen = persisted<Screen>(
+  "da.screen",
+  (raw) => (raw === "draft" ? "draft" : "season"),
+  "season",
+);
+
+const lineupView = persisted<LineupView>(
+  "da.lineupView",
+  (raw) => (raw === "Scoreboard" ? "Scoreboard" : "Table"),
+  "Table",
+);
 
 export function chimeOn(): boolean {
-  return chime;
+  return chime.get() === "on";
 }
 
 export function setChime(next: boolean): void {
-  chime = next;
-  try {
-    localStorage.setItem(CHIME_KEY, next ? "on" : "off");
-  } catch {
-    // Not remembered in a sandboxed webview; still applies for this session.
-  }
-  for (const l of listeners) l();
+  chime.set(next ? "on" : "off");
 }
 
 export function useChime(): boolean {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    chimeOn,
-    chimeOn,
-  );
+  return usePersisted(chime) === "on";
 }
 
-/** Test seam: reset the store between cases. */
+export function setScreen(next: Screen): void {
+  screen.set(next);
+}
+
+export function useScreen(): Screen {
+  return usePersisted(screen);
+}
+
+export function setLineupView(next: LineupView): void {
+  lineupView.set(next);
+}
+
+export function useLineupView(): LineupView {
+  return usePersisted(lineupView);
+}
+
+/** Test seam: forget this session's choices and re-read what is stored. */
 export function resetPrefs(): void {
-  chime = true;
-  for (const l of listeners) l();
+  chime.reset();
+  screen.reset();
+  lineupView.reset();
 }

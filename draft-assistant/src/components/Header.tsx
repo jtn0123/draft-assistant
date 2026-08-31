@@ -4,8 +4,9 @@
 import { useEffect, useRef } from "react";
 import type { PollHealth } from "../types";
 import { age } from "../format";
+import { setChime, useChime, type Screen } from "../prefs";
 
-export type Screen = "draft" | "season";
+export type { Screen };
 
 export interface SettingsRow {
   label: string;
@@ -116,8 +117,6 @@ export function Header({
   onScreen,
   polling,
   pollHealth,
-  chime,
-  onToggleChime,
   onUndo,
   chatOpen,
   onToggleChat,
@@ -133,8 +132,6 @@ export function Header({
   onScreen: (screen: Screen) => void;
   polling: boolean;
   pollHealth: PollHealth | null;
-  chime: boolean;
-  onToggleChime: () => void;
   onUndo: () => void;
   chatOpen: boolean;
   onToggleChat: () => void;
@@ -143,6 +140,9 @@ export function Header({
   settingsRows: SettingsRow[];
   footerNote: string;
 }) {
+  // The chime is a preference the header owns outright: it reads it from the
+  // store and flips it there, rather than being handed both halves as props.
+  const chime = useChime();
   // Wraps the gear and the menu together, so focus moving between the two
   // does not read as leaving.
   const menuRef = useRef<HTMLDivElement>(null);
@@ -269,7 +269,7 @@ export function Header({
             <button
               type="button"
               className={`btn-ghost btn-square${chime ? " is-on" : ""}`}
-              onClick={onToggleChime}
+              onClick={() => setChime(!chime)}
               title={chime ? "Pick chime on — click to mute" : "Pick chime muted"}
               aria-pressed={chime}
             >

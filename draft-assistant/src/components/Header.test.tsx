@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PollHealth } from "../types";
 import { Header, type SettingsRow } from "./Header";
+import { resetPrefs, setChime } from "../prefs";
 import { settle } from "../test/settle";
 
 const rows = (onSelect = () => {}): SettingsRow[] => [
@@ -37,8 +38,6 @@ function Harness({
         onScreen={() => {}}
         polling
         pollHealth={pollHealth}
-        chime
-        onToggleChime={() => {}}
         onUndo={() => {}}
         chatOpen={false}
         onToggleChat={() => {}}
@@ -51,6 +50,24 @@ function Harness({
     </>
   );
 }
+
+// jsdom here has no storage of its own; give the preferences a scratch one.
+const saved = new Map<string, string>();
+
+beforeEach(() => {
+  saved.clear();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => saved.get(key) ?? null,
+    setItem: (key: string, value: string) => void saved.set(key, value),
+    removeItem: (key: string) => void saved.delete(key),
+  });
+  resetPrefs();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  resetPrefs();
+});
 
 const openMenu = async (onSelect?: () => void) => {
   render(<Harness onSelect={onSelect} />);
@@ -160,5 +177,26 @@ describe("the sync pill", () => {
     );
     expect(screen.getByText(/^Live · /)).toHaveClass("pill-live");
     expect(screen.queryByText(/Last try failed/)).not.toBeInTheDocument();
+  });
+});
+
+describe("the chime button", () => {
+  it("reads the preference itself, so nobody has to hand it down", async () => {
+    render(<Harness />);
+    const button = () => screen.getByRole("button", { name: "Pick chime on — click to mute" });
+    expect(button()).toHaveAttribute("aria-pressed", "true");
+
+    await settle(() => {
+      button().click();
+    });
+    const muted = screen.getByRole("button", { name: "Pick chime muted" });
+    expect(muted).toHaveAttribute("aria-pressed", "false");
+    expect(saved.get("da.chime")).toBe("off");
+
+    // And it follows the store when something else does the changing.
+    await settle(() => {
+      setChime(true);
+    });
+    expect(button()).toHaveAttribute("aria-pressed", "true");
   });
 });

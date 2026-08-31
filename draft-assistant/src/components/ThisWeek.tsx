@@ -5,17 +5,7 @@ import { useState } from "react";
 import type { LineupCall, MatchupView, WaiverTarget } from "../season-types";
 import { fmt, ideasAgeNote, injuryWord, kickoffLabel, pct, signed } from "../format";
 import { Headshot, PlayerName, PanelHead, PosBadge, TeamAvatar, Empty, Segmented } from "./bits";
-
-const LINEUP_VIEW_KEY = "da.lineupView";
-type LineupView = "Table" | "Scoreboard";
-
-function storedLineupView(): LineupView {
-  try {
-    return localStorage.getItem(LINEUP_VIEW_KEY) === "Scoreboard" ? "Scoreboard" : "Table";
-  } catch {
-    return "Table";
-  }
-}
+import { setLineupView, useLineupView } from "../prefs";
 
 // ---------- calls to make ----------
 
@@ -121,16 +111,8 @@ export function LineupCompare({
   /** 0..1 chance of winning this week, shown beside the margin. */
   winOdds: number;
 }) {
-  const [view, setView] = useState<LineupView>(storedLineupView);
-
-  const change = (next: LineupView) => {
-    setView(next);
-    try {
-      localStorage.setItem(LINEUP_VIEW_KEY, next);
-    } catch {
-      // Preference is a nicety; failing to store it must not break the toggle.
-    }
-  };
+  // Remembered between sessions, in prefs.ts along with the rest of them.
+  const view = useLineupView();
 
   const [which, setWhich] = useState<"Best" | "Set">("Best");
 
@@ -177,7 +159,7 @@ export function LineupCompare({
           <Segmented
             options={["Table", "Scoreboard"] as const}
             value={view}
-            onChange={change}
+            onChange={setLineupView}
             label="Lineup view"
           />
         </span>

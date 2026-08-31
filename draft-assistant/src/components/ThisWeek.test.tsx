@@ -1,8 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { LineupCall, MatchupView, WaiverTarget } from "../season-types";
 import { CallsToMake, LineupCompare, Waivers } from "./ThisWeek";
+import { resetPrefs } from "../prefs";
+
+// The table/scoreboard choice is remembered for the session now, so a test
+// that switches it must not decide the next one's starting point.
+afterEach(() => {
+  resetPrefs();
+});
 
 function call(slot: string, gain: number, why: string): LineupCall {
   return {

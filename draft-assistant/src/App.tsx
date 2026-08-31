@@ -1,25 +1,18 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { setAvatarMode, useAvatarMode } from "./avatars";
-import { setChime, useChime } from "./prefs";
+import { setChime, setScreen, useChime, useScreen } from "./prefs";
 import { stableAvailable } from "./boardIdentity";
 import { useSeasonSession } from "./session";
 import type { DraftView, PollHealth, StoredLeague } from "./types";
 import type { SeasonView } from "./season-types";
-import { Header, type Screen, type SettingsRow } from "./components/Header";
+import { Header, type SettingsRow } from "./components/Header";
 import { Chat, DraftScreen, ScreenFallback, SeasonScreen } from "./components/lazyScreens";
 import { LaunchScreen, Setup } from "./components/Panels";
 import { ConfirmDialog, Toast } from "./components/Overlays";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ordinal, pickLabel, age, scoringFormat } from "./format";
-import {
-  applyTheme,
-  resolveTheme,
-  savePreference,
-  storedPreference,
-  watchSystemTheme,
-  type ThemePreference,
-} from "./theme";
+import { cycleThemePreference, useAppliedTheme } from "./theme";
 // Only the sheets the shell itself paints with. The screen-specific ones are
 // imported by the screens, so Vite ships each alongside the chunk that needs
 // it rather than making every window parse all ten before first paint.
@@ -32,24 +25,19 @@ const MAX_RECONNECT_ATTEMPTS = 4;
 
 type Confirm = { playerId: string; name: string } | null;
 
-const SCREEN_KEY = "da.screen";
+/** A line under the header. `retry` marks it as something gone wrong that the
+ * user can have another go at — and that should wait for them. */
+type ToastMessage = { text: string; retry?: () => void };
 
 export default function App() {
   const [view, setView] = useState<DraftView | null>(null);
-  // Season is the everyday screen; the draft is a few hours a year. The last
-  // choice is remembered so a draft-night user lands back on the board.
-  const [screen, setScreen] = useState<Screen>(() => {
-    try {
-      return localStorage.getItem(SCREEN_KEY) === "draft" ? "draft" : "season";
-    } catch {
-      return "season";
-    }
-  });
+  // Remembered between sessions, along with the rest of the preferences.
+  const screen = useScreen();
   const [polling, setPolling] = useState(false);
   const avatars = useAvatarMode();
   const [pollHealth, setPollHealth] = useState<PollHealth | null>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
   const [busy, setBusy] = useState(true);
   // Stable across renders so the memoised board rows are not invalidated by a
   // fresh closure on every 3-second poll.
@@ -66,30 +54,23 @@ export default function App() {
   const [showSetup, setShowSetup] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  const [preference, setPreference] = useState<ThemePreference>(storedPreference);
+  // Reads the stored choice, keeps the page painted in it, and follows the OS
+  // while the choice is "system".
+  const { preference, theme } = useAppliedTheme();
   const toastTimer = useRef<number | undefined>(undefined);
   const wasMyPick = useRef(false);
 
-  // ---------- theme ----------
-
-  useEffect(() => {
-    applyTheme(resolveTheme(preference));
-    savePreference(preference);
-  }, [preference]);
-
-  useEffect(() => {
-    if (preference !== "system") return undefined;
-    return watchSystemTheme(applyTheme);
-  }, [preference]);
-
-  const theme = resolveTheme(preference);
-
   // ---------- toasts ----------
 
-  const showToast = useCallback((message: string) => {
-    setToast(message);
+  const showToast = useCallback((text: string, retry?: () => void) => {
+    setToast({ text, retry });
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 5000);
+    // News gets out of the way on its own. Something that failed waits to be
+    // answered — a lost pick in the middle of a draft is the worst thing this
+    // app could shrug off.
+    if (retry === undefined) {
+      toastTimer.current = window.setTimeout(() => setToast(null), 5000);
+    }
   }, []);
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
@@ -118,14 +99,18 @@ export default function App() {
     });
   }, []);
 
-  const startLive = useCallback(async () => {
-    try {
-      await api.startPolling(3);
-      setPolling(true);
-    } catch (e) {
-      showToast(String(e));
-    }
-  }, [showToast]);
+  // Named so the retry it offers can be itself.
+  const startLive = useCallback(
+    async function start(): Promise<void> {
+      try {
+        await api.startPolling(3);
+        setPolling(true);
+      } catch (e) {
+        showToast(problem("Could not turn live sync on", e), () => void start());
+      }
+    },
+    [showToast],
+  );
 
   // Restore the last league on mount, and again whenever the user retries.
   // State is set from the promise callbacks, never synchronously in the body.
@@ -208,15 +193,18 @@ export default function App() {
         showToast("Live sync on — polling Sleeper every 3s");
       }
     } catch (e) {
-      showToast(String(e));
+      showToast(problem("Could not change live sync", e), () => void togglePolling());
     }
   };
 
-  const doDraft = async (playerId: string) => {
+  const doDraft = async (playerId: string, name: string) => {
     try {
       applyView(await api.recordManualPick(playerId));
     } catch (e) {
-      showToast(String(e));
+      showToast(
+        problem(`Could not mark ${name} as drafted`, e),
+        () => void doDraft(playerId, name),
+      );
     } finally {
       setConfirm(null);
     }
@@ -227,7 +215,7 @@ export default function App() {
       applyView(await api.undoManualPick());
       showToast("Last recorded pick undone");
     } catch (e) {
-      showToast(String(e));
+      showToast(problem("Could not undo the last recorded pick", e), () => void doUndo());
     }
   };
 
@@ -236,7 +224,7 @@ export default function App() {
     try {
       showToast(`State exported: ${await api.exportState()}`);
     } catch (e) {
-      showToast(String(e));
+      showToast(problem("Could not export the state", e), () => void doExport());
     }
   };
 
@@ -253,7 +241,7 @@ export default function App() {
         `Projections refreshed — board rebuilt from ${refreshed.data_health.board_size} players`,
       );
     } catch (e) {
-      showToast(String(e));
+      showToast(problem("Could not refresh the projections", e), () => void doRefreshData());
     } finally {
       setBusy(false);
     }
@@ -350,11 +338,8 @@ export default function App() {
           : "Overriding your system setting",
       value: preference === "system" ? `System (${theme})` : theme === "dark" ? "Dark" : "Light",
       on: theme === "dark",
-      onSelect: () =>
-        setPreference((p) =>
-          // system -> light -> dark -> back to system
-          p === "system" ? "light" : p === "light" ? "dark" : "system",
-        ),
+      // system -> light -> dark -> back to system
+      onSelect: cycleThemePreference,
     },
   ];
 
@@ -367,18 +352,9 @@ export default function App() {
             subtitle={subtitle}
             meta={`${d.teams}-team ${scoringFormat(view.league.scoring_settings.rec)} · ${d.rounds} rounds${d.manual_picks_active ? " · manual picks active" : ""}`}
             screen={screen}
-            onScreen={(next) => {
-              setScreen(next);
-              try {
-                localStorage.setItem(SCREEN_KEY, next);
-              } catch {
-                // Private mode or a sandboxed webview: the choice just isn't remembered.
-              }
-            }}
+            onScreen={setScreen}
             polling={polling}
             pollHealth={pollHealth}
-            chime={chime}
-            onToggleChime={() => setChime(!chime)}
             onUndo={() => void doUndo()}
             chatOpen={chatOpen}
             onToggleChat={() => setChatOpen((c) => !c)}
@@ -388,7 +364,15 @@ export default function App() {
             footerNote={`${view.league.name} · league ${view.league.league_id} · read-only connection`}
           />
 
-          {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+          {toast !== null && (
+            <Toast
+              message={toast.text}
+              action={
+                toast.retry === undefined ? undefined : { label: "Try again", onClick: toast.retry }
+              }
+              onDismiss={() => setToast(null)}
+            />
+          )}
 
           {screen === "draft" ? (
             <ErrorBoundary>
@@ -435,12 +419,21 @@ export default function App() {
         <ConfirmDialog
           pickLabel={`Pick ${pickLabel(d.current_pick, d.teams)} · slot ${d.on_clock_slot}`}
           playerName={confirm.name}
-          onConfirm={() => void doDraft(confirm.playerId)}
+          onConfirm={() => void doDraft(confirm.playerId, confirm.name)}
           onCancel={() => setConfirm(null)}
         />
       )}
     </div>
   );
+}
+
+/** What went wrong, in the app's own words, with the backend's kept on the
+ * end rather than thrown away. */
+function problem(what: string, e: unknown): string {
+  const detail = String(e)
+    .replace(/^Error:\s*/, "")
+    .trim();
+  return detail === "" ? what : `${what} — ${detail}`;
 }
 
 function myRecord(season: SeasonView): string {

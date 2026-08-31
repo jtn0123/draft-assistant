@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fixtureJson from "../public/dev-fixture.json";
 import type { DraftView, PollHealth } from "./types";
 import type { SeasonView } from "./season-types";
@@ -41,6 +41,8 @@ const testState = vi.hoisted(() => ({
 vi.mock("./api", () => ({ api: testState.api }));
 
 import App from "./App";
+import { resetPrefs } from "./prefs";
+import { settle } from "./test/settle";
 
 function fixture(): DraftView {
   return structuredClone(fixtureJson) as unknown as DraftView;
@@ -56,6 +58,9 @@ beforeEach(() => {
     setItem: (k: string, v: string) => void store.set(k, v),
     removeItem: (k: string) => void store.delete(k),
   });
+  // The preference stores hold this session's choices; each test starts from
+  // what its own storage says.
+  resetPrefs();
   testState.draftHandler = null;
   testState.healthHandler = null;
   testState.seasonHandler = null;
@@ -90,6 +95,10 @@ beforeEach(() => {
     return Promise.resolve(() => undefined);
   });
   testState.api.onSeasonPollHealth.mockImplementation(() => Promise.resolve(() => undefined));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("App live workflow", () => {
@@ -323,6 +332,89 @@ describe("App live workflow", () => {
     await user.click(retry);
     expect(await screen.findByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
     expect(testState.api.loadSeason).toHaveBeenLastCalledWith(true);
+  });
+});
+
+describe("when an action fails", () => {
+  /** The app loaded on the draft board, ready to take a pick. */
+  async function loadedOnTheBoard(initial: DraftView) {
+    testState.api.getConfig.mockResolvedValue({
+      my_user_id: "browser-preview",
+      active_league_id: initial.league.league_id,
+      leagues: [],
+    });
+    testState.api.addLeague.mockResolvedValue(initial);
+    render(<App />);
+    await screen.findByText(initial.league.name);
+    const rows = await waitFor(() => {
+      const buttons = screen.getAllByRole("button", { name: "Draft" });
+      expect(buttons.length).toBeGreaterThan(1);
+      return buttons;
+    });
+    return rows[rows.length - 1];
+  }
+
+  it("says so in plain words, waits to be answered, and tries again on request", async () => {
+    const initial = fixture();
+    const afterPick = fixture();
+    afterPick.available = afterPick.available.slice(1);
+    testState.api.recordManualPick
+      .mockRejectedValueOnce(new Error("Sleeper is not answering"))
+      .mockResolvedValueOnce(afterPick);
+
+    const row = await loadedOnTheBoard(initial);
+    // Fake timers only once the app is up, so loading is not held back by them.
+    vi.useFakeTimers();
+
+    await settle(() => {
+      row.click();
+    });
+    await settle(() => {
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Mark drafted" }).click();
+    });
+
+    // An error is announced straight away, not filed away politely.
+    const failure = screen.getByRole("alert");
+    expect(failure).toHaveTextContent(/Could not mark .+ as drafted — Sleeper is not answering/);
+
+    // Long past the five seconds an informational toast lives for.
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    await settle(() => {
+      screen.getByRole("button", { name: "Try again" }).click();
+    });
+    expect(testState.api.recordManualPick).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("still lets an informational message get out of the way on its own", async () => {
+    const initial = fixture();
+    const refreshed = fixture();
+    refreshed.data_health.board_size = 312;
+    testState.api.refreshData.mockResolvedValue(refreshed);
+
+    await loadedOnTheBoard(initial);
+    vi.useFakeTimers();
+
+    await settle(() => {
+      screen.getByRole("button", { name: "Settings" }).click();
+    });
+    await settle(() => {
+      screen.getByRole("menuitemcheckbox", { name: /Refresh data/ }).click();
+    });
+
+    const note = "Projections refreshed — board rebuilt from 312 players";
+    expect(screen.getByText(note)).toBeInTheDocument();
+    // Nothing to decide, so it is announced politely and clears itself.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(screen.queryByText(note)).not.toBeInTheDocument();
   });
 });
 
