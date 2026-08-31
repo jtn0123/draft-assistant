@@ -47,11 +47,17 @@ jobs:
       - name: Verify project
         run: npm run verify
 
-      # Coverage is a floor, not a target: this fails only if it drops.
+      # Coverage is a floor, not a target: this fails only if it drops. Actual
+      # line coverage is 76.4%, so the floor sits a couple of points below it
+      # rather than the eight points of slack it used to carry.
+      #
+      # The version is pinned and the install is allowed to fail the job: an
+      # unpinned `|| true` turned a broken install into a "command not found"
+      # on the next line, which reads like an unrelated problem.
       - name: Rust coverage
         run: |
-          cargo install cargo-llvm-cov --locked || true
-          cargo llvm-cov --manifest-path src-tauri/Cargo.toml --summary-only --fail-under-lines 68
+          cargo install cargo-llvm-cov --version 0.9.0 --locked
+          cargo llvm-cov --manifest-path src-tauri/Cargo.toml --summary-only --fail-under-lines 74
 
   audit:
     name: Dependency advisories
