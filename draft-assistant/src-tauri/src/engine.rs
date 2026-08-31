@@ -91,6 +91,14 @@ pub struct LoadedLeague {
 pub struct Engine {
     pub client: SleeperClient,
     pub data_dir: PathBuf,
+    /// The Keychain's answer, remembered.
+    ///
+    /// Reading it shells out to `/usr/bin/security`: tens of milliseconds on a
+    /// good day and unbounded if the Keychain decides to prompt. The chat
+    /// panel asks on every question and on every settings render, so the
+    /// answer is fetched once and kept until the key is changed. `None` means
+    /// "not looked up yet"; `Some(None)` means "looked and there is none".
+    pub(crate) key_cache: tokio::sync::Mutex<Option<Option<String>>>,
 }
 
 /// The one thing that talks to Sleeper and owns the on-disk cache.
@@ -112,6 +120,7 @@ impl Engine {
         Self {
             client: SleeperClient::new(),
             data_dir,
+            key_cache: tokio::sync::Mutex::new(None),
         }
     }
 
@@ -244,31 +253,6 @@ impl Engine {
         }
         std::fs::rename(&tmp, &live)
             .map_err(|e| format!("could not save your settings to {}: {e}", live.display()))
-    }
-
-    /// The Anthropic key, wherever it is kept.
-    pub fn api_key(&self, config: &AppConfig) -> Option<String> {
-        if crate::secrets::available() {
-            if let Some(key) = crate::secrets::load() {
-                return Some(key);
-            }
-        }
-        config.anthropic_api_key.clone()
-    }
-
-    /// Store (or, with `None`, clear) the key: Keychain when there is one,
-    /// the config file otherwise.
-    pub fn store_api_key(&self, config: &mut AppConfig, key: Option<String>) -> Result<(), String> {
-        if crate::secrets::available() {
-            match &key {
-                Some(k) => crate::secrets::store(k)?,
-                None => crate::secrets::clear()?,
-            }
-            config.anthropic_api_key = None;
-        } else {
-            config.anthropic_api_key = key;
-        }
-        self.save_config(config)
     }
 
     /// Load a league end-to-end and build its scored board.

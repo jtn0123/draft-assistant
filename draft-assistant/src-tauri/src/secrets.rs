@@ -4,6 +4,7 @@
 //! so it never sits in a plaintext JSON file next to the caches. Anywhere the
 //! Keychain is unavailable the key stays in the config file as before.
 
+use crate::engine::AppConfig;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
@@ -109,9 +110,99 @@ pub fn clear() -> Result<(), String> {
     }
 }
 
+/// How the rest of the app gets at the key.
+///
+/// These sit here rather than on `Engine` itself because everything they
+/// decide — which copy of the key wins, when the Keychain is worth asking,
+/// how long the answer is good for — is this module's business.
+impl crate::engine::Engine {
+    /// The Anthropic key, wherever it is kept.
+    ///
+    /// The Keychain lookup is a subprocess, so it runs on the blocking pool
+    /// rather than on a runtime thread, and its answer is cached: a chat
+    /// question used to spawn `security` every time it was asked.
+    pub async fn api_key(&self, config: &AppConfig) -> Option<String> {
+        if !crate::secrets::available() {
+            return config.anthropic_api_key.clone();
+        }
+        let mut cache = self.key_cache.lock().await;
+        let stored = match cache.as_ref() {
+            Some(known) => known.clone(),
+            None => {
+                let loaded = tokio::task::spawn_blocking(crate::secrets::load)
+                    .await
+                    .ok()
+                    .flatten();
+                *cache = Some(loaded.clone());
+                loaded
+            }
+        };
+        chosen_key(stored, config)
+    }
+
+    /// Store (or, with `None`, clear) the key: Keychain when there is one,
+    /// the config file otherwise.
+    pub async fn store_api_key(
+        &self,
+        config: &mut AppConfig,
+        key: Option<String>,
+    ) -> Result<(), String> {
+        if crate::secrets::available() {
+            let writing = key.clone();
+            tokio::task::spawn_blocking(move || match &writing {
+                Some(k) => crate::secrets::store(k),
+                None => crate::secrets::clear(),
+            })
+            .await
+            .map_err(|e| format!("could not reach the Keychain: {e}"))??;
+            // The remembered answer is now the one we just wrote, so the next
+            // question does not have to go and ask again.
+            *self.key_cache.lock().await = Some(key);
+            config.anthropic_api_key = None;
+        } else {
+            config.anthropic_api_key = key;
+        }
+        self.save_config(config)
+    }
+}
+
+/// Which key wins: the Keychain's copy when it has one, otherwise whatever is
+/// still in the config file. Older installs and machines with no Keychain
+/// keep it in the file, and those must keep working.
+fn chosen_key(stored: Option<String>, config: &AppConfig) -> Option<String> {
+    stored.or_else(|| config.anthropic_api_key.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn config_with(key: Option<&str>) -> AppConfig {
+        AppConfig {
+            anthropic_api_key: key.map(str::to_string),
+            ..AppConfig::default()
+        }
+    }
+
+    #[test]
+    fn the_keychain_copy_wins_over_the_one_left_in_the_config_file() {
+        let config = config_with(Some("from-file"));
+        assert_eq!(
+            chosen_key(Some("from-keychain".into()), &config).as_deref(),
+            Some("from-keychain")
+        );
+    }
+
+    #[test]
+    fn a_key_still_in_the_config_file_is_used_when_the_keychain_has_none() {
+        let config = config_with(Some("from-file"));
+        assert_eq!(chosen_key(None, &config).as_deref(), Some("from-file"));
+    }
+
+    #[test]
+    fn no_key_anywhere_is_no_key() {
+        assert!(chosen_key(None, &config_with(None)).is_none());
+    }
 
     #[test]
     fn the_key_never_appears_in_the_arguments() {

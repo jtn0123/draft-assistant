@@ -50,7 +50,7 @@ pub async fn set_api_key(state: State<'_, AppState>, key: String) -> Result<bool
         Some(trimmed)
     };
     let stored = next.is_some();
-    state.engine.store_api_key(&mut config, next)?;
+    state.engine.store_api_key(&mut config, next).await?;
     Ok(stored)
 }
 
@@ -68,7 +68,7 @@ pub async fn set_chat_provider(
     let mut config = state.config.lock().await;
     config.chat_provider = Some(chosen.to_string());
     state.engine.save_config(&config)?;
-    let has_key = state.engine.api_key(&config).is_some();
+    let has_key = state.engine.api_key(&config).await.is_some();
     Ok(resolve_provider(
         &config,
         has_key,
@@ -79,8 +79,10 @@ pub async fn set_chat_provider(
 /// What the chat panel needs to render itself before the first message.
 #[tauri::command]
 pub async fn chat_settings(state: State<'_, AppState>) -> Result<ChatSettings, String> {
-    let config = state.config.lock().await;
-    let key = state.engine.api_key(&config);
+    // Copied rather than held: the Keychain lookup below can take a moment
+    // the first time, and nothing else should wait on the config for it.
+    let config = state.config.lock().await.clone();
+    let key = state.engine.api_key(&config).await;
     let key = key.as_deref();
     let cli_available = chat_cli::find_cli().is_some();
     let mut efforts = std::collections::HashMap::new();
@@ -144,11 +146,9 @@ pub async fn ask_claude(
     // rejected request.
     check_thread_size(&messages)?;
     let cli = chat_cli::find_cli();
-    let (provider, api_key) = {
-        let config = state.config.lock().await;
-        let key = state.engine.api_key(&config);
-        (resolve_provider(&config, key.is_some(), cli.is_some()), key)
-    };
+    let config = state.config.lock().await.clone();
+    let api_key = state.engine.api_key(&config).await;
+    let provider = resolve_provider(&config, api_key.is_some(), cli.is_some());
 
     // Building a season view is seconds of arithmetic. It must not happen with
     // the pollers' mutexes held, so the season screen's own view is reused and
