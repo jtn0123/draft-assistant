@@ -16,6 +16,15 @@ import { GamesTab } from "./GamesTab";
 import { LastSeason, LeagueTab, Standings, TeamRoster } from "./SeasonTabs";
 import { TrendsTab } from "./TrendsTab";
 
+// Ship with this chunk, not with the window. board.css is here because the
+// shared table header and the right/centre column helpers it owns are used by
+// the standings and lineup tables as well as the draft board.
+import "../board.css";
+import "../season.css";
+import "../season-tabs.css";
+import "../trends.css";
+import "../live.css";
+
 /** Stable ids so each tab can point at the panel it controls. */
 const tabId = (name: SeasonTab) => `rail-tab-${name.replace(/\s+/g, "-").toLowerCase()}`;
 const panelId = (name: SeasonTab) => `rail-panel-${name.replace(/\s+/g, "-").toLowerCase()}`;

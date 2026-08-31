@@ -20,16 +20,13 @@ import {
   watchSystemTheme,
   type ThemePreference,
 } from "./theme";
+// Only the sheets the shell itself paints with. The screen-specific ones are
+// imported by the screens, so Vite ships each alongside the chunk that needs
+// it rather than making every window parse all ten before first paint.
 import "./theme.css";
 import "./App.css";
 import "./components.css";
-import "./board.css";
-import "./season.css";
-import "./season-tabs.css";
-import "./trends.css";
 import "./zoom.css";
-import "./live.css";
-import "./chat.css";
 
 const MAX_RECONNECT_ATTEMPTS = 4;
 

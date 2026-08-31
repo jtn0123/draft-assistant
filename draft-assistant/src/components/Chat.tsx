@@ -7,6 +7,11 @@ import { api } from "../api";
 import type { ChatMessage, ChatSettings, ThreadEntry } from "../chat-types";
 import type { Screen } from "./Header";
 
+// Ship with this chunk, not with the window. live.css owns the pulsing dot
+// this panel borrows while an answer is on its way.
+import "../chat.css";
+import "../live.css";
+
 const DEFAULT_MODEL = "Opus 5";
 const DEFAULT_EFFORT = "High";
 

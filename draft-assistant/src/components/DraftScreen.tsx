@@ -5,6 +5,9 @@ import { Board } from "./Board";
 import { ClockBanner, SnakeStrip } from "./ClockBanner";
 import { RecCard, SidePanel } from "./Panels";
 
+// Ships with this chunk, not with the window.
+import "../board.css";
+
 /** The design gives the middle card the emphasised treatment. */
 const FEATURED_MODE = "balanced";
 

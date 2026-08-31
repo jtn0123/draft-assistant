@@ -210,7 +210,9 @@ impl Engine {
             .unwrap_or_default();
         if let Some(key) = config.anthropic_api_key.take() {
             if crate::secrets::available() && crate::secrets::store(&key).is_ok() {
-                self.save_config(&config);
+                // The key is safely in the Keychain either way; if rewriting
+                // the file to drop it fails, the next save tries again.
+                let _ = self.save_config(&config);
             } else {
                 config.anthropic_api_key = Some(key);
             }
@@ -221,15 +223,16 @@ impl Engine {
     /// Write the config atomically: to a temp file first, then swapped into
     /// place, with the previous copy kept as `config.json.bak`. A crash
     /// mid-write can never leave a half-written config behind.
-    pub fn save_config(&self, config: &AppConfig) {
-        let Ok(json) = serde_json::to_string_pretty(config) else {
-            return;
-        };
+    ///
+    /// Every failure comes back to the caller: a save that quietly did nothing
+    /// loses the user's league list at the next launch with nothing said.
+    pub fn save_config(&self, config: &AppConfig) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(config)
+            .map_err(|e| format!("could not prepare your settings to be saved: {e}"))?;
         let live = self.cache_path("config.json");
         let tmp = self.cache_path("config.json.tmp");
-        if std::fs::write(&tmp, json).is_err() {
-            return;
-        }
+        std::fs::write(&tmp, json)
+            .map_err(|e| format!("could not save your settings to {}: {e}", tmp.display()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -238,7 +241,8 @@ impl Engine {
         if live.exists() {
             std::fs::copy(&live, self.cache_path("config.json.bak")).ok();
         }
-        std::fs::rename(&tmp, &live).ok();
+        std::fs::rename(&tmp, &live)
+            .map_err(|e| format!("could not save your settings to {}: {e}", live.display()))
     }
 
     /// The Anthropic key, wherever it is kept.
@@ -263,8 +267,7 @@ impl Engine {
         } else {
             config.anthropic_api_key = key;
         }
-        self.save_config(config);
-        Ok(())
+        self.save_config(config)
     }
 
     /// Load a league end-to-end and build its scored board.

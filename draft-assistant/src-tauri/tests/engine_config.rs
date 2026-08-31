@@ -61,7 +61,7 @@ fn config_round_trips_and_keeps_a_backup() {
     let dir = test_dir("roundtrip");
     let engine = Engine::new(dir.clone());
 
-    engine.save_config(&config_without_key());
+    engine.save_config(&config_without_key()).unwrap();
     let loaded = engine.load_config();
     assert_eq!(loaded.my_user_id.as_deref(), Some("user-1"));
     assert_eq!(loaded.active_league_id.as_deref(), Some("league-1"));
@@ -75,7 +75,7 @@ fn config_round_trips_and_keeps_a_backup() {
 
     let mut second = config_without_key();
     second.my_user_id = Some("user-2".into());
-    engine.save_config(&second);
+    engine.save_config(&second).unwrap();
     assert!(dir.join("config.json.bak").exists());
     assert_eq!(engine.load_config().my_user_id.as_deref(), Some("user-2"));
 
@@ -88,7 +88,7 @@ fn config_file_is_private_to_the_user() {
     use std::os::unix::fs::PermissionsExt;
     let dir = test_dir("perms");
     let engine = Engine::new(dir.clone());
-    engine.save_config(&config_without_key());
+    engine.save_config(&config_without_key()).unwrap();
     let mode = std::fs::metadata(dir.join("config.json"))
         .unwrap()
         .permissions()
@@ -102,10 +102,10 @@ fn corrupt_config_falls_back_to_backup_then_default() {
     let dir = test_dir("corrupt");
     let engine = Engine::new(dir.clone());
 
-    engine.save_config(&config_without_key());
+    engine.save_config(&config_without_key()).unwrap();
     let mut updated = config_without_key();
     updated.my_user_id = Some("user-2".into());
-    engine.save_config(&updated); // config.json = user-2, bak = user-1
+    engine.save_config(&updated).unwrap(); // config.json = user-2, bak = user-1
 
     std::fs::write(dir.join("config.json"), "{ not json").unwrap();
     assert_eq!(
@@ -183,6 +183,21 @@ fn save_manual_picks_reports_disk_failures() {
         .unwrap_err();
     assert!(err.contains("write"), "unexpected error: {err}");
     assert!(engine.load_manual_picks("draft-a").is_empty());
+
+    std::fs::remove_file(blocker).unwrap();
+}
+
+#[test]
+fn save_config_reports_disk_failures() {
+    // Point the engine at a path that is a *file*, so its data dir cannot
+    // exist and the save must say so instead of pretending it worked.
+    let blocker = test_dir("config-blocked");
+    std::fs::write(&blocker, "occupied").unwrap();
+    let engine = Engine::new(blocker.clone());
+
+    let err = engine.save_config(&config_without_key()).unwrap_err();
+    assert!(err.contains("settings"), "unexpected error: {err}");
+    assert!(engine.load_config().leagues.is_empty(), "nothing was saved");
 
     std::fs::remove_file(blocker).unwrap();
 }

@@ -48,7 +48,7 @@ pub async fn add_league(
         });
     }
     config.active_league_id = Some(league_id);
-    state.engine.save_config(&config);
+    state.engine.save_config(&config)?;
     let view = view_from(&new_loaded, &config);
     // Never hold config while waiting for loaded: the live path reads loaded first.
     drop(config);
@@ -69,7 +69,7 @@ pub async fn set_my_username(
     let user = state.engine.client.user(&username).await?;
     let mut config = state.config.lock().await;
     config.my_user_id = Some(user.user_id.clone());
-    state.engine.save_config(&config);
+    state.engine.save_config(&config)?;
     Ok(user.user_id)
 }
 

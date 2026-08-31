@@ -68,7 +68,7 @@ pub async fn set_chat_provider(
     };
     let mut config = state.config.lock().await;
     config.chat_provider = Some(chosen.to_string());
-    state.engine.save_config(&config);
+    state.engine.save_config(&config)?;
     let has_key = state.engine.api_key(&config).is_some();
     Ok(resolve_provider(
         &config,
