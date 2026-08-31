@@ -9,23 +9,47 @@
 
 use crate::engine::{now_secs, LoadedLeague};
 use crate::season::{SeasonAnalysis, SeasonView};
+use crate::sleeper::Pick;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+/// A cheap stand-in for the whole pick list: how many there are, and a hash of
+/// which player sits at which pick number.
+///
+/// Counting alone missed the case that actually bites — a commissioner editing
+/// or replacing a pick, which leaves the count untouched but changes the board
+/// under the user. Hashing the ids costs a single pass over a list that never
+/// exceeds a couple of hundred entries, once per poll tick.
+type PicksSignature = (usize, u64);
+
+fn picks_signature(picks: &[Pick]) -> PicksSignature {
+    let mut hasher = DefaultHasher::new();
+    for pick in picks {
+        pick.pick_no.hash(&mut hasher);
+        pick.player_id.hash(&mut hasher);
+    }
+    (picks.len(), hasher.finish())
+}
 
 /// What the draft poller remembers between ticks so it can tell a real change
 /// from another identical response.
 #[derive(Debug, Default)]
 pub struct DraftPollMemory {
-    last_count: Option<usize>,
+    last_picks: Option<PicksSignature>,
     last_status: String,
 }
 
 impl DraftPollMemory {
-    /// True when the pick count differs from the last tick. The first tick
-    /// counts as a change, so the UI gets its initial state.
-    pub fn picks_changed(&mut self, count: usize) -> bool {
-        if self.last_count == Some(count) {
+    /// True when the picks differ from the last tick — a new pick, a removed
+    /// one, or the same number of picks with a different player in one of
+    /// them. The first tick counts as a change, so the UI gets its initial
+    /// state.
+    pub fn picks_changed(&mut self, picks: &[Pick]) -> bool {
+        let signature = picks_signature(picks);
+        if self.last_picks == Some(signature) {
             return false;
         }
-        self.last_count = Some(count);
+        self.last_picks = Some(signature);
         true
     }
 
@@ -122,11 +146,28 @@ impl AnalysisCache {
 mod tests {
     use super::*;
 
+    /// `n` picks, each of player `id{i}` unless `swap` renames one of them.
+    fn picks(n: u32, swap: Option<(u32, &str)>) -> Vec<Pick> {
+        (1..=n)
+            .map(|pick_no| Pick {
+                round: 1,
+                pick_no,
+                draft_slot: pick_no,
+                player_id: match swap {
+                    Some((at, id)) if at == pick_no => id.to_string(),
+                    _ => format!("id{pick_no}"),
+                },
+                picked_by: None,
+                metadata: None,
+            })
+            .collect()
+    }
+
     #[test]
     fn the_first_tick_always_counts_as_a_change() {
         let mut memory = DraftPollMemory::default();
         assert!(
-            memory.picks_changed(0),
+            memory.picks_changed(&picks(0, None)),
             "the initial state must reach the UI"
         );
         assert!(memory.status_changed("pre_draft"));
@@ -135,10 +176,30 @@ mod tests {
     #[test]
     fn an_identical_response_is_not_a_change() {
         let mut memory = DraftPollMemory::default();
-        memory.picks_changed(26);
-        assert!(!memory.picks_changed(26));
-        assert!(memory.picks_changed(27), "a new pick is a change");
-        assert!(!memory.picks_changed(27));
+        memory.picks_changed(&picks(26, None));
+        assert!(!memory.picks_changed(&picks(26, None)));
+        assert!(
+            memory.picks_changed(&picks(27, None)),
+            "a new pick is a change"
+        );
+        assert!(!memory.picks_changed(&picks(27, None)));
+    }
+
+    #[test]
+    fn a_commissioner_swapping_a_pick_is_a_change_at_the_same_count() {
+        // The bug this guards: pick 14 is edited to a different player, the
+        // count never moves, and the board silently keeps the old name.
+        let mut memory = DraftPollMemory::default();
+        assert!(memory.picks_changed(&picks(26, None)));
+        assert!(
+            memory.picks_changed(&picks(26, Some((14, "someone-else")))),
+            "an edited pick must reach the UI even at an unchanged count"
+        );
+        assert!(!memory.picks_changed(&picks(26, Some((14, "someone-else")))));
+        assert!(
+            memory.picks_changed(&picks(26, None)),
+            "and undoing the edit is a change too"
+        );
     }
 
     #[test]

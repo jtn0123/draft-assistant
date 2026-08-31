@@ -257,7 +257,7 @@ pub async fn start_polling(
                     if let Some(loaded) = loaded.as_mut() {
                         match picks {
                             Ok(picks) => {
-                                changed |= memory.picks_changed(picks.len());
+                                changed |= memory.picks_changed(&picks);
                                 loaded.api_picks = picks;
                                 if engine::reconcile_manual_picks(
                                     &loaded.api_picks,
