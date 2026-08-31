@@ -7,11 +7,11 @@
 | 1 | Lazy-load the big UI chunks (Chat, SeasonScreen, DraftScreen) | done `b4f2c39` | Entry bundle 273 → 228 KB; each screen is its own chunk, Chat only fetched when opened. |
 | 2 | Board sort caching without staleness (audit G7) | done `c8ca01e` | New `boardIdentity.ts` deep-compares players and reuses the array only when observationally identical — re-sort and ~400 row re-renders skipped on no-op ticks, staleness impossible by construction. |
 | 3 | Per-source status + analysis age | done `4cecd63` | Live badge tracks matchups/scores/rosters separately with a plain-language tooltip; trade/waiver ideas show "from N min ago" when the cached analysis is older than 2 min. |
-| 4 | Week-one assistant upgrades (reasons, injury flags, decision deadlines) | in progress | Agent running. |
+| 4 | Week-one assistant upgrades (reasons, injury flags, decision deadlines) | done `bb61687` | New `season_calls.rs` (advice) + `season_injury.rs` (Sleeper's dozen injury spellings → Q/D/O). Every call carries a plain-language `reason` and a `locks_at_ms` deadline from the scoreboard's `start_time` ("decide by Sun 1:00 ET"); the head-to-head table tags injured starters on both sides with the word on hover; a starter listed Out/Doubtful raises a call the projections alone would miss, sorted to the top and kept out of the "points on the table" total. All fields additive/optional, so the checked-in fixture still loads. `matchup_rows` moved to `season_view_parts.rs` to keep `season.rs` under the cap. |
 | 5 | Split `build_season_view` by section (audit A5) | todo | After #4 lands; golden tests from D2 make it safe now. |
 
 Follow-ups found during this work:
-- `DraftPollMemory::picks_changed` keys on pick *count* only — a commissioner replacing a pick without changing the count never reaches the UI (`poll.rs`). todo
+- `DraftPollMemory::picks_changed` keys on pick *count* only — a commissioner replacing a pick without changing the count never reaches the UI (`poll.rs`). done `a1af9e0` — now compares count plus a hash of every pick number and player id.
 - Pre-commit hook was broken for git worktrees (validated the main checkout). done `b4f2c39`
 
 ---
