@@ -5,6 +5,8 @@
 //! matchup sweep only changes when a week ends, and last season never changes
 //! at all. Each is cached with a TTL that matches.
 
+mod last_season;
+
 use crate::cache::safe_key;
 use crate::engine::{now_secs, Engine, REQUEST_CONCURRENCY};
 use crate::season::LastSeasonRow;
@@ -14,13 +16,13 @@ use crate::season_sources::{LiveFetch, SourceHealth};
 use crate::sleeper::League;
 use crate::sleeper_error::to_message;
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
+use std::collections::{HashMap, HashSet};
 
 /// Live scoring windows move fast; everything else can lag a little.
 const LIVE_TTL_SECS: u64 = 30;
 const WEEK_SWEEP_TTL_SECS: u64 = 6 * 3600;
-const LAST_SEASON_TTL_SECS: u64 = 30 * 24 * 3600;
+pub(crate) const LAST_SEASON_TTL_SECS: u64 = 30 * 24 * 3600;
 
 /// Everything in-season, already fetched.
 #[derive(Clone, Default)]
@@ -47,12 +49,37 @@ pub struct LoadedSeason {
     pub sources: SourceHealth,
 }
 
-/// The full-season matchup sweep, cached as one blob.
-#[derive(Serialize, Deserialize)]
+/// The full-season matchup sweep, assembled from the per-week caches.
 struct WeekSweep {
-    week: u32,
     schedule: Vec<(u32, Vec<(u32, u32)>)>,
     season_points: HashMap<String, f64>,
+}
+
+/// Merge the weeks' transaction batches into one list, keeping the first copy
+/// of each id — the same claim is reported in both weeks' responses — and
+/// turning a failed week into a warning rather than losing the other one.
+///
+/// A set rather than a scan back over everything kept so far: that check was
+/// quadratic in a list that runs to hundreds of rows.
+fn merge_transactions(
+    batches: Vec<(u32, Result<Vec<Transaction>, String>)>,
+    warnings: &mut Vec<String>,
+) -> Vec<Transaction> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut merged: Vec<Transaction> = Vec::new();
+    for (week, result) in batches {
+        match result {
+            Ok(batch) => merged.extend(
+                batch
+                    .into_iter()
+                    .filter(|t| seen.insert(t.transaction_id.clone())),
+            ),
+            Err(error) => {
+                warnings.push(format!("transactions for week {week} unavailable: {error}"))
+            }
+        }
+    }
+    merged
 }
 
 /// Pair up the rosters sharing a matchup_id. Sleeper gives two rows per game
@@ -114,8 +141,44 @@ impl Engine {
         format!("season_{}_{suffix}.json", safe_key(league_id))
     }
 
-    /// Sweep every regular-season week once: pairings for the simulation and
-    /// season-to-date points per player. Cached — this is 15-ish requests.
+    /// One week's matchup rows, cached on their own.
+    ///
+    /// A week that is already over can never change again, so it is kept
+    /// forever; the current week and the ones still to come keep the old
+    /// six-hour TTL. That is what makes a weekly rollover cost one request
+    /// instead of fifteen — the sweep used to be a single blob stamped with
+    /// the week it was taken in, so the week ticking over threw all of it
+    /// away.
+    async fn week_matchups(
+        &self,
+        league_id: &str,
+        week: u32,
+        current_week: u32,
+        force: bool,
+    ) -> Result<Vec<Matchup>, String> {
+        let name = Self::season_cache_name(league_id, &format!("week{week}"));
+        let settled = week < current_week;
+        let ttl = if settled {
+            u64::MAX
+        } else {
+            WEEK_SWEEP_TTL_SECS
+        };
+        if !force {
+            if let Some((_, matchups)) = self.read_cache::<Vec<Matchup>>(&name, ttl) {
+                return Ok(matchups);
+            }
+        }
+        let matchups = self
+            .client
+            .matchups(league_id, week)
+            .await
+            .map_err(to_message)?;
+        self.write_cache(&name, &matchups);
+        Ok(matchups)
+    }
+
+    /// Sweep every regular-season week: pairings for the simulation and
+    /// season-to-date points per player. Weeks already on disk cost nothing.
     async fn week_sweep(
         &self,
         league_id: &str,
@@ -124,14 +187,6 @@ impl Engine {
         force: bool,
         warnings: &mut Vec<String>,
     ) -> WeekSweep {
-        let name = Self::season_cache_name(league_id, "weeks");
-        if !force {
-            if let Some((_, sweep)) = self.read_cache::<WeekSweep>(&name, WEEK_SWEEP_TTL_SECS) {
-                if sweep.week == week {
-                    return sweep;
-                }
-            }
-        }
         let mut schedule = Vec::new();
         let mut season_points: HashMap<String, f64> = HashMap::new();
         let mut failed = Vec::new();
@@ -140,12 +195,7 @@ impl Engine {
         // another; the results come back out of order, so sort before use.
         let mut fetched: Vec<(u32, Result<Vec<Matchup>, String>)> =
             futures_util::stream::iter(1..=last_regular_week.max(week))
-                .map(|w| async move {
-                    (
-                        w,
-                        self.client.matchups(league_id, w).await.map_err(to_message),
-                    )
-                })
+                .map(|w| async move { (w, self.week_matchups(league_id, w, week, force).await) })
                 .buffer_unordered(REQUEST_CONCURRENCY)
                 .collect()
                 .await;
@@ -178,109 +228,10 @@ impl Engine {
                     .join(", ")
             ));
         }
-        let sweep = WeekSweep {
-            week,
+        WeekSweep {
             schedule,
             season_points,
-        };
-        self.write_cache(&name, &sweep);
-        sweep
-    }
-
-    /// Last season's final table, from the previous league in the chain.
-    async fn last_season(
-        &self,
-        league: &League,
-        my_user_id: Option<&str>,
-        force: bool,
-    ) -> Vec<LastSeasonRow> {
-        let Some(previous_id) = league.previous_league_id.as_deref() else {
-            return Vec::new();
-        };
-        if previous_id.is_empty() || previous_id == "0" {
-            return Vec::new();
         }
-        let name = Self::season_cache_name(previous_id, "final");
-        if !force {
-            if let Some((_, rows)) =
-                self.read_cache::<Vec<LastSeasonRow>>(&name, LAST_SEASON_TTL_SECS)
-            {
-                return rows;
-            }
-        }
-        let (rosters, users, bracket) = tokio::join!(
-            self.client.rosters(previous_id),
-            self.client.league_users(previous_id),
-            self.client.winners_bracket(previous_id)
-        );
-        let Ok(rosters) = rosters else {
-            return Vec::new();
-        };
-        let names: HashMap<String, String> = users
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|u| u.label().map(|n| (u.user_id.clone(), n)))
-            .collect();
-        // The game that decides first place names the champion.
-        let champion =
-            bracket.unwrap_or_default().iter().find_map(
-                |m| {
-                    if m.p == Some(1) {
-                        m.w
-                    } else {
-                        None
-                    }
-                },
-            );
-        let most_points = rosters
-            .iter()
-            .max_by(|a, b| a.settings.points_for().total_cmp(&b.settings.points_for()))
-            .map(|r| r.roster_id);
-
-        let mut ordered: Vec<&Roster> = rosters.iter().collect();
-        // Champion first — they finished first overall whatever the regular
-        // season said — then everyone else by record and points.
-        ordered.sort_by(|a, b| {
-            let champ = |r: &Roster| champion == Some(r.roster_id);
-            champ(b)
-                .cmp(&champ(a))
-                .then_with(|| b.settings.wins.cmp(&a.settings.wins))
-                .then_with(|| b.settings.points_for().total_cmp(&a.settings.points_for()))
-        });
-        let rows: Vec<LastSeasonRow> = ordered
-            .into_iter()
-            .enumerate()
-            .map(|(i, r)| {
-                let is_champ = champion == Some(r.roster_id);
-                LastSeasonRow {
-                    place: i as u32 + 1,
-                    name: r
-                        .owner_id
-                        .as_ref()
-                        .and_then(|o| names.get(o).cloned())
-                        .unwrap_or_else(|| format!("Team {}", r.roster_id)),
-                    record: if r.settings.ties > 0 {
-                        format!(
-                            "{}\u{2013}{}\u{2013}{}",
-                            r.settings.wins, r.settings.losses, r.settings.ties
-                        )
-                    } else {
-                        format!("{}\u{2013}{}", r.settings.wins, r.settings.losses)
-                    },
-                    points: r.settings.points_for(),
-                    tag: if is_champ {
-                        Some("Champ".into())
-                    } else if most_points == Some(r.roster_id) {
-                        Some("Most pts".into())
-                    } else {
-                        None
-                    },
-                    is_mine: my_user_id.is_some() && r.owner_id.as_deref() == my_user_id,
-                }
-            })
-            .collect();
-        self.write_cache(&name, &rows);
-        rows
     }
 
     /// Load the whole in-season picture for a league.
@@ -349,29 +300,30 @@ impl SeasonLoader for Engine {
         };
 
         // The activity feed spans this week and last, which is what "recent"
-        // means to someone checking waivers.
+        // means to someone checking waivers. The two weeks go out together
+        // rather than one after the other, the way every sibling path does.
         // In week 1 "last week" is week 1 too; fetching it twice would list
-        // every preseason move twice.
-        let mut weeks = vec![week.saturating_sub(1).max(1), week];
-        weeks.dedup();
-        let mut transactions: Vec<Transaction> = Vec::new();
-        for w in weeks {
-            match self.client.transactions(league_id, w).await {
-                Ok(batch) => {
-                    for t in batch {
-                        if !transactions
-                            .iter()
-                            .any(|seen| seen.transaction_id == t.transaction_id)
-                        {
-                            transactions.push(t);
-                        }
-                    }
-                }
-                Err(error) => {
-                    warnings.push(format!("transactions for week {w} unavailable: {error}"))
-                }
-            }
-        }
+        // every preseason move twice, so week 1 asks once.
+        let previous = week.saturating_sub(1).max(1);
+        let batches: Vec<(u32, Result<Vec<Transaction>, String>)> = if previous == week {
+            vec![(
+                week,
+                self.client
+                    .transactions(league_id, week)
+                    .await
+                    .map_err(to_message),
+            )]
+        } else {
+            let (earlier, current) = tokio::join!(
+                self.client.transactions(league_id, previous),
+                self.client.transactions(league_id, week)
+            );
+            vec![
+                (previous, earlier.map_err(to_message)),
+                (week, current.map_err(to_message)),
+            ]
+        };
+        let transactions = merge_transactions(batches, &mut warnings);
 
         let sweep = self
             .week_sweep(
@@ -424,7 +376,77 @@ impl SeasonLoader for Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::projections::test_support::offline_engine;
     use crate::season_api::Matchup;
+
+    fn transaction(id: &str) -> Transaction {
+        Transaction {
+            transaction_id: id.into(),
+            kind: "waiver".into(),
+            status: "complete".into(),
+            created: 0,
+            adds: None,
+            drops: None,
+            roster_ids: Vec::new(),
+            settings: None,
+        }
+    }
+
+    #[test]
+    fn a_claim_reported_in_both_weeks_is_listed_once() {
+        let mut warnings = Vec::new();
+        let merged = merge_transactions(
+            vec![
+                (4, Ok(vec![transaction("a"), transaction("b")])),
+                (5, Ok(vec![transaction("b"), transaction("c")])),
+            ],
+            &mut warnings,
+        );
+        let ids: Vec<&str> = merged.iter().map(|t| t.transaction_id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn one_failed_week_warns_and_keeps_the_other() {
+        let mut warnings = Vec::new();
+        let merged = merge_transactions(
+            vec![(4, Err("503".into())), (5, Ok(vec![transaction("c")]))],
+            &mut warnings,
+        );
+        assert_eq!(merged.len(), 1);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("week 4"), "{}", warnings[0]);
+    }
+
+    /// The rollover fix: a week that is over can never change, so its rows
+    /// stand however old the copy is. Only the week being played expires.
+    #[tokio::test]
+    async fn a_finished_week_is_never_refetched_but_the_current_one_expires() {
+        let engine = offline_engine("week-cache");
+        let stale = now_secs() - WEEK_SWEEP_TTL_SECS - 1;
+        for week in [3u32, 5] {
+            let name = Engine::season_cache_name("league-1", &format!("week{week}"));
+            crate::cache::write_atomic(
+                engine.data_dir.join(format!("{name}.tmp")),
+                engine.data_dir.join(&name),
+                stale,
+                &vec![matchup(1, Some(1))],
+            )
+            .unwrap();
+        }
+
+        let settled = engine
+            .week_matchups("league-1", 3, 5, false)
+            .await
+            .expect("a finished week is served from disk at any age");
+        assert_eq!(settled.len(), 1);
+
+        // Week 5 is being played, so a six-hour-old copy is refetched — and
+        // offline that fails rather than passing stale scoring off as live.
+        assert!(engine.week_matchups("league-1", 5, 5, false).await.is_err());
+        std::fs::remove_dir_all(engine.data_dir).unwrap();
+    }
 
     fn matchup(roster_id: u32, matchup_id: Option<u32>) -> Matchup {
         Matchup {
