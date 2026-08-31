@@ -63,7 +63,7 @@ async fn main() {
         }
     };
 
-    season.history = engine.record_history(&loaded, &season);
+    season.history = engine.record_history(&loaded, &season).await;
     let view = build_season_view(&loaded, &season, config.my_user_id.as_deref());
     for warning in &view.data_health.warnings {
         eprintln!("warning: {warning}");

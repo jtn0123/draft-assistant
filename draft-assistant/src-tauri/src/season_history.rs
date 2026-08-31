@@ -144,7 +144,13 @@ pub fn push(history: &mut History, snapshot: Snapshot) {
 /// Persisting the Trends snapshots for a league.
 pub trait HistoryStore {
     /// Load this league's history, add a snapshot if one is due, and persist.
-    fn record_history(&self, loaded: &LoadedLeague, season: &LoadedSeason) -> History;
+    ///
+    /// Async because the file is not small: four hundred snapshots of a
+    /// twelve-team league is megabytes of JSON to parse and write back, and
+    /// doing that on a runtime thread stopped everything else for the length
+    /// of it on every season load.
+    #[allow(async_fn_in_trait)]
+    async fn record_history(&self, loaded: &LoadedLeague, season: &LoadedSeason) -> History;
 }
 
 impl Engine {
@@ -157,17 +163,18 @@ impl Engine {
 }
 
 impl HistoryStore for Engine {
-    fn record_history(&self, loaded: &LoadedLeague, season: &LoadedSeason) -> History {
+    async fn record_history(&self, loaded: &LoadedLeague, season: &LoadedSeason) -> History {
         let name = Self::history_name(&loaded.league.league_id);
         let mut history: History = self
-            .read_cache_any(&name)
+            .read_cache_any_off_thread(&name)
+            .await
             .map(|(_, h)| h)
             .unwrap_or_default();
         let lookup = Lookup { loaded };
         let snapshot = take_snapshot(loaded, season, &lookup, now_secs());
         if should_record(&history, &snapshot) {
             push(&mut history, snapshot);
-            self.write_cache(&name, &history);
+            self.write_cache_off_thread(&name, &history).await;
         }
         history
     }

@@ -32,7 +32,7 @@ pub async fn load_season(
         // The load above took a few seconds with no lock held. If the user
         // switched leagues in that window, this data belongs to the old one:
         // writing it would file league A's roster snapshot under league B.
-        adopt_load(&state.engine, guard.as_ref(), &league.league_id, &mut fresh)?;
+        adopt_load(&state.engine, guard.as_ref(), &league.league_id, &mut fresh).await?;
     }
     *state.season.lock().await = Some(fresh);
     season_view_from(&state).await
@@ -41,14 +41,14 @@ pub async fn load_season(
 /// Take the Trends snapshot for a finished season load, but only if the league
 /// it was loaded for is still the loaded one. Refusing here is what keeps one
 /// league's roster snapshot out of another league's history file.
-fn adopt_load(
+async fn adopt_load(
     engine: &Engine,
     loaded: Option<&LoadedLeague>,
     loaded_for: &str,
     fresh: &mut LoadedSeason,
 ) -> Result<(), String> {
     let loaded = same_league(loaded, loaded_for)?;
-    fresh.history = engine.record_history(loaded, fresh);
+    fresh.history = engine.record_history(loaded, fresh).await;
     Ok(())
 }
 
@@ -275,8 +275,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_load_that_finished_after_a_league_switch_is_thrown_away() {
+    #[tokio::test]
+    async fn a_load_that_finished_after_a_league_switch_is_thrown_away() {
         let dir = test_dir("switched");
         let engine = Engine::new(dir.clone());
         let now_loaded = loaded_league("league-b");
@@ -284,7 +284,9 @@ mod tests {
 
         // The load was started for league A; league B is loaded by the time it
         // came back.
-        let err = adopt_load(&engine, Some(&now_loaded), "league-a", &mut fresh).unwrap_err();
+        let err = adopt_load(&engine, Some(&now_loaded), "league-a", &mut fresh)
+            .await
+            .unwrap_err();
         assert!(err.contains("changed"), "unexpected message: {err}");
         assert!(fresh.history.snapshots.is_empty(), "history was recorded");
         assert!(
@@ -293,19 +295,23 @@ mod tests {
         );
 
         // The same load, still under the league it was started for, records.
-        adopt_load(&engine, Some(&now_loaded), "league-b", &mut fresh).unwrap();
+        adopt_load(&engine, Some(&now_loaded), "league-b", &mut fresh)
+            .await
+            .unwrap();
         assert_eq!(fresh.history.snapshots.len(), 1);
         assert!(dir.join("history_league-b.json").exists());
 
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    #[test]
-    fn a_load_that_outlived_its_league_is_thrown_away() {
+    #[tokio::test]
+    async fn a_load_that_outlived_its_league_is_thrown_away() {
         let dir = test_dir("closed");
         let engine = Engine::new(dir.clone());
         let mut fresh = season();
-        let err = adopt_load(&engine, None, "league-a", &mut fresh).unwrap_err();
+        let err = adopt_load(&engine, None, "league-a", &mut fresh)
+            .await
+            .unwrap_err();
         assert!(err.contains("closed"), "unexpected message: {err}");
         assert!(fresh.history.snapshots.is_empty());
         std::fs::remove_dir_all(dir).unwrap();

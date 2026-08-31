@@ -156,8 +156,8 @@ fn snapshot_in_the_final_week_uses_that_week_alone() {
     assert!((snap.teams[0].strength - 4.0).abs() < 1e-9);
 }
 
-#[test]
-fn record_history_persists_once_and_skips_quiet_refreshes() {
+#[tokio::test]
+async fn record_history_persists_once_and_skips_quiet_refreshes() {
     let dir = std::env::temp_dir().join(format!(
         "draft-assistant-history-{}-{}",
         std::process::id(),
@@ -170,11 +170,11 @@ fn record_history_persists_once_and_skips_quiet_refreshes() {
     let loaded = loaded_league();
     let season = season(1, vec![roster(&["qb1", "wr1"])], 0);
 
-    let first = engine.record_history(&loaded, &season);
+    let first = engine.record_history(&loaded, &season).await;
     assert_eq!(first.snapshots.len(), 1);
     assert!(dir.join("history_league-hist.json").is_file());
 
-    let unchanged = engine.record_history(&loaded, &season);
+    let unchanged = engine.record_history(&loaded, &season).await;
     assert_eq!(
         unchanged.snapshots.len(),
         1,
@@ -182,7 +182,7 @@ fn record_history_persists_once_and_skips_quiet_refreshes() {
     );
 
     let traded = season_with_new_player();
-    let after_trade = engine.record_history(&loaded, &traded);
+    let after_trade = engine.record_history(&loaded, &traded).await;
     assert_eq!(
         after_trade.snapshots.len(),
         2,

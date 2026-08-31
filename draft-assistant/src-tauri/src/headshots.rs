@@ -7,7 +7,7 @@
 //! as such (`<key>.none`) so the miss is never retried on every render.
 
 use crate::engine::{now_secs, Engine};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 const CDN: &str = "https://sleepercdn.com/content/nfl/players/thumb";
@@ -92,10 +92,55 @@ pub fn data_url(bytes: &[u8]) -> Option<String> {
     Some(format!("data:{mime};base64,{}", base64(bytes)))
 }
 
-fn age_secs(path: &PathBuf) -> Option<u64> {
+fn age_secs(path: &Path) -> Option<u64> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
     let at = modified.duration_since(UNIX_EPOCH).ok()?.as_secs();
     Some(now_secs().saturating_sub(at))
+}
+
+/// What the cache on disk had to say about one image.
+enum Cached {
+    /// A picture, fresh enough to serve as it stands.
+    Image(Vec<u8>),
+    /// A remembered "Sleeper has no picture for this", still fresh.
+    KnownMissing,
+    /// Nothing usable — go and fetch it.
+    Nothing,
+}
+
+/// Make sure the cache directory exists and read whatever is already in it.
+///
+/// Every call in here blocks, which is why it runs on the blocking pool: a
+/// roster render asks for dozens of images at once, and doing this on a
+/// runtime thread stalls every other task for the length of all of them.
+fn look_on_disk(dir: &Path, image: &Path, miss: &Path) -> Result<Cached, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("headshots dir: {e}"))?;
+    crate::cache::owner_only_dir(dir);
+    if age_secs(image).is_some_and(|age| age < FRESH_SECS) {
+        if let Ok(bytes) = std::fs::read(image) {
+            if mime_of(&bytes).is_some() {
+                return Ok(Cached::Image(bytes));
+            }
+        }
+    }
+    if age_secs(miss).is_some_and(|age| age < MISS_SECS) {
+        return Ok(Cached::KnownMissing);
+    }
+    Ok(Cached::Nothing)
+}
+
+/// Write down what the CDN gave us: the picture, or the fact that there is
+/// none. Blocking, and run on the blocking pool for the same reason.
+fn store_on_disk(image: &Path, miss: &Path, bytes: &[u8], usable: bool) {
+    if !usable {
+        std::fs::write(miss, b"").ok();
+        return;
+    }
+    let tmp = image.with_extension("img.tmp");
+    if std::fs::write(&tmp, bytes).is_ok() {
+        std::fs::rename(&tmp, image).ok();
+    }
+    std::fs::remove_file(miss).ok();
 }
 
 /// Sleeper's images, cached on disk.
@@ -121,20 +166,18 @@ impl Engine {
 
     async fn cached_image(&self, key: &str, url: &str) -> Result<Option<String>, String> {
         let dir = self.headshot_dir();
-        std::fs::create_dir_all(&dir).map_err(|e| format!("headshots dir: {e}"))?;
-        crate::cache::owner_only_dir(&dir);
         let image = dir.join(format!("{key}.img"));
         let miss = dir.join(format!("{key}.none"));
 
-        if age_secs(&image).is_some_and(|age| age < FRESH_SECS) {
-            if let Ok(bytes) = std::fs::read(&image) {
-                if let Some(url) = data_url(&bytes) {
-                    return Ok(Some(url));
-                }
-            }
-        }
-        if age_secs(&miss).is_some_and(|age| age < MISS_SECS) {
-            return Ok(None);
+        let looking = (dir, image.clone(), miss.clone());
+        let found =
+            tokio::task::spawn_blocking(move || look_on_disk(&looking.0, &looking.1, &looking.2))
+                .await
+                .map_err(|e| format!("headshot cache: {e}"))??;
+        match found {
+            Cached::Image(bytes) => return Ok(data_url(&bytes)),
+            Cached::KnownMissing => return Ok(None),
+            Cached::Nothing => {}
         }
 
         let response = self
@@ -154,20 +197,12 @@ impl Engine {
             Vec::new()
         };
 
-        match data_url(&bytes) {
-            Some(url) => {
-                let tmp = dir.join(format!("{key}.img.tmp"));
-                if std::fs::write(&tmp, &bytes).is_ok() {
-                    std::fs::rename(&tmp, &image).ok();
-                }
-                std::fs::remove_file(&miss).ok();
-                Ok(Some(url))
-            }
-            None => {
-                std::fs::write(&miss, b"").ok();
-                Ok(None)
-            }
-        }
+        let served = data_url(&bytes);
+        let usable = served.is_some();
+        tokio::task::spawn_blocking(move || store_on_disk(&image, &miss, &bytes, usable))
+            .await
+            .ok();
+        Ok(served)
     }
 }
 
@@ -264,6 +299,53 @@ mod tests {
         assert!(avatar_target("https://evil.example/x.jpg", false).is_none());
         assert!(avatar_target("https://sleepercdn.com/uploads/../../etc/passwd", false).is_none());
         assert!(avatar_target("", false).is_none());
+    }
+
+    fn image_dir(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "da-heads-{label}-{}-{}",
+            std::process::id(),
+            now_secs()
+        ))
+    }
+
+    /// The cache lookup now happens on the blocking pool, so this pins down
+    /// that it still finds what is already there and never reaches the CDN.
+    #[tokio::test]
+    async fn a_picture_already_on_disk_is_served_without_the_network() {
+        let dir = image_dir("hit");
+        let engine = Engine::new(dir.clone());
+        let heads = dir.join("headshots");
+        std::fs::create_dir_all(&heads).unwrap();
+        std::fs::write(
+            heads.join("11560.img"),
+            [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
+        )
+        .unwrap();
+
+        let served = engine
+            .headshot("11560")
+            .await
+            .unwrap()
+            .expect("the copy on disk");
+        assert!(served.starts_with("data:image/png;base64,"), "{served}");
+        assert_eq!(engine.headshot_count(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A player Sleeper has no picture for is remembered as such, so the miss
+    /// is not re-fetched on every render.
+    #[tokio::test]
+    async fn a_remembered_miss_answers_without_the_network() {
+        let dir = image_dir("miss");
+        let engine = Engine::new(dir.clone());
+        let heads = dir.join("headshots");
+        std::fs::create_dir_all(&heads).unwrap();
+        std::fs::write(heads.join("11560.none"), b"").unwrap();
+
+        assert_eq!(engine.headshot("11560").await.unwrap(), None);
+        assert_eq!(engine.headshot_count(), 0);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
