@@ -5,7 +5,7 @@
 
 use crate::engine::Engine;
 use crate::season::LastSeasonRow;
-use crate::season_api::Roster;
+use crate::season_api::{Roster, SeasonEndpoints};
 use crate::season_engine::LAST_SEASON_TTL_SECS;
 use crate::sleeper::League;
 use std::collections::HashMap;

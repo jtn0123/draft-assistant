@@ -10,7 +10,7 @@ mod last_season;
 use crate::cache::safe_key;
 use crate::engine::{now_secs, Engine, REQUEST_CONCURRENCY};
 use crate::season::LastSeasonRow;
-use crate::season_api::{Matchup, Roster, ScoreGame, Transaction};
+use crate::season_api::{Matchup, Roster, ScoreGame, SeasonEndpoints, Transaction};
 use crate::season_history::History;
 use crate::season_sources::{LiveFetch, SourceHealth};
 use crate::sleeper::League;

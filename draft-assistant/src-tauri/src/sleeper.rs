@@ -10,8 +10,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
-const BASE: &str = "https://api.sleeper.app/v1";
-const BASE_UNDOC: &str = "https://api.sleeper.app";
+/// The documented v1 API root. Declared once here; `season_api` imports it
+/// rather than repeating the host.
+pub(crate) const BASE: &str = "https://api.sleeper.app/v1";
+/// Root for the undocumented endpoints (projections, scores).
+pub(crate) const BASE_UNDOC: &str = "https://api.sleeper.app";
 /// Total attempts per request, including the first.
 const RETRIES: u32 = 3;
 
@@ -242,6 +245,13 @@ impl LeagueUser {
     }
 }
 
+/// The one thing that speaks HTTP to Sleeper.
+///
+/// Its draft-facing surface is below. The in-season endpoints are declared as
+/// a trait next to the types they return, so this list is the whole story:
+///
+/// - [`crate::season_api::SeasonEndpoints`] — NFL state, rosters, matchups,
+///   transactions, the playoff bracket and the live scoreboard
 pub struct SleeperClient {
     http: reqwest::Client,
 }

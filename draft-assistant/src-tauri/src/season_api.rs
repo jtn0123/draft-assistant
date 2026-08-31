@@ -4,13 +4,10 @@
 //! deserialized defensively so an undocumented field disappearing degrades a
 //! panel rather than failing the whole load.
 
-use crate::sleeper::SleeperClient;
+use crate::sleeper::{SleeperClient, BASE, BASE_UNDOC};
 use crate::sleeper_error::SleeperError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-const BASE: &str = "https://api.sleeper.app/v1";
-const BASE_UNDOC: &str = "https://api.sleeper.app";
 
 /// Where the NFL currently is. Drives which week the season screen shows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,27 +264,59 @@ pub struct BracketMatch {
     pub l: Option<u32>,
 }
 
-impl SleeperClient {
+/// The in-season half of the Sleeper client.
+///
+/// Stated as a trait, and indexed in [`SleeperClient`]'s own doc comment, so
+/// that a client method living outside `sleeper.rs` is declared rather than
+/// merely found: the season endpoints sit next to the types they deserialize
+/// into, and `SleeperClient` still lists everything it can do in one place.
+pub trait SeasonEndpoints {
     /// Current NFL week and season. One tiny call, never cached for long.
-    pub async fn nfl_state(&self) -> Result<NflState, SleeperError> {
+    #[allow(async_fn_in_trait)]
+    async fn nfl_state(&self) -> Result<NflState, SleeperError>;
+
+    #[allow(async_fn_in_trait)]
+    async fn rosters(&self, league_id: &str) -> Result<Vec<Roster>, SleeperError>;
+
+    #[allow(async_fn_in_trait)]
+    async fn matchups(&self, league_id: &str, week: u32) -> Result<Vec<Matchup>, SleeperError>;
+
+    #[allow(async_fn_in_trait)]
+    async fn transactions(
+        &self,
+        league_id: &str,
+        week: u32,
+    ) -> Result<Vec<Transaction>, SleeperError>;
+
+    /// Playoff bracket. Empty until the league seeds it.
+    #[allow(async_fn_in_trait)]
+    async fn winners_bracket(&self, league_id: &str) -> Result<Vec<BracketMatch>, SleeperError>;
+
+    /// Undocumented: live NFL scoreboard for one week, with quarter and clock.
+    #[allow(async_fn_in_trait)]
+    async fn nfl_scores(&self, season: u32, week: u32) -> Result<Vec<ScoreGame>, SleeperError>;
+}
+
+impl SeasonEndpoints for SleeperClient {
+    async fn nfl_state(&self) -> Result<NflState, SleeperError> {
         self.get_json(&format!("{BASE}/state/nfl")).await
     }
 
-    pub async fn rosters(&self, league_id: &str) -> Result<Vec<Roster>, SleeperError> {
+    async fn rosters(&self, league_id: &str) -> Result<Vec<Roster>, SleeperError> {
         let v: Option<Vec<Roster>> = self
             .get_json(&format!("{BASE}/league/{league_id}/rosters"))
             .await?;
         Ok(v.unwrap_or_default())
     }
 
-    pub async fn matchups(&self, league_id: &str, week: u32) -> Result<Vec<Matchup>, SleeperError> {
+    async fn matchups(&self, league_id: &str, week: u32) -> Result<Vec<Matchup>, SleeperError> {
         let v: Option<Vec<Matchup>> = self
             .get_json(&format!("{BASE}/league/{league_id}/matchups/{week}"))
             .await?;
         Ok(v.unwrap_or_default())
     }
 
-    pub async fn transactions(
+    async fn transactions(
         &self,
         league_id: &str,
         week: u32,
@@ -298,19 +327,14 @@ impl SleeperClient {
         Ok(v.unwrap_or_default())
     }
 
-    /// Playoff bracket. Empty until the league seeds it.
-    pub async fn winners_bracket(
-        &self,
-        league_id: &str,
-    ) -> Result<Vec<BracketMatch>, SleeperError> {
+    async fn winners_bracket(&self, league_id: &str) -> Result<Vec<BracketMatch>, SleeperError> {
         let v: Option<Vec<BracketMatch>> = self
             .get_json(&format!("{BASE}/league/{league_id}/winners_bracket"))
             .await?;
         Ok(v.unwrap_or_default())
     }
 
-    /// Undocumented: live NFL scoreboard for one week, with quarter and clock.
-    pub async fn nfl_scores(&self, season: u32, week: u32) -> Result<Vec<ScoreGame>, SleeperError> {
+    async fn nfl_scores(&self, season: u32, week: u32) -> Result<Vec<ScoreGame>, SleeperError> {
         let v: Option<Vec<ScoreGame>> = self
             .get_json(&format!("{BASE_UNDOC}/scores/nfl/regular/{season}/{week}"))
             .await?;
