@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { headshotSrc, teamAvatarSrc, useAvatarMode } from "../avatars";
 import { teamLogo } from "../format";
 import { closeZoom, openZoom, useZoom, type Zoomed } from "../zoom";
+import { useFocusTrap } from "./useFocusTrap";
 
 /** NFL team mark. Renders nothing when the player has no team (free agents). */
 export function TeamLogo({
@@ -81,34 +82,9 @@ export function ZoomLayer() {
     };
   }, [zoomed]);
 
-  useEffect(() => {
-    if (zoomed === null) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        closeZoom();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      // A modal must not leak focus to the page behind it. Close is the only
-      // stop in here, so Tab and Shift+Tab both land back on it.
-      const stops = card.current?.querySelectorAll<HTMLElement>(
-        "button, [href], [tabindex]:not([tabindex='-1'])",
-      );
-      if (stops === undefined || stops.length === 0) return;
-      const first = stops[0];
-      const last = stops[stops.length - 1];
-      if (first === undefined || last === undefined) return;
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [zoomed]);
+  // A modal must not leak focus to the page behind it. Close is the only stop
+  // in here, so Tab and Shift+Tab both land back on it.
+  useFocusTrap(card, closeZoom, zoomed !== null);
 
   if (zoomed === null) return null;
   return (

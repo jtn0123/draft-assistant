@@ -1,6 +1,7 @@
 // Modal confirm and the toast strip.
 
 import { useEffect, useRef } from "react";
+import { useFocusTrap } from "./useFocusTrap";
 
 export function ConfirmDialog({
   pickLabel,
@@ -13,21 +14,30 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const dialog = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  // Whatever was focused when the dialog opened — a board row, usually.
+  const opener = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    opener.current = document.activeElement as HTMLElement | null;
     confirmRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCancel();
+    return () => {
+      // Back to the row they were on, not the top of a two-hundred-row board.
+      opener.current?.focus();
+      opener.current = null;
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  }, []);
+
+  // Escape, Tab containment, and the board behind held inert — the same trap
+  // the zoomed-picture overlay uses, so there is only one of them to get right.
+  useFocusTrap(dialog, onCancel);
 
   return (
     <div className="scrim" onClick={onCancel} role="presentation">
       <div
         className="dialog"
+        ref={dialog}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
