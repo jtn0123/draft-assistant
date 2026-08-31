@@ -112,3 +112,44 @@ describe("TrendsTab", () => {
     expect(dateLabel(Date.parse("2026-09-04T03:30:00Z") / 1000, true)).toBe("Sep 3, 11:30 PM");
   });
 });
+
+// Grade item G7. `Math.min(...values)` spread every point of every series into
+// one argument list; a league with enough snapshots behind it eventually
+// crosses the engine's argument limit and the tab throws instead of drawing.
+describe("TrendsTab with a long history", () => {
+  const long = (points: number): TrendsView => ({
+    series: [2, 7].map((roster_id) => ({
+      roster_id,
+      name: `Team ${roster_id}`,
+      is_mine: roster_id === 2,
+      points: Array.from({ length: points }, (_, i) => ({
+        at: T0 + i * 60,
+        week: 1 + Math.floor(i / 100),
+        strength: 100 + (i % 50),
+      })),
+    })),
+    changes: [],
+  });
+
+  it("draws a chart from more readings than an argument list can hold", () => {
+    // Comfortably past the ~125k spread limit once both series are counted.
+    expect(() => render(<TrendsTab trends={long(80_000)} />)).not.toThrow();
+    const chart = screen.getByRole("img", { name: /Projected strength/ });
+    expect(chart.querySelectorAll("path.trend-line")).toHaveLength(2);
+    expect(screen.getByText("80000 snapshots")).toBeInTheDocument();
+  });
+
+  it("keeps the same lines while the pointer moves over them", () => {
+    const { container } = render(<TrendsTab trends={view(3)} />);
+    const chart = screen.getByRole("img", { name: /Projected strength/ });
+    const before = [...chart.querySelectorAll("path.trend-line")];
+
+    fireEvent.mouseMove(chart, { clientX: 40 });
+    expect(container.querySelector(".trend-crosshair")).not.toBeNull();
+    // Hover moves the crosshair; the fourteen path strings behind it are not
+    // rebuilt, and React keeps the very same elements.
+    const after = [...chart.querySelectorAll("path.trend-line")];
+    expect(after).toEqual(before);
+    expect(after.map((p) => p.getAttribute("d"))).toEqual(before.map((p) => p.getAttribute("d")));
+  });
+});

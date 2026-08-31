@@ -5,7 +5,7 @@
 // mine. Every other team is a recessive line that lights up on hover or when
 // picked in the legend — identity comes from the label, not the colour.
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { TeamSeries, TrendChange, TrendsView } from "../season-types";
 import { dateLabel, fmt, signed } from "../format";
 import { Empty, PanelHead, Segmented, TeamAvatar } from "./bits";
@@ -13,6 +13,24 @@ import { Empty, PanelHead, Segmented, TeamAvatar } from "./bits";
 const W = 460;
 const H = 200;
 const PAD = { top: 10, right: 12, bottom: 22, left: 34 };
+
+/**
+ * The smallest and largest of a list of numbers.
+ *
+ * `Math.min(...values)` reads better and is a latent crash: it spreads every
+ * point of every series into one argument list, and a league with enough
+ * snapshots behind it eventually crosses the engine's argument limit and
+ * throws `RangeError: too many arguments`. A fold has no such ceiling.
+ */
+function extent(values: number[]): { lo: number; hi: number } {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const v of values) {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  return { lo, hi };
+}
 
 /** The distinct snapshot times across every series, oldest first. */
 function timeline(series: TeamSeries[]): number[] {
@@ -25,8 +43,9 @@ function timeline(series: TeamSeries[]): number[] {
  * of identical numbers plot as fourteen flat rules that read as gridlines. */
 function hasMovement(series: TeamSeries[]): boolean {
   return series.some((s) => {
-    const vs = s.points.map((p) => p.strength);
-    return vs.length > 1 && Math.max(...vs) - Math.min(...vs) >= 0.05;
+    if (s.points.length <= 1) return false;
+    const { lo, hi } = extent(s.points.map((p) => p.strength));
+    return hi - lo >= 0.05;
   });
 }
 
@@ -44,9 +63,9 @@ function Ranked({ series, avatars }: { series: TeamSeries[]; avatars: Record<str
     .filter((r): r is { s: TeamSeries; v: number; from: number } => r.v !== null && r.from !== null)
     .sort((a, b) => b.v - a.v);
   if (now.length === 0) return null;
-  const all = now.flatMap((r) => [r.v, r.from]);
-  const lo = Math.floor(Math.min(...all) / 5) * 5;
-  const hi = Math.ceil(Math.max(...all) / 5) * 5;
+  const bounds = extent(now.flatMap((r) => [r.v, r.from]));
+  const lo = Math.floor(bounds.lo / 5) * 5;
+  const hi = Math.ceil(bounds.hi / 5) * 5;
   const pct = (v: number) => ((v - lo) / Math.max(1, hi - lo)) * 100;
   return (
     <div className="trend-ranked">
@@ -101,6 +120,79 @@ function Ranked({ series, avatars }: { series: TeamSeries[]; avatars: Record<str
   );
 }
 
+interface Plot {
+  /** Distinct snapshot times, oldest first. */
+  times: number[];
+  /** Data space to SVG space. */
+  x: (at: number) => number;
+  y: (v: number) => number;
+  /** The three horizontal gridlines, in data space. */
+  ticks: number[];
+  /** One path string per series, in the order the series were given. */
+  paths: string[];
+}
+
+/**
+ * Everything the data alone decides: the scales, the gridlines, and the path
+ * string for each team.
+ *
+ * Hovering the chart samples a pointer position several times a frame. All
+ * that hover changes is where a crosshair and two dots sit, so none of this —
+ * fourteen path strings over every snapshot ever taken — has any business
+ * being rebuilt for it.
+ */
+function buildPlot(series: TeamSeries[]): Plot {
+  const times = timeline(series);
+  const bounds = extent(series.flatMap((s) => s.points.map((p) => p.strength)));
+  const lo = Math.floor(bounds.lo / 5) * 5;
+  const hi = Math.ceil(bounds.hi / 5) * 5;
+  const t0 = times[0];
+  const t1 = times[times.length - 1];
+  const x = (at: number) =>
+    PAD.left + ((at - t0) / Math.max(1, t1 - t0)) * (W - PAD.left - PAD.right);
+  const y = (v: number) =>
+    PAD.top + (1 - (v - lo) / Math.max(1, hi - lo)) * (H - PAD.top - PAD.bottom);
+  const paths = series.map((s) =>
+    s.points.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.at)},${y(p.strength)}`).join(" "),
+  );
+  return { times, x, y, ticks: [lo, (lo + hi) / 2, hi], paths };
+}
+
+/** The team lines, held still while the pointer moves over them. */
+const Lines = memo(function Lines({
+  series,
+  paths,
+  focus,
+  onFocus,
+}: {
+  series: TeamSeries[];
+  paths: string[];
+  focus: number | null;
+  onFocus: (rosterId: number | null) => void;
+}) {
+  return (
+    <>
+      {series.map((s, i) => (
+        <path
+          key={s.roster_id}
+          className={
+            s.is_mine
+              ? "trend-line is-mine"
+              : s.roster_id === focus
+                ? "trend-line is-focus"
+                : "trend-line"
+          }
+          d={paths[i]}
+          onMouseEnter={() => onFocus(s.roster_id)}
+          onMouseLeave={() => onFocus(null)}
+        >
+          <title>{s.name}</title>
+        </path>
+      ))}
+    </>
+  );
+});
+
 function Chart({
   series,
   focus,
@@ -111,18 +203,9 @@ function Chart({
   onFocus: (rosterId: number | null) => void;
 }) {
   const [hoverAt, setHoverAt] = useState<number | null>(null);
-  const times = useMemo(() => timeline(series), [series]);
-  const values = series.flatMap((s) => s.points.map((p) => p.strength));
-  const lo = Math.floor(Math.min(...values) / 5) * 5;
-  const hi = Math.ceil(Math.max(...values) / 5) * 5;
+  const { times, x, y, ticks, paths } = useMemo(() => buildPlot(series), [series]);
   const t0 = times[0];
   const t1 = times[times.length - 1];
-  const x = (at: number) =>
-    PAD.left + ((at - t0) / Math.max(1, t1 - t0)) * (W - PAD.left - PAD.right);
-  const y = (v: number) =>
-    PAD.top + (1 - (v - lo) / Math.max(1, hi - lo)) * (H - PAD.top - PAD.bottom);
-
-  const ticks = [lo, (lo + hi) / 2, hi];
   // Snapshots hours apart need the time to tell the ends of the axis apart.
   const sameDay = t1 - t0 < 86_400;
   const mine = series.find((s) => s.is_mine) ?? null;
@@ -171,27 +254,7 @@ function Chart({
             y2={H - PAD.bottom}
           />
         )}
-        {series.map((s) => {
-          const d = s.points
-            .map((p, i) => `${i === 0 ? "M" : "L"}${x(p.at)},${y(p.strength)}`)
-            .join(" ");
-          const cls = s.is_mine
-            ? "trend-line is-mine"
-            : s.roster_id === focus
-              ? "trend-line is-focus"
-              : "trend-line";
-          return (
-            <path
-              key={s.roster_id}
-              className={cls}
-              d={d}
-              onMouseEnter={() => onFocus(s.roster_id)}
-              onMouseLeave={() => onFocus(null)}
-            >
-              <title>{s.name}</title>
-            </path>
-          );
-        })}
+        <Lines series={series} paths={paths} focus={focus} onFocus={onFocus} />
         {[mine, focused].map((s) => {
           const v = valueAt(s);
           if (s === null || v === null) return null;
