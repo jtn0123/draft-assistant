@@ -94,8 +94,9 @@ export default function App() {
     setView((prev) => stableAvailable(prev, next));
     setPollHealth({
       last_success_at: next.data_health.poll_last_success_at ?? next.generated_at,
-      consecutive_failures: next.data_health.poll_consecutive_failures ?? 0,
-      last_error: next.data_health.poll_last_error ?? null,
+      // Both are always present: the backend types them u32 and Option<String>.
+      consecutive_failures: next.data_health.poll_consecutive_failures,
+      last_error: next.data_health.poll_last_error,
     });
   }, []);
 
