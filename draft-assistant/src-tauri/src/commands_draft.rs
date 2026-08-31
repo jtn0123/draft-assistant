@@ -4,6 +4,7 @@ use crate::draft;
 use crate::engine::{self, AppConfig, StoredLeague};
 use crate::poll::{record_poll_outcome, DraftPollMemory};
 use crate::sleeper::Pick;
+use crate::sleeper_error::to_message;
 use crate::state::{view_from, AppState};
 use crate::view::{self, DraftView};
 use std::sync::atomic::Ordering;
@@ -66,7 +67,12 @@ pub async fn set_my_username(
 ) -> Result<String, String> {
     // Through the pooled client, so this call gets the same timeouts, retries
     // and user-agent as every other Sleeper request.
-    let user = state.engine.client.user(&username).await?;
+    let user = state
+        .engine
+        .client
+        .user(&username)
+        .await
+        .map_err(to_message)?;
     let mut config = state.config.lock().await;
     config.my_user_id = Some(user.user_id.clone());
     state.engine.save_config(&config)?;
@@ -104,7 +110,7 @@ pub async fn refresh_picks(state: State<'_, AppState>) -> Result<DraftView, Stri
         state.engine.client.picks(&draft_id),
         state.engine.client.draft(&draft_id)
     );
-    let picks = picks?;
+    let picks = picks.map_err(to_message)?;
 
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
@@ -270,14 +276,14 @@ pub async fn start_polling(
                                     }
                                 }
                             }
-                            Err(error) => errors.push(error),
+                            Err(error) => errors.push(error.to_string()),
                         }
                         match draft {
                             Ok(draft) => {
                                 changed |= memory.status_changed(&draft.status);
                                 loaded.draft = draft;
                             }
-                            Err(error) => errors.push(error),
+                            Err(error) => errors.push(error.to_string()),
                         }
                         record_poll_outcome(loaded, &errors);
                         health = Some(view::poll_health(loaded));

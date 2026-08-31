@@ -11,6 +11,7 @@ use crate::cache::{
 use crate::mock_league::synthesize_league;
 use crate::roster::RosterRules;
 use crate::sleeper::{Draft, League, Pick, PlayerMeta, SleeperClient};
+use crate::sleeper_error::to_message;
 use crate::valuation::ReplacementModel;
 use crate::weekly::WeeklyPoints;
 use serde::{Deserialize, Serialize};
@@ -273,12 +274,12 @@ impl Engine {
 
     /// Load a league end-to-end and build its scored board.
     pub async fn load_league(&self, league_id: &str, force: bool) -> Result<LoadedLeague, String> {
-        let league = self.client.league(league_id).await?;
+        let league = self.client.league(league_id).await.map_err(to_message)?;
         let draft_id = league
             .draft_id
             .clone()
             .ok_or_else(|| "league has no draft".to_string())?;
-        let draft = self.client.draft(&draft_id).await?;
+        let draft = self.client.draft(&draft_id).await.map_err(to_message)?;
         let users = self
             .client
             .league_users(league_id)
@@ -303,7 +304,7 @@ impl Engine {
         draft_id: &str,
         force: bool,
     ) -> Result<LoadedLeague, String> {
-        let draft = self.client.draft(draft_id).await?;
+        let draft = self.client.draft(draft_id).await.map_err(to_message)?;
         let league = synthesize_league(&draft);
         let mut loaded = self
             .assemble(league, draft, HashMap::new(), HashMap::new(), force)
@@ -333,7 +334,7 @@ impl Engine {
         force: bool,
     ) -> Result<LoadedLeague, String> {
         let (api_picks, poll_last_success_at, poll_consecutive_failures, poll_last_error) =
-            match self.client.picks(&draft.draft_id).await {
+            match self.client.picks(&draft.draft_id).await.map_err(to_message) {
                 Ok(picks) => (picks, Some(now_secs()), 0, None),
                 Err(error) => (Vec::new(), None, 1, Some(error)),
             };

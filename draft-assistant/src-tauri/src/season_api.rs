@@ -5,6 +5,7 @@
 //! panel rather than failing the whole load.
 
 use crate::sleeper::SleeperClient;
+use crate::sleeper_error::SleeperError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -268,18 +269,18 @@ pub struct BracketMatch {
 
 impl SleeperClient {
     /// Current NFL week and season. One tiny call, never cached for long.
-    pub async fn nfl_state(&self) -> Result<NflState, String> {
+    pub async fn nfl_state(&self) -> Result<NflState, SleeperError> {
         self.get_json(&format!("{BASE}/state/nfl")).await
     }
 
-    pub async fn rosters(&self, league_id: &str) -> Result<Vec<Roster>, String> {
+    pub async fn rosters(&self, league_id: &str) -> Result<Vec<Roster>, SleeperError> {
         let v: Option<Vec<Roster>> = self
             .get_json(&format!("{BASE}/league/{league_id}/rosters"))
             .await?;
         Ok(v.unwrap_or_default())
     }
 
-    pub async fn matchups(&self, league_id: &str, week: u32) -> Result<Vec<Matchup>, String> {
+    pub async fn matchups(&self, league_id: &str, week: u32) -> Result<Vec<Matchup>, SleeperError> {
         let v: Option<Vec<Matchup>> = self
             .get_json(&format!("{BASE}/league/{league_id}/matchups/{week}"))
             .await?;
@@ -290,7 +291,7 @@ impl SleeperClient {
         &self,
         league_id: &str,
         week: u32,
-    ) -> Result<Vec<Transaction>, String> {
+    ) -> Result<Vec<Transaction>, SleeperError> {
         let v: Option<Vec<Transaction>> = self
             .get_json(&format!("{BASE}/league/{league_id}/transactions/{week}"))
             .await?;
@@ -298,7 +299,10 @@ impl SleeperClient {
     }
 
     /// Playoff bracket. Empty until the league seeds it.
-    pub async fn winners_bracket(&self, league_id: &str) -> Result<Vec<BracketMatch>, String> {
+    pub async fn winners_bracket(
+        &self,
+        league_id: &str,
+    ) -> Result<Vec<BracketMatch>, SleeperError> {
         let v: Option<Vec<BracketMatch>> = self
             .get_json(&format!("{BASE}/league/{league_id}/winners_bracket"))
             .await?;
@@ -306,7 +310,7 @@ impl SleeperClient {
     }
 
     /// Undocumented: live NFL scoreboard for one week, with quarter and clock.
-    pub async fn nfl_scores(&self, season: u32, week: u32) -> Result<Vec<ScoreGame>, String> {
+    pub async fn nfl_scores(&self, season: u32, week: u32) -> Result<Vec<ScoreGame>, SleeperError> {
         let v: Option<Vec<ScoreGame>> = self
             .get_json(&format!("{BASE_UNDOC}/scores/nfl/regular/{season}/{week}"))
             .await?;

@@ -12,6 +12,7 @@ use crate::season_api::{Matchup, Roster, ScoreGame, Transaction};
 use crate::season_history::History;
 use crate::season_sources::{apply_refresh, SourceHealth};
 use crate::sleeper::League;
+use crate::sleeper_error::to_message;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -129,7 +130,12 @@ impl Engine {
         // another; the results come back out of order, so sort before use.
         let mut fetched: Vec<(u32, Result<Vec<Matchup>, String>)> =
             futures_util::stream::iter(1..=last_regular_week.max(week))
-                .map(|w| async move { (w, self.client.matchups(league_id, w).await) })
+                .map(|w| async move {
+                    (
+                        w,
+                        self.client.matchups(league_id, w).await.map_err(to_message),
+                    )
+                })
                 .buffer_unordered(REQUEST_CONCURRENCY)
                 .collect()
                 .await;
@@ -289,7 +295,7 @@ impl SeasonLoader for Engine {
         my_user_id: Option<&str>,
         force: bool,
     ) -> Result<LoadedSeason, String> {
-        let state = self.client.nfl_state().await?;
+        let state = self.client.nfl_state().await.map_err(to_message)?;
         let week = state.current_week();
         let season: u32 = league
             .season
@@ -303,7 +309,7 @@ impl SeasonLoader for Engine {
             self.client.matchups(league_id, week),
             self.client.nfl_scores(season, week)
         );
-        let rosters = rosters?;
+        let rosters = rosters.map_err(to_message)?;
         // The same per-source bookkeeping the live poll keeps, so the health
         // badge starts out honest rather than waiting for the first refresh.
         let loaded_at = now_secs();
@@ -316,7 +322,7 @@ impl SeasonLoader for Engine {
             }
             Err(error) => {
                 warnings.push(format!("this week's matchups unavailable: {error}"));
-                sources.matchups.failed(error);
+                sources.matchups.failed(error.to_string());
                 Vec::new()
             }
         };
@@ -327,7 +333,7 @@ impl SeasonLoader for Engine {
             }
             Err(error) => {
                 warnings.push(format!("live NFL scores unavailable: {error}"));
-                sources.scores.failed(error);
+                sources.scores.failed(error.to_string());
                 Vec::new()
             }
         };
@@ -396,7 +402,13 @@ impl SeasonLoader for Engine {
         // Which endpoint gave what, and what that means for the staleness
         // clock, is decided in `season_sources` where it can be tested without
         // a network.
-        apply_refresh(season, matchups, scores, rosters, now_secs())
+        apply_refresh(
+            season,
+            matchups.map_err(to_message),
+            scores.map_err(to_message),
+            rosters.map_err(to_message),
+            now_secs(),
+        )
     }
 }
 

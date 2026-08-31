@@ -9,6 +9,7 @@ use crate::engine::{
     now_secs, Engine, PLAYERS_TTL_SECS, PROJECTIONS_TTL_SECS, REQUEST_CONCURRENCY, WEEKS,
 };
 use crate::sleeper::{PlayerMeta, ProjectionRow};
+use crate::sleeper_error::to_message;
 use futures_util::StreamExt;
 use std::collections::HashMap;
 
@@ -26,7 +27,7 @@ impl Engine {
             }
         }
         let stale = self.read_cache_any_off_thread("players.json").await;
-        match self.client.players().await {
+        match self.client.players().await.map_err(to_message) {
             Ok(data) => {
                 let at = self.write_cache_off_thread("players.json", &data).await;
                 Ok((at, data, None))
@@ -62,7 +63,12 @@ impl Engine {
             }
         }
         let stale = self.read_cache_any_off_thread(&name).await;
-        match self.client.season_projections(season).await {
+        match self
+            .client
+            .season_projections(season)
+            .await
+            .map_err(to_message)
+        {
             Ok(data) => {
                 let at = self.write_cache_off_thread(&name, &data).await;
                 Ok((at, data, None))
@@ -101,13 +107,20 @@ impl Engine {
         // Eighteen weeks, six at a time: sequentially this was eighteen round
         // trips end to end, and at an 8s timeout a bad connection turned a
         // league load into minutes of waiting.
-        let fetched: Vec<(u32, Result<Vec<ProjectionRow>, String>)> = futures_util::stream::iter(
-            1..=WEEKS,
-        )
-        .map(|week| async move { (week, self.client.weekly_projections(season, week).await) })
-        .buffer_unordered(REQUEST_CONCURRENCY)
-        .collect()
-        .await;
+        let fetched: Vec<(u32, Result<Vec<ProjectionRow>, String>)> =
+            futures_util::stream::iter(1..=WEEKS)
+                .map(|week| async move {
+                    (
+                        week,
+                        self.client
+                            .weekly_projections(season, week)
+                            .await
+                            .map_err(to_message),
+                    )
+                })
+                .buffer_unordered(REQUEST_CONCURRENCY)
+                .collect()
+                .await;
 
         let mut all = Vec::new();
         let mut failures = Vec::new();

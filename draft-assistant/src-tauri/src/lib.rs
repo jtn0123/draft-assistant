@@ -40,6 +40,7 @@ pub mod season_view_standings;
 pub mod secrets;
 pub mod simulation;
 pub mod sleeper;
+pub mod sleeper_error;
 pub mod state;
 pub mod valuation;
 pub mod view;

@@ -5,6 +5,7 @@
 //! deserialized defensively (unknown fields ignored, missing fields defaulted)
 //! and raw JSON snapshots are cached on disk by the caller.
 
+use crate::sleeper_error::SleeperError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -252,12 +253,28 @@ impl Default for SleeperClient {
 }
 
 impl SleeperClient {
-    pub fn new() -> Self {
-        let http = reqwest::Client::builder()
+    fn builder() -> reqwest::ClientBuilder {
+        reqwest::Client::builder()
             .user_agent("draft-assistant/0.1 (local second-screen tool)")
             .gzip(true)
             .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(8))
+    }
+
+    pub fn new() -> Self {
+        let http = Self::builder()
+            .build()
+            .expect("failed to build http client");
+        Self { http }
+    }
+
+    /// A client that ignores `HTTP_PROXY`/`HTTPS_PROXY`. The offline tests set
+    /// both, process-wide, to a dead port; transport tests that drive a real
+    /// stub server on localhost must not be routed through that.
+    #[cfg(test)]
+    pub(crate) fn without_proxy() -> Self {
+        let http = Self::builder()
+            .no_proxy()
             .build()
             .expect("failed to build http client");
         Self { http }
@@ -269,40 +286,53 @@ impl SleeperClient {
         self.http.clone()
     }
 
-    /// One attempt, no retry. `Err(retryable)` says whether trying again
-    /// could plausibly help: a transport error or a 5xx, but never a 404.
-    async fn get_json_once<T: serde::de::DeserializeOwned>(
+    /// One attempt, no retry. The returned `SleeperError` carries whether
+    /// another try could help; `get_json` asks it rather than guessing.
+    pub(crate) async fn get_json_once<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
-    ) -> Result<T, (String, bool)> {
+    ) -> Result<T, SleeperError> {
         let resp = self
             .http
             .get(url)
             .send()
             .await
-            .map_err(|e| (format!("request failed: {url}: {e}"), true))?;
+            .map_err(|e| SleeperError::Transport {
+                url: url.to_string(),
+                detail: e.to_string(),
+            })?;
         let status = resp.status();
         if !status.is_success() {
-            return Err((format!("HTTP {status} for {url}"), status.is_server_error()));
+            return Err(SleeperError::Http {
+                status,
+                url: url.to_string(),
+            });
         }
-        resp.json::<T>()
-            .await
-            .map_err(|e| (format!("bad JSON from {url}: {e}"), false))
+        resp.json::<T>().await.map_err(|e| SleeperError::Decode {
+            url: url.to_string(),
+            detail: e.to_string(),
+        })
     }
 
     /// A GET that survives a blip. Sleeper drops the occasional request during
     /// Sunday traffic, and a single failure used to blank a whole week of
     /// data until the next manual refresh.
+    ///
+    /// Only failures the error type calls retryable are tried again: a 404 or
+    /// a malformed body returns on the first attempt, because waiting 750ms to
+    /// receive the same 404 twice more helps nobody.
     pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
-    ) -> Result<T, String> {
+    ) -> Result<T, SleeperError> {
         let mut backoff = Duration::from_millis(250);
-        for attempt in 0..RETRIES {
+        let mut attempts = 0;
+        loop {
             match self.get_json_once(url).await {
                 Ok(value) => return Ok(value),
-                Err((error, retryable)) => {
-                    if !retryable || attempt + 1 == RETRIES {
+                Err(error) => {
+                    attempts += 1;
+                    if !error.retryable() || attempts == RETRIES {
                         return Err(error);
                     }
                 }
@@ -310,7 +340,6 @@ impl SleeperClient {
             tokio::time::sleep(backoff).await;
             backoff *= 2;
         }
-        Err(format!("request failed: {url}"))
     }
 
     /// Resolve a Sleeper username to its user id.
@@ -318,7 +347,7 @@ impl SleeperClient {
     /// Sleeper usernames are alphanumerics plus `_` and `-`; anything else is
     /// refused rather than escaped, because it would be interpolated into the
     /// request path.
-    pub async fn user(&self, username: &str) -> Result<SleeperUser, String> {
+    pub async fn user(&self, username: &str) -> Result<SleeperUser, SleeperError> {
         let username = username.trim();
         let legal = !username.is_empty()
             && username.len() <= 32
@@ -326,23 +355,33 @@ impl SleeperClient {
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
         if !legal {
-            return Err(format!("'{username}' is not a valid Sleeper username"));
+            return Err(SleeperError::Invalid(format!(
+                "'{username}' is not a valid Sleeper username"
+            )));
         }
         let user: Option<SleeperUser> = self.get_json(&format!("{BASE}/user/{username}")).await?;
-        user.ok_or_else(|| format!("Sleeper user '{username}' not found"))
+        user.ok_or_else(|| SleeperError::NotFound(format!("Sleeper user '{username}' not found")))
     }
 
-    pub async fn league(&self, league_id: &str) -> Result<League, String> {
+    pub async fn league(&self, league_id: &str) -> Result<League, SleeperError> {
         let v: Option<League> = self.get_json(&format!("{BASE}/league/{league_id}")).await?;
-        v.ok_or_else(|| format!("league {league_id} not found (Sleeper returned null)"))
+        v.ok_or_else(|| {
+            SleeperError::NotFound(format!(
+                "league {league_id} not found (Sleeper returned null)"
+            ))
+        })
     }
 
-    pub async fn draft(&self, draft_id: &str) -> Result<Draft, String> {
+    pub async fn draft(&self, draft_id: &str) -> Result<Draft, SleeperError> {
         let v: Option<Draft> = self.get_json(&format!("{BASE}/draft/{draft_id}")).await?;
-        v.ok_or_else(|| format!("draft {draft_id} not found (Sleeper returned null)"))
+        v.ok_or_else(|| {
+            SleeperError::NotFound(format!(
+                "draft {draft_id} not found (Sleeper returned null)"
+            ))
+        })
     }
 
-    pub async fn picks(&self, draft_id: &str) -> Result<Vec<Pick>, String> {
+    pub async fn picks(&self, draft_id: &str) -> Result<Vec<Pick>, SleeperError> {
         let v: Option<Vec<Pick>> = self
             .get_json(&format!("{BASE}/draft/{draft_id}/picks"))
             .await?;
@@ -350,7 +389,7 @@ impl SleeperClient {
     }
 
     /// All members of a league (for slot display names). One call.
-    pub async fn league_users(&self, league_id: &str) -> Result<Vec<LeagueUser>, String> {
+    pub async fn league_users(&self, league_id: &str) -> Result<Vec<LeagueUser>, SleeperError> {
         let v: Option<Vec<LeagueUser>> = self
             .get_json(&format!("{BASE}/league/{league_id}/users"))
             .await?;
@@ -358,12 +397,15 @@ impl SleeperClient {
     }
 
     /// Full player dictionary: player_id -> meta. ~14.6MB, cache on disk.
-    pub async fn players(&self) -> Result<HashMap<String, PlayerMeta>, String> {
+    pub async fn players(&self) -> Result<HashMap<String, PlayerMeta>, SleeperError> {
         self.get_json(&format!("{BASE}/players/nfl")).await
     }
 
     /// Undocumented: full-season raw-stat projections for one season.
-    pub async fn season_projections(&self, season: u32) -> Result<Vec<ProjectionRow>, String> {
+    pub async fn season_projections(
+        &self,
+        season: u32,
+    ) -> Result<Vec<ProjectionRow>, SleeperError> {
         let url = format!(
             "{BASE_UNDOC}/projections/nfl/{season}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF&order_by=adp_ppr"
         );
@@ -375,7 +417,7 @@ impl SleeperClient {
         &self,
         season: u32,
         week: u32,
-    ) -> Result<Vec<ProjectionRow>, String> {
+    ) -> Result<Vec<ProjectionRow>, SleeperError> {
         let url = format!(
             "{BASE_UNDOC}/projections/nfl/{season}/{week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF"
         );
