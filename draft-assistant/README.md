@@ -222,13 +222,17 @@ src/                        React + TS strict UI
 src-tauri/src/
   shared
     sleeper.rs              API client + response types
+    sleeper_error.rs        what a request can fail with, and whether retrying helps
     engine.rs               caching, config, league loading
+    cache.rs                the cache-file envelope: read, TTL check, atomic write
     projections.rs          projection fetch + stale-cache fallback
     roster.rs               slot rules (flex eligibility, draftable positions)
     scoring.rs              data-driven scorer + per-game bonus model
     headshots.rs            on-disk image cache (players + manager avatars)
     secrets.rs              API key in the macOS Keychain
     state.rs                Tauri-managed app state
+    poll.rs                 what each poll tick decides — see "How it stays live"
+    mock_league.rs          league settings invented for a mock draft, which has none
   draft screen
     draft.rs                snake math, rosters, survival probabilities
     board.rs                scored board assembly (incl. bye inference)
@@ -238,29 +242,37 @@ src-tauri/src/
     simulation.rs           deterministic draft simulation
   season screen
     season.rs               SeasonView + SeasonAnalysis; orchestrates the sections
+    season_types.rs         the view's plain data structs, kept out of season.rs
     season_view_matchup.rs  head-to-head rows + start/sit calls
     season_view_live.rs     live scoreboard for the two set lineups
     season_view_standings.rs standings + playoff odds
     season_view_market.rs   waiver targets + trade ideas
     season_view_feeds.rs    activity, completed trades, trends
+    season_calls.rs         the words around a start/sit call: why, and when it locks
+    season_injury.rs        Sleeper's dozen injury spellings cut down to three tags
     season_lookup.rs        player name/position/team/injury lookup
     season_api.rs           season-only Sleeper endpoints + DTOs
     season_engine.rs        season load, week sweep, live refresh
+    season_sources.rs       per-feed freshness, so the badge can name what broke
     season_lineup.rs        optimal lineup solver
     season_odds.rs          playoff-odds simulation
     season_moves.rs         waiver targets by marginal lineup gain
-    season_trades.rs        trade ideas; season_deals.rs completed trades
+    season_trades.rs        trade ideas
+    season_deals.rs         completed trades, both sides named
     season_activity.rs      league activity feed
-    season_live.rs          live scoreboard; season_history.rs trends
+    season_live.rs          live scoreboard
+    season_history.rs       team-strength snapshots, kept per league on disk
+    season_trends_view.rs   the Trends tab: the series + why each line moved
     weekly.rs               weekly projection lookup
   ask claude
     chat.rs                 Anthropic Messages API route
     chat_cli.rs             Claude Code CLI route
     chat_context.rs         what Claude is shown per screen
-  commands_draft.rs         draft commands + 3s pick poller
-  commands_season.rs        season commands + 30s live poller
+  commands_draft.rs         draft commands + the 3s pick poller
+  commands_season.rs        season commands + the 30s live poller
   commands_chat.rs          chat commands
-  lib.rs                    command registration
+  lib.rs                    the module list + command registration
+  main.rs                   the desktop binary; hands straight off to lib.rs
   bin/dump_state.rs         headless draft dump + simulator
   bin/dump_season.rs        headless season dump
 ```
