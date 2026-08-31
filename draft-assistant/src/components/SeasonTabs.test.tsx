@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LastSeasonRow, RosterRow, StandingsRow, TradeIdea } from "../season-types";
 import { LastSeason, LeagueTab, Standings, TeamRoster } from "./SeasonTabs";
 
@@ -16,6 +16,12 @@ function row(overrides: Partial<RosterRow>): RosterRow {
     ...overrides,
   };
 }
+
+// Fake timers are installed by the one test that needs them; this makes sure
+// they cannot leak into the rest of this file or any other.
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("LeagueTab", () => {
   it("dates every activity row and lists completed trades with both sides", () => {
@@ -95,7 +101,12 @@ describe("LeagueTab", () => {
     expect(screen.getByText("1 in review · 0 completed")).toBeInTheDocument();
   });
 
+  // Grade item D8. Staleness is measured against the wall clock, so the clock
+  // is stopped: the interesting assertion is the threshold itself, and a live
+  // clock can only ever land near it.
   it("admits how old the trade ideas are once they stop being current", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-09-13T17:00:00Z"));
     const nowSecs = Math.floor(Date.now() / 1000);
     const { rerender } = render(
       <LeagueTab trades={[]} recentTrades={[]} activity={[]} analysisAsOfSecs={nowSecs - 60} />,
@@ -103,6 +114,18 @@ describe("LeagueTab", () => {
     // A minute old is still "now" as far as a reader is concerned.
     expect(screen.getByText("by roster fit")).toBeInTheDocument();
     expect(screen.queryByText(/ideas from/)).not.toBeInTheDocument();
+
+    // One second short of the two-minute threshold: still current.
+    rerender(
+      <LeagueTab trades={[]} recentTrades={[]} activity={[]} analysisAsOfSecs={nowSecs - 119} />,
+    );
+    expect(screen.queryByText(/ideas from/)).not.toBeInTheDocument();
+
+    // The threshold exactly — the first moment the note is owed to the reader.
+    rerender(
+      <LeagueTab trades={[]} recentTrades={[]} activity={[]} analysisAsOfSecs={nowSecs - 120} />,
+    );
+    expect(screen.getByText("ideas from 2 minutes ago")).toBeInTheDocument();
 
     rerender(
       <LeagueTab trades={[]} recentTrades={[]} activity={[]} analysisAsOfSecs={nowSecs - 420} />,

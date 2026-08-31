@@ -1,9 +1,14 @@
 import { act, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SeasonView, SourceHealth } from "../season-types";
 import { SeasonScreen } from "./SeasonScreen";
 
-const NOW = () => Math.floor(Date.now() / 1000);
+// Grade item D8. The badge's whole job is to notice how long ago something
+// happened, so every test here runs against a clock that is standing still:
+// otherwise "5 seconds ago" is a race against the second hand, and the
+// thresholds below could never be asserted at the boundary itself.
+const FROZEN = Date.parse("2026-09-13T17:00:00Z");
+const NOW = () => Math.floor(FROZEN / 1000);
 
 function fresh(): SourceHealth {
   return {
@@ -63,6 +68,11 @@ function view(overrides: Partial<SeasonView> = {}): SeasonView {
   };
 }
 
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(FROZEN);
+});
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -107,6 +117,22 @@ describe("the live badge", () => {
     expect(screen.getByText("Matchups: 5 seconds ago")).toBeInTheDocument();
   });
 
+  // The exact threshold, which a live clock can only ever straddle by luck.
+  it("still vouches for a source at ninety seconds and gives up at ninety-one", () => {
+    const at = (behindSecs: number) => {
+      const sources = fresh();
+      sources.rosters = { last_success_secs: NOW() - behindSecs, error: null };
+      const { unmount } = render(
+        <SeasonScreen view={view({ data_health: { fetched_at: NOW(), warnings: [], sources } })} />,
+      );
+      const label = screen.getByText(/^Live · |^Not updating$/).textContent;
+      unmount();
+      return label;
+    };
+    expect(at(90)).toBe("Live · 0s ago");
+    expect(at(91)).toBe("Live · rosters behind");
+  });
+
   it("keeps the breakdown out of the way while every source is current", () => {
     render(<SeasonScreen view={view()} />);
     expect(screen.queryByText("Scores: 5 seconds ago")).not.toBeInTheDocument();
@@ -127,7 +153,6 @@ describe("the live badge", () => {
   // The badge is the one thing on the screen whose job is to notice an
   // absence, so it has to keep moving when nothing else does.
   it("stops calling itself live when time passes and no new data arrives", async () => {
-    vi.useFakeTimers();
     render(<SeasonScreen view={view()} />);
     expect(screen.getByText(/^Live · /)).toHaveClass("pill-live");
 
@@ -140,7 +165,6 @@ describe("the live badge", () => {
   });
 
   it("goes stale on the overall stamp too, when there is no per-source detail", async () => {
-    vi.useFakeTimers();
     render(<SeasonScreen view={view({ data_health: { fetched_at: NOW(), warnings: [] } })} />);
     expect(screen.getByText(/^Live · /)).toHaveClass("pill-live");
 
