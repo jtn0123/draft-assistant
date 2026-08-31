@@ -60,6 +60,9 @@ interface Api {
   startSeasonPolling(intervalSecs?: number): Promise<void>;
   stopSeasonPolling(): Promise<void>;
   onSeasonUpdated(handler: (view: SeasonView) => void): Promise<UnlistenFn>;
+  /** How the season poller's last attempt went — the live-scoring twin of
+   *  `onPollHealth`, which reports the draft poller. */
+  onSeasonPollHealth(handler: (health: PollHealth) => void): Promise<UnlistenFn>;
   setApiKey(key: string): Promise<boolean>;
   setChatProvider(provider: "api" | "claude_code"): Promise<"api" | "claude_code">;
   chatSettings(): Promise<ChatSettings>;
@@ -96,6 +99,8 @@ const tauriApi: Api = {
   stopSeasonPolling: () => invoke<void>("stop_season_polling"),
   onSeasonUpdated: (handler) =>
     listen<SeasonView>("season-updated", (event) => handler(validateSeasonView(event.payload))),
+  onSeasonPollHealth: (handler) =>
+    listen<PollHealth>("season-poll-health", (event) => handler(event.payload)),
   setApiKey: (key) => invoke<boolean>("set_api_key", { key }),
   setChatProvider: (provider) => invoke<"api" | "claude_code">("set_chat_provider", { provider }),
   chatSettings: () => invoke<ChatSettings>("chat_settings"),
@@ -185,6 +190,7 @@ function browserApi(): Api {
     },
     stopSeasonPolling: async () => undefined,
     onSeasonUpdated: async () => () => undefined,
+    onSeasonPollHealth: async () => () => undefined,
     setApiKey: async () => false,
     setChatProvider: async () => "api",
     chatSettings: async () => ({

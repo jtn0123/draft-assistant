@@ -10,6 +10,7 @@ import type {
   SourceStatus,
 } from "../season-types";
 import { SEASON_TABS } from "../season-types";
+import type { PollHealth } from "../types";
 import { age, fmt, lockLabel, nowSecs, pct, spanLabel, untilLabel } from "../format";
 import { CallsToMake, LineupCompare, Waivers } from "./ThisWeek";
 import { GamesTab } from "./GamesTab";
@@ -78,52 +79,100 @@ function sourceLine(label: string, status: SourceStatus, now: number): string {
   return `${label}: ${since} (${status.error})`;
 }
 
+interface BadgeStatus {
+  label: string;
+  /** True when the badge should stop vouching for the data it is stamping. */
+  stale: boolean;
+  /** The per-source breakdown, when the view carries one. */
+  title: string | undefined;
+}
+
 /**
- * The live badge, one source at a time.
+ * What the badge says about freshness, one source at a time.
  *
  * Overall freshness alone can be a lie: two feeds answering every thirty
  * seconds keep the stamp green while the third has been down for an hour. So
  * the badge counts how many sources are actually behind, and the tooltip
  * always spells out all three.
  */
-function LiveBadge({ health }: { health: SeasonHealth }) {
-  const now = useClockTick();
+function badgeStatus(health: SeasonHealth, now: number): BadgeStatus {
   const sources = health.sources;
   if (sources === undefined) {
     // Older cached views carry no per-source detail, only one overall stamp.
     // That stamp still has to be checked: an unchecked one always says "Live".
-    const behind = now - health.fetched_at > SOURCE_STALE_SECS;
-    return (
-      <span className={behind ? "pill pill-stale" : "pill pill-live"}>
-        <span className="dot" />
-        {behind ? "Not updating" : `Live · ${age(health.fetched_at)}`}
-      </span>
-    );
+    const stale = now - health.fetched_at > SOURCE_STALE_SECS;
+    return {
+      label: stale ? "Not updating" : `Live · ${age(health.fetched_at)}`,
+      stale,
+      title: undefined,
+    };
   }
   const entries = SOURCES.map(([key, label]) => ({ label, status: sources[key] }));
   const behind = entries.filter(
     (e) => e.status.error !== null || now - e.status.last_success_secs > SOURCE_STALE_SECS,
   );
   const title = entries.map((e) => sourceLine(e.label, e.status, now)).join(" · ");
-
   if (behind.length === 0) {
-    return (
-      <span className="pill pill-live" title={title}>
-        <span className="dot" />
-        Live · {age(health.fetched_at)}
-      </span>
-    );
+    return { label: `Live · ${age(health.fetched_at)}`, stale: false, title };
   }
   const names = behind.map((e) => e.label.toLowerCase()).join(" and ");
+  return {
+    label: behind.length === entries.length ? "Not updating" : `Live · ${names} behind`,
+    stale: true,
+    title,
+  };
+}
+
+/** Why the score feed is not updating, in the words a person would use. */
+function failureNote(poll: PollHealth, now: number): string {
+  const tries =
+    poll.consecutive_failures === 1
+      ? "The last try"
+      : `The last ${poll.consecutive_failures} tries`;
+  const since =
+    poll.last_success_at === null
+      ? "no scores have come through yet"
+      : `the last new scores arrived ${spanLabel(Math.max(0, now - poll.last_success_at))} ago`;
+  const why = poll.last_error === null ? "" : ` (${poll.last_error})`;
+  return `${tries} to get new scores failed — ${since}${why}`;
+}
+
+/**
+ * The badge, plus a sentence when the poller says it is failing.
+ *
+ * Staleness and failure are one status, not two competing ones. A failed poll
+ * is the surer of the two — the timestamps can still look fresh for a minute
+ * after the feed stops answering — so it decides the badge, and the reason
+ * goes underneath where it can be read without hovering.
+ */
+function LiveStatus({ health, poll }: { health: SeasonHealth; poll: PollHealth | null }) {
+  const now = useClockTick();
+  const failing = poll !== null && poll.consecutive_failures > 0;
+  const status = badgeStatus(health, now);
   return (
-    <span className="pill pill-stale" title={title}>
-      <span className="dot" />
-      {behind.length === entries.length ? "Not updating" : `Live · ${names} behind`}
-    </span>
+    <>
+      <span
+        className={failing || status.stale ? "pill pill-stale" : "pill pill-live"}
+        title={status.title}
+      >
+        <span className="dot" />
+        {failing ? "Not updating" : status.label}
+      </span>
+      {poll !== null && failing && (
+        <span className="muted small season-stat-sub">{failureNote(poll, now)}</span>
+      )}
+    </>
   );
 }
 
-export function SeasonScreen({ view }: { view: SeasonView }) {
+export function SeasonScreen({
+  view,
+  pollHealth = null,
+}: {
+  view: SeasonView;
+  /** The season poller's last report, or null before one has arrived. */
+  pollHealth?: PollHealth | null;
+}) {
   const [tab, setTab] = useState<SeasonTab>("Standings");
   const selectedTab = useRef<HTMLButtonElement>(null);
   // Only move focus when the keyboard drove the change; clicking a tab should
@@ -174,7 +223,7 @@ export function SeasonScreen({ view }: { view: SeasonView }) {
         />
         <div className="season-stat">
           <span className="eyebrow">Data</span>
-          <LiveBadge health={view.data_health} />
+          <LiveStatus health={view.data_health} poll={pollHealth} />
         </div>
       </div>
 

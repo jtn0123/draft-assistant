@@ -125,6 +125,13 @@ describe("tauri arm", () => {
     await api.onPollHealth((h) => seen.push(h));
     deliver!({ payload: { ok: true } });
     expect(seen[seen.length - 1]).toEqual({ ok: true });
+
+    // Season health is passed through as-is: it carries no schema stamp, so
+    // there is nothing to validate and nothing to throw away.
+    const health = { last_success_at: 1, consecutive_failures: 2, last_error: "down" };
+    await api.onSeasonPollHealth((h) => seen.push(h));
+    deliver!({ payload: health });
+    expect(seen[seen.length - 1]).toEqual(health);
   });
 });
 
@@ -197,5 +204,6 @@ describe("browser arm", () => {
     expect((await api.onDraftUpdated(() => undefined))()).toBeUndefined();
     expect((await api.onPollHealth(() => undefined))()).toBeUndefined();
     expect((await api.onSeasonUpdated(() => undefined))()).toBeUndefined();
+    expect((await api.onSeasonPollHealth(() => undefined))()).toBeUndefined();
   });
 });

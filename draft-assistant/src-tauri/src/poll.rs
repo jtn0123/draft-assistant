@@ -7,11 +7,14 @@
 //! how should a failure be recorded — lives here, where it can be tested
 //! without a running app.
 
-use crate::engine::{now_secs, LoadedLeague};
-use crate::season::{SeasonAnalysis, SeasonView};
+use crate::engine::{now_secs, AppConfig, LoadedLeague};
+use crate::season::{build_season_view_cached, SeasonAnalysis, SeasonView};
+use crate::season_engine::{LoadedSeason, SeasonLoader};
 use crate::sleeper::Pick;
+use crate::view::PollHealth;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use tokio::sync::Mutex;
 
 /// A cheap stand-in for the whole pick list: how many there are, and a hash of
 /// which player sits at which pick number.
@@ -64,19 +67,59 @@ impl DraftPollMemory {
     }
 }
 
+/// Whether a poller's requests are getting through, and why not when they are
+/// not.
+///
+/// Both pollers keep the same three facts. The draft poller stores them on the
+/// league it is watching (they ride along in `DataHealth`); the season poller
+/// has no such home, so it keeps one of these in the loop itself. The rule for
+/// updating them lives here once, in `record`, rather than in either loop.
+#[derive(Debug, Default, Clone)]
+pub struct PollHealthMemory {
+    last_success_at: Option<u64>,
+    consecutive_failures: u32,
+    last_error: Option<String>,
+}
+
+impl PollHealthMemory {
+    /// A tick with no errors resets the failure count; a tick with errors adds
+    /// to it and keeps every reason, so "failing for 3 tries because X" is
+    /// available. A failure never moves the last-success time.
+    pub fn record(&mut self, errors: &[String]) {
+        if errors.is_empty() {
+            self.last_success_at = Some(now_secs());
+            self.consecutive_failures = 0;
+            self.last_error = None;
+        } else {
+            self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+            self.last_error = Some(errors.join("; "));
+        }
+    }
+
+    /// The same three facts in the shape the frontend already listens for.
+    pub fn report(&self) -> PollHealth {
+        PollHealth {
+            last_success_at: self.last_success_at,
+            consecutive_failures: self.consecutive_failures,
+            last_error: self.last_error.clone(),
+        }
+    }
+}
+
 /// Record a tick's outcome on the league so the health badge can report it.
 ///
-/// A tick with no errors resets the failure count; a tick with errors adds to
-/// it and keeps the reason, so "stale for 3 tries because X" is available.
+/// The draft poller's spelling of `PollHealthMemory::record`: same rule, but
+/// reading and writing the fields the draft view already carries.
 pub fn record_poll_outcome(loaded: &mut LoadedLeague, errors: &[String]) {
-    if errors.is_empty() {
-        loaded.poll_last_success_at = Some(now_secs());
-        loaded.poll_consecutive_failures = 0;
-        loaded.poll_last_error = None;
-    } else {
-        loaded.poll_consecutive_failures = loaded.poll_consecutive_failures.saturating_add(1);
-        loaded.poll_last_error = Some(errors.join("; "));
-    }
+    let mut health = PollHealthMemory {
+        last_success_at: loaded.poll_last_success_at,
+        consecutive_failures: loaded.poll_consecutive_failures,
+        last_error: loaded.poll_last_error.clone(),
+    };
+    health.record(errors);
+    loaded.poll_last_success_at = health.last_success_at;
+    loaded.poll_consecutive_failures = health.consecutive_failures;
+    loaded.poll_last_error = health.last_error;
 }
 
 /// Suppresses season-updated events whose scores are identical to the last
@@ -139,6 +182,99 @@ impl AnalysisCache {
         if self.ticks % self.rebuild_every == 0 {
             self.held = None;
         }
+    }
+}
+
+/// What the season poller remembers between ticks: whether it is getting
+/// through, what it last emitted, and the analysis it is reusing.
+#[derive(Debug)]
+pub struct SeasonPollMemory {
+    health: PollHealthMemory,
+    gate: LiveEmitGate,
+    analysis: AnalysisCache,
+}
+
+impl SeasonPollMemory {
+    /// `rebuild_every` is how many ticks the cached analysis is reused for.
+    pub fn new(rebuild_every: u32) -> Self {
+        Self {
+            health: PollHealthMemory::default(),
+            gate: LiveEmitGate::default(),
+            analysis: AnalysisCache::new(rebuild_every),
+        }
+    }
+}
+
+/// What one season tick decided the app should be told.
+#[derive(Debug, Default)]
+pub struct SeasonTick {
+    /// The view worth emitting, or `None` when the scores have not moved.
+    pub view: Option<SeasonView>,
+    /// How the refresh went, or `None` when there was nothing to refresh — no
+    /// league open yet, or the season not loaded. Neither is the feed failing,
+    /// so neither should be reported as one.
+    pub health: Option<PollHealth>,
+}
+
+/// One turn of the season poll loop: refresh the live slice, note whether that
+/// worked, and rebuild the view if the scores moved.
+///
+/// The loop around this lives in the command layer because it needs Tauri's
+/// event emitter; everything it decides lives here, where a test can drive it
+/// with a loader that fails on demand.
+pub async fn season_tick<E: SeasonLoader>(
+    engine: &E,
+    loaded_ref: &Mutex<Option<LoadedLeague>>,
+    season_ref: &Mutex<Option<LoadedSeason>>,
+    config_ref: &Mutex<AppConfig>,
+    memory: &mut SeasonPollMemory,
+) -> SeasonTick {
+    let league_id = {
+        let loaded = loaded_ref.lock().await;
+        loaded.as_ref().map(|l| l.league.league_id.clone())
+    };
+    let Some(league_id) = league_id else {
+        return SeasonTick::default();
+    };
+
+    let mut errors = Vec::new();
+    {
+        let mut season = season_ref.lock().await;
+        let Some(season) = season.as_mut() else {
+            return SeasonTick::default();
+        };
+        if let Err(error) = engine.refresh_live(season, &league_id).await {
+            errors.push(error);
+        }
+    }
+    memory.health.record(&errors);
+    let health = Some(memory.health.report());
+    if !errors.is_empty() {
+        return SeasonTick { view: None, health };
+    }
+
+    // Locks are taken loaded -> season -> config here, the same order as
+    // everywhere else that needs more than one of them.
+    let loaded = loaded_ref.lock().await;
+    let season = season_ref.lock().await;
+    let config = config_ref.lock().await;
+    let (Some(loaded), Some(season)) = (loaded.as_ref(), season.as_ref()) else {
+        return SeasonTick { view: None, health };
+    };
+    let view = build_season_view_cached(
+        loaded,
+        season,
+        config.my_user_id.as_deref(),
+        memory.analysis.get(),
+    );
+    memory.analysis.observe(&view);
+    let moved = memory.gate.should_emit(
+        view.live.totals.my_live_points,
+        view.live.totals.opp_live_points,
+    );
+    SeasonTick {
+        view: moved.then_some(view),
+        health,
     }
 }
 

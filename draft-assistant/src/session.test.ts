@@ -4,12 +4,14 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SeasonView } from "./season-types";
+import type { PollHealth } from "./types";
 
 const mocks = vi.hoisted(() => ({
   loadSeason: vi.fn(),
   startSeasonPolling: vi.fn(),
   stopSeasonPolling: vi.fn(),
   onSeasonUpdated: vi.fn(),
+  onSeasonPollHealth: vi.fn(),
 }));
 vi.mock("./api", () => ({ api: mocks }));
 
@@ -18,14 +20,20 @@ import { useSeasonSession } from "./session";
 const view = (week: number) => ({ schema_version: "1.0", week }) as unknown as SeasonView;
 
 let pushUpdate: ((v: SeasonView) => void) | null = null;
+let pushHealth: ((h: PollHealth) => void) | null = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
   pushUpdate = null;
+  pushHealth = null;
   mocks.startSeasonPolling.mockResolvedValue(undefined);
   mocks.stopSeasonPolling.mockResolvedValue(undefined);
   mocks.onSeasonUpdated.mockImplementation(async (handler: (v: SeasonView) => void) => {
     pushUpdate = handler;
+    return () => undefined;
+  });
+  mocks.onSeasonPollHealth.mockImplementation(async (handler: (h: PollHealth) => void) => {
+    pushHealth = handler;
     return () => undefined;
   });
 });
@@ -120,6 +128,29 @@ describe("useSeasonSession", () => {
     await waitFor(() =>
       expect(onError).toHaveBeenCalledWith(expect.stringContaining("Live updates are not running")),
     );
+  });
+
+  it("hands on how the live poll is going, good news and bad", async () => {
+    mocks.loadSeason.mockResolvedValue(view(2));
+    const { result } = renderHook(() => useSeasonSession(true, true, () => undefined));
+    await waitFor(() => expect(mocks.onSeasonPollHealth).toHaveBeenCalled());
+    // Nothing is claimed before the first poll has reported.
+    expect(result.current.pollHealth).toBeNull();
+
+    const failing = {
+      last_success_at: 1000,
+      consecutive_failures: 2,
+      last_error: "scores: request failed",
+    };
+    act(() => pushHealth?.(failing));
+    expect(result.current.pollHealth).toEqual(failing);
+
+    // A failing poll must not disturb the last good view: the numbers stay put
+    // and only the health says they have stopped moving.
+    expect(result.current.season?.week).toBe(2);
+
+    act(() => pushHealth?.({ last_success_at: 2000, consecutive_failures: 0, last_error: null }));
+    expect(result.current.pollHealth?.consecutive_failures).toBe(0);
   });
 
   it("retry clears the error and forces a fresh fetch", async () => {

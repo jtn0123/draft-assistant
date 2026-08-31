@@ -140,6 +140,70 @@ describe("the live badge", () => {
   });
 });
 
+describe("a failing live poll", () => {
+  it("says the feed is failing, and why, even while the stamps still look fresh", () => {
+    render(
+      <SeasonScreen
+        view={view()}
+        pollHealth={{
+          last_success_at: NOW() - 300,
+          consecutive_failures: 3,
+          last_error: "scores: request failed",
+        }}
+      />,
+    );
+    // The badge stops vouching for the data even though every source stamp is
+    // five seconds old — the poller knows better than the timestamps do.
+    expect(screen.getByText("Not updating")).toHaveClass("pill-stale");
+    expect(screen.getByText(/The last 3 tries to get new scores failed/)).toBeInTheDocument();
+    expect(screen.getByText(/5 minutes ago/)).toBeInTheDocument();
+    expect(screen.getByText(/scores: request failed/)).toBeInTheDocument();
+  });
+
+  it("counts a single failure in the singular, and says when nothing has arrived yet", () => {
+    render(
+      <SeasonScreen
+        view={view()}
+        pollHealth={{ last_success_at: null, consecutive_failures: 1, last_error: null }}
+      />,
+    );
+    expect(
+      screen.getByText("The last try to get new scores failed — no scores have come through yet"),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing at all while the poll is getting through", () => {
+    render(
+      <SeasonScreen
+        view={view()}
+        pollHealth={{ last_success_at: NOW(), consecutive_failures: 0, last_error: null }}
+      />,
+    );
+    expect(screen.getByText(/^Live · /)).toHaveClass("pill-live");
+    expect(screen.queryByText(/to get new scores failed/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the stale badge but adds the reason when the sources are behind too", () => {
+    const sources = fresh();
+    sources.scores = { last_success_secs: NOW() - 600, error: "timeout" };
+    sources.matchups = { last_success_secs: NOW() - 600, error: "timeout" };
+    sources.rosters = { last_success_secs: NOW() - 600, error: "timeout" };
+    render(
+      <SeasonScreen
+        view={view({ data_health: { fetched_at: NOW() - 600, warnings: [], sources } })}
+        pollHealth={{
+          last_success_at: NOW() - 600,
+          consecutive_failures: 2,
+          last_error: "timeout",
+        }}
+      />,
+    );
+    // One status, not two: a single stale pill plus one sentence of reason.
+    expect(screen.getAllByText("Not updating")).toHaveLength(1);
+    expect(screen.getByText(/The last 2 tries to get new scores failed/)).toBeInTheDocument();
+  });
+});
+
 describe("the age of cached ideas", () => {
   it("says how old the waiver ideas are once they stop being current", () => {
     render(<SeasonScreen view={view({ analysis_as_of_secs: NOW() - 420 })} />);

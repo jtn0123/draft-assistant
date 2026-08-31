@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { SeasonView } from "./season-types";
+import type { PollHealth } from "./types";
 
 /** How often to poll live scoring while the season screen is open, seconds. */
 const LIVE_INTERVAL = 30;
@@ -18,6 +19,13 @@ export interface SeasonSession {
   season: SeasonView | null;
   /** Why the last load failed, or null. */
   error: string | null;
+  /**
+   * How the live-scoring poller's last attempt went, or null before the first
+   * one has finished. This is the only place a poll failure shows up: a failed
+   * refresh leaves the view exactly as it was, so without this the screen has
+   * nothing to notice.
+   */
+  pollHealth: PollHealth | null;
   /** Re-fetch from Sleeper, bypassing the cache. */
   retry: () => void;
 }
@@ -34,6 +42,7 @@ export function useSeasonSession(
 ): SeasonSession {
   const [season, setSeason] = useState<SeasonView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pollHealth, setPollHealth] = useState<PollHealth | null>(null);
 
   // Held in a ref so a caller that hands us a fresh closure on every render
   // cannot, by itself, re-run the load or restart the poller.
@@ -51,6 +60,17 @@ export function useSeasonSession(
   // Live updates are pushed from the backend whenever the score moves.
   useEffect(() => {
     const un = api.onSeasonUpdated(setSeason);
+    return () => {
+      un.then((f) => f()).catch(() => undefined);
+    };
+  }, []);
+
+  // The other half of the same feed: every poll reports whether it got
+  // through, including the ones that brought no new scores because they
+  // failed. Kept separate from `season` so a run of failures does not disturb
+  // the last good view — the numbers stay, labelled as not moving.
+  useEffect(() => {
+    const un = api.onSeasonPollHealth(setPollHealth);
     return () => {
       un.then((f) => f()).catch(() => undefined);
     };
@@ -108,7 +128,7 @@ export function useSeasonSession(
       .catch((e) => setError(String(e)));
   }, []);
 
-  return { season, error, retry };
+  return { season, error, pollHealth, retry };
 }
 
 /** Force a fresh season load, for the Settings "Refresh data" path. */

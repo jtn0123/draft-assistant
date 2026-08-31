@@ -30,6 +30,7 @@ const testState = vi.hoisted(() => ({
     startSeasonPolling: vi.fn(),
     stopSeasonPolling: vi.fn(),
     onSeasonUpdated: vi.fn(),
+    onSeasonPollHealth: vi.fn(),
     setApiKey: vi.fn(),
     chatSettings: vi.fn(),
     chatSuggestions: vi.fn(),
@@ -86,6 +87,7 @@ beforeEach(() => {
     testState.seasonHandler = handler;
     return () => undefined;
   });
+  testState.api.onSeasonPollHealth.mockImplementation(async () => () => undefined);
 });
 
 describe("App live workflow", () => {

@@ -2,8 +2,8 @@
 
 use crate::engine::{Engine, LoadedLeague};
 use crate::headshots::ImageCache;
-use crate::poll::{AnalysisCache, LiveEmitGate};
-use crate::season::{build_season_view_cached, SeasonView};
+use crate::poll::{season_tick, SeasonPollMemory};
+use crate::season::SeasonView;
 use crate::season_engine::{LoadedSeason, SeasonLoader};
 use crate::season_history::HistoryStore;
 use crate::state::{season_view_from, AppState};
@@ -117,7 +117,13 @@ pub async fn refresh_season(state: State<'_, AppState>) -> Result<SeasonView, St
 const ANALYSIS_EVERY: u32 = 20;
 
 /// Poll live scoring every `interval_secs` (default 30). Emits "season-updated"
-/// with a fresh SeasonView whenever the totals move.
+/// with a fresh SeasonView whenever the totals move, and "season-poll-health"
+/// after every attempt so the screen can say when the feed is failing.
+///
+/// Always succeeds. Starting the poller is not something that can go wrong:
+/// asking twice replaces the running loop, and asking before a league is open
+/// leaves a loop that picks one up as soon as there is one. So a rejection
+/// reaching the screen really does mean live updates are not running.
 #[tauri::command]
 pub async fn start_season_polling(
     app: tauri::AppHandle,
@@ -136,46 +142,22 @@ pub async fn start_season_polling(
     let season_generation = state.season_generation.clone();
 
     tauri::async_runtime::spawn(async move {
-        let mut gate = LiveEmitGate::default();
-        let mut analysis = AnalysisCache::new(ANALYSIS_EVERY);
+        let mut memory = SeasonPollMemory::new(ANALYSIS_EVERY);
         loop {
             if !polling.load(Ordering::SeqCst)
                 || season_generation.load(Ordering::SeqCst) != generation
             {
                 break;
             }
-            let league_id = {
-                let loaded = loaded_ref.lock().await;
-                loaded.as_ref().map(|l| l.league.league_id.clone())
-            };
-            if let Some(league_id) = league_id {
-                let refreshed = {
-                    let mut season = season_ref.lock().await;
-                    match season.as_mut() {
-                        Some(season) => engine.refresh_live(season, &league_id).await.is_ok(),
-                        None => false,
-                    }
-                };
-                if refreshed {
-                    let loaded = loaded_ref.lock().await;
-                    let season = season_ref.lock().await;
-                    let config = config_ref.lock().await;
-                    if let (Some(loaded), Some(season)) = (loaded.as_ref(), season.as_ref()) {
-                        let view = build_season_view_cached(
-                            loaded,
-                            season,
-                            config.my_user_id.as_deref(),
-                            analysis.get(),
-                        );
-                        analysis.observe(&view);
-                        if gate.should_emit(
-                            view.live.totals.my_live_points,
-                            view.live.totals.opp_live_points,
-                        ) {
-                            app.emit("season-updated", &view).ok();
-                        }
-                    }
-                }
+            let tick =
+                season_tick(&*engine, &loaded_ref, &season_ref, &config_ref, &mut memory).await;
+            // Health first: when a refresh fails there is no view to send, and
+            // the screen still has to hear that the attempt was made and lost.
+            if let Some(health) = &tick.health {
+                app.emit("season-poll-health", health).ok();
+            }
+            if let Some(view) = &tick.view {
+                app.emit("season-updated", view).ok();
             }
             tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
         }

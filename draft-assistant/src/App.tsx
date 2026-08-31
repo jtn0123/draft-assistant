@@ -99,6 +99,7 @@ export default function App() {
   const {
     season,
     error: seasonError,
+    pollHealth: seasonPollHealth,
     retry: retrySeason,
   } = useSeasonSession(screen === "season", view !== null, showToast);
   const chime = useChime();
@@ -398,7 +399,7 @@ export default function App() {
           ) : season !== null ? (
             <ErrorBoundary>
               <Suspense fallback={<ScreenFallback />}>
-                <SeasonScreen view={season} />
+                <SeasonScreen view={season} pollHealth={seasonPollHealth} />
               </Suspense>
             </ErrorBoundary>
           ) : seasonError !== null ? (
