@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { setAvatarMode, useAvatarMode } from "./avatars";
 import { setChime, useChime } from "./prefs";
@@ -7,11 +7,9 @@ import { useSeasonSession } from "./session";
 import type { DraftView, PollHealth, StoredLeague } from "./types";
 import type { SeasonView } from "./season-types";
 import { Header, type Screen, type SettingsRow } from "./components/Header";
-import { DraftScreen } from "./components/DraftScreen";
-import { SeasonScreen } from "./components/SeasonScreen";
+import { Chat, DraftScreen, ScreenFallback, SeasonScreen } from "./components/lazyScreens";
 import { LaunchScreen, Setup } from "./components/Panels";
 import { ConfirmDialog, Toast } from "./components/Overlays";
-import { Chat } from "./components/Chat";
 import { ordinal, pickLabel, age, scoringFormat } from "./format";
 import {
   applyTheme,
@@ -394,9 +392,13 @@ export default function App() {
           {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
 
           {screen === "draft" ? (
-            <DraftScreen view={view} busy={busy} onDraft={askToDraft} />
+            <Suspense fallback={<ScreenFallback />}>
+              <DraftScreen view={view} busy={busy} onDraft={askToDraft} />
+            </Suspense>
           ) : season !== null ? (
-            <SeasonScreen view={season} />
+            <Suspense fallback={<ScreenFallback />}>
+              <SeasonScreen view={season} />
+            </Suspense>
           ) : seasonError !== null ? (
             <div className="season-loading is-error">
               <span>{seasonError}</span>
@@ -410,15 +412,17 @@ export default function App() {
         </div>
 
         {chatOpen && (
-          <Chat
-            screen={screen}
-            contextNote={
-              screen === "season" && season !== null
-                ? `Sees week ${season.week} · your lineup and the league`
-                : `Sees this draft · pick ${pickLabel(d.current_pick, d.teams)}`
-            }
-            onClose={() => setChatOpen(false)}
-          />
+          <Suspense fallback={null}>
+            <Chat
+              screen={screen}
+              contextNote={
+                screen === "season" && season !== null
+                  ? `Sees week ${season.week} · your lineup and the league`
+                  : `Sees this draft · pick ${pickLabel(d.current_pick, d.teams)}`
+              }
+              onClose={() => setChatOpen(false)}
+            />
+          </Suspense>
         )}
       </div>
 

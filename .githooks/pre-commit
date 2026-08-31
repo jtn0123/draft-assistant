@@ -5,7 +5,10 @@
 #
 # Enable once with:  git config core.hooksPath .githooks
 set -e
-cd "$(dirname "$0")/../draft-assistant"
+# Resolve the tree actually being committed: core.hooksPath is an absolute
+# path into the main checkout, so `dirname $0` would point a git worktree's
+# commit at the wrong working copy.
+cd "$(git rev-parse --show-toplevel)/draft-assistant"
 npm run check:loc
 npm run check:css
 npx prettier --check "src/**/*.{ts,tsx,css}" "scripts/**/*.mjs" "*.{ts,js,json}"
