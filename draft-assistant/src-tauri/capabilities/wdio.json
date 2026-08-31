@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "wdio",
+  "description": "End-to-end testing only. Grants the in-app WebDriver server from `tauri-plugin-wdio-webdriver` permission to drive the main window. build.rs only feeds this file to tauri-build when the `wdio` cargo feature is on, so a default build has no such grant in its ACL at all.",
+  "windows": ["main"],
+  "permissions": ["wdio:default"]
+}

@@ -64,24 +64,36 @@ use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .setup(|app| {
-            let data_dir = app.path().app_data_dir().expect("no app data dir");
-            let engine = Engine::new(data_dir);
-            let config = engine.load_config();
-            app.manage(AppState {
-                engine: Arc::new(engine),
-                loaded: Arc::new(Mutex::new(None)),
-                season: Arc::new(Mutex::new(None)),
-                config: Arc::new(Mutex::new(config)),
-                polling: Arc::new(AtomicBool::new(false)),
-                poll_generation: Arc::new(AtomicU64::new(0)),
-                season_polling: Arc::new(AtomicBool::new(false)),
-                season_generation: Arc::new(AtomicU64::new(0)),
-                last_season_view: Arc::new(Mutex::new(None)),
-            });
-            Ok(())
-        })
+    let builder = tauri::Builder::default().setup(|app| {
+        let data_dir = app.path().app_data_dir().expect("no app data dir");
+        let engine = Engine::new(data_dir);
+        let config = engine.load_config();
+        app.manage(AppState {
+            engine: Arc::new(engine),
+            loaded: Arc::new(Mutex::new(None)),
+            season: Arc::new(Mutex::new(None)),
+            config: Arc::new(Mutex::new(config)),
+            polling: Arc::new(AtomicBool::new(false)),
+            poll_generation: Arc::new(AtomicU64::new(0)),
+            season_polling: Arc::new(AtomicBool::new(false)),
+            season_generation: Arc::new(AtomicU64::new(0)),
+            last_season_view: Arc::new(Mutex::new(None)),
+        });
+        Ok(())
+    });
+
+    // The only thing that puts a WebDriver server -- a full remote-control
+    // surface -- inside this app, and it is compiled out unless the `wdio`
+    // cargo feature is on. That feature is off by default and is set by
+    // nothing but `npm run test:e2e`; `build.rs` gates the matching
+    // capability on the same flag. A release bundle therefore does not
+    // contain these plugins, not even dormant.
+    #[cfg(feature = "wdio")]
+    let builder = builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init());
+
+    builder
         .invoke_handler(tauri::generate_handler![
             add_league,
             set_my_username,

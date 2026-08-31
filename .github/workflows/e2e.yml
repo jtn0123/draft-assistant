@@ -1,0 +1,96 @@
+# End-to-end smoke test: launches the real app and reads the real screen.
+#
+# Deliberately NOT part of the `Verify` workflow, and deliberately not a
+# required check. Three reasons, in order of weight:
+#
+#  1. It needs a Tauri binary built by `tauri build --features wdio`. That
+#     is a different cargo feature set from everything `verify` builds, so it
+#     shares no artifacts with it -- a second full compile of tauri, wry and
+#     reqwest, plus axum and the two WDIO plugins. Measured locally: ~1
+#     minute warm, several minutes cold, on a runner billed at ten times the
+#     Linux rate.
+#  2. It needs a real window and a real WKWebView, and it talks to the live
+#     Sleeper API. Both are things that can be slow or down for reasons that
+#     have nothing to do with the diff under review. A gate that fails for
+#     someone else's outage is a gate people learn to ignore.
+#  3. Its npm side is ~152 MB of WebdriverIO, in its own package with its own
+#     lockfile so the app's `npm ci` never pays for it. Pulling that into the
+#     PR gate would slow every run for a check that only earns its keep after
+#     changes to a specific handful of files.
+#
+# So: on pushes to main (where a break is worth knowing about but nothing is
+# waiting on it), on PRs that touch the seam it actually watches, and on
+# demand. `continue-on-error` is not used -- the job reports honestly; it is
+# simply not in the required set.
+name: End-to-end
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "draft-assistant/src-tauri/src/lib.rs"
+      - "draft-assistant/src-tauri/capabilities/**"
+      - "draft-assistant/src-tauri/build.rs"
+      - "draft-assistant/src-tauri/tauri.conf.json"
+      - "draft-assistant/vite.config.ts"
+      - "draft-assistant/e2e/**"
+      - ".github/workflows/e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Launch the app and read the screen
+    # Must be macOS: the embedded WebDriver provider drives WKWebView, and
+    # `tauri-driver` -- the alternative -- has no macOS support at all.
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: draft-assistant
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: draft-assistant/.nvmrc
+
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+        working-directory: draft-assistant/src-tauri
+
+      # Keyed separately from the `verify` cache: this job builds different
+      # feature sets into their own target directories (`target/wdio` for the
+      # app, `target/wdio-lint` for clippy), and sharing a key would have the
+      # two caches evicting each other.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: draft-assistant/src-tauri
+          key: wdio
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # The `#[cfg(feature = "wdio")]` lines in lib.rs are invisible to the
+      # clippy that `verify` runs, which is on default features on purpose
+      # (see package.json). This job already pays for the wdio build, so it
+      # is the right place to lint that path -- at the same -D warnings.
+      - name: Lint the wdio feature path
+        run: npm run lint:rust:wdio
+
+      - name: Build the app with the wdio feature
+        run: npm run build:e2e
+
+      - name: Run the smoke test
+        run: npm --prefix e2e ci && npm --prefix e2e test
