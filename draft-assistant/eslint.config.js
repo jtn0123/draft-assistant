@@ -1,5 +1,6 @@
 import js from "@eslint/js";
 import globals from "globals";
+import jsxA11y from "eslint-plugin-jsx-a11y";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
@@ -27,6 +28,11 @@ export default tseslint.config(
       // non-checked preset cannot see either.
       ...tseslint.configs.recommendedTypeChecked,
       reactHooks.configs.flat.recommended,
+      // Accessibility, on the strict preset. The app is a keyboard-heavy draft
+      // board: every defect this catches (a click handler with no keyboard
+      // path, a dialog with no label, a fact hidden in a hover-only tooltip)
+      // is one a real user would hit. --max-warnings=0 makes it a gate.
+      jsxA11y.flatConfigs.strict,
     ],
     languageOptions: {
       ecmaVersion: 2022,

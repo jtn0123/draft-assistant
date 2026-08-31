@@ -258,7 +258,7 @@ export function SeasonScreen({
         </div>
 
         <div className="season-rail">
-          <div className="rail-tabs" role="tablist" aria-label="League detail" onKeyDown={onTabKey}>
+          <div className="rail-tabs" role="tablist" aria-label="League detail">
             {SEASON_TABS.map((name) => (
               <button
                 key={name}
@@ -273,6 +273,9 @@ export function SeasonScreen({
                 tabIndex={name === tab ? 0 : -1}
                 ref={name === tab ? selectedTab : undefined}
                 onClick={() => setTab(name)}
+                // The keys act on whichever tab has focus, so the handler
+                // lives on the tabs rather than on the list around them.
+                onKeyDown={onTabKey}
               >
                 {name}
               </button>

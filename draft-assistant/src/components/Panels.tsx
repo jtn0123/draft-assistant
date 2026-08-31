@@ -46,7 +46,6 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="mcsleeper26"
-          autoFocus
         />
       </label>
       <label className="field">

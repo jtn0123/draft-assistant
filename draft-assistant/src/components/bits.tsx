@@ -90,12 +90,21 @@ export function ZoomLayer() {
   return (
     <div
       className="zoom-layer"
-      role="dialog"
-      aria-modal="true"
-      aria-label={zoomed.label}
-      onClick={closeZoom}
+      role="presentation"
+      // The backdrop is scenery: the card below is the dialog. Clicking the
+      // backdrop itself closes, and a click inside the card is left alone,
+      // so the card needs no mouse-only handler of its own.
+      onClick={(e) => {
+        if (e.target === e.currentTarget) closeZoom();
+      }}
     >
-      <figure className="zoom-card" ref={card} onClick={(e) => e.stopPropagation()}>
+      <figure
+        className="zoom-card"
+        ref={card}
+        role="dialog"
+        aria-modal="true"
+        aria-label={zoomed.label}
+      >
         <img
           className="zoom-image"
           src={(big !== null && big.reference === wanted ? big.url : null) ?? zoomed.src}

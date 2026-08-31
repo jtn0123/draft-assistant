@@ -300,13 +300,7 @@ export function Header({
         </button>
 
         {settingsOpen && (
-          <div
-            className="settings-menu"
-            role="menu"
-            aria-label="Settings"
-            ref={menuBox}
-            onKeyDown={onMenuKey}
-          >
+          <div className="settings-menu" role="menu" aria-label="Settings" ref={menuBox}>
             <div className="settings-menu-head" role="none">
               <span className="eyebrow">Settings</span>
               <button
@@ -315,6 +309,9 @@ export function Header({
                 role="menuitem"
                 tabIndex={-1}
                 onClick={onToggleSettings}
+                // Arrows move between items, so the handler sits on the items
+                // themselves: the menu box around them never holds focus.
+                onKeyDown={onMenuKey}
               >
                 Done
               </button>
@@ -332,6 +329,7 @@ export function Header({
                 tabIndex={-1}
                 ref={index === 0 ? firstRow : undefined}
                 onClick={row.onSelect}
+                onKeyDown={onMenuKey}
               >
                 <span className="settings-row-text">
                   <span className="settings-row-label">{row.label}</span>

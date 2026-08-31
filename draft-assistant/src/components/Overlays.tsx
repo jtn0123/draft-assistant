@@ -34,11 +34,20 @@ export function ConfirmDialog({
   useFocusTrap(dialog, onCancel);
 
   return (
-    <div className="scrim" onClick={onCancel} role="presentation">
+    <div
+      className="scrim"
+      role="presentation"
+      // Only a click on the scrim itself closes; a click that started inside
+      // the dialog just lands here on its way up. Checking the target beats
+      // stopping propagation, which would have put a mouse-only handler on the
+      // dialog with no keyboard equivalent.
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
       <div
         className="dialog"
         ref={dialog}
-        onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
