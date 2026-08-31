@@ -140,6 +140,11 @@ pub fn clock_deadline_ms(
     Some(last_picked? + u64::from(pick_timer.filter(|t| *t > 0)?) * 1000)
 }
 
+/// How many recent picks a positional run is judged over, and how many of them
+/// have to share a position for it to count as one.
+const RUN_WINDOW: u32 = 6;
+const RUN_MIN: u32 = 4;
+
 /// The position taken at least `min_count` times in the last `window` picks.
 pub fn position_run(positions: &[String], window: u32, min_count: u32) -> Option<PositionRun> {
     let mut counts: HashMap<&str, u32> = HashMap::new();
@@ -157,6 +162,37 @@ pub fn position_run(positions: &[String], window: u32, min_count: u32) -> Option
             count,
             window,
         })
+}
+
+/// The best tier still on the board at each position, and how many players are
+/// left in it — one alert per draftable position that has anyone left, in the
+/// order the league rosters them.
+///
+/// `available` is in board order, so the first player seen at a position sets
+/// that position's tier and everyone later in the same tier adds to the count.
+/// One pass fills every position: scanning the whole board once per position
+/// gave the same answer for several times the work.
+pub fn tier_alerts(available: &[AvailablePlayer], positions: Vec<String>) -> Vec<TierAlert> {
+    let mut top: HashMap<&str, (u32, u32)> = HashMap::new();
+    for a in available {
+        let (tier, left) = top
+            .entry(a.player.position.as_str())
+            .or_insert((a.player.tier, 0));
+        if *tier == a.player.tier {
+            *left += 1;
+        }
+    }
+    positions
+        .into_iter()
+        .filter_map(|pos| {
+            top.get(pos.as_str())
+                .map(|&(tier, players_left)| TierAlert {
+                    position: pos,
+                    tier,
+                    players_left,
+                })
+        })
+        .collect()
 }
 
 /// Merge API picks with manual fallback picks. API picks are authoritative;
@@ -268,47 +304,34 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let my_roster = my_slot.and_then(|slot| rosters.get((slot - 1) as usize).cloned());
 
     // Available players with survival probabilities.
-    let available: Vec<AvailablePlayer> = loaded
-        .board
-        .iter()
-        .filter(|p| !taken.contains(p.player_id.as_str()))
-        .map(|p| AvailablePlayer {
-            survival_next: survival_pick
-                .and_then(|pick| p.adp.map(|adp| draft::survival_probability(adp, pick))),
-            player: p.clone(),
-        })
-        .collect();
+    //
+    // Every undrafted player is copied, which is the largest single cost in a
+    // poll tick. It stays a copy on purpose: a borrowed `&BoardPlayer` would
+    // tie `DraftView` to the lifetime of the `loaded` mutex guard, and every
+    // command here builds a view under that guard and then returns it — the
+    // view has to outlive the lock. Reserving up front at least keeps the
+    // growth from re-copying the vector as it fills.
+    let mut available: Vec<AvailablePlayer> = Vec::with_capacity(loaded.board.len());
+    available.extend(
+        loaded
+            .board
+            .iter()
+            .filter(|p| !taken.contains(p.player_id.as_str()))
+            .map(|p| AvailablePlayer {
+                survival_next: survival_pick
+                    .and_then(|pick| p.adp.map(|adp| draft::survival_probability(adp, pick))),
+                player: p.clone(),
+            }),
+    );
 
-    // Tier alerts: top remaining tier per position and how many are left in it.
-    let mut tier_alerts: Vec<TierAlert> = Vec::new();
-    for pos in loaded.roster_rules.draftable_positions() {
-        let mut best_tier: Option<u32> = None;
-        let mut count = 0;
-        for a in &available {
-            if a.player.position == pos {
-                match best_tier {
-                    None => {
-                        best_tier = Some(a.player.tier);
-                        count = 1;
-                    }
-                    Some(t) if a.player.tier == t => count += 1,
-                    _ => {}
-                }
-            }
-        }
-        if let Some(tier) = best_tier {
-            tier_alerts.push(TierAlert {
-                position: pos,
-                tier,
-                players_left: count,
-            });
-        }
-    }
+    let tier_alerts = tier_alerts(&available, loaded.roster_rules.draftable_positions());
 
-    // Position run: 4+ of the same position in the last 6 picks.
+    // Position run: 4+ of the same position in the last 6 picks. Only those
+    // six can be in it, so only those six are looked up.
     let position_run = {
-        let positions: Vec<String> = picks.iter().map(|p| name_of(&p.player_id).1).collect();
-        position_run(&positions, 6, 4)
+        let recent = &picks[picks.len().saturating_sub(RUN_WINDOW as usize)..];
+        let positions: Vec<String> = recent.iter().map(|p| name_of(&p.player_id).1).collect();
+        position_run(&positions, RUN_WINDOW, RUN_MIN)
     };
 
     let recommendations = recommend(
