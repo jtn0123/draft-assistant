@@ -64,10 +64,47 @@ export function ConfirmDialog({
   );
 }
 
-export function Toast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+/** Something the user can do about the message — a retry, in practice. */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
+/**
+ * The message strip under the header.
+ *
+ * A toast with an action is a failure the user has to decide about, so it is
+ * announced straight away and waits to be answered; App leaves the five-second
+ * timer off for those. A plain one is news, announced politely and gone on its
+ * own. Either way the text is written once and only re-announced when it
+ * changes, so an error sitting on screen is not read out over and over.
+ */
+export function Toast({
+  message,
+  action,
+  onDismiss,
+}: {
+  message: string;
+  action?: ToastAction;
+  onDismiss: () => void;
+}) {
   return (
-    <div className="toast" role="status">
+    <div className="toast" role={action === undefined ? "status" : "alert"}>
       <span>{message}</span>
+      {action !== undefined && (
+        <button
+          type="button"
+          className="link-btn"
+          onClick={() => {
+            // Clear the failed attempt first: whatever happens next says so
+            // itself, and a stale error under a fresh one reads badly.
+            onDismiss();
+            action.onClick();
+          }}
+        >
+          {action.label}
+        </button>
+      )}
       <button type="button" className="link-btn" onClick={onDismiss}>
         Dismiss
       </button>

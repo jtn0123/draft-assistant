@@ -121,3 +121,27 @@ describe("Toast", () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("a toast with something to do about it", () => {
+  it("is announced as an alert and hands the retry back", async () => {
+    const onDismiss = vi.fn();
+    const onClick = vi.fn();
+    render(
+      <Toast
+        message="Could not mark Josh Downs as drafted — Sleeper is not answering"
+        action={{ label: "Try again", onClick }}
+        onDismiss={onDismiss}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not mark Josh Downs as drafted");
+    // Plain messages stay polite; only ones with a decision in them interrupt.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    await settle(() => {
+      screen.getByRole("button", { name: "Try again" }).click();
+    });
+    expect(onClick).toHaveBeenCalledTimes(1);
+    // The failed attempt clears itself out of the way of whatever happens next.
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+});
