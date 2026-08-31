@@ -10,6 +10,7 @@ import { Header, type Screen, type SettingsRow } from "./components/Header";
 import { Chat, DraftScreen, ScreenFallback, SeasonScreen } from "./components/lazyScreens";
 import { LaunchScreen, Setup } from "./components/Panels";
 import { ConfirmDialog, Toast } from "./components/Overlays";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ordinal, pickLabel, age, scoringFormat } from "./format";
 import {
   applyTheme,
@@ -392,13 +393,17 @@ export default function App() {
           {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
 
           {screen === "draft" ? (
-            <Suspense fallback={<ScreenFallback />}>
-              <DraftScreen view={view} busy={busy} onDraft={askToDraft} />
-            </Suspense>
+            <ErrorBoundary>
+              <Suspense fallback={<ScreenFallback />}>
+                <DraftScreen view={view} busy={busy} onDraft={askToDraft} />
+              </Suspense>
+            </ErrorBoundary>
           ) : season !== null ? (
-            <Suspense fallback={<ScreenFallback />}>
-              <SeasonScreen view={season} />
-            </Suspense>
+            <ErrorBoundary>
+              <Suspense fallback={<ScreenFallback />}>
+                <SeasonScreen view={season} />
+              </Suspense>
+            </ErrorBoundary>
           ) : seasonError !== null ? (
             <div className="season-loading is-error">
               <span>{seasonError}</span>
@@ -412,17 +417,19 @@ export default function App() {
         </div>
 
         {chatOpen && (
-          <Suspense fallback={null}>
-            <Chat
-              screen={screen}
-              contextNote={
-                screen === "season" && season !== null
-                  ? `Sees week ${season.week} · your lineup and the league`
-                  : `Sees this draft · pick ${pickLabel(d.current_pick, d.teams)}`
-              }
-              onClose={() => setChatOpen(false)}
-            />
-          </Suspense>
+          <ErrorBoundary>
+            <Suspense fallback={null}>
+              <Chat
+                screen={screen}
+                contextNote={
+                  screen === "season" && season !== null
+                    ? `Sees week ${season.week} · your lineup and the league`
+                    : `Sees this draft · pick ${pickLabel(d.current_pick, d.teams)}`
+                }
+                onClose={() => setChatOpen(false)}
+              />
+            </Suspense>
+          </ErrorBoundary>
         )}
       </div>
 
