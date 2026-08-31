@@ -11,9 +11,11 @@ use crate::season_lineup::{optimal_lineup, Candidate};
 use serde::Serialize;
 use std::collections::HashSet;
 
-/// How many free agents to evaluate. They arrive ranked by projection, so the
-/// tail cannot displace a starter and is not worth the lineup solves.
-const CANDIDATE_POOL: usize = 60;
+/// How many free agents to evaluate. The caller ranks them by this week's
+/// projection and cuts the pool to this size, so the tail cannot displace a
+/// starter and is not worth the lineup solves. This is the one place the size
+/// is defined; the `take` below is only a guard for callers that pass more.
+pub const CANDIDATE_POOL: usize = 60;
 const MAX_TARGETS: usize = 6;
 
 #[derive(Debug, Clone, Serialize)]

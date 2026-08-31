@@ -163,7 +163,10 @@ fn a_low_ranked_free_agent_with_a_big_week_is_still_a_waiver_target() {
     assert!(
         view.waivers.iter().any(|w| w.player_id == "streamer"),
         "the best week-2 free agent was never evaluated: {:?}",
-        view.waivers.iter().map(|w| &w.player_id).collect::<Vec<_>>()
+        view.waivers
+            .iter()
+            .map(|w| &w.player_id)
+            .collect::<Vec<_>>()
     );
     let top = &view.waivers[0];
     assert_eq!(top.player_id, "streamer");
