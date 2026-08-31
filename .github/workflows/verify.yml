@@ -5,6 +5,14 @@ on:
     branches: [main]
   pull_request:
 
+# The token defaults to whatever the repo setting is; pin it down to the
+# minimum both jobs actually need. Every action below is pinned to a commit
+# SHA rather than a tag: a tag is mutable, so a compromised upstream can
+# repoint `v4` and run with this token. The trailing comment names the
+# version the SHA corresponds to, for readable upgrades.
+permissions:
+  contents: read
+
 concurrency:
   group: verify-${{ github.ref }}
   cancel-in-progress: true
@@ -13,16 +21,20 @@ jobs:
   verify:
     name: Frontend and Rust checks
     runs-on: macos-latest
+    # macos-latest is billed at ten times the Linux rate and the default cap is
+    # six hours, so a hung cargo build is expensive. A full cold run is well
+    # under this.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: draft-assistant
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: draft-assistant/.nvmrc
           cache: npm
@@ -37,7 +49,7 @@ jobs:
       # Without this the whole Tauri dependency graph is rebuilt on every run,
       # on a runner billed at ten times the Linux rate.
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: draft-assistant/src-tauri
 
@@ -62,16 +74,17 @@ jobs:
   audit:
     name: Dependency advisories
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: draft-assistant
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: draft-assistant/.nvmrc
 
@@ -79,6 +92,6 @@ jobs:
         run: npm audit --audit-level=high
 
       - name: Cargo advisories
-        uses: rustsec/audit-check@v2
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
