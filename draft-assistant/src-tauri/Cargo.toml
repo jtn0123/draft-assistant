@@ -35,6 +35,13 @@ tokio = { version = "1.53", features = ["process", "rt-multi-thread", "macros", 
 # Already in the tree via reqwest; used for bounded request concurrency.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
+[dev-dependencies]
+# Tauri's own mock runtime, used by tests/command_surface.rs to stand the app
+# up and push real IPC messages through it. Same version as the normal
+# dependency above -- only the `test` feature is extra, so this adds a feature
+# to a crate already in the graph rather than a new crate.
+tauri = { version = "2.11", features = ["test"] }
+
 [profile.release]
 overflow-checks = true
 lto = "thin"

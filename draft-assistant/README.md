@@ -333,3 +333,86 @@ The chat panel reaches Claude one of two ways, picked in the panel itself:
 
 Either way the conversation is read-only with respect to Sleeper: Claude is
 shown the current board or matchup and never writes anything back.
+
+## Testing
+
+`npm run verify` is the gate: format, lint, typecheck, the vitest suite, the
+Rust suite, and a production `vite build`. Everything in it runs offline and
+finishes in seconds, and it is meant to stay that way.
+
+### What is not covered
+
+Nothing in `verify` launches the app. The React bundle is tested in jsdom, the
+Rust is tested by calling functions directly, and the two never meet — so the
+seam where they do meet in production is the one thing no test watches: the
+command names the frontend types into `invoke()`, the capability set, and the
+CSP the built bundle has to load under.
+
+`src-tauri/tests/command_surface.rs` closes the first of those three. It stands
+the app up on Tauri's mock runtime with the same state `lib.rs` installs, sends
+each command a real IPC message, and fails if the dispatcher does not recognise
+the name. It also reads `lib.rs` and asserts that the `generate_handler!` list
+is exactly the set of `#[tauri::command]` functions in the crate, which is the
+one failure that otherwise reaches the user: a command written, wired up in
+`api.ts`, and never registered. Two commands take a bare `tauri::AppHandle`
+(i.e. `AppHandle<Wry>`) and so cannot be registered on the mock runtime;
+they are covered by the source-level check but not the IPC round trip.
+
+The capability set and the CSP are still only exercised by running the app.
+
+### Manual smoke check
+
+Until the WebdriverIO run below is wired up, do this after touching
+`tauri.conf.json`, `capabilities/`, `lib.rs`, or the Vite chunking — it is the
+only thing that catches a blank window:
+
+```bash
+npm run tauri dev
+```
+
+1. The window opens and is not blank. A blank window with content in the DOM
+   means the CSP rejected a chunk — check the WKWebView console.
+2. The saved league restores, or the setup screen offers to add one. Either way
+   the launch screen resolves; if it hangs, `get_config` did not answer.
+3. The draft board renders rows, and picking a player opens the confirm dialog.
+4. The season screen opens and shows the matchup, lineup and standings.
+5. Player headshots and manager avatars render. They arrive as `data:` URLs, so
+   a missing image is usually a change to `img-src` in the CSP.
+6. Ask Claude opens and reports a provider.
+
+### End-to-end, for real
+
+This is achievable on macOS and has been run against this app, but it is not
+committed, because it needs two lines in `src-tauri/src/lib.rs`.
+
+`tauri-driver` itself only supports Windows and Linux — macOS has no WKWebView
+driver tool. The way around it is `@wdio/tauri-service` (1.3), whose default
+`embedded` provider runs a WebDriver server *inside* the app, supplied by
+`tauri-plugin-wdio-webdriver`. That plugin has to be registered by the app, so
+it cannot live in test code:
+
+```toml
+# src-tauri/Cargo.toml — behind a feature, so the release bundle never
+# contains a WebDriver server listening on a port.
+[features]
+wdio = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
+
+[dependencies]
+tauri-plugin-wdio = { version = "1", optional = true }
+tauri-plugin-wdio-webdriver = { version = "1", optional = true }
+```
+
+```rust
+// src-tauri/src/lib.rs, on the builder
+#[cfg(feature = "wdio")]
+let builder = builder
+    .plugin(tauri_plugin_wdio::init())
+    .plugin(tauri_plugin_wdio_webdriver::init());
+```
+
+plus `"wdio:default"` in `capabilities/default.json`. With those in place,
+`cargo build --features wdio` and a WebdriverIO config pointed at the resulting
+binary drives the real app: the session comes up as `webkit 605.1.15 macos`,
+the real league loads, and `browser.$("body").getText()` returns the rendered
+season screen. Node dev dependencies for it are about 200 MB, so it belongs in
+its own npm script and its own non-blocking CI job, not in `verify`.
