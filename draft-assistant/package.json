@@ -23,7 +23,8 @@
     "tauri": "tauri",
     "check:css": "node scripts/check-css.mjs",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.mjs\" \"*.{ts,js,json}\" && cargo fmt --manifest-path src-tauri/Cargo.toml --all",
-    "verify:fast": "npm run check:loc && npm run check:css && npm run format:check && npm run lint && npm run typecheck"
+    "verify:fast": "npm run check:loc && npm run check:css && npm run format:check && npm run lint && npm run typecheck",
+    "verify:mid": "npm run verify:fast && npm run test:frontend"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
