@@ -224,9 +224,25 @@ export interface TrendsView {
   changes: TrendChange[];
 }
 
+export interface SourceStatus {
+  /** Epoch seconds of the last successful fetch; 0 when it has never worked. */
+  last_success_secs: number;
+  /** Why the latest attempt failed; null when the latest attempt worked. */
+  error: string | null;
+}
+
+/** The three feeds the live poll depends on, tracked one by one. */
+export interface SourceHealth {
+  matchups: SourceStatus;
+  scores: SourceStatus;
+  rosters: SourceStatus;
+}
+
 export interface SeasonHealth {
   fetched_at: number;
   warnings: string[];
+  /** Optional: views cached before per-source tracking existed have none. */
+  sources?: SourceHealth;
 }
 
 export interface SeasonView {
@@ -256,6 +272,11 @@ export interface SeasonView {
   /** roster_id -> the manager's avatar reference. */
   team_avatars: Record<string, string>;
   data_health: SeasonHealth;
+  /**
+   * Epoch seconds the standings/waivers/trades analysis was built. The live
+   * poll reuses it for minutes at a time. Optional: older views have none.
+   */
+  analysis_as_of_secs?: number;
 }
 
 /** Which side panel tab the season screen is showing. */

@@ -10,7 +10,7 @@ import type {
   TradeIdea,
   TradeDone,
 } from "../season-types";
-import { dateLabel, fmt, ordinal, pct, signed } from "../format";
+import { dateLabel, fmt, ideasAgeNote, ordinal, pct, signed } from "../format";
 import { Headshot, PlayerName, PosBadge, SortHead, TeamAvatar, Empty } from "./bits";
 
 // ---------- standings ----------
@@ -191,18 +191,22 @@ export function LeagueTab({
   recentTrades,
   activity,
   avatars = {},
+  analysisAsOfSecs,
 }: {
   trades: TradeIdea[];
   recentTrades: TradeDone[];
   activity: ActivityItem[];
   avatars?: Record<string, string>;
+  /** When the trade search last ran; absent or recent says nothing. */
+  analysisAsOfSecs?: number;
 }) {
+  const ideasAge = ideasAgeNote(analysisAsOfSecs);
   return (
     <div className="tab-body">
       <RecentTrades deals={recentTrades} avatars={avatars} />
       <div className="tab-head tab-head-spaced">
         <span className="eyebrow">Trades worth offering</span>
-        <span className="muted small">by roster fit</span>
+        <span className="muted small">{ideasAge ?? "by roster fit"}</span>
       </div>
       {trades.length === 0 ? (
         <Empty>No swap would improve both rosters right now.</Empty>

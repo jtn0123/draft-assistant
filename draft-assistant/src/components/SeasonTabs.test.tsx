@@ -94,6 +94,22 @@ describe("LeagueTab", () => {
     expect(screen.getByText("In review")).toBeInTheDocument();
     expect(screen.getByText("1 in review · 0 completed")).toBeInTheDocument();
   });
+
+  it("admits how old the trade ideas are once they stop being current", () => {
+    const nowSecs = Math.floor(Date.now() / 1000);
+    const { rerender } = render(
+      <LeagueTab trades={[]} recentTrades={[]} activity={[]} analysisAsOfSecs={nowSecs - 60} />,
+    );
+    // A minute old is still "now" as far as a reader is concerned.
+    expect(screen.getByText("by roster fit")).toBeInTheDocument();
+    expect(screen.queryByText(/ideas from/)).not.toBeInTheDocument();
+
+    rerender(
+      <LeagueTab trades={[]} recentTrades={[]} activity={[]} analysisAsOfSecs={nowSecs - 420} />,
+    );
+    expect(screen.getByText("ideas from 7 minutes ago")).toBeInTheDocument();
+    expect(screen.queryByText("by roster fit")).not.toBeInTheDocument();
+  });
 });
 
 describe("TeamRoster empty state", () => {

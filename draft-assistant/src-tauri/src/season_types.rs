@@ -2,6 +2,7 @@
 //! logic in `season.rs` so each file stays readable.
 
 use crate::season_live::{KickoffWindow, LiveGame, LiveTotals};
+use crate::season_sources::SourceHealth;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
@@ -88,4 +89,7 @@ pub struct LastSeasonRow {
 pub struct SeasonHealth {
     pub fetched_at: u64,
     pub warnings: Vec<String>,
+    /// Freshness one source at a time, so a badge can be green about the
+    /// scoreboard and honest about the rosters at the same time.
+    pub sources: SourceHealth,
 }

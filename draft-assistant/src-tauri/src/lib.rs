@@ -25,6 +25,7 @@ pub mod season_lineup;
 pub mod season_live;
 pub mod season_moves;
 pub mod season_odds;
+pub mod season_sources;
 pub mod season_trades;
 pub mod season_trends_view;
 pub mod season_types;

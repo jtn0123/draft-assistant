@@ -121,6 +121,7 @@ async fn refresh_live_reports_a_total_outage_instead_of_claiming_freshness() {
         history: Default::default(),
         fetched_at: stamped,
         warnings: Vec::new(),
+        sources: Default::default(),
     };
 
     let err = engine
@@ -133,5 +134,14 @@ async fn refresh_live_reports_a_total_outage_instead_of_claiming_freshness() {
     // The staleness clock must not move, or the health badge goes green on
     // data that never arrived.
     assert_eq!(season.fetched_at, stamped);
+    // Each source keeps its own reason, so the badge can name what is broken.
+    for status in [
+        &season.sources.matchups,
+        &season.sources.scores,
+        &season.sources.rosters,
+    ] {
+        assert!(status.error.is_some(), "every source failed");
+        assert_eq!(status.last_success_secs, 0, "none of them has ever worked");
+    }
     std::fs::remove_dir_all(engine.data_dir).unwrap();
 }

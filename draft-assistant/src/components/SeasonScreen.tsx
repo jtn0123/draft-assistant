@@ -2,9 +2,15 @@
 // waivers) and the tabbed rail.
 
 import { useEffect, useRef, useState } from "react";
-import type { SeasonTab, SeasonView } from "../season-types";
+import type {
+  SeasonHealth,
+  SeasonTab,
+  SeasonView,
+  SourceHealth,
+  SourceStatus,
+} from "../season-types";
 import { SEASON_TABS } from "../season-types";
-import { fmt, lockLabel, pct, untilLabel } from "../format";
+import { age, fmt, lockLabel, nowSecs, pct, spanLabel, untilLabel } from "../format";
 import { CallsToMake, LineupCompare, Waivers } from "./ThisWeek";
 import { GamesTab } from "./GamesTab";
 import { LastSeason, LeagueTab, Standings, TeamRoster } from "./SeasonTabs";
@@ -21,6 +27,67 @@ function HeaderStat({ label, value, sub }: { label: string; value: string; sub?:
       <span className="season-stat-value">{value}</span>
       {sub && <span className="muted small season-stat-sub">{sub}</span>}
     </div>
+  );
+}
+
+/** How far behind a single source may fall before the badge stops vouching
+ *  for it: three polls at the default thirty-second cadence. */
+const SOURCE_STALE_SECS = 90;
+
+const SOURCES: [keyof SourceHealth, string][] = [
+  ["matchups", "Matchups"],
+  ["scores", "Scores"],
+  ["rosters", "Rosters"],
+];
+
+/** "Scores: 5 seconds ago" / "Rosters: failing for 12 minutes (timeout)". */
+function sourceLine(label: string, status: SourceStatus, now: number): string {
+  const behind = Math.max(0, now - status.last_success_secs);
+  if (status.error === null) return `${label}: ${spanLabel(behind)} ago`;
+  const since =
+    status.last_success_secs === 0 ? "never loaded" : `failing for ${spanLabel(behind)}`;
+  return `${label}: ${since} (${status.error})`;
+}
+
+/**
+ * The live badge, one source at a time.
+ *
+ * Overall freshness alone can be a lie: two feeds answering every thirty
+ * seconds keep the stamp green while the third has been down for an hour. So
+ * the badge counts how many sources are actually behind, and the tooltip
+ * always spells out all three.
+ */
+function LiveBadge({ health }: { health: SeasonHealth }) {
+  const sources = health.sources;
+  if (sources === undefined) {
+    return (
+      <span className="pill pill-live">
+        <span className="dot" />
+        Live · {age(health.fetched_at)}
+      </span>
+    );
+  }
+  const now = nowSecs();
+  const entries = SOURCES.map(([key, label]) => ({ label, status: sources[key] }));
+  const behind = entries.filter(
+    (e) => e.status.error !== null || now - e.status.last_success_secs > SOURCE_STALE_SECS,
+  );
+  const title = entries.map((e) => sourceLine(e.label, e.status, now)).join(" · ");
+
+  if (behind.length === 0) {
+    return (
+      <span className="pill pill-live" title={title}>
+        <span className="dot" />
+        Live · {age(health.fetched_at)}
+      </span>
+    );
+  }
+  const names = behind.map((e) => e.label.toLowerCase()).join(" and ");
+  return (
+    <span className="pill pill-stale" title={title}>
+      <span className="dot" />
+      {behind.length === entries.length ? "Not updating" : `Live · ${names} behind`}
+    </span>
   );
 }
 
@@ -73,6 +140,10 @@ export function SeasonScreen({ view }: { view: SeasonView }) {
           value={untilLabel(header.locks_in_ms)}
           sub={lockLabel(header.locks_in_ms)}
         />
+        <div className="season-stat">
+          <span className="eyebrow">Data</span>
+          <LiveBadge health={view.data_health} />
+        </div>
       </div>
 
       {view.data_health.warnings.length > 0 && (
@@ -87,6 +158,7 @@ export function SeasonScreen({ view }: { view: SeasonView }) {
             waivers={view.waivers}
             budgetLeft={view.waiver_budget_left}
             budgetTotal={view.waiver_budget_total}
+            analysisAsOfSecs={view.analysis_as_of_secs}
           />
         </div>
 
@@ -130,6 +202,7 @@ export function SeasonScreen({ view }: { view: SeasonView }) {
                 recentTrades={view.recent_trades}
                 activity={view.activity}
                 avatars={view.team_avatars}
+                analysisAsOfSecs={view.analysis_as_of_secs}
               />
             )}
             {tab === "Last season" && <LastSeason rows={view.last_season} season={view.season} />}

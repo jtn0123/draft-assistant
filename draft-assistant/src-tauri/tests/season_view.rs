@@ -213,6 +213,7 @@ fn a_cached_analysis_is_reused_verbatim_and_the_live_slice_is_not() {
         standings: Vec::new(),
         waivers: Vec::new(),
         trades: Vec::new(),
+        as_of: 1_700_000_000,
     };
     let cheap = build_season_view_cached(
         &loaded,
@@ -244,4 +245,36 @@ fn a_cached_analysis_is_reused_verbatim_and_the_live_slice_is_not() {
     assert_eq!(reused.standings.len(), full.standings.len());
     assert_eq!(reused.waivers.len(), full.waivers.len());
     assert_eq!(reused.trades.len(), full.trades.len());
+}
+
+#[test]
+fn reused_analysis_reports_when_it_was_actually_built() {
+    use draft_assistant_lib::season::{build_season_view_cached, SeasonAnalysis};
+
+    let (loaded, season, config) = common::fixture();
+    let fresh = build_season_view_cached(&loaded, &season, config.my_user_id.as_deref(), None);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    assert!(
+        fresh.analysis_as_of_secs.abs_diff(now) < 5,
+        "a fresh build is stamped now, got {}",
+        fresh.analysis_as_of_secs
+    );
+
+    // A view built from a ten-minute-old analysis must say ten minutes old,
+    // not "just now" — that is the whole point of carrying the stamp.
+    let stale = SeasonAnalysis {
+        as_of: now - 600,
+        ..SeasonAnalysis::of(&fresh)
+    };
+    let reused =
+        build_season_view_cached(&loaded, &season, config.my_user_id.as_deref(), Some(&stale));
+    assert_eq!(reused.analysis_as_of_secs, now - 600);
+
+    // Dropping the cache rebuilds it, and the stamp moves back to now.
+    let rebuilt = build_season_view_cached(&loaded, &season, config.my_user_id.as_deref(), None);
+    assert!(rebuilt.analysis_as_of_secs >= fresh.analysis_as_of_secs);
+    assert!(rebuilt.analysis_as_of_secs > reused.analysis_as_of_secs);
 }

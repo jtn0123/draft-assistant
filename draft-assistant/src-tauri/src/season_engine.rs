@@ -10,6 +10,7 @@ use crate::engine::{now_secs, Engine, REQUEST_CONCURRENCY};
 use crate::season::LastSeasonRow;
 use crate::season_api::{Matchup, Roster, ScoreGame, Transaction};
 use crate::season_history::History;
+use crate::season_sources::{apply_refresh, SourceHealth};
 use crate::sleeper::League;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,7 @@ const WEEK_SWEEP_TTL_SECS: u64 = 6 * 3600;
 const LAST_SEASON_TTL_SECS: u64 = 30 * 24 * 3600;
 
 /// Everything in-season, already fetched.
+#[derive(Default)]
 pub struct LoadedSeason {
     pub week: u32,
     pub season: u32,
@@ -40,6 +42,8 @@ pub struct LoadedSeason {
     pub history: History,
     pub fetched_at: u64,
     pub warnings: Vec<String>,
+    /// When each live source last answered, and why it last did not.
+    pub sources: SourceHealth,
 }
 
 /// The full-season matchup sweep, cached as one blob.
@@ -300,14 +304,33 @@ impl SeasonLoader for Engine {
             self.client.nfl_scores(season, week)
         );
         let rosters = rosters?;
-        let matchups = matchups.unwrap_or_else(|error| {
-            warnings.push(format!("this week's matchups unavailable: {error}"));
-            Vec::new()
-        });
-        let scores = scores.unwrap_or_else(|error| {
-            warnings.push(format!("live NFL scores unavailable: {error}"));
-            Vec::new()
-        });
+        // The same per-source bookkeeping the live poll keeps, so the health
+        // badge starts out honest rather than waiting for the first refresh.
+        let loaded_at = now_secs();
+        let mut sources = SourceHealth::default();
+        sources.rosters.succeeded(loaded_at);
+        let matchups = match matchups {
+            Ok(matchups) => {
+                sources.matchups.succeeded(loaded_at);
+                matchups
+            }
+            Err(error) => {
+                warnings.push(format!("this week's matchups unavailable: {error}"));
+                sources.matchups.failed(error);
+                Vec::new()
+            }
+        };
+        let scores = match scores {
+            Ok(scores) => {
+                sources.scores.succeeded(loaded_at);
+                scores
+            }
+            Err(error) => {
+                warnings.push(format!("live NFL scores unavailable: {error}"));
+                sources.scores.failed(error);
+                Vec::new()
+            }
+        };
 
         // The activity feed spans this week and last, which is what "recent"
         // means to someone checking waivers.
@@ -356,8 +379,9 @@ impl SeasonLoader for Engine {
             scores,
             last_season,
             history: History::default(),
-            fetched_at: now_secs(),
+            fetched_at: loaded_at,
             warnings,
+            sources,
         })
     }
 
@@ -369,28 +393,10 @@ impl SeasonLoader for Engine {
             self.client.nfl_scores(season.season, season.week),
             self.client.rosters(league_id)
         );
-        // A partial refresh still counts as fresh — one dead endpoint should
-        // not blank the screen. But if all three fail we must say so and leave
-        // `fetched_at` alone, or the staleness clock resets and the health
-        // badge reports live data that never arrived.
-        let mut errors = Vec::new();
-        match matchups {
-            Ok(matchups) => season.matchups = matchups,
-            Err(error) => errors.push(format!("matchups: {error}")),
-        }
-        match scores {
-            Ok(scores) => season.scores = scores,
-            Err(error) => errors.push(format!("scores: {error}")),
-        }
-        match rosters {
-            Ok(rosters) => season.rosters = rosters,
-            Err(error) => errors.push(format!("rosters: {error}")),
-        }
-        if errors.len() == 3 {
-            return Err(errors.join("; "));
-        }
-        season.fetched_at = now_secs();
-        Ok(())
+        // Which endpoint gave what, and what that means for the staleness
+        // clock, is decided in `season_sources` where it can be tested without
+        // a network.
+        apply_refresh(season, matchups, scores, rosters, now_secs())
     }
 }
 

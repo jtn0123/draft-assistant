@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import type { LineupCall, MatchupView, WaiverTarget } from "../season-types";
-import { fmt, pct, signed } from "../format";
+import { fmt, ideasAgeNote, pct, signed } from "../format";
 import { Headshot, PlayerName, PanelHead, PosBadge, TeamAvatar, Empty, Segmented } from "./bits";
 
 const LINEUP_VIEW_KEY = "da.lineupView";
@@ -269,14 +269,22 @@ export function Waivers({
   waivers,
   budgetLeft,
   budgetTotal,
+  analysisAsOfSecs,
 }: {
   waivers: WaiverTarget[];
   budgetLeft: number | null;
   budgetTotal: number | null;
+  /** When the waiver search last ran; absent or recent says nothing. */
+  analysisAsOfSecs?: number;
 }) {
+  const ideasAge = ideasAgeNote(analysisAsOfSecs);
+  const budget = budgetNote(budgetLeft, budgetTotal);
   return (
     <section className="waivers">
-      <PanelHead title="Worth a claim" note={budgetNote(budgetLeft, budgetTotal)} />
+      <PanelHead
+        title="Worth a claim"
+        note={ideasAge === null ? budget : `${budget} · ${ideasAge}`}
+      />
       {waivers.length === 0 ? (
         <Empty>No free agent would crack your starting lineup — nothing worth spending on.</Empty>
       ) : (

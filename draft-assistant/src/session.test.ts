@@ -1,7 +1,7 @@
 // The season lifecycle on its own: load once, poll while showing, stop when
 // hidden, surface a failure, and recover on retry.
 
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SeasonView } from "./season-types";
 
@@ -93,10 +93,16 @@ describe("useSeasonSession", () => {
 
   it("retry clears the error and forces a fresh fetch", async () => {
     mocks.loadSeason.mockRejectedValueOnce(new Error("down")).mockResolvedValue(view(5));
-    const { result } = renderHook(() => useSeasonSession(true, true, () => undefined));
+    // A stable callback, so the load effect does not re-fire on every render
+    // and race the retry with a second automatic fetch.
+    const quiet = () => undefined;
+    const { result } = renderHook(() => useSeasonSession(true, true, quiet));
     await waitFor(() => expect(result.current.error).not.toBeNull());
 
-    result.current.retry();
+    // Retry drives two state updates; let React flush both before reading them.
+    await act(async () => {
+      result.current.retry();
+    });
     await waitFor(() => expect(result.current.season?.week).toBe(5));
     expect(result.current.error).toBeNull();
     // force=true: a retry must bypass the cache that just failed.

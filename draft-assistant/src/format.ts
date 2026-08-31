@@ -72,6 +72,30 @@ export function age(timestamp: number | null): string {
   return `${Math.floor(seconds / 3600)}h ago`;
 }
 
+/** Seconds since the epoch, now. Kept here with the other clock readers so
+ * components stay pure functions of what they are handed. */
+export function nowSecs(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
+/** "40 seconds", "1 minute", "3 hours" — a span of time in plain words. */
+export function spanLabel(seconds: number): string {
+  const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+  const whole = Math.max(0, Math.floor(seconds));
+  if (whole < 60) return plural(whole, "second");
+  if (whole < 3600) return plural(Math.floor(whole / 60), "minute");
+  return plural(Math.floor(whole / 3600), "hour");
+}
+
+/** How long the cached analysis has been sitting, but only once that is worth
+ * saying: "ideas from 7 minutes ago". Null while the numbers are current. */
+export function ideasAgeNote(asOfSecs: number | undefined, staleAfter = 120): string | null {
+  if (asOfSecs === undefined || asOfSecs <= 0) return null;
+  const seconds = Math.floor(Date.now() / 1000) - asOfSecs;
+  if (seconds < staleAfter) return null;
+  return `ideas from ${spanLabel(seconds)} ago`;
+}
+
 /**
  * NFL kickoff windows are named in Eastern time regardless of where the user
  * is, so this formats explicitly in that zone: "Sun 1:00 ET".

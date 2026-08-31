@@ -4,11 +4,11 @@
 use crate::engine::LoadedLeague;
 use crate::roster::RosterRules;
 use crate::season::SeasonView;
-use crate::season_api::Matchup;
-use crate::season_lineup::LineupSlot;
+use crate::season_api::{Matchup, Roster};
+use crate::season_lineup::{Candidate, LineupSlot};
 use crate::season_moves::WaiverTarget;
 use crate::season_odds::StandingsRow;
-use crate::season_trades::TradeIdea;
+use crate::season_trades::{self, TradeIdea, TradePartner};
 use crate::weekly::WeeklyPoints;
 
 /// dictionary — DEF entries live only in the latter.
@@ -143,6 +143,10 @@ pub struct SeasonAnalysis {
     pub standings: Vec<StandingsRow>,
     pub waivers: Vec<WaiverTarget>,
     pub trades: Vec<TradeIdea>,
+    /// Epoch seconds this analysis was computed. Carried with the analysis so
+    /// a view built from it reports the age of the ideas it is showing rather
+    /// than the moment it happened to be re-serialised.
+    pub as_of: u64,
 }
 
 impl SeasonAnalysis {
@@ -152,6 +156,44 @@ impl SeasonAnalysis {
             standings: view.standings.clone(),
             waivers: view.waivers.clone(),
             trades: view.trades.clone(),
+            as_of: view.analysis_as_of_secs,
         }
     }
+}
+
+/// Trade ideas against every rival roster.
+///
+/// Lives here rather than inline in `build_season_view` so that file stays
+/// inside the size cap; the shape is exactly the block it replaced.
+pub fn trade_ideas_for(
+    rules: &RosterRules,
+    lookup: &Lookup,
+    rosters: &[Roster],
+    my_roster_id: Option<u32>,
+    my_candidates: &[Candidate],
+    candidates_of: &impl Fn(&[String]) -> Vec<Candidate>,
+    team_name: &impl Fn(u32) -> String,
+) -> Vec<TradeIdea> {
+    let partner_candidates: Vec<(u32, String, Vec<Candidate>)> = rosters
+        .iter()
+        .filter(|r| Some(r.roster_id) != my_roster_id)
+        .map(|r| {
+            (
+                r.roster_id,
+                team_name(r.roster_id),
+                candidates_of(r.player_ids()),
+            )
+        })
+        .collect();
+    let partners: Vec<TradePartner> = partner_candidates
+        .iter()
+        .map(|(roster_id, name, candidates)| TradePartner {
+            roster_id: *roster_id,
+            name: name.clone(),
+            candidates,
+        })
+        .collect();
+    season_trades::trade_ideas(rules, my_candidates, &partners, &|id| {
+        (lookup.name(id), lookup.position(id).unwrap_or_default())
+    })
 }

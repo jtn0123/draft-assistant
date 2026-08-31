@@ -13,7 +13,7 @@ use crate::season_lineup::{
 use crate::season_live::{self, TrackedPlayer};
 use crate::season_moves::{self, FreeAgent, RivalRoster, WaiverTarget};
 use crate::season_odds::{self, ScheduledGame, StandingsRow, TeamSeason};
-use crate::season_trades::{self, TradeIdea, TradePartner};
+use crate::season_trades::TradeIdea;
 use crate::season_trends_view::{self, TrendsView};
 use crate::view::LeagueSummary;
 use serde::Serialize;
@@ -21,6 +21,7 @@ use std::collections::{HashMap, HashSet};
 
 pub const SEASON_SCHEMA_VERSION: &str = "1.0";
 
+pub use crate::season_sources::{SourceHealth, SourceStatus};
 pub use crate::season_types::{
     LastSeasonRow, LiveSection, MatchupRow, MatchupView, RosterRow, SeasonHeader, SeasonHealth,
 };
@@ -54,9 +55,14 @@ pub struct SeasonView {
     /// Only teams whose manager has set one appear.
     pub team_avatars: std::collections::HashMap<u32, String>,
     pub data_health: SeasonHealth,
+    /// When the standings, waiver and trade analysis was computed. The live
+    /// poll reuses it for minutes at a time, so the screen can admit that.
+    pub analysis_as_of_secs: u64,
 }
 
-use crate::season_view_parts::{current_lineup, matchup_for, opponent_of, why_start, Lookup};
+use crate::season_view_parts::{
+    current_lineup, matchup_for, opponent_of, trade_ideas_for, why_start, Lookup,
+};
 // SeasonAnalysis lives beside the other view helpers to stay inside the
 // file-size cap, but it belongs to this module's public surface.
 pub use crate::season_view_parts::SeasonAnalysis;
@@ -85,6 +91,9 @@ pub fn build_season_view_cached(
     let weekly = &loaded.weekly_points;
     let week = season.week;
     let position_of = |id: &str| lookup.position(id);
+    let candidates_of = |ids: &[String]| candidates_for(ids, &position_of, weekly, week);
+    // Reused analysis keeps its own build time; a fresh one is being built now.
+    let analysis_as_of = cached.map_or_else(now_secs, |analysis| analysis.as_of);
 
     let my_roster: Option<&Roster> = my_user_id.and_then(|uid| {
         season
@@ -344,7 +353,7 @@ pub fn build_season_view_cached(
                 &my_candidates,
                 &free_agents,
                 &rival_rosters,
-                &|ids: &[String]| candidates_for(ids, &position_of, weekly, week),
+                &candidates_of,
                 waiver_budget_left,
             )
         }
@@ -353,31 +362,15 @@ pub fn build_season_view_cached(
     // ---------- trades ----------
     let trades = match cached {
         Some(analysis) => analysis.trades.clone(),
-        None => {
-            let partner_candidates: Vec<(u32, String, Vec<Candidate>)> = season
-                .rosters
-                .iter()
-                .filter(|r| Some(r.roster_id) != my_roster_id)
-                .map(|r| {
-                    (
-                        r.roster_id,
-                        team_name(r.roster_id),
-                        candidates_for(r.player_ids(), &position_of, weekly, week),
-                    )
-                })
-                .collect();
-            let partners: Vec<TradePartner> = partner_candidates
-                .iter()
-                .map(|(roster_id, name, candidates)| TradePartner {
-                    roster_id: *roster_id,
-                    name: name.clone(),
-                    candidates,
-                })
-                .collect();
-            season_trades::trade_ideas(rules, &my_candidates, &partners, &|id| {
-                (lookup.name(id), lookup.position(id).unwrap_or_default())
-            })
-        }
+        None => trade_ideas_for(
+            rules,
+            &lookup,
+            &season.rosters,
+            my_roster_id,
+            &my_candidates,
+            &candidates_of,
+            &team_name,
+        ),
     };
 
     // ---------- my roster ----------
@@ -489,6 +482,8 @@ pub fn build_season_view_cached(
         data_health: SeasonHealth {
             fetched_at: season.fetched_at,
             warnings: season.warnings.clone(),
+            sources: season.sources.clone(),
         },
+        analysis_as_of_secs: analysis_as_of,
     }
 }

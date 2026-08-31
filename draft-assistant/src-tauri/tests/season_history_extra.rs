@@ -115,6 +115,7 @@ fn season(week: u32, rosters: Vec<Roster>, fetched_at: u64) -> LoadedSeason {
         history: History::default(),
         fetched_at,
         warnings: Vec::new(),
+        sources: Default::default(),
     }
 }
 
