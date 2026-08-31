@@ -5,6 +5,7 @@ use crate::engine::{now_secs, LoadedLeague};
 use crate::roster::RosterRules;
 use crate::season_activity::{self, ActivityItem};
 use crate::season_api::Roster;
+use crate::season_calls;
 use crate::season_deals::{self, TradeDone};
 use crate::season_engine::LoadedSeason;
 use crate::season_lineup::{
@@ -61,7 +62,7 @@ pub struct SeasonView {
 }
 
 use crate::season_view_parts::{
-    current_lineup, matchup_for, opponent_of, trade_ideas_for, why_start, Lookup,
+    current_lineup, matchup_for, matchup_rows, opponent_of, trade_ideas_for, why_start, Lookup,
 };
 // SeasonAnalysis lives beside the other view helpers to stay inside the
 // file-size cap, but it belongs to this module's public surface.
@@ -147,10 +148,27 @@ pub fn build_season_view_cached(
     let eligible = |slot: &str, id: &str| {
         position_of(id).is_some_and(|position| RosterRules::can_fill(slot, &position))
     };
-    let calls = calls_from_diff(&my_optimal, &my_current, &eligible, &describe, &reason);
+    let mut calls = calls_from_diff(&my_optimal, &my_current, &eligible, &describe, &reason);
     // Rust's additive identity for f64 is -0.0, so an empty sum serialises as
     // "-0.0" and would render as "−0.0 points on the table". Normalise it.
+    //
+    // Counted before the injury calls join the list: those are about a player
+    // who may not take the field at all, not about points being left on the
+    // bench, and their gain is often negative.
     let points_on_table: f64 = calls.iter().map(|c| c.gain).sum::<f64>() + 0.0;
+
+    let facts = season_calls::WeekFacts {
+        players: &lookup,
+        weekly,
+        week,
+        scores: &season.scores,
+        now_ms: i64::try_from(now_secs())
+            .unwrap_or(i64::MAX)
+            .saturating_mul(1000),
+    };
+    let sidelined = facts.injury_calls(&my_current, &my_candidates, &calls, &eligible);
+    calls.extend(sidelined);
+    facts.finish(&mut calls);
 
     let opp_candidates: Vec<Candidate> = opp_matchup
         .and_then(|m| {
@@ -173,35 +191,8 @@ pub fn build_season_view_cached(
 
     // Both halves of the comparison: my best lineup and the one I have set,
     // each against their set one. The screen toggles between them.
-    let rows_against_theirs = |mine: &[crate::season_lineup::LineupSlot]| {
-        mine.iter()
-            .enumerate()
-            .map(|(i, slot)| {
-                let theirs = opp_current.get(i);
-                let my_id = slot.player_id.clone();
-                let opp_id = theirs.and_then(|s| s.player_id.clone());
-                let opp_points = theirs.map(|s| s.points).unwrap_or(0.0);
-                MatchupRow {
-                    slot: slot.slot.clone(),
-                    my_name: my_id
-                        .as_deref()
-                        .map(|id| lookup.name(id))
-                        .unwrap_or_default(),
-                    my_team: my_id.as_deref().and_then(|id| lookup.team(id)),
-                    my_points: slot.points,
-                    my_player_id: my_id,
-                    opp_name: opp_id
-                        .as_deref()
-                        .map(|id| lookup.name(id))
-                        .unwrap_or_default(),
-                    opp_team: opp_id.as_deref().and_then(|id| lookup.team(id)),
-                    opp_points,
-                    opp_player_id: opp_id,
-                    margin: slot.points - opp_points,
-                }
-            })
-            .collect::<Vec<_>>()
-    };
+    let rows_against_theirs =
+        |mine: &[crate::season_lineup::LineupSlot]| matchup_rows(&lookup, mine, &opp_current);
 
     let matchup = my_matchup.map(|mine| MatchupView {
         my_name: team_name(mine.roster_id),

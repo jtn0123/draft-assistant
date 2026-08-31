@@ -240,14 +240,20 @@ export function PlayerName({
   name,
   team,
   tag,
+  tagTitle,
   playerId,
 }: {
   name: string;
   team: string | null | undefined;
   tag?: string | null;
+  /** Spelled-out form of a short tag, shown on hover: "O" -> "Out". */
+  tagTitle?: string;
   /** When given, shows the player's headshot instead of the team logo. */
   playerId?: string | null;
 }) {
+  // A player who is Out or Doubtful is the one worth colouring; Questionable
+  // is common enough that shouting about it would be noise.
+  const alarming = tag === "Out" || tag === "O" || tag === "D";
   return (
     <span className="player-name">
       {playerId === undefined ? (
@@ -256,7 +262,11 @@ export function PlayerName({
         <Headshot playerId={playerId} team={team} name={name} />
       )}
       <span className="ellipsis">{name}</span>
-      {tag && <span className={tag === "Out" ? "tag tag-out" : "tag"}>{tag}</span>}
+      {tag && (
+        <span className={alarming ? "tag tag-out" : "tag"} title={tagTitle}>
+          {tag}
+        </span>
+      )}
     </span>
   );
 }

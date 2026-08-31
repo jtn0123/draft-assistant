@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clockLabel,
+  injuryWord,
   kickoffLabel,
   pickLabel,
   posRank,
@@ -89,5 +90,17 @@ describe("clockLabel", () => {
     expect(clockLabel(90_000, 0)).toBe("1:30");
     expect(clockLabel(5_000, 9_000)).toBe("0:00");
     expect(clockLabel(null, 0)).toBeNull();
+  });
+});
+
+describe("injuryWord", () => {
+  it("spells out each short tag for the tooltip", () => {
+    expect(injuryWord("Q")).toBe("Questionable");
+    expect(injuryWord("D")).toBe("Doubtful");
+    expect(injuryWord("O")).toBe("Out");
+  });
+
+  it("passes anything else through rather than inventing a word", () => {
+    expect(injuryWord("IR")).toBe("IR");
   });
 });

@@ -117,6 +117,17 @@ export function kickoffLabel(ms: number): string {
   }
 }
 
+/**
+ * The word behind a one-letter injury tag, for the tooltip beside a name.
+ * Anything the backend does not recognise never reaches here.
+ */
+export function injuryWord(code: string): string {
+  if (code === "Q") return "Questionable";
+  if (code === "D") return "Doubtful";
+  if (code === "O") return "Out";
+  return code;
+}
+
 /** "2d 6h", "6h 12m", "48m" — how long until a deadline. */
 export function untilLabel(ms: number | null): string {
   if (ms === null) return "–";

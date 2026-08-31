@@ -51,6 +51,35 @@ describe("CallsToMake", () => {
     render(<CallsToMake calls={[call("WR", 4, "why")]} pointsOnTable={4} />);
     expect(screen.getByText("+4.0")).toBeInTheDocument();
   });
+
+  it("shows the one-line reason without waiting to be asked", () => {
+    const injury: LineupCall = {
+      ...call("WR", -3, "the long form nobody has opened yet"),
+      reason: "Jaylen Waddle is listed Out — pick a replacement",
+    };
+    render(<CallsToMake calls={[injury]} pointsOnTable={0} />);
+    expect(
+      screen.getByText(/Jaylen Waddle is listed Out — pick a replacement/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("the long form nobody has opened yet")).not.toBeInTheDocument();
+  });
+
+  it("says when the decision locks, in plain words", () => {
+    const dated: LineupCall = {
+      ...call("WR", 4, "why"),
+      reason: "he's on bye",
+      // 2025-09-07 17:00 UTC is the Sunday 1pm Eastern window.
+      locks_at_ms: Date.parse("2025-09-07T17:00:00Z"),
+    };
+    render(<CallsToMake calls={[dated]} pointsOnTable={4} />);
+    expect(screen.getByText(/decide by Sun 1:00 ET/)).toBeInTheDocument();
+    expect(screen.getByText(/he's on bye/)).toBeInTheDocument();
+  });
+
+  it("leaves the note out entirely when there is neither reason nor deadline", () => {
+    render(<CallsToMake calls={[call("WR", 4, "why")]} pointsOnTable={4} />);
+    expect(document.querySelector(".call-note")).toBeNull();
+  });
 });
 
 const bestRow = {
@@ -174,6 +203,28 @@ describe("LineupCompare", () => {
     expect(leans[1].className).toContain("is-theirs");
     expect(leans[1].textContent).toBe("−8.8");
     expect(leans[2].textContent).toBe("—");
+  });
+
+  it("flags an injured starter with a tag that spells itself out on hover", () => {
+    const hurt: MatchupView = {
+      ...matchup,
+      rows: [{ ...matchup.rows[0], my_injury: "O", opp_injury: "Q" }],
+    };
+    render(<LineupCompare matchup={hurt} winOdds={0.62} />);
+
+    const mine = screen.getByText("O");
+    expect(mine).toHaveAttribute("title", "Out");
+    expect(mine.className).toContain("tag-out");
+
+    const theirs = screen.getByText("Q");
+    expect(theirs).toHaveAttribute("title", "Questionable");
+    // Questionable is common enough that colouring it would be noise.
+    expect(theirs.className).not.toContain("tag-out");
+  });
+
+  it("leaves healthy starters untagged", () => {
+    render(<LineupCompare matchup={matchup} winOdds={0.62} />);
+    expect(document.querySelector(".lineup-table .tag")).toBeNull();
   });
 
   it("shows a headshot on both sides of every scoreboard row", async () => {

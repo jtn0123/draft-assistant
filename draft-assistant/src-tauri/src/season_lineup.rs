@@ -129,6 +129,16 @@ pub struct LineupCall {
     pub player_out_id: String,
     pub gain: f64,
     pub why: String,
+    /// One line of plain language for *why*, beyond the point difference:
+    /// "he's on bye", "your starter is listed Out". Filled in by
+    /// `season_calls`, which is where the injury and schedule data lives.
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Epoch milliseconds by which the swap has to be made — the earlier of
+    /// the two players' kickoffs. `None` when the scoreboard has no game for
+    /// either of them, or when both have already started.
+    #[serde(default)]
+    pub locks_at_ms: Option<i64>,
 }
 
 /// Diff the optimal lineup against the starters actually set.
@@ -218,6 +228,8 @@ pub fn calls_from_diff(
             player_out_id: now_id.to_string(),
             gain,
             why: reason(&now.slot, best_id, now_id),
+            reason: None,
+            locks_at_ms: None,
         });
     }
     calls.sort_by(|a, b| b.gain.total_cmp(&a.gain));

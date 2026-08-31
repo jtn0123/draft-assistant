@@ -24,10 +24,15 @@ pub struct MatchupRow {
     pub my_player_id: Option<String>,
     pub my_name: String,
     pub my_team: Option<String>,
+    /// "Q", "D" or "O" when the player carries an injury tag this week.
+    #[serde(default)]
+    pub my_injury: Option<String>,
     pub my_points: f64,
     pub opp_player_id: Option<String>,
     pub opp_name: String,
     pub opp_team: Option<String>,
+    #[serde(default)]
+    pub opp_injury: Option<String>,
     pub opp_points: f64,
     pub margin: f64,
 }

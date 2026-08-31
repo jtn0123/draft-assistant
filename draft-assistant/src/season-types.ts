@@ -18,10 +18,13 @@ export interface MatchupRow {
   my_player_id: string | null;
   my_name: string;
   my_team: string | null;
+  /** "Q", "D" or "O" when the player carries an injury tag this week. */
+  my_injury?: string | null;
   my_points: number;
   opp_player_id: string | null;
   opp_name: string;
   opp_team: string | null;
+  opp_injury?: string | null;
   opp_points: number;
   margin: number;
 }
@@ -52,6 +55,11 @@ export interface LineupCall {
   player_out_id: string;
   gain: number;
   why: string;
+  /** One line of plain language for why, beyond the points: "he's on bye". */
+  reason?: string | null;
+  /** Epoch milliseconds by which the swap has to be made — the earlier of the
+   * two players' kickoffs. Absent when neither game is on the scoreboard. */
+  locks_at_ms?: number | null;
 }
 
 export interface WaiverTarget {

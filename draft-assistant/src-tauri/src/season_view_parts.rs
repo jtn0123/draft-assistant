@@ -5,10 +5,12 @@ use crate::engine::LoadedLeague;
 use crate::roster::RosterRules;
 use crate::season::SeasonView;
 use crate::season_api::{Matchup, Roster};
+use crate::season_injury::{injury_code, PlayerFacts};
 use crate::season_lineup::{Candidate, LineupSlot};
 use crate::season_moves::WaiverTarget;
 use crate::season_odds::StandingsRow;
 use crate::season_trades::{self, TradeIdea, TradePartner};
+use crate::season_types::MatchupRow;
 use crate::weekly::WeeklyPoints;
 
 /// dictionary — DEF entries live only in the latter.
@@ -55,6 +57,74 @@ impl Lookup<'_> {
             .get(player_id)
             .and_then(|m| m.team.clone())
     }
+
+    /// Sleeper's injury status, as it comes off the player dictionary:
+    /// "Questionable", "Out", "IR" and so on. Blank entries read as no status.
+    pub fn injury(&self, player_id: &str) -> Option<String> {
+        if let Some(&i) = self.loaded.board_index.get(player_id) {
+            if let Some(status) = self.loaded.board[i].injury_status.clone() {
+                return Some(status).filter(|s| !s.trim().is_empty());
+            }
+        }
+        self.loaded
+            .player_meta
+            .get(player_id)
+            .and_then(|m| m.injury_status.clone())
+            .filter(|s| !s.trim().is_empty())
+    }
+}
+
+impl PlayerFacts for Lookup<'_> {
+    fn name(&self, player_id: &str) -> String {
+        Lookup::name(self, player_id)
+    }
+    fn team(&self, player_id: &str) -> Option<String> {
+        Lookup::team(self, player_id)
+    }
+    fn injury_status(&self, player_id: &str) -> Option<String> {
+        self.injury(player_id)
+    }
+}
+
+/// My lineup, slot by slot, against the one the opponent has set — the rows
+/// behind both halves of the head-to-head table.
+pub fn matchup_rows(
+    lookup: &Lookup,
+    mine: &[LineupSlot],
+    theirs: &[LineupSlot],
+) -> Vec<MatchupRow> {
+    let describe = |id: Option<&str>| {
+        (
+            id.map(|id| lookup.name(id)).unwrap_or_default(),
+            id.and_then(|id| lookup.team(id)),
+            id.and_then(|id| injury_code(lookup.injury(id).as_deref()))
+                .map(str::to_string),
+        )
+    };
+    mine.iter()
+        .enumerate()
+        .map(|(i, slot)| {
+            let opp = theirs.get(i);
+            let opp_id = opp.and_then(|s| s.player_id.clone());
+            let opp_points = opp.map_or(0.0, |s| s.points);
+            let (my_name, my_team, my_injury) = describe(slot.player_id.as_deref());
+            let (opp_name, opp_team, opp_injury) = describe(opp_id.as_deref());
+            MatchupRow {
+                slot: slot.slot.clone(),
+                my_name,
+                my_team,
+                my_injury,
+                my_points: slot.points,
+                my_player_id: slot.player_id.clone(),
+                opp_name,
+                opp_team,
+                opp_injury,
+                opp_points,
+                opp_player_id: opp_id,
+                margin: slot.points - opp_points,
+            }
+        })
+        .collect()
 }
 
 pub fn matchup_for(matchups: &[Matchup], roster_id: u32) -> Option<&Matchup> {

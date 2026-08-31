@@ -176,6 +176,16 @@
   color: var(--act);
 }
 
+/* The one-line reason and the deadline, always visible under the call. The
+   long-form "why" below it stays behind the toggle. */
+.call-note {
+  display: block;
+  font-size: 12px;
+  color: var(--faint);
+  padding: 0 0 9px;
+  margin-top: -4px;
+}
+
 .call-reason {
   display: block;
   font-size: 12px;

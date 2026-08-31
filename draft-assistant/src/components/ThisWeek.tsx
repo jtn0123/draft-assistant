@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import type { LineupCall, MatchupView, WaiverTarget } from "../season-types";
-import { fmt, ideasAgeNote, pct, signed } from "../format";
+import { fmt, ideasAgeNote, injuryWord, kickoffLabel, pct, signed } from "../format";
 import { Headshot, PlayerName, PanelHead, PosBadge, TeamAvatar, Empty, Segmented } from "./bits";
 
 const LINEUP_VIEW_KEY = "da.lineupView";
@@ -81,6 +81,7 @@ export function CallsToMake({
               <span className="call-gain">{signed(call.gain)}</span>
               <span className="call-why">{open ? "Hide" : "Why"}</span>
             </button>
+            <CallNote reason={call.reason} locksAtMs={call.locks_at_ms} />
             {open && <span className="mid call-reason">{call.why}</span>}
           </div>
         );
@@ -88,6 +89,26 @@ export function CallsToMake({
       <span className="mid call-foot">Set it on Sleeper — this app reads, it doesn't write.</span>
     </div>
   );
+}
+
+/** The always-visible line under a call: the one reason worth reading, and
+ * when the decision stops being yours to make. */
+function CallNote({ reason, locksAtMs }: { reason?: string | null; locksAtMs?: number | null }) {
+  const deadline = locksAtMs ? kickoffLabel(locksAtMs) : "";
+  if (!reason && !deadline) return null;
+  return (
+    <span className="call-note">
+      {reason}
+      {reason && deadline ? " · " : ""}
+      {deadline && `decide by ${deadline}`}
+    </span>
+  );
+}
+
+/** The Q/D/O flag beside a starter, spelled out on hover. */
+function injuryProps(code: string | null | undefined) {
+  if (!code) return {};
+  return { tag: code, tagTitle: injuryWord(code) };
 }
 
 // ---------- lineup comparison ----------
@@ -200,6 +221,7 @@ export function LineupCompare({
                   name={row.my_name || "—"}
                   team={row.my_team}
                   playerId={row.my_player_id}
+                  {...injuryProps(row.my_injury)}
                 />
               </span>
               <span className="right strong">{fmt(row.my_points, 1)}</span>
@@ -210,6 +232,7 @@ export function LineupCompare({
                   name={row.opp_name || "—"}
                   team={row.opp_team}
                   playerId={row.opp_player_id}
+                  {...injuryProps(row.opp_injury)}
                 />
               </span>
             </div>
