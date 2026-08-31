@@ -83,9 +83,16 @@ export function useSeasonSession(
   // keep its schedule instead of being cancelled and recreated on every tick.
   useEffect(() => {
     if (!active || !ready) return undefined;
-    api.startSeasonPolling(LIVE_INTERVAL).catch(() => undefined);
+    api.startSeasonPolling(LIVE_INTERVAL).catch((e) => {
+      // A poller that never started looks exactly like a screen that quietly
+      // stopped moving, so say it out loud rather than leaving the numbers to
+      // go stale in silence.
+      onErrorRef.current(`Live updates are not running: ${String(e)}`);
+    });
     return () => {
       // Stop polling as soon as the screen is not showing: nothing renders it.
+      // A failure here is not worth a message — the screen is on its way out,
+      // and the next time it opens it starts a fresh poller anyway.
       api.stopSeasonPolling().catch(() => undefined);
     };
   }, [active, ready]);

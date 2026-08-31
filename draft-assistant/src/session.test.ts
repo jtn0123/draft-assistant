@@ -111,6 +111,17 @@ describe("useSeasonSession", () => {
     expect(onError).toHaveBeenCalledTimes(1);
   });
 
+  it("says so when live updates could not be started", async () => {
+    mocks.loadSeason.mockResolvedValue(view(2));
+    mocks.startSeasonPolling.mockRejectedValue(new Error("no league loaded"));
+    const onError = vi.fn();
+    renderHook(() => useSeasonSession(true, true, onError));
+
+    await waitFor(() =>
+      expect(onError).toHaveBeenCalledWith(expect.stringContaining("Live updates are not running")),
+    );
+  });
+
   it("retry clears the error and forces a fresh fetch", async () => {
     mocks.loadSeason.mockRejectedValueOnce(new Error("down")).mockResolvedValue(view(5));
     // A stable callback, so the load effect does not re-fire on every render

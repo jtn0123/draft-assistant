@@ -34,6 +34,26 @@ function HeaderStat({ label, value, sub }: { label: string; value: string; sub?:
  *  for it: three polls at the default thirty-second cadence. */
 const SOURCE_STALE_SECS = 90;
 
+/** How often the badge re-reads the clock, in milliseconds. */
+const HEARTBEAT_MS = 10_000;
+
+/**
+ * The current time, refreshed on a timer.
+ *
+ * Everything else on this screen only changes when new data arrives, which is
+ * exactly the wrong behaviour for a badge whose job is to notice that no new
+ * data is arriving. Left to re-render on data alone it would sit there reading
+ * "Live · 8s ago" for hours after the feed died.
+ */
+function useClockTick(): number {
+  const [now, setNow] = useState(nowSecs);
+  useEffect(() => {
+    const id = setInterval(() => setNow(nowSecs()), HEARTBEAT_MS);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
 const SOURCES: [keyof SourceHealth, string][] = [
   ["matchups", "Matchups"],
   ["scores", "Scores"],
@@ -58,16 +78,19 @@ function sourceLine(label: string, status: SourceStatus, now: number): string {
  * always spells out all three.
  */
 function LiveBadge({ health }: { health: SeasonHealth }) {
+  const now = useClockTick();
   const sources = health.sources;
   if (sources === undefined) {
+    // Older cached views carry no per-source detail, only one overall stamp.
+    // That stamp still has to be checked: an unchecked one always says "Live".
+    const behind = now - health.fetched_at > SOURCE_STALE_SECS;
     return (
-      <span className="pill pill-live">
+      <span className={behind ? "pill pill-stale" : "pill pill-live"}>
         <span className="dot" />
-        Live · {age(health.fetched_at)}
+        {behind ? "Not updating" : `Live · ${age(health.fetched_at)}`}
       </span>
     );
   }
-  const now = nowSecs();
   const entries = SOURCES.map(([key, label]) => ({ label, status: sources[key] }));
   const behind = entries.filter(
     (e) => e.status.error !== null || now - e.status.last_success_secs > SOURCE_STALE_SECS,

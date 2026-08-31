@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SeasonView, SourceHealth } from "../season-types";
 import { SeasonScreen } from "./SeasonScreen";
 
@@ -63,6 +63,10 @@ function view(overrides: Partial<SeasonView> = {}): SeasonView {
   };
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("the live badge", () => {
   it("calls itself live and dates every source when all three are current", () => {
     render(<SeasonScreen view={view()} />);
@@ -99,6 +103,32 @@ describe("the live badge", () => {
     render(
       <SeasonScreen view={view({ data_health: { fetched_at: NOW(), warnings: [], sources } })} />,
     );
+    expect(screen.getByText("Not updating")).toHaveClass("pill-stale");
+  });
+
+  // The badge is the one thing on the screen whose job is to notice an
+  // absence, so it has to keep moving when nothing else does.
+  it("stops calling itself live when time passes and no new data arrives", async () => {
+    vi.useFakeTimers();
+    render(<SeasonScreen view={view()} />);
+    expect(screen.getByText(/^Live · /)).toHaveClass("pill-live");
+
+    // Well past the point where all three sources are behind, with no re-render
+    // from new data — only the badge's own heartbeat.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(screen.getByText("Not updating")).toHaveClass("pill-stale");
+  });
+
+  it("goes stale on the overall stamp too, when there is no per-source detail", async () => {
+    vi.useFakeTimers();
+    render(<SeasonScreen view={view({ data_health: { fetched_at: NOW(), warnings: [] } })} />);
+    expect(screen.getByText(/^Live · /)).toHaveClass("pill-live");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
     expect(screen.getByText("Not updating")).toHaveClass("pill-stale");
   });
 
