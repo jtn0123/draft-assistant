@@ -262,12 +262,14 @@ impl Engine {
             .draft_id
             .clone()
             .ok_or_else(|| "league has no draft".to_string())?;
-        let draft = self.client.draft(&draft_id).await.map_err(to_message)?;
-        let users = self
-            .client
-            .league_users(league_id)
-            .await
-            .unwrap_or_default();
+        // The draft and the member list depend on nothing but ids we already
+        // have, so they go out together rather than one waiting on the other.
+        let (draft, users) = tokio::join!(
+            self.client.draft(&draft_id),
+            self.client.league_users(league_id)
+        );
+        let draft = draft.map_err(to_message)?;
+        let users = users.unwrap_or_default();
         let user_names: HashMap<String, String> = users
             .iter()
             .filter_map(|u| u.label().map(|n| (u.user_id.clone(), n)))
@@ -338,11 +340,17 @@ impl Engine {
             .season
             .parse()
             .map_err(|_| "bad season".to_string())?;
-        let (players_at, player_meta, players_warning) = self.players(force).await?;
-        let (proj_at, season_rows, projections_warning) =
-            self.season_projections(season, force).await?;
-        let (weekly_at, weekly_rows, weekly_warning) =
-            self.weekly_projections(season, force).await?;
+        // Three independent fetches — the third an eighteen-request fan-out of
+        // its own. Run one after another at an eight-second timeout each, a
+        // cold load served three rounds of latency where one would do.
+        let (players, season_projections, weekly) = tokio::try_join!(
+            self.players(force),
+            self.season_projections(season, force),
+            self.weekly_projections(season, force),
+        )?;
+        let (players_at, player_meta, players_warning) = players;
+        let (proj_at, season_rows, projections_warning) = season_projections;
+        let (weekly_at, weekly_rows, weekly_warning) = weekly;
 
         let mut warnings = Vec::new();
         warnings.extend(players_warning);

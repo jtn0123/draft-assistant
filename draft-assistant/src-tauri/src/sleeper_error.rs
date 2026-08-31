@@ -238,6 +238,42 @@ mod retry_loop_tests {
         assert_eq!(hits.load(Ordering::SeqCst), 1);
     }
 
+    /// The players dictionary comes back as bytes so it can be parsed off the
+    /// runtime, and that path has to keep the same retry policy as `get_json`.
+    #[tokio::test]
+    async fn the_raw_body_fetch_returns_what_the_server_sent() {
+        let (url, hits) = stub(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 9\r\nConnection: close\r\n\r\n{\"a\": 1}\n",
+        );
+        let body = SleeperClient::without_proxy()
+            .get_bytes(&url)
+            .await
+            .expect("a 200 with a body");
+        assert_eq!(String::from_utf8(body).unwrap(), "{\"a\": 1}\n");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn the_raw_body_fetch_retries_a_server_error_and_stops_at_a_404() {
+        let (url, hits) = stub(
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        );
+        let error = SleeperClient::without_proxy()
+            .get_bytes(&url)
+            .await
+            .expect_err("503 is not a body");
+        assert!(error.retryable(), "{error}");
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+
+        let (url, hits) =
+            stub("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        SleeperClient::without_proxy()
+            .get_bytes(&url)
+            .await
+            .expect_err("404 is not a body");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
     #[tokio::test]
     async fn a_refused_connection_is_a_retryable_transport_failure() {
         // Bound only to reserve a port, then dropped: connections are refused.

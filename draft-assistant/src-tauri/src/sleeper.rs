@@ -314,21 +314,54 @@ impl SleeperClient {
         })
     }
 
-    /// A GET that survives a blip. Sleeper drops the occasional request during
-    /// Sunday traffic, and a single failure used to blank a whole week of
-    /// data until the next manual refresh.
+    /// One attempt that stops at the raw body, without deserialising it.
+    ///
+    /// The players dictionary is ~14.6 MB; turning it into a `HashMap` inside
+    /// the task is hundreds of milliseconds during which no other task on the
+    /// runtime moves. Handing back bytes lets the caller push that onto the
+    /// blocking pool.
+    async fn get_bytes_once(&self, url: &str) -> Result<Vec<u8>, SleeperError> {
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| SleeperError::Transport {
+                url: url.to_string(),
+                detail: e.to_string(),
+            })?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(SleeperError::Http {
+                status,
+                url: url.to_string(),
+            });
+        }
+        resp.bytes()
+            .await
+            .map(|body| body.to_vec())
+            .map_err(|e| SleeperError::Transport {
+                url: url.to_string(),
+                detail: e.to_string(),
+            })
+    }
+
+    /// Retry a request that survives a blip. Sleeper drops the occasional
+    /// request during Sunday traffic, and a single failure used to blank a
+    /// whole week of data until the next manual refresh.
     ///
     /// Only failures the error type calls retryable are tried again: a 404 or
     /// a malformed body returns on the first attempt, because waiting 750ms to
     /// receive the same 404 twice more helps nobody.
-    pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(
-        &self,
-        url: &str,
-    ) -> Result<T, SleeperError> {
+    async fn with_retries<T, F, Fut>(&self, attempt: F) -> Result<T, SleeperError>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = Result<T, SleeperError>>,
+    {
         let mut backoff = Duration::from_millis(250);
         let mut attempts = 0;
         loop {
-            match self.get_json_once(url).await {
+            match attempt().await {
                 Ok(value) => return Ok(value),
                 Err(error) => {
                     attempts += 1;
@@ -340,6 +373,20 @@ impl SleeperClient {
             tokio::time::sleep(backoff).await;
             backoff *= 2;
         }
+    }
+
+    /// A GET that parses in-task, for the small payloads.
+    pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+    ) -> Result<T, SleeperError> {
+        self.with_retries(|| self.get_json_once(url)).await
+    }
+
+    /// A GET that hands back the raw body, for payloads too big to parse on
+    /// the runtime thread. Same retry policy as `get_json`.
+    pub(crate) async fn get_bytes(&self, url: &str) -> Result<Vec<u8>, SleeperError> {
+        self.with_retries(|| self.get_bytes_once(url)).await
     }
 
     /// Resolve a Sleeper username to its user id.
@@ -396,9 +443,12 @@ impl SleeperClient {
         Ok(v.unwrap_or_default())
     }
 
-    /// Full player dictionary: player_id -> meta. ~14.6MB, cache on disk.
-    pub async fn players(&self) -> Result<HashMap<String, PlayerMeta>, SleeperError> {
-        self.get_json(&format!("{BASE}/players/nfl")).await
+    /// Full player dictionary, unparsed: ~14.6 MB of JSON, cached on disk.
+    ///
+    /// Bytes rather than a `HashMap` because the caller parses it on the
+    /// blocking pool — see `projections::players`.
+    pub async fn players_bytes(&self) -> Result<Vec<u8>, SleeperError> {
+        self.get_bytes(&format!("{BASE}/players/nfl")).await
     }
 
     /// Undocumented: full-season raw-stat projections for one season.

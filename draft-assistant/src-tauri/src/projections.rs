@@ -14,6 +14,20 @@ use futures_util::StreamExt;
 use std::collections::HashMap;
 
 impl Engine {
+    /// The players dictionary, fetched and then parsed off the runtime.
+    ///
+    /// ~14.6 MB of JSON. Deserialising it in-task stopped every other task —
+    /// including both pollers — for hundreds of milliseconds on every cold
+    /// load. Only the disk read was moved off-thread before; this is the
+    /// network path.
+    async fn fetch_players(&self) -> Result<HashMap<String, PlayerMeta>, String> {
+        let bytes = self.client.players_bytes().await.map_err(to_message)?;
+        tokio::task::spawn_blocking(move || serde_json::from_slice(&bytes))
+            .await
+            .map_err(|e| format!("could not read the player list: {e}"))?
+            .map_err(|e| format!("could not read the player list: {e}"))
+    }
+
     pub(crate) async fn players(
         &self,
         force: bool,
@@ -27,7 +41,7 @@ impl Engine {
             }
         }
         let stale = self.read_cache_any_off_thread("players.json").await;
-        match self.client.players().await.map_err(to_message) {
+        match self.fetch_players().await {
             Ok(data) => {
                 let at = self.write_cache_off_thread("players.json", &data).await;
                 Ok((at, data, None))
