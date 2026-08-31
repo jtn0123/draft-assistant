@@ -1,5 +1,6 @@
 // The draft cockpit: clock, pick queue, three recommendations, rail, board.
 
+import { useMemo } from "react";
 import type { DraftView } from "../types";
 import { Board } from "./Board";
 import { ClockBanner, SnakeStrip } from "./ClockBanner";
@@ -21,12 +22,24 @@ export function DraftScreen({
   onDraft: (id: string, name: string) => void;
 }) {
   // The engine can surface the same player under two modes; showing one card
-  // twice reads as a bug even though the underlying scores differ.
-  const recommendations = view.recommendations.filter(
-    (r, i, all) => i === all.findIndex((x) => x.player_id === r.player_id),
+  // twice reads as a bug even though the underlying scores differ. A seen-set
+  // rather than `findIndex`, which made this quadratic.
+  const recommendations = useMemo(() => {
+    const seen = new Set<string>();
+    return view.recommendations.filter((r) => {
+      if (seen.has(r.player_id)) return false;
+      seen.add(r.player_id);
+      return true;
+    });
+  }, [view.recommendations]);
+
+  // One pass over the pool instead of a full scan per card, and it survives
+  // every update that leaves the pool alone (boardIdentity.ts).
+  const ranks = useMemo(
+    () => new Map(view.available.map((p) => [p.player_id, p.position_rank])),
+    [view.available],
   );
-  const rankOf = (playerId: string) =>
-    view.available.find((p) => p.player_id === playerId)?.position_rank ?? null;
+  const rankOf = (playerId: string) => ranks.get(playerId) ?? null;
 
   return (
     <div className="draft-screen">

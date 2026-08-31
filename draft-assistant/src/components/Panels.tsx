@@ -1,7 +1,7 @@
 // Draft-screen panels: the three recommendation cards and the left rail
 // (roster, at-risk players, tier alerts, recent picks).
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "../api";
 import type { DraftView, Recommendation } from "../types";
 import { fmt, pct, pickLabel, posRank } from "../format";
@@ -192,10 +192,18 @@ export function RecCard({
 export function SidePanel({ view }: { view: DraftView }) {
   const roster = view.my_roster;
   const rounds = view.draft.rounds;
-  const atRisk = view.available
-    .filter((p) => p.survival_next !== null && p.survival_next < 0.5)
-    .sort((a, b) => (a.survival_next ?? 1) - (b.survival_next ?? 1))
-    .slice(0, 5);
+  // Several hundred players, filtered and sorted, on a panel that re-renders
+  // on every 3-second poll and every tick of the pick clock. `applyView`
+  // recycles the `available` array when nothing about the pool changed
+  // (boardIdentity.ts), so this memo genuinely holds across those updates.
+  const atRisk = useMemo(
+    () =>
+      view.available
+        .filter((p) => p.survival_next !== null && p.survival_next < 0.5)
+        .sort((a, b) => (a.survival_next ?? 1) - (b.survival_next ?? 1))
+        .slice(0, 5),
+    [view.available],
+  );
   // Survival is judged at my next pick AFTER the one I'm making now, which is
   // what the backend computed `survival_next` against — the label has to name
   // the same pick, in the same round.pick form used everywhere else.
