@@ -1,5 +1,22 @@
 # Draft Assistant — grade & tracker (2026-08-30)
 
+## Current focus: stability · performance · lazy load · week-one assistant · status
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 1 | Lazy-load the big UI chunks (Chat, SeasonScreen, DraftScreen) | done `b4f2c39` | Entry bundle 273 → 228 KB; each screen is its own chunk, Chat only fetched when opened. |
+| 2 | Board sort caching without staleness (audit G7) | done `c8ca01e` | New `boardIdentity.ts` deep-compares players and reuses the array only when observationally identical — re-sort and ~400 row re-renders skipped on no-op ticks, staleness impossible by construction. |
+| 3 | Per-source status + analysis age | done `4cecd63` | Live badge tracks matchups/scores/rosters separately with a plain-language tooltip; trade/waiver ideas show "from N min ago" when the cached analysis is older than 2 min. |
+| 4 | Week-one assistant upgrades (reasons, injury flags, decision deadlines) | in progress | Agent running. |
+| 5 | Split `build_season_view` by section (audit A5) | todo | After #4 lands; golden tests from D2 make it safe now. |
+
+Follow-ups found during this work:
+- `DraftPollMemory::picks_changed` keys on pick *count* only — a commissioner replacing a pick without changing the count never reaches the UI (`poll.rs`). todo
+- Pre-commit hook was broken for git worktrees (validated the main checkout). done `b4f2c39`
+
+---
+## Earlier tracker (Claude Design import)
+
 Grades are for the working tree after the Claude Design import (nothing is committed yet).
 Evidence: section-by-section audit of `Draft Assistant.dc.html` vs `src/` + `src-tauri/src/`,
 screenshots of every screen/tab in both themes, and live Sleeper data for the lineup bug.
