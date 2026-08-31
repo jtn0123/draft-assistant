@@ -133,3 +133,21 @@ Note: rerun the script with `--scoring ppr` before importing; it still won't ref
 - B11 last-season narrative foot (needs bracket data the backend does not fetch).
 - Fable 5 "Ultra" effort level (a Claude Code feature, not an API effort).
 - Nothing is committed — all work is in the working tree.
+
+---
+## Merge: unify local + origin rebuilds (2026-08-31)
+
+Decision (approved): local main is the trunk; origin/main features are ported onto it.
+UI/UX driven by local's design. Backups pushed: `backup/local-rebuild` (local main
+c81d799) and `backup/origin-rebuild` (origin's 79-commit rebuild). Source for ports:
+origin/main worktree.
+
+| # | Port | Status | Notes |
+|---|---|---|---|
+| 1 | Chat UX: saved sessions, suggested questions, budget cap, Markdown rendering (keep local's model/effort picker + styling) | todo | |
+| 2 | Keeper support + traded picks + pick deadline + third-round reversal (Rust domain + minimal UI in local's style) | todo | |
+| 3 | LeaguePicker (multi-league selection) | todo | |
+| 4 | Season replay mode (`?replay=` fixture loading) — evaluate if local's fixture mode already covers it | todo | |
+| 5 | Compare origin lineup advice vs local `season_lineup.rs`; graft anything better | todo | |
+| 6 | Review t3code branch (pick-trade pricing/backtest) for porting | todo | |
+| 7 | Push unified main (`--force-with-lease`) after user confirms; delete /private/tmp/da-fix | blocked-on-user | |
