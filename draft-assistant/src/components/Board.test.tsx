@@ -1,10 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-import type { AvailablePlayer } from "../types";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AvailablePlayer, DraftView } from "../types";
+import { stableAvailable } from "../boardIdentity";
 import { Board } from "./Board";
 
-function player(id: string, name: string, position: string): AvailablePlayer {
+function player(
+  id: string,
+  name: string,
+  position: string,
+  over: Partial<AvailablePlayer> = {},
+): AvailablePlayer {
   return {
     player_id: id,
     name,
@@ -21,6 +27,7 @@ function player(id: string, name: string, position: string): AvailablePlayer {
     injury_status: null,
     sleeper_pts_ppr: null,
     survival_next: 0.5,
+    ...over,
   };
 }
 
@@ -94,5 +101,84 @@ describe("Board", () => {
       <Board players={[]} positions={["QB"]} loading={true} boardSize={312} onDraft={vi.fn()} />,
     );
     expect(screen.getByText("Pulling projections for 312 players…")).toBeInTheDocument();
+  });
+});
+
+// Grade item G7. The filter-and-sort memo is keyed on the players array, and
+// `applyView` now recycles that array when an incoming view says the same
+// thing about the pool. These tests hold both ends of the bargain: no work
+// when the data is unchanged, and never a stale number when it is not.
+describe("Board across repeated updates", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** What `applyView` does to the pool, without the rest of the app. */
+  const deliver = (prev: AvailablePlayer[], next: AvailablePlayer[]): AvailablePlayer[] =>
+    stableAvailable({ available: prev } as DraftView, { available: next } as DraftView).available;
+
+  const pool = () => [
+    player("a", "Alpha", "RB", { points: 210, vorp: 40, overall_rank: 1 }),
+    player("b", "Bravo", "WR", { points: 190, vorp: 30, overall_rank: 2 }),
+    player("c", "Charlie", "RB", { points: 175, vorp: 22, overall_rank: 3 }),
+  ];
+
+  const board = (players: AvailablePlayer[]) => (
+    <Board
+      players={players}
+      positions={["RB", "WR"]}
+      loading={false}
+      boardSize={players.length}
+      onDraft={vi.fn()}
+    />
+  );
+
+  const rows = (container: HTMLElement) => [...container.querySelectorAll(".board-body")];
+  const names = (container: HTMLElement) =>
+    rows(container).map((row) => row.querySelector(".board-player .ellipsis")?.textContent);
+  const points = (container: HTMLElement) =>
+    rows(container).map((row) => row.children[5].textContent);
+
+  it("shows the new projections when a rebuilt board keeps the same players", () => {
+    const before = pool();
+    const { container, rerender } = render(board(before));
+    // The board opens sorted by points, so new projections have to re-order it.
+    expect(names(container)).toEqual(["Alpha", "Bravo", "Charlie"]);
+    expect(points(container)).toEqual(["210", "190", "175"]);
+
+    // "Refresh data": same players, same ids, same order in — new numbers.
+    const after = deliver(before, [
+      { ...before[0], points: 150, vorp: 12 },
+      { ...before[1], points: 240, vorp: 55 },
+      { ...before[2], points: 175, vorp: 22 },
+    ]);
+    expect(after).not.toBe(before);
+    rerender(board(after));
+
+    expect(names(container)).toEqual(["Bravo", "Charlie", "Alpha"]);
+    expect(points(container)).toEqual(["240", "175", "150"]);
+  });
+
+  it("does no work when an update carries an identical pool", () => {
+    const sorts = vi.spyOn(Array.prototype, "sort");
+    const first = pool();
+    const { container, rerender } = render(board(first));
+    expect(sorts).toHaveBeenCalled();
+
+    // A poll tick: a brand-new array of brand-new objects saying the same thing.
+    const tick = deliver(
+      first,
+      first.map((p) => ({ ...p })),
+    );
+    expect(tick).toBe(first);
+
+    const sortsBefore = sorts.mock.calls.length;
+    rerender(board(tick));
+    expect(sorts.mock.calls.length).toBe(sortsBefore);
+    expect(names(container)).toEqual(["Alpha", "Bravo", "Charlie"]);
+
+    // …and an update that takes a drafted player off the board does re-sort.
+    const third = deliver(first, [first[0], first[2]]);
+    rerender(board(third));
+    expect(sorts.mock.calls.length).toBeGreaterThan(sortsBefore);
+    expect(names(container)).toEqual(["Alpha", "Charlie"]);
   });
 });

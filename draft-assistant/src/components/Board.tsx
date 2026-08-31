@@ -178,11 +178,13 @@ export function Board({
       .map((player) => ({ player, key: column.value(player) }))
       .sort((a, b) => compare(a.key, b.key) * sign)
       .map(({ player }) => player);
-    // `players` stays in the dependency list on purpose. Its identity does
-    // change on every poll, so this re-runs every 3 seconds — but a rebuilt
-    // board can carry the same players with new projections, and skipping the
-    // recompute there would render stale numbers. With the sort keys
-    // precomputed above, re-running is cheap enough that correctness wins.
+    // `players` stays in the dependency list on purpose, and nothing coarser
+    // belongs here: a rebuilt board can carry the same players with new
+    // projections, so a key made of pick counts or lengths would render stale
+    // numbers. The identity is instead made meaningful upstream — `applyView`
+    // in App.tsx recycles this array whenever an incoming view says exactly
+    // the same thing about the pool (boardIdentity.ts), so an update that only
+    // moved the clock no longer re-filters and re-sorts the whole board.
   }, [players, pos, query, sortKey, direction]);
 
   const visible = showAll ? matching : matching.slice(0, PAGE);
