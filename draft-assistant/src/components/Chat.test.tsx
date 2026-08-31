@@ -1,14 +1,15 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatSettings } from "../chat-types";
+import type { ChatReply, ChatRequest, ChatSettings } from "../chat-types";
 
 const mocks = vi.hoisted(() => ({
   chatSettings: vi.fn(),
   chatSuggestions: vi.fn(),
   setChatProvider: vi.fn(),
   setApiKey: vi.fn(),
-  askClaude: vi.fn(),
+  // Typed so the assertions below read a real ChatRequest, not `any`.
+  askClaude: vi.fn<(args: ChatRequest) => Promise<ChatReply>>(),
 }));
 
 vi.mock("../api", () => ({ api: mocks }));
@@ -27,6 +28,20 @@ function settings(overrides: Partial<ChatSettings>): ChatSettings {
       "Fable 5": ["Low", "Medium", "High", "xhigh", "Max"],
     },
     notes: {},
+    ...overrides,
+  };
+}
+
+/** A whole ChatReply. Filling every field keeps the mocks honest about what
+ * the backend actually returns, so a new field cannot go untested by accident. */
+function reply(overrides: Partial<ChatReply>): ChatReply {
+  return {
+    text: "",
+    thinking: null,
+    model: "Opus 5",
+    refused: false,
+    input_tokens: 0,
+    output_tokens: 0,
     ...overrides,
   };
 }
@@ -96,7 +111,7 @@ describe("Chat routing", () => {
 describe("Chat conversation", () => {
   it("sends a question, shows the answer, and keeps the thread as history", async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true, key_hint: "····abcd" }));
-    mocks.askClaude.mockResolvedValue({ refused: false, text: "Take the RB.\n\nHe scores more." });
+    mocks.askClaude.mockResolvedValue(reply({ text: "Take the RB.\n\nHe scores more." }));
     render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
     const input = await screen.findByRole("textbox", { name: "Ask Claude" });
 
@@ -119,7 +134,7 @@ describe("Chat conversation", () => {
 
   it("labels a refusal", async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true }));
-    mocks.askClaude.mockResolvedValue({ refused: true, text: "I can't help with that." });
+    mocks.askClaude.mockResolvedValue(reply({ refused: true, text: "I can't help with that." }));
     render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
     const input = await screen.findByRole("textbox", { name: "Ask Claude" });
     await userEvent.type(input, "collude with me{Enter}");
@@ -128,10 +143,9 @@ describe("Chat conversation", () => {
 
   it("shows an error turn and drops the failed question from history", async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true }));
-    mocks.askClaude.mockRejectedValueOnce(new Error("network down")).mockResolvedValue({
-      refused: false,
-      text: "Back online.",
-    });
+    mocks.askClaude
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValue(reply({ text: "Back online." }));
     render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
     const input = await screen.findByRole("textbox", { name: "Ask Claude" });
 
@@ -149,7 +163,7 @@ describe("Chat conversation", () => {
   it("asks a suggestion with one click", async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true }));
     mocks.chatSuggestions.mockResolvedValue(["Who do I start this week?"]);
-    mocks.askClaude.mockResolvedValue({ refused: false, text: "Start Downs." });
+    mocks.askClaude.mockResolvedValue(reply({ text: "Start Downs." }));
     render(<Chat screen="season" contextNote="Sees week 1" onClose={() => undefined} />);
     await userEvent.click(await screen.findByRole("button", { name: "Who do I start this week?" }));
     expect(await screen.findByText("Start Downs.")).toBeInTheDocument();
@@ -176,7 +190,7 @@ describe("Chat model and effort", () => {
 describe("Chat thread controls", () => {
   const startThread = async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true }));
-    mocks.askClaude.mockResolvedValue({ refused: false, text: "An answer." });
+    mocks.askClaude.mockResolvedValue(reply({ text: "An answer." }));
     render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
     const input = await screen.findByRole("textbox", { name: "Ask Claude" });
     await userEvent.type(input, "A question{Enter}");

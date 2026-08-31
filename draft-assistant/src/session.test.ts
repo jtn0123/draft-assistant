@@ -2,6 +2,7 @@
 // hidden, surface a failure, and recover on retry.
 
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { settle } from "./test/settle";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SeasonView } from "./season-types";
 import type { PollHealth } from "./types";
@@ -28,13 +29,13 @@ beforeEach(() => {
   pushHealth = null;
   mocks.startSeasonPolling.mockResolvedValue(undefined);
   mocks.stopSeasonPolling.mockResolvedValue(undefined);
-  mocks.onSeasonUpdated.mockImplementation(async (handler: (v: SeasonView) => void) => {
+  mocks.onSeasonUpdated.mockImplementation((handler: (v: SeasonView) => void) => {
     pushUpdate = handler;
-    return () => undefined;
+    return Promise.resolve(() => undefined);
   });
-  mocks.onSeasonPollHealth.mockImplementation(async (handler: (h: PollHealth) => void) => {
+  mocks.onSeasonPollHealth.mockImplementation((handler: (h: PollHealth) => void) => {
     pushHealth = handler;
-    return () => undefined;
+    return Promise.resolve(() => undefined);
   });
 });
 
@@ -162,7 +163,7 @@ describe("useSeasonSession", () => {
     await waitFor(() => expect(result.current.error).not.toBeNull());
 
     // Retry drives two state updates; let React flush both before reading them.
-    await act(async () => {
+    await settle(() => {
       result.current.retry();
     });
     await waitFor(() => expect(result.current.season?.week).toBe(5));

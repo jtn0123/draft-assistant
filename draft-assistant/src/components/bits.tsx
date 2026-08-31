@@ -54,7 +54,9 @@ export function ZoomLayer() {
   useEffect(() => {
     if (wanted === undefined) return;
     let cancelled = false;
-    teamAvatarSrc(wanted, true).then((url) => {
+    // Fire-and-forget: teamAvatarSrc already folds every failure into a null
+    // url, so this promise cannot reject and there is nothing to await.
+    void teamAvatarSrc(wanted, true).then((url) => {
       if (!cancelled) setBig({ reference: wanted, url });
     });
     return () => {
@@ -171,7 +173,9 @@ export function Headshot({
   useEffect(() => {
     if (wanted === null) return;
     let cancelled = false;
-    headshotSrc(wanted).then((url) => {
+    // Fire-and-forget: headshotSrc already folds every failure into a null
+    // url, so this promise cannot reject and there is nothing to await.
+    void headshotSrc(wanted).then((url) => {
       if (!cancelled) setSrc({ id: wanted, url });
     });
     return () => {
@@ -214,7 +218,9 @@ export function TeamAvatar({ avatar, name }: { avatar?: string | null; name: str
   useEffect(() => {
     if (avatar === null || avatar === undefined) return;
     let cancelled = false;
-    teamAvatarSrc(avatar).then((url) => {
+    // Fire-and-forget: teamAvatarSrc already folds every failure into a null
+    // url, so this promise cannot reject and there is nothing to await.
+    void teamAvatarSrc(avatar).then((url) => {
       if (!cancelled) setSrc(url);
     });
     return () => {

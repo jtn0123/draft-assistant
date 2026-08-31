@@ -8,6 +8,7 @@ vi.mock("../api", () => ({ api: mocks }));
 import { resetAvatarCache, setAvatarMode } from "../avatars";
 import { PlayerName, ZoomLayer } from "./bits";
 import { closeZoom } from "../zoom";
+import { settle } from "../test/settle";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -28,7 +29,7 @@ describe("clicking a picture", () => {
     const button = await screen.findByRole("button", {
       name: "Show a larger picture of Josh Downs",
     });
-    await act(async () => {
+    await settle(() => {
       button.click();
     });
     const dialog = screen.getByRole("dialog", { name: "Josh Downs" });
@@ -37,7 +38,7 @@ describe("clicking a picture", () => {
       "data:image/png;base64,AAAA",
     );
 
-    await act(async () => {
+    await settle(() => {
       screen.getByRole("button", { name: "Close" }).click();
     });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -57,7 +58,7 @@ describe("the zoom dialog and the keyboard", () => {
       name: "Show a larger picture of Josh Downs",
     });
     button.focus();
-    await act(async () => {
+    await settle(() => {
       button.click();
     });
     return button;
@@ -68,7 +69,7 @@ describe("the zoom dialog and the keyboard", () => {
     const close = screen.getByRole("button", { name: "Close" });
     expect(close).toHaveFocus();
 
-    await act(async () => {
+    await settle(() => {
       close.click();
     });
     // Back where they were in the table, not at the top of the page.
@@ -88,7 +89,7 @@ describe("the zoom dialog and the keyboard", () => {
 
   it("closes on Escape and restores focus", async () => {
     const opener = await open();
-    await act(async () => {
+    await settle(() => {
       fireEvent.keyDown(window, { key: "Escape" });
     });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -123,7 +124,7 @@ describe("PlayerName", () => {
     expect(mocks.headshot).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to the team logo for defences and players without a photo", async () => {
+  it("falls back to the team logo for defences and players without a photo", () => {
     mocks.headshot.mockResolvedValue(null);
     render(<PlayerName name="Detroit Lions" team="DET" playerId="DET" />);
     expect(screen.getByRole("presentation", { hidden: true })).toHaveAttribute(

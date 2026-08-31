@@ -62,7 +62,7 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
         type="button"
         className="btn-primary card-screen-submit"
         disabled={!leagueId.trim() || busy !== null}
-        onClick={submit}
+        onClick={() => void submit()}
       >
         {busy ?? "Load league"}
       </button>

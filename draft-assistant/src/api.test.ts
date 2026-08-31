@@ -7,8 +7,12 @@ import type { SeasonView } from "./season-types";
 
 const invoke = vi.fn();
 const listen = vi.fn();
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: (...a: unknown[]) => listen(...a) }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...a: unknown[]): unknown => invoke(...a) as unknown,
+}));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: (...a: unknown[]): unknown => listen(...a) as unknown,
+}));
 
 const draftView = {
   schema_version: "1.1",
@@ -108,9 +112,9 @@ describe("tauri arm", () => {
   it("validates event payloads before handing them to listeners", async () => {
     const { api } = await load(true);
     let deliver: ((event: { payload: unknown }) => void) | null = null;
-    listen.mockImplementation(async (_name: string, cb: (event: { payload: unknown }) => void) => {
+    listen.mockImplementation((_name: string, cb: (event: { payload: unknown }) => void) => {
       deliver = cb;
-      return () => undefined;
+      return Promise.resolve(() => undefined);
     });
     const seen: unknown[] = [];
     await api.onDraftUpdated((v) => seen.push(v));
@@ -139,7 +143,7 @@ describe("browser arm", () => {
   const fixtureFetch = (body: unknown, ok = true) =>
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({ ok, json: async () => body })),
+      vi.fn(() => Promise.resolve({ ok, json: () => Promise.resolve(body) })),
     );
 
   it("serves and caches the draft fixture", async () => {

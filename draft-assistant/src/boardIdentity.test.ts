@@ -78,8 +78,8 @@ describe("stableAvailable", () => {
 
   it("recycles the previous pool but keeps everything else from the new view", () => {
     const pool = [player()];
-    const prev = { ...view(pool), generated_at: 100, schema_version: "1" } as DraftView;
-    const next = { ...view([player()]), generated_at: 200, schema_version: "2" } as DraftView;
+    const prev = { ...view(pool), generated_at: 100, schema_version: "1" };
+    const next = { ...view([player()]), generated_at: 200, schema_version: "2" };
 
     const merged = stableAvailable(prev, next);
     expect(merged).not.toBe(prev);

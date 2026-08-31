@@ -191,7 +191,7 @@ export default function App() {
   useEffect(() => {
     const isMine = view?.draft.is_my_pick ?? false;
     if (isMine && !wasMyPick.current && chime) {
-      void playChime();
+      playChime();
     }
     wasMyPick.current = isMine;
   }, [view?.draft.is_my_pick, chime, view]);
@@ -450,7 +450,7 @@ function myRecord(season: SeasonView): string {
 }
 
 /** A short two-tone chime via WebAudio — no asset to ship or fail to load. */
-async function playChime(): Promise<void> {
+function playChime(): void {
   try {
     const Ctor = window.AudioContext ?? window.webkitAudioContext;
     if (Ctor === undefined) return;

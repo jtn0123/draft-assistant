@@ -94,7 +94,12 @@ function ApiKeyPrompt({ hint, onSaved }: { hint: string | null; onSaved: () => v
         }}
         aria-label="Anthropic API key"
       />
-      <button type="button" className="btn-primary" disabled={!key.trim() || busy} onClick={save}>
+      <button
+        type="button"
+        className="btn-primary"
+        disabled={!key.trim() || busy}
+        onClick={() => void save()}
+      >
         {busy ? "Saving…" : "Save key"}
       </button>
       {error && <div className="error">{error}</div>}
@@ -377,7 +382,7 @@ export function Chat({
                 key={text}
                 type="button"
                 className="chat-suggestion"
-                onClick={() => send(text)}
+                onClick={() => void send(text)}
               >
                 {text}
               </button>
@@ -400,7 +405,7 @@ export function Chat({
             type="button"
             className="btn-primary"
             disabled={showKeyForm || sending || draft.trim() === ""}
-            onClick={() => send(draft)}
+            onClick={() => void send(draft)}
           >
             Send
           </button>

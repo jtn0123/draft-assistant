@@ -75,19 +75,21 @@ beforeEach(() => {
     efforts: { "Opus 5": ["Off", "High"], "Fable 5": ["Low", "High"] },
     notes: {},
   });
-  testState.api.onDraftUpdated.mockImplementation(async (handler) => {
+  // Typed parameters, not inferred `any`: these captured handlers are what the
+  // tests push fake pushes through, so a shape change must fail here.
+  testState.api.onDraftUpdated.mockImplementation((handler: (view: DraftView) => void) => {
     testState.draftHandler = handler;
-    return () => undefined;
+    return Promise.resolve(() => undefined);
   });
-  testState.api.onPollHealth.mockImplementation(async (handler) => {
+  testState.api.onPollHealth.mockImplementation((handler: (health: PollHealth) => void) => {
     testState.healthHandler = handler;
-    return () => undefined;
+    return Promise.resolve(() => undefined);
   });
-  testState.api.onSeasonUpdated.mockImplementation(async (handler) => {
+  testState.api.onSeasonUpdated.mockImplementation((handler: (view: SeasonView) => void) => {
     testState.seasonHandler = handler;
-    return () => undefined;
+    return Promise.resolve(() => undefined);
   });
-  testState.api.onSeasonPollHealth.mockImplementation(async () => () => undefined);
+  testState.api.onSeasonPollHealth.mockImplementation(() => Promise.resolve(() => undefined));
 });
 
 describe("App live workflow", () => {

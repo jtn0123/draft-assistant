@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppConfig, DraftView, PollHealth } from "./types";
 import type { SeasonView } from "./season-types";
-import type { ChatMessage, ChatReply, ChatSettings } from "./chat-types";
+import type { ChatReply, ChatRequest, ChatSettings } from "./chat-types";
 
 const DRAFT_VIEW_SCHEMA_VERSION = "1.1";
 const SEASON_VIEW_SCHEMA_VERSION = "1.0";
@@ -67,12 +67,7 @@ interface Api {
   setChatProvider(provider: "api" | "claude_code"): Promise<"api" | "claude_code">;
   chatSettings(): Promise<ChatSettings>;
   chatSuggestions(screen: string): Promise<string[]>;
-  askClaude(args: {
-    screen: string;
-    model: string;
-    effort: string;
-    messages: ChatMessage[];
-  }): Promise<ChatReply>;
+  askClaude(args: ChatRequest): Promise<ChatReply>;
 }
 
 const tauriApi: Api = {
@@ -114,6 +109,11 @@ const tauriApi: Api = {
  * Mutating calls only simulate what they can locally.
  */
 function browserApi(): Api {
+  // A rejected promise, not a synchronous throw: callers of these methods
+  // always `await` or `.catch()`, and the preview must fail the same way the
+  // desktop app does.
+  const readOnly = (advice: string): Promise<never> =>
+    Promise.reject(new Error(`browser preview is read-only — ${advice}`));
   let cached: DraftView | null = null;
   let cachedSeason: SeasonView | null = null;
   const seasonFixture = async (): Promise<SeasonView> => {
@@ -141,7 +141,7 @@ function browserApi(): Api {
   };
   return {
     addLeague: fixture,
-    setMyUsername: async (u) => u,
+    setMyUsername: (u) => Promise.resolve(u),
     getConfig: async () => {
       const v = await fixture();
       return {
@@ -159,56 +159,51 @@ function browserApi(): Api {
     getState: fixture,
     refreshPicks: fixture,
     refreshData: fixture,
-    recordManualPick: async () => {
-      throw new Error("browser preview is read-only — run the desktop app to draft");
-    },
-    undoManualPick: async () => {
-      throw new Error("browser preview is read-only — run the desktop app to draft");
-    },
-    exportState: async () => "browser preview — no export",
-    headshot: async (playerId) =>
-      /^\d+$/.test(playerId)
-        ? `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg`
-        : null,
-    avatar: async (reference, full) =>
-      reference.startsWith("https://sleepercdn.com/")
-        ? reference
-        : /^[0-9a-f]+$/.test(reference)
-          ? `https://sleepercdn.com/avatars/${full ? "" : "thumbs/"}${reference}`
+    recordManualPick: () => readOnly("run the desktop app to draft"),
+    undoManualPick: () => readOnly("run the desktop app to draft"),
+    exportState: () => Promise.resolve("browser preview — no export"),
+    headshot: (playerId) =>
+      Promise.resolve(
+        /^\d+$/.test(playerId)
+          ? `https://sleepercdn.com/content/nfl/players/thumb/${playerId}.jpg`
           : null,
-    startPolling: async () => {
-      throw new Error("browser preview is read-only — live sync requires the desktop app");
-    },
-    stopPolling: async () => undefined,
-    onDraftUpdated: async () => () => undefined,
-    onPollHealth: async () => () => undefined,
+      ),
+    avatar: (reference, full) =>
+      Promise.resolve(
+        reference.startsWith("https://sleepercdn.com/")
+          ? reference
+          : /^[0-9a-f]+$/.test(reference)
+            ? `https://sleepercdn.com/avatars/${full ? "" : "thumbs/"}${reference}`
+            : null,
+      ),
+    startPolling: () => readOnly("live sync requires the desktop app"),
+    stopPolling: () => Promise.resolve(),
+    onDraftUpdated: () => Promise.resolve(() => undefined),
+    onPollHealth: () => Promise.resolve(() => undefined),
     loadSeason: seasonFixture,
     getSeason: seasonFixture,
     refreshSeason: seasonFixture,
-    startSeasonPolling: async () => {
-      throw new Error("browser preview is read-only — live scoring requires the desktop app");
-    },
-    stopSeasonPolling: async () => undefined,
-    onSeasonUpdated: async () => () => undefined,
-    onSeasonPollHealth: async () => () => undefined,
-    setApiKey: async () => false,
-    setChatProvider: async () => "api",
-    chatSettings: async () => ({
-      has_key: false,
-      key_hint: null,
-      cli_available: false,
-      provider: "api",
-      models: ["Opus 5", "Fable 5"],
-      efforts: {
-        "Opus 5": ["Off", "Low", "Medium", "High", "xhigh", "Max"],
-        "Fable 5": ["Low", "Medium", "High", "xhigh", "Max"],
-      },
-      notes: {},
-    }),
-    chatSuggestions: async () => [],
-    askClaude: async () => {
-      throw new Error("browser preview is read-only — Ask Claude requires the desktop app");
-    },
+    startSeasonPolling: () => readOnly("live scoring requires the desktop app"),
+    stopSeasonPolling: () => Promise.resolve(),
+    onSeasonUpdated: () => Promise.resolve(() => undefined),
+    onSeasonPollHealth: () => Promise.resolve(() => undefined),
+    setApiKey: () => Promise.resolve(false),
+    setChatProvider: () => Promise.resolve("api"),
+    chatSettings: () =>
+      Promise.resolve({
+        has_key: false,
+        key_hint: null,
+        cli_available: false,
+        provider: "api",
+        models: ["Opus 5", "Fable 5"],
+        efforts: {
+          "Opus 5": ["Off", "Low", "Medium", "High", "xhigh", "Max"],
+          "Fable 5": ["Low", "Medium", "High", "xhigh", "Max"],
+        },
+        notes: {},
+      }),
+    chatSuggestions: () => Promise.resolve([]),
+    askClaude: () => readOnly("Ask Claude requires the desktop app"),
   };
 }
 

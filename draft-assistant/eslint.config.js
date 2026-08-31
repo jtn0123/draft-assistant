@@ -21,12 +21,20 @@ export default tseslint.config(
     files: ["src/**/*.{ts,tsx}"],
     extends: [
       js.configs.recommended,
-      ...tseslint.configs.recommended,
+      // Type-aware, not just syntactic. Everything this app does with the
+      // backend is an async IPC call, so no-floating-promises and
+      // no-misused-promises are the rules that matter most here; the
+      // non-checked preset cannot see either.
+      ...tseslint.configs.recommendedTypeChecked,
       reactHooks.configs.flat.recommended,
     ],
     languageOptions: {
       ecmaVersion: 2022,
       globals: globals.browser,
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
     plugins: {
       "react-refresh": reactRefresh,

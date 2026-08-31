@@ -6,6 +6,15 @@ export interface ChatMessage {
   content: string;
 }
 
+/** One chat turn on its way to the backend. A type alias, not an interface,
+ * so it still satisfies Tauri's `Record<string, unknown>` invoke args. */
+export type ChatRequest = {
+  screen: string;
+  model: string;
+  effort: string;
+  messages: ChatMessage[];
+};
+
 export interface ChatReply {
   text: string;
   thinking: string | null;
