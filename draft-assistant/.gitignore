@@ -28,3 +28,4 @@ coverage
 
 # tsc --build scratch output for the node-side project
 node_modules/.tmp
+tsconfig.tsbuildinfo

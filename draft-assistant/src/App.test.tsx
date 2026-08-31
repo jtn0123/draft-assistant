@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import fixtureJson from "../public/dev-fixture.json";
@@ -139,8 +139,13 @@ describe("App live workflow", () => {
     expect(stale.closest("span")).toHaveAttribute("title", "network timeout");
 
     // The first "Draft" button is the Draft/Season mode toggle, so reach into
-    // the board for a row action instead.
-    const rowDraft = screen.getAllByRole("button", { name: "Draft" });
+    // the board for a row action instead. The board arrives with the lazy
+    // DraftScreen chunk, so wait until more than the toggle matches.
+    const rowDraft = await waitFor(() => {
+      const buttons = screen.getAllByRole("button", { name: "Draft" });
+      expect(buttons.length).toBeGreaterThan(1);
+      return buttons;
+    });
     await user.click(rowDraft[rowDraft.length - 1]);
     // "Mark drafted" is also the rec-card action, so confirm inside the dialog.
     const dialog = screen.getByRole("dialog");
