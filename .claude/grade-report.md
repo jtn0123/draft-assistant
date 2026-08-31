@@ -82,7 +82,45 @@ Worth recording:
 Post-wave baselines: Rust **77.56%** lines / **252** tests; frontend **~90%**
 lines / **197** tests; `npm run verify` green.
 
-**Remaining open (9):** A1, A4, C5, D5, D6, D7, D8, G7, I2.
+### Third execution wave — all 47 items now resolved
+
+The last 9 landed: **A1, A4, C5, D5, D6, D7, D8, G7, I2.**
+
+- **G7 found a bigger bug than the audit did.** The `Math.min(...values)` spread
+  really does throw `RangeError` (confirmed at 160k values) — and there were
+  **three** such spreads in `TrendsTab.tsx`, not the one the audit named.
+- **D7 is a documented partial, deliberately.** `tauri-driver` is genuinely
+  Windows/Linux only, but `@wdio/tauri-service`'s embedded provider **does** work
+  on macOS: the agent drove the real app, real WKWebView, real CSP, and read the
+  live league off the screen. Not committed — it needs two plugin lines in
+  `lib.rs`, which should be behind a `wdio` cargo feature so no release ever
+  ships a WebDriver server. Recipe is in the README. What *did* land is
+  `tests/command_surface.rs`: every command gets a real IPC message, and the
+  `generate_handler!` list is asserted to match the `#[tauri::command]` set —
+  both verified to fail when deliberately broken.
+- **I2: 9 findings, 0 false alarms, 0 suppressions.** Including a real defect the
+  rule only hinted at — `role="dialog"`/`aria-modal` sat on the zoom *backdrop*
+  while the focus-trapped card had no role.
+- **D6/D8: every new test was checked for teeth.** Nine were verified to fail
+  when the source was temporarily broken; the D8 fake-timer work now asserts the
+  exact rollovers the old `+30_000` fudge was hiding.
+
+**Final baselines:** Rust **267** tests / ~78% lines; frontend **296** tests /
+**97.62%** lines, 96.22% statements, 88.77% branches, 95.99% functions.
+`npm run verify` green.
+
+### Two source issues found while testing, deliberately not fixed
+
+Both are new items for the next audit, not regressions:
+
+- **`Board.tsx` null-sorting contradicts its own comment.** The comment claims
+  missing values sort last in either direction, but `compare` returns ±1 and the
+  caller multiplies by the sign — so sorting Team or Bye **descending** puts free
+  agents and no-bye players at the *top*. Needs a source-owner decision: fix
+  `compare` to short-circuit the sign, or correct the comment.
+- **`App.tsx`'s `poll_consecutive_failures ?? 0` is unreachable as typed** —
+  `types.ts` declares it `number`, so the fallback can't be exercised. Either the
+  type should be `number | null` like its neighbours, or the `?? 0` should go.
 
 Baselines at audit time: Rust 74.77% lines / 212 tests; frontend 88.97%
 lines / 160 tests; `npm audit` and `cargo audit` clean; `npm run verify` green.
@@ -98,7 +136,7 @@ is still split across two files with duplicated constants, and the whole crate
 uses `Result<_, String>` (74 occurrences, 15 files) so callers can't tell a
 terminal error from a retryable one without string-matching.
 
-#### A1 — The Sleeper client is still defined in two files with duplicated base URLs
+#### ~~A1~~ ✓ done 2026-08-30 — The Sleeper client is still defined in two files with duplicated base URLs
 - **Where:** `src-tauri/src/season_api.rs:11-12,269-311` vs `sleeper.rs:12-13,254`
 - **What's wrong:** `BASE`/`BASE_UNDOC` are byte-identical in both files, and six client methods live in `season_api.rs` as an inherent-impl extension of a type owned by `sleeper.rs`. Changing the Sleeper host means editing two files; "where are the HTTP methods" has two answers.
 - **Fix:** Make the constants `pub(crate)` in `sleeper.rs` and import them; either move the six methods into `sleeper.rs` (splitting that file first) or define a `SeasonEndpoints` trait so the extension matches the `Engine` convention (named trait, indexed in the doc comment).
@@ -119,7 +157,7 @@ terminal error from a retryable one without string-matching.
 - **Effort:** S
 - **Grade lift:** B+ → B+ (consistency; removes a silent divergence)
 
-#### A4 — `App.tsx` still hand-rolls persisted state the stores already know how to do
+#### ~~A4~~ ✓ done 2026-08-30 — `App.tsx` still hand-rolls persisted state the stores already know how to do
 - **Where:** `src/App.tsx:43-49,71,77-85,106,373-377`; the localStorage try/catch pattern is re-implemented in 5 places (`prefs.ts`, `avatars.ts`, `theme.ts`, `ThisWeek.tsx:9-17`, `App.tsx`)
 - **What's wrong:** Theme occupies three hooks in App.tsx though `theme.ts` owns the logic; `screen` duplicates the persistence pattern a fifth time; `chime` is read from the store only to be drilled back down as two of `Header`'s 16 props.
 - **Fix:** Add a `persisted<T>(key, parse, fallback)` helper to `prefs.ts`; build `useScreen()`, `useThemePreference()`, `useLineupView()` on it; let `Header` subscribe to `prefs.ts` directly and drop `chime`/`onToggleChime` from its props.
@@ -226,7 +264,7 @@ moment, load-bearing info in hover-only tooltips), and nothing lints for it.
 - **Effort:** S
 - **Grade lift:** B → B (consistency with the app's own best practice)
 
-#### C5 — Failed actions vanish in a 5-second toast with no retry
+#### ~~C5~~ ✓ done 2026-08-30 — Failed actions vanish in a 5-second toast with no retry
 - **Where:** `src/App.tsx:216-261` (`doDraft`, `doUndo`, `doExport`, `doRefreshData`, `togglePolling`); auto-dismiss at `:94`
 - **What's wrong:** Every mutating rejection becomes `showToast(String(e))` — raw Rust error text that auto-dismisses in 5s with no retry affordance. A failed "Mark drafted" during a live draft disappears before the user can react.
 - **Fix:** Extend `Toast` with an optional `{ label, onClick }` action; pass a retry that re-runs the call; suppress auto-dismiss whenever an action is present.
@@ -287,28 +325,28 @@ error boundary to catch it.
 - **Effort:** S
 - **Grade lift:** B → B+ (contains the new failure mode)
 
-#### D5 — [BE] Two untested pieces from today: `season_lookup.rs` (48%) and `AnalysisCache`
+#### ~~D5~~ ✓ done 2026-08-30 — [BE] Two untested pieces from today: `season_lookup.rs` (48%) and `AnalysisCache`
 - **Where:** `src-tauri/src/season_lookup.rs:18,29,47,59` (no test block; the missing-metadata fallbacks are exactly what's uncovered); `poll.rs:107-140` (`AnalysisCache` — the mod tests below it cover its two neighbors but not it)
 - **What's wrong:** Every season section resolves names through `Lookup`'s fallback layer, untested; `AnalysisCache`'s `ticks % rebuild_every` expiry and `.max(1)` clamp are off-by-one-prone and unverified.
 - **Fix:** Tests for absent id / missing position / missing team / injury None-vs-Some; three asserts on the cache (None before first observe, held through tick 19, None at tick 20).
 - **Effort:** S
 - **Grade lift:** B → B (closes today's coverage stragglers)
 
-#### D6 — [FE] The worst frontend files sit below the thresholds the config claims
+#### ~~D6~~ ✓ done 2026-08-30 — [FE] The worst frontend files sit below the thresholds the config claims
 - **Where:** `src/prefs.ts` 57.9% stmts / 0% branches; `src/components/Board.tsx` 68.5% stmts; `src/App.tsx` 68.8% stmts with lines 392-423 (the whole screen-switch/Suspense/season-error branch) dark; `src/theme.ts` 53.3% branches; `src/session.ts` 64.3% functions
 - **What's wrong:** The primary screen and the persistence layer are the least-covered files in the repo — invisible until D1 lands, at which point they fail the gate.
 - **Fix:** `prefs.ts`/`theme.ts` are pure — test first; then a `Board.tsx` pass for the empty/filtered branches and an `App.tsx` test through the screen-switch path.
 - **Effort:** M
 - **Grade lift:** B → B+ (do before or with D1 so the gate lands green)
 
-#### D7 — [both] Nothing ever launches the real app — confirmed no e2e harness exists
+#### ~~D7~~ ✓ done 2026-08-30 — [both] Nothing ever launches the real app — confirmed no e2e harness exists
 - **Where:** no `tauri-driver`/Playwright/WebdriverIO anywhere (checked); `lib.rs` also 0% covered
 - **What's wrong:** Command registration, the capability set, the CSP, and the bundle are never exercised together in a real WKWebView — the most likely place for a shipping break.
 - **Fix:** One smoke spec via `tauri-driver` + WebdriverIO: launch, load the committed fixture league, assert the board renders. A single test closes the "does it boot" gap.
 - **Effort:** L
 - **Grade lift:** B → B+ (the one class of regression no current test can catch)
 
-#### D8 — [FE] Time-dependent tests run against the real clock
+#### ~~D8~~ ✓ done 2026-08-30 — [FE] Time-dependent tests run against the real clock
 - **Where:** `src/format.test.ts:52,59` (`Date.now() + ms + 30_000` fudge), `SeasonTabs.test.tsx:99`, `SeasonScreen.test.tsx:6`
 - **What's wrong:** The 30s fudge makes tests less likely to fail rather than deterministic, and the interesting rollover boundary is never actually asserted. `ClockBanner.test.tsx:16` already shows the right pattern.
 - **Fix:** `vi.useFakeTimers()` + `vi.setSystemTime(...)` in the four files; assert the exact boundaries the fudge hides.
@@ -419,7 +457,7 @@ a second from duplicate clocks.
 - **Effort:** S
 - **Grade lift:** B → B (applies the repo's own established fix)
 
-#### G7 — Draft screen re-renders twice a second from duplicate clocks; several unmemoized per-render scans
+#### ~~G7~~ ✓ done 2026-08-30 — Draft screen re-renders twice a second from duplicate clocks; several unmemoized per-render scans
 - **Where:** `src/components/ClockBanner.tsx:15-23,29,115` (two independent 1s intervals + unmemoized `buildQueue`); `Panels.tsx:195-199` (`atRisk` filter/sort per render); `DraftScreen.tsx:22-26` (O(n²) dedupe + three full scans); `TrendsTab.tsx:106-224` (14 SVG paths rebuilt per mousemove; `Math.min(...spread)` will eventually throw); `Board.tsx:297` ("Show all" renders ~600 rows / ~1,800 nodes in one commit, and the loading state at `:267` lacks `role="status"`)
 - **What's wrong:** Each is small; together they undo the render work G6-from-the-first-audit paid for.
 - **Fix:** One clock in a `useSyncExternalStore` module store; `useMemo` for `buildQueue`/`atRisk`/rank-Map/chart paths (reduce instead of spread); incremental paging for Show all; `role="status"` on the loader.
@@ -487,7 +525,7 @@ tests, and the Rust coverage floor has 6.8 points of dead slack.
 - **Effort:** M
 - **Grade lift:** B+ → A− (the highest-value rule set available to this codebase)
 
-#### I2 — Nothing lints accessibility
+#### ~~I2~~ ✓ done 2026-08-30 — Nothing lints accessibility
 - **Where:** `eslint.config.js:20-36` — no `eslint-plugin-jsx-a11y`
 - **What's wrong:** Every issue in C3/C4/C6/C7 is in the class that plugin catches automatically; `--max-warnings=0` means it becomes a gate the moment it's added.
 - **Fix:** Add `jsx-a11y` (strict preset) to the `src/**` block; fix what it finds (overlaps the C items).
