@@ -74,10 +74,10 @@ is not worth ~33% on a local bridge). Both are argued on the items.
 
 ### Where the remaining risk sits
 
-Nothing open is a correctness or safety issue. **A2** and **A5** are structural
-tidiness in the season layer, and **A5** is now much safer to attempt than it
-was: the golden tests it needed (D2) exist. That is the natural next piece of
-work.
+Nothing open is a correctness or safety issue. **A5** has since landed — the
+season view is split by section — which also took the first half of **A2**. What
+remains of **A2** is moving the six season endpoints into `sleeper.rs`, and that
+wants a wider `sleeper.rs` split to land with it.
 
 ---
 
@@ -94,7 +94,7 @@ Layering intent is real and documented: `sleeper.rs`/`season_api.rs` are pure HT
 - **Grade lift:** B− → B (the largest structural ambiguity in the backend)
 
 #### A2 — Inverted dependency: the season layer extends the transport layer  *(◦ not done — deliberate)*
-- **Outcome:** Left as is. Moving the six season endpoints into `sleeper.rs` would push it well past the 500-line cap, and the duplicated `BASE` constants are a two-line annoyance rather than a defect. Worth doing as part of a wider `sleeper.rs` split, not on its own.
+- **Outcome:** Partly addressed by A5 — `matchup_for`/`opponent_of` now live on `season_api.rs` beside the `Matchup` they query. The six endpoints stay put: moving them into `sleeper.rs` would push it well past the 500-line cap, and the duplicated `BASE` constants are a two-line annoyance rather than a defect. Worth doing as part of a wider `sleeper.rs` split, not on its own.
 - **Where:** `src-tauri/src/season_api.rs:255` (and duplicated `BASE`/`BASE_UNDOC` at `season_api.rs:11-12` vs `sleeper.rs:11-12`)
 - **What's wrong:** A season-screen module opens `impl SleeperClient` and owns HTTP methods, splitting the client's route list across two files with duplicated base URLs.
 - **Fix:** Move the six methods (`nfl_state`, `rosters`, `matchups`, `transactions`, `winners_bracket`, `nfl_scores`) into `sleeper.rs`, or define an explicit `SeasonEndpoints` extension trait.
@@ -117,8 +117,8 @@ Layering intent is real and documented: `sleeper.rs`/`season_api.rs` are pure HT
 - **Effort:** S
 - **Grade lift:** B− → B− (consistency; also see E4)
 
-#### A5 — `season.rs` is the season god-module; `season_view_parts.rs` is an LOC-cap artifact  *(◦ not done — deliberate)*
-- **Outcome:** Partly addressed — `SeasonAnalysis` now lives in `season_view_parts.rs` and the three expensive sections are separable. Splitting `build_season_view` by section is a larger refactor of the app's most load-bearing function; it wants its own change with the golden tests (D2) already in place, which they now are.
+#### ~~A5~~ ✓ done 2026-08-30 — `season.rs` is the season god-module; `season_view_parts.rs` is an LOC-cap artifact
+- **Outcome:** `build_season_view` split by section. `season_view_parts.rs` is gone, dissolved into `season_lookup.rs` (the `Lookup` primitive), `season_view_matchup.rs` (head-to-head, calls, live), `season_view_standings.rs`, `season_view_market.rs` (waivers + trades) and `season_view_feeds.rs` (activity, completed trades, trends). `season.rs` is now 326 lines of `SeasonView`/`SeasonAnalysis` plus a page of orchestration, down from 15 crate imports to 4 non-section ones; no section file imports more than 6. Golden tests (D2) passed unmodified.
 - **Where:** `src-tauri/src/season.rs:4-18` (15 crate imports), `season_view_parts.rs:56-99`
 - **What's wrong:** `build_season_view` couples to 15 modules (2× anything else); `season_view_parts.rs`'s only theme is "helpers that didn't fit."
 - **Fix:** Split `build_season_view` by section (matchup / waivers / standings) so each sub-builder imports 2-3 modules; rehome `matchup_for`/`opponent_of` → `season_api.rs`, `why_start` → `season_lineup.rs`.

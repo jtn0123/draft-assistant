@@ -133,8 +133,13 @@ src-tauri/src/
     view.rs                 DraftView: the one state struct (UI + AI dump)
     simulation.rs           deterministic draft simulation
   season screen
-    season.rs               build_season_view + SeasonAnalysis
-    season_view_parts.rs    lookup, current lineup, start/sit reasons
+    season.rs               SeasonView + SeasonAnalysis; orchestrates the sections
+    season_view_matchup.rs  head-to-head rows + start/sit calls
+    season_view_live.rs     live scoreboard for the two set lineups
+    season_view_standings.rs standings + playoff odds
+    season_view_market.rs   waiver targets + trade ideas
+    season_view_feeds.rs    activity, completed trades, trends
+    season_lookup.rs        player name/position/team/injury lookup
     season_api.rs           season-only Sleeper endpoints + DTOs
     season_engine.rs        season load, week sweep, live refresh
     season_lineup.rs        optimal lineup solver

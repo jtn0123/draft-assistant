@@ -129,6 +129,20 @@ impl Matchup {
     }
 }
 
+/// One roster's entry in a week's matchup list.
+pub fn matchup_for(matchups: &[Matchup], roster_id: u32) -> Option<&Matchup> {
+    matchups.iter().find(|m| m.roster_id == roster_id)
+}
+
+/// The other side of `mine`. `None` on a bye week, where a roster has a
+/// matchup entry but no `matchup_id` pairing it with anyone.
+pub fn opponent_of<'a>(matchups: &'a [Matchup], mine: &Matchup) -> Option<&'a Matchup> {
+    let id = mine.matchup_id?;
+    matchups
+        .iter()
+        .find(|m| m.matchup_id == Some(id) && m.roster_id != mine.roster_id)
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TransactionSettings {
     #[serde(default)]
