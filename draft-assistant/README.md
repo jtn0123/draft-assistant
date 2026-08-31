@@ -94,8 +94,19 @@ cargo run --bin dump_state  -- <league_id> [username] ../public/dev-fixture.json
 cargo run --bin dump_season -- <league_id> [username] ../public/dev-season-fixture.json
 ```
 
-The season dump reads through the same on-disk cache as the app, so delete
-`/tmp/draft-assistant-cli` first if you want genuinely fresh data.
+Both dumps read through an on-disk cache of their own — not the app's, but a
+separate one under the system temp directory. To force genuinely fresh data,
+delete it first:
+
+```bash
+rm -rf "${TMPDIR:-/tmp}/draft-assistant-cli"
+```
+
+On macOS `$TMPDIR` is a per-user folder under `/var/folders/...`, not `/tmp`,
+which is why the plain `/tmp` path does not work here. That directory also
+holds the Trends history snapshots (`history_<league_id>.json`), so clearing it
+resets the CLI's trend lines too — the app's own history, under Application
+Support, is untouched.
 
 ## Data sources
 
