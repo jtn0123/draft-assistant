@@ -238,3 +238,185 @@ describe("Board paging", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Pulling projections for 312 players…");
   });
 });
+
+// Grade item D6. Every column is sortable and every column head is a control
+// a user clicks; before this, only the default points sort was ever exercised,
+// so nine of the ten value accessors and the whole direction-toggling path
+// were dark.
+describe("Board sorting", () => {
+  const pool = () => [
+    player("a", "Alpha", "WR", {
+      team: "SF",
+      bye_week: 9,
+      points: 100,
+      vorp: 5,
+      tier: 3,
+      adp: 30,
+      overall_rank: 3,
+      survival_next: 0.1,
+    }),
+    player("b", "Bravo", "RB", {
+      team: null,
+      bye_week: null,
+      points: 200,
+      vorp: 15,
+      tier: 1,
+      adp: 10,
+      overall_rank: 1,
+      survival_next: 0.9,
+    }),
+    player("c", "Charlie", "QB", {
+      team: "KC",
+      bye_week: 5,
+      points: 150,
+      vorp: 10,
+      tier: 2,
+      adp: 20,
+      overall_rank: 2,
+      survival_next: null,
+    }),
+  ];
+
+  function board() {
+    const view = render(
+      <Board
+        players={pool()}
+        positions={["QB", "RB", "WR"]}
+        loading={false}
+        boardSize={3}
+        onDraft={vi.fn()}
+      />,
+    );
+    const names = () =>
+      [...view.container.querySelectorAll(".board-body")].map(
+        (row) => row.querySelector(".board-player .ellipsis")?.textContent,
+      );
+    /** Click a column head by its label, whatever its sort state is called. */
+    const sortBy = (label: string) =>
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}, `) }));
+    return { ...view, names, sortBy };
+  }
+
+  it("orders by each column in the direction that column naturally reads", () => {
+    const { names, sortBy } = board();
+    // Points is the board's opening sort, high to low.
+    expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
+
+    sortBy("#");
+    expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
+    sortBy("Player");
+    expect(names()).toEqual(["Alpha", "Bravo", "Charlie"]);
+    sortBy("Pos");
+    expect(names()).toEqual(["Charlie", "Bravo", "Alpha"]);
+    sortBy("Tier");
+    expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
+    sortBy("Adp");
+    expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
+    sortBy("Surv");
+    expect(names()).toEqual(["Alpha", "Bravo", "Charlie"]);
+    // Counting stats open high-to-low, names and ranks low-to-high.
+    sortBy("Vorp");
+    expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
+  });
+
+  it("flips direction when the same column is clicked again, and says which", () => {
+    const { names, sortBy } = board();
+    sortBy("Player");
+    expect(names()).toEqual(["Alpha", "Bravo", "Charlie"]);
+    expect(screen.getByText(/Sorted by name, low to high/)).toBeInTheDocument();
+    // The head names its own state, since a grid of buttons has no aria-sort.
+    expect(screen.getByRole("button", { name: "Player, sorted ascending" })).toBeInTheDocument();
+
+    sortBy("Player");
+    expect(names()).toEqual(["Charlie", "Bravo", "Alpha"]);
+    expect(screen.getByText(/Sorted by name, high to low/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Player, sorted descending" })).toBeInTheDocument();
+
+    // Moving to another column starts from that column's own direction rather
+    // than carrying the previous one over.
+    sortBy("Pts");
+    expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
+    expect(screen.getByText(/Sorted by points, high to low/)).toBeInTheDocument();
+  });
+
+  it("puts players with no team or no bye week after the ones that have them", () => {
+    const { names, sortBy } = board();
+    // Bravo is the free agent with no bye — a blank must not read as zero and
+    // take the top of the board.
+    sortBy("Team");
+    expect(names()).toEqual(["Charlie", "Alpha", "Bravo"]);
+    sortBy("Bye");
+    expect(names()).toEqual(["Charlie", "Alpha", "Bravo"]);
+  });
+
+  it("shows a dash and no colour for a survival chance nobody can compute", () => {
+    const { container, sortBy } = board();
+    sortBy("Surv");
+    const survival = [...container.querySelectorAll(".board-body")].map((row) => row.children[9]);
+    expect(survival.map((c) => c.textContent)).toEqual(["10%", "90%", "–"]);
+    expect(survival[0].className).toContain("surv-low");
+    expect(survival[1].className).toContain("surv-high");
+    expect(survival[2].className).toContain("muted");
+  });
+});
+
+describe("Board when there is nothing to show", () => {
+  it("distinguishes a filtered-out board from a fully drafted one", async () => {
+    const user = userEvent.setup();
+    render(
+      <Board
+        players={[player("qb", "Quarterback", "QB")]}
+        positions={["QB", "RB"]}
+        loading={false}
+        boardSize={1}
+        onDraft={vi.fn()}
+      />,
+    );
+
+    // Filtered empty: the way out is offered.
+    await user.click(screen.getByRole("button", { name: "RB" }));
+    expect(screen.getByText("No players match")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Nothing left at this position with the current filter/),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("Quarterback")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "ALL" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("clears a search box as well as the position tab", async () => {
+    const user = userEvent.setup();
+    render(
+      <Board
+        players={[player("qb", "Quarterback", "QB")]}
+        positions={["QB"]}
+        loading={false}
+        boardSize={1}
+        onDraft={vi.fn()}
+      />,
+    );
+    const search = screen.getByRole("textbox", { name: "Search players" });
+    await user.type(search, "nobody");
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(search).toHaveValue("");
+    expect(screen.getByText("1 player")).toBeInTheDocument();
+  });
+
+  it("says the board is drafted out when nothing is filtered", () => {
+    render(
+      <Board players={[]} positions={["QB"]} loading={false} boardSize={0} onDraft={vi.fn()} />,
+    );
+    expect(screen.getByText("Every player on the board has been drafted.")).toBeInTheDocument();
+    // Nothing to clear, so nothing is offered.
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
+  });
+
+  it("does not name a player count it does not have while loading", () => {
+    render(
+      <Board players={[]} positions={["QB"]} loading={true} boardSize={0} onDraft={vi.fn()} />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Pulling projections…");
+    expect(screen.queryByText(/Pulling projections for/)).not.toBeInTheDocument();
+  });
+});

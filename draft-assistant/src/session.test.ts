@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("./api", () => ({ api: mocks }));
 
-import { useSeasonSession } from "./session";
+import { reloadSeason, useSeasonSession } from "./session";
 
 const view = (week: number) => ({ schema_version: "1.0", week }) as unknown as SeasonView;
 
@@ -170,5 +170,93 @@ describe("useSeasonSession", () => {
     expect(result.current.error).toBeNull();
     // force=true: a retry must bypass the cache that just failed.
     expect(mocks.loadSeason).toHaveBeenLastCalledWith(true);
+  });
+});
+
+// Grade item D6. The teardown paths: what the hook lets go of when the window
+// closes, and what it does with a failure that arrives after nobody is left to
+// tell. These are the branches a leak or a set-state-after-unmount hides in.
+describe("useSeasonSession on the way out", () => {
+  it("unsubscribes from both feeds when it goes away", async () => {
+    const stopUpdates = vi.fn();
+    const stopHealth = vi.fn();
+    mocks.loadSeason.mockResolvedValue(view(2));
+    mocks.onSeasonUpdated.mockReturnValue(Promise.resolve(stopUpdates));
+    mocks.onSeasonPollHealth.mockReturnValue(Promise.resolve(stopHealth));
+
+    const { unmount } = renderHook(() => useSeasonSession(true, true, () => undefined));
+    await act(async () => {
+      unmount();
+      await Promise.resolve();
+    });
+
+    expect(stopUpdates).toHaveBeenCalledTimes(1);
+    expect(stopHealth).toHaveBeenCalledTimes(1);
+    // Polling is the backend's timer, and it must not be left running for a
+    // screen that no longer exists.
+    expect(mocks.stopSeasonPolling).toHaveBeenCalled();
+  });
+
+  it("survives a subscription that never resolved into an unlisten", async () => {
+    mocks.loadSeason.mockResolvedValue(view(2));
+    mocks.onSeasonUpdated.mockReturnValue(Promise.reject(new Error("no event bus")));
+    mocks.stopSeasonPolling.mockRejectedValue(new Error("already stopped"));
+
+    const { unmount } = renderHook(() => useSeasonSession(true, true, () => undefined));
+    await act(async () => {
+      unmount();
+      await Promise.resolve();
+    });
+    // Nothing thrown, nothing reported: a teardown failure is not the user's
+    // problem, and an unhandled rejection here would fail this test.
+    await act(async () => {
+      await Promise.resolve();
+    });
+  });
+
+  it("says nothing when the load fails after the screen has closed", async () => {
+    let reject: ((e: Error) => void) | null = null;
+    mocks.loadSeason.mockReturnValue(
+      new Promise((_resolve, r: (e: Error) => void) => {
+        reject = r;
+      }),
+    );
+    const onError = vi.fn();
+    const { unmount } = renderHook(() => useSeasonSession(true, true, onError));
+    await waitFor(() => expect(reject).not.toBeNull());
+
+    unmount();
+    await act(async () => {
+      reject?.(new Error("Sleeper timed out"));
+      await Promise.resolve();
+    });
+
+    // A toast for a screen nobody is looking at is noise, not news.
+    expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe("a retry that fails too", () => {
+  it("replaces the error rather than clearing it and going quiet", async () => {
+    mocks.loadSeason
+      .mockRejectedValueOnce(new Error("down"))
+      .mockRejectedValueOnce(new Error("still down"));
+    const quiet = () => undefined;
+    const { result } = renderHook(() => useSeasonSession(true, true, quiet));
+    await waitFor(() => expect(result.current.error).toMatch(/down/));
+
+    await settle(() => {
+      result.current.retry();
+    });
+    await waitFor(() => expect(result.current.error).toMatch(/still down/));
+    expect(result.current.season).toBeNull();
+  });
+});
+
+describe("reloadSeason", () => {
+  it("always bypasses the cache", async () => {
+    mocks.loadSeason.mockResolvedValue(view(9));
+    await expect(reloadSeason()).resolves.toEqual(view(9));
+    expect(mocks.loadSeason).toHaveBeenCalledWith(true);
   });
 });

@@ -91,15 +91,43 @@ describe("preferences that were saved by an earlier version", () => {
   });
 
   it("fall back to the defaults when the stored text is not one of ours", () => {
-    storageHolding({ "da.screen": "nonsense", "da.theme": "aubergine" });
+    // Every preference, not just one: a value written by a future version, or
+    // corrupted, must not be able to put the app into a state it cannot name.
+    storageHolding({
+      "da.screen": "nonsense",
+      "da.theme": "aubergine",
+      "da.chime": "maybe",
+      "da.lineupView": "Grid",
+    });
 
     const { result } = renderHook(() => ({
       screen: useScreen(),
       appearance: useAppliedTheme(),
+      chime: useChime(),
+      lineup: useLineupView(),
     }));
 
     expect(result.current.screen).toBe("season");
     expect(result.current.appearance.preference).toBe("system");
+    expect(result.current.chime).toBe(true);
+    expect(result.current.lineup).toBe("Table");
+  });
+
+  it("read back the defaults when those are what was stored", () => {
+    // The other side of each guard: the stored word is one of ours and happens
+    // to be the default, which must round-trip rather than being re-derived.
+    storageHolding({ "da.chime": "on", "da.lineupView": "Table", "da.screen": "season" });
+
+    const { result } = renderHook(() => ({
+      screen: useScreen(),
+      chime: useChime(),
+      lineup: useLineupView(),
+    }));
+
+    expect(result.current.screen).toBe("season");
+    expect(result.current.chime).toBe(true);
+    expect(result.current.lineup).toBe("Table");
+    expect(chimeOn()).toBe(true);
   });
 });
 
