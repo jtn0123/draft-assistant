@@ -15,6 +15,7 @@ use crate::cache::safe_key;
 use crate::engine::{now_secs, Engine, LoadedLeague};
 use crate::season_engine::LoadedSeason;
 use crate::season_lineup::optimal_points;
+use crate::season_lookup::Lookup;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -53,13 +54,24 @@ pub struct History {
 }
 
 /// Measure every roster right now.
-pub fn take_snapshot(loaded: &LoadedLeague, season: &LoadedSeason, now: u64) -> Snapshot {
+///
+/// Positions come from the shared `Lookup`, not from `player_meta` directly:
+/// the board carries the position this league actually scores a player at, and
+/// the standings projection resolves through the same `Lookup`. Reading the
+/// metadata here instead meant a team's Trends strength and its standings
+/// projection could be built from two different lineups for the same roster.
+pub fn take_snapshot(
+    loaded: &LoadedLeague,
+    season: &LoadedSeason,
+    lookup: &Lookup,
+    now: u64,
+) -> Snapshot {
     let weekly = &loaded.weekly_points;
     let rules = &loaded.roster_rules;
     let first = season.week.max(1);
     let last = loaded.league.last_regular_week().max(first);
     let weeks = f64::from(last - first + 1);
-    let position_of = |id: &str| loaded.player_meta.get(id).and_then(|m| m.position.clone());
+    let position_of = |id: &str| lookup.position(id);
 
     let teams = season
         .rosters
@@ -150,7 +162,8 @@ impl HistoryStore for Engine {
             .read_cache_any(&name)
             .map(|(_, h)| h)
             .unwrap_or_default();
-        let snapshot = take_snapshot(loaded, season, now_secs());
+        let lookup = Lookup { loaded };
+        let snapshot = take_snapshot(loaded, season, &lookup, now_secs());
         if should_record(&history, &snapshot) {
             push(&mut history, snapshot);
             self.write_cache(&name, &history);

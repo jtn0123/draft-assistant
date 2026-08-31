@@ -1,11 +1,14 @@
 //! Strength snapshots: measuring rosters and persisting history to disk.
 
+use draft_assistant_lib::board::BoardPlayer;
 use draft_assistant_lib::engine::{Engine, LoadedLeague};
 use draft_assistant_lib::roster::RosterRules;
 use draft_assistant_lib::season_api::Roster;
 use draft_assistant_lib::season_engine::LoadedSeason;
 use draft_assistant_lib::season_history::HistoryStore;
 use draft_assistant_lib::season_history::{take_snapshot, History};
+use draft_assistant_lib::season_lookup::Lookup;
+use draft_assistant_lib::season_view_standings::standings_rows;
 use draft_assistant_lib::sleeper::{Draft, League, PlayerMeta, ProjectionRow};
 use draft_assistant_lib::valuation::ReplacementModel;
 use draft_assistant_lib::weekly::WeeklyPoints;
@@ -124,7 +127,7 @@ fn snapshot_measures_best_lineup_strength_per_remaining_week() {
     let loaded = loaded_league();
     let season = season(1, vec![roster(&["qb1", "wr1"])], 0);
 
-    let snap = take_snapshot(&loaded, &season, 777);
+    let snap = take_snapshot(&loaded, &season, &Lookup { loaded: &loaded }, 777);
     assert_eq!(snap.taken_at, 777);
     assert_eq!(snap.week, 1);
     assert_eq!(snap.teams.len(), 1);
@@ -148,7 +151,7 @@ fn snapshot_measures_best_lineup_strength_per_remaining_week() {
 fn snapshot_in_the_final_week_uses_that_week_alone() {
     let loaded = loaded_league();
     let season = season(2, vec![roster(&["qb1"])], 0);
-    let snap = take_snapshot(&loaded, &season, 1);
+    let snap = take_snapshot(&loaded, &season, &Lookup { loaded: &loaded }, 1);
     // Week 2 is the last regular week: strength is week 2's lineup only.
     assert!((snap.teams[0].strength - 4.0).abs() < 1e-9);
 }
@@ -206,4 +209,71 @@ fn live_slice_staleness_is_measured_from_fetch_time() {
     let stale = season(1, Vec::new(), now.saturating_sub(3600));
     assert!(Engine::live_age(&stale) >= 3600);
     assert!(Engine::live_is_stale(&stale));
+}
+
+/// A league whose only starting slot is QB, holding one player the board and
+/// the player dictionary disagree about: the board (built from this league's
+/// own scoring) calls him a QB, Sleeper's metadata still says WR.
+///
+/// Trends used to read `player_meta` directly while the standings read through
+/// `Lookup`, so this roster started a QB in one screen and nobody in the other.
+fn league_with_a_disputed_position() -> LoadedLeague {
+    let mut loaded = loaded_league();
+    loaded.board = vec![BoardPlayer {
+        player_id: "swap1".to_string(),
+        name: "S. Wapp".to_string(),
+        position: "QB".to_string(),
+        team: None,
+        bye_week: None,
+        points: 16.0,
+        bonus_points: 0.0,
+        vorp: 0.0,
+        tier: 1,
+        position_rank: 1,
+        overall_rank: 1,
+        adp: None,
+        injury_status: None,
+        sleeper_pts_ppr: None,
+    }];
+    loaded.board_index = HashMap::from([("swap1".to_string(), 0)]);
+    loaded.player_meta =
+        serde_json::from_str(r#"{"swap1": {"full_name": "S. Wapp", "position": "WR"}}"#).unwrap();
+    let rows: Vec<ProjectionRow> = serde_json::from_str(
+        r#"[
+            {"player_id": "swap1", "stats": {"rec": 8.0}, "week": 1},
+            {"player_id": "swap1", "stats": {"rec": 8.0}, "week": 2}
+        ]"#,
+    )
+    .unwrap();
+    loaded.weekly_points = WeeklyPoints::build(&rows, &loaded.league.scoring_settings.clone());
+    loaded
+}
+
+#[test]
+fn trends_and_standings_field_the_same_lineup_when_board_and_metadata_disagree() {
+    let loaded = league_with_a_disputed_position();
+    let lookup = Lookup { loaded: &loaded };
+    let season = season(1, vec![roster(&["swap1"])], 0);
+
+    // The board wins: swap1 fills the QB slot, and 8 points in each of weeks
+    // 1 and 2 average to 8 per remaining week.
+    let snap = take_snapshot(&loaded, &season, &lookup, 5);
+    let strength = snap.teams[0].strength;
+    assert!(
+        (strength - 8.0).abs() < 1e-9,
+        "Trends should start the board's QB, got strength {strength}"
+    );
+
+    // The standings project the one remaining week, week 2, from the same
+    // lineup — so the two agree rather than one of them fielding nobody.
+    let rows = standings_rows(&loaded, &season, &lookup, None, &|id| format!("Team {id}"));
+    let projected = rows[0].projected_points;
+    assert!(
+        (projected - strength).abs() < 1e-9,
+        "standings projected {projected}, Trends measured {strength}"
+    );
+    assert!(
+        projected > 0.0,
+        "neither screen should field an empty lineup"
+    );
 }
