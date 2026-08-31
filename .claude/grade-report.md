@@ -51,8 +51,38 @@ Post-execution baselines: Rust **76.56%** lines / **245** tests (floor raised
 68 → 74); frontend **89.42%** lines / **173** tests, now genuinely gated;
 entry CSS 35 → 15 kB; pre-commit runs tests in ~11s. `npm run verify` green.
 
-**Remaining open (29):** A1, A4, all of E and F, G4-G8, all of H, I2, and the
-D items not listed above. E, F and H are untouched by this wave.
+### Second execution wave — 2026-08-30 late evening
+
+20 more items landed (`32aab18`..`b0a5aaf`), taking the total to **38 of 47**:
+**B5, B6, B7, C3, C4, C6, C7, E1, E2, E3, F1, F2, G4, G5, G6, G8, H1, H2, H3, H4.**
+
+Worth recording:
+
+- **E1 was worse than written.** `rustsec/audit-check@v2` — the action handed
+  `GITHUB_TOKEN` — is not a tag at all but a **branch**, mutable by anyone with
+  upstream write access. All six actions are now pinned to resolved SHAs.
+- **F2's first measurement was wrong and the agent said so.** An apparent
+  22s → 12s win was contention from three concurrent agents sharing a target
+  dir. Re-measured in isolation: ~0.5s off a ~2.4s incremental rebuild. The real
+  win is no longer writing a 366 MB `staticlib` on every build.
+- **C3 needed care, not just an `aria-live`.** A live region on a per-second
+  clock would re-announce every tick. The announced sentence is now held against
+  a situation key (status / whose pick / pick number), so seconds are captured
+  once at the transition and frozen; a test advances 5s and asserts the visible
+  timer moved while the announcement did not.
+- **G6 measured: 2.11 ms → 1.58 ms** per analysis rebuild (~25%), A/B in release.
+  G4/G5/G8 are latency and runtime-blocking wins that were deliberately **not**
+  given invented numbers.
+- **Found and correctly left alone:** `season_engine::live_is_stale()` and
+  `LIVE_TTL_SECS` have no callers anywhere; because the fn is `pub`, no
+  dead-code warning fires. The 30s interval that actually drives the poller is
+  set independently in `session.ts`. Two unrelated 30s numbers, one inert.
+  Documented as a new item rather than silently deleted.
+
+Post-wave baselines: Rust **77.56%** lines / **252** tests; frontend **~90%**
+lines / **197** tests; `npm run verify` green.
+
+**Remaining open (9):** A1, A4, C5, D5, D6, D7, D8, G7, I2.
 
 Baselines at audit time: Rust 74.77% lines / 212 tests; frontend 88.97%
 lines / 160 tests; `npm audit` and `cargo audit` clean; `npm run verify` green.
@@ -136,21 +166,21 @@ misses the players waivers exist for.
 - **Effort:** S
 - **Grade lift:** B → B+ (truthfulness about persistence)
 
-#### B5 — The `season` mutex is held across up to ~25s of network retries
+#### ~~B5~~ ✓ done 2026-08-30 — The `season` mutex is held across up to ~25s of network retries
 - **Where:** `src-tauri/src/commands_season.rs:77-79,122-125`; `refresh_live` at `season_engine.rs:389-399`
 - **What's wrong:** Three requests × 8s timeout × 3 retries can hold the `season` lock for tens of seconds, blocking `get_season`, `load_season`, and `ask_claude`, and queuing the next poll tick behind the current one.
 - **Fix:** Fetch outside the lock (`tokio::join!` the three requests unlocked), then take the lock only to run `apply_refresh`.
 - **Effort:** S
 - **Grade lift:** B → B+ (keeps the UI responsive during network trouble)
 
-#### B6 — Keychain subprocess runs blocking on the runtime thread, once per chat request
+#### ~~B6~~ ✓ done 2026-08-30 — Keychain subprocess runs blocking on the runtime thread, once per chat request
 - **Where:** `src-tauri/src/secrets.rs:56-67`; reached from `commands_chat.rs:53,83,149` via `engine.rs:246-251`
 - **What's wrong:** `std::process::Command` + `wait_with_output` on the async thread — tens of milliseconds normally, unbounded if the Keychain prompts — with `config` locked, re-shelled on every `ask_claude` and `chat_settings`.
 - **Fix:** Switch to `tokio::process::Command` (already a dependency, used in `chat_cli.rs:15`) or wrap in `spawn_blocking`; cache the loaded key in `AppState`.
 - **Effort:** S
 - **Grade lift:** B → B (removes a hidden stall and a per-request subprocess)
 
-#### B7 — Weekly rollover refetches all ~15 weeks; transactions fetched sequentially with O(n²) dedupe
+#### ~~B7~~ ✓ done 2026-08-30 — Weekly rollover refetches all ~15 weeks; transactions fetched sequentially with O(n²) dedupe
 - **Where:** `src-tauri/src/season_engine.rs:118-170` (`week_sweep`), `:340-355` (transactions)
 - **What's wrong:** Completed weeks' matchups are immutable, but `sweep.week != week` invalidates the whole sweep — 15 requests to learn one new week. The transaction loop is sequential where every sibling path uses `join!`, and dedupes with `.iter().any()` over a growing Vec.
 - **Fix:** Cache per-week (`season_<id>_week<N>.json`), fetch only missing weeks plus the current one; `join!` the two transaction weeks and dedupe with a `HashSet` of ids.
@@ -182,14 +212,14 @@ moment, load-bearing info in hover-only tooltips), and nothing lints for it.
 - **Effort:** S
 - **Grade lift:** B → B+ (the status feature becomes trustworthy under failure — its whole point)
 
-#### C3 — "You are on the clock" is announced to nobody
+#### ~~C3~~ ✓ done 2026-08-30 — "You are on the clock" is announced to nobody
 - **Where:** `src/components/ClockBanner.tsx:44`; only two `role="status"` and one `aria-live` exist in the tree
 - **What's wrong:** The app's most important state change renders as a plain styled span. A screen-reader user gets a chime (if enabled) and no text; the `is-mine` highlight is color-only.
 - **Fix:** Wrap the clock-main block in `role="status" aria-live="assertive" aria-atomic="true"` rendering a stable sentence ("You are on the clock — pick 3.07, 41 seconds left"), announced once per transition rather than every second.
 - **Effort:** S
 - **Grade lift:** B → B+ (the headline moment becomes accessible)
 
-#### C4 — `ConfirmDialog` claims `aria-modal` but doesn't trap focus
+#### ~~C4~~ ✓ done 2026-08-30 — `ConfirmDialog` claims `aria-modal` but doesn't trap focus
 - **Where:** `src/components/Overlays.tsx:17-50`; the working trap lives in `bits.tsx:79-105` (`ZoomLayer`)
 - **What's wrong:** Tab walks straight out of the dialog into the 200-row board behind the scrim; the pattern exists in the repo and this dialog was left out of it.
 - **Fix:** Extract `ZoomLayer`'s keydown trap into a `useFocusTrap(ref)` hook in `bits.tsx`; use it in both; set `inert`/`aria-hidden` on `.shell` while an overlay is open.
@@ -203,14 +233,14 @@ moment, load-bearing info in hover-only tooltips), and nothing lints for it.
 - **Effort:** S
 - **Grade lift:** B → B+ (draft-night failures become recoverable)
 
-#### C6 — The settings menu has no menu semantics, state exposure, or focus management
+#### ~~C6~~ ✓ done 2026-08-30 — The settings menu has no menu semantics, state exposure, or focus management
 - **Where:** `src/components/Header.tsx:145,222-260`
 - **What's wrong:** No `aria-haspopup`/`role="menu"`; toggle state lives only in a styled span (no `aria-checked`); focus never moves in or restores; dismissal is mousedown-only so tabbing away leaves it open.
 - **Fix:** `role="menu"` on the container, `role="menuitemcheckbox" aria-checked` per row, focus first row on open / restore the gear on close, add a `focusout` handler.
 - **Effort:** S
 - **Grade lift:** B → B (completes the menu's half-built ARIA)
 
-#### C7 — Load-bearing information exists only in mouse-hover `title=`
+#### ~~C7~~ ✓ done 2026-08-30 — Load-bearing information exists only in mouse-hover `title=`
 - **Where:** `src/components/bits.tsx:266` (injury tag), `Header.tsx:30,38` (sync error detail), `SeasonScreen.tsx:79,87` (per-source freshness)
 - **What's wrong:** The injury word ("Questionable") and the *only* diagnostics for why sync is failing live in `title` on non-focusable spans — unreachable by keyboard, unreliable for screen readers.
 - **Fix:** `aria-label` + visually-hidden text on the injury tag; make the sync pill a button that expands an inline detail line (or render source lines under the badge whenever a source is behind).
@@ -294,21 +324,21 @@ running webview, key off argv with a test guarding it, no secrets in the repo,
 clean audits, host-constant fetching, validated inputs. What remains is
 defense-in-depth: CI trust, file permissions, and one unused capability.
 
-#### E1 — CI actions on floating tags, no `permissions:` block, no job timeouts
+#### ~~E1~~ ✓ done 2026-08-30 — CI actions on floating tags, no `permissions:` block, no job timeouts
 - **Where:** `.github/workflows/verify.yml:20,24,36,64,68,75-77`
 - **What's wrong:** Six actions pinned to mutable tags — including third-party `rustsec/audit-check@v2`, which is handed `secrets.GITHUB_TOKEN`. No top-level `permissions:` (token gets repo default, not `contents: read`); no `timeout-minutes`, so a hung build burns up to 6 hours at 10× macOS billing.
 - **Fix:** Pin all six to commit SHAs with version comments; add `permissions: { contents: read }`; `timeout-minutes: 30`/`10` on the two jobs.
 - **Effort:** S
 - **Grade lift:** A− → A (closes the supply-chain gap in CI)
 
-#### E2 — League cache written world-readable; only `config.json` gets 0600
+#### ~~E2~~ ✓ done 2026-08-30 — League cache written world-readable; only `config.json` gets 0600
 - **Where:** `src-tauri/src/engine.rs:106` (dir at 0755), `cache.rs:51` (files at 0644); the correct pattern exists at `engine.rs:233-237`
 - **What's wrong:** Rosters, users, league member names/ids, and the players dictionary are readable by any local process; the repo demonstrably knows the fix and applies it to one file only.
 - **Fix:** `set_permissions(0o700)` on the data dir in `Engine::new`; add the existing `#[cfg(unix)]` 0600 block to `cache::replace_file` (and `headshots.rs:124`'s dir).
 - **Effort:** S
 - **Grade lift:** A− → A− (consistency; low sensitivity but zero cost)
 
-#### E3 — `tauri-plugin-opener` is registered and granted a capability nothing uses
+#### ~~E3~~ ✓ done 2026-08-30 — `tauri-plugin-opener` is registered and granted a capability nothing uses
 - **Where:** `src-tauri/src/lib.rs:67`, `capabilities/default.json` (`opener:default`); zero frontend usages (checked)
 - **What's wrong:** The webview holds a live open-url/open-path permission no code path needs — a free XSS-to-shell escalation step in a webview whose CSP permits inline styles.
 - **Fix:** Drop the plugin init, the capability entry, and both dependency entries; re-add scoped with an allowlist if a link ever needs opening.
@@ -322,14 +352,14 @@ defense-in-depth: CI trust, file permissions, and one unused capability.
 Lean and current, both lockfiles committed, audits clean, toolchain pinned and
 read by CI. Two pinning inconsistencies remain.
 
-#### F1 — npm side ignores the pinning rule the Cargo side documents
+#### ~~F1~~ ✓ done 2026-08-30 — npm side ignores the pinning rule the Cargo side documents
 - **Where:** `package.json:31-33` (`@tauri-apps/api: "^2"`, `@tauri-apps/cli: "^2"`) vs the pinning rationale at `src-tauri/Cargo.toml:19-31`; `.nvmrc`=22 but no `.npmrc`
 - **What's wrong:** A clean `npm install` can pull Tauri JS 2.99 against Rust pinned at 2.11 — exactly the IPC-ABI drift the Cargo comment exists to prevent. And `engines` isn't enforced without `engine-strict`, so Node 20 fails confusingly instead of clearly.
 - **Fix:** Pin both to `^2.11`; add `.npmrc` with `engine-strict=true`.
 - **Effort:** S
 - **Grade lift:** A− → A (one pinning philosophy, both ecosystems)
 
-#### F2 — Mobile-only crate types slow every build of a macOS-only app
+#### ~~F2~~ ✓ done 2026-08-30 — Mobile-only crate types slow every build of a macOS-only app
 - **Where:** `src-tauri/Cargo.toml:12` (`crate-type = ["staticlib", "cdylib", "rlib"]`)
 - **What's wrong:** `staticlib`/`cdylib` exist only for iOS/Android — targets the same file's reqwest comment says aren't real — and add two link steps to every build.
 - **Fix:** Reduce to `["rlib"]` (or cfg-gate the mobile types).
@@ -368,21 +398,21 @@ a second from duplicate clocks.
 - **Effort:** M
 - **Grade lift:** B → B+ (the draft tick's biggest remaining cost)
 
-#### G4 — The 14.6 MB players parse still blocks the runtime — via the network path
+#### ~~G4~~ ✓ done 2026-08-30 — The 14.6 MB players parse still blocks the runtime — via the network path
 - **Where:** `src-tauri/src/sleeper.rs:285-287` (`resp.json::<T>()` deserialises in-task); only the disk read was moved off-thread
 - **What's wrong:** Cold loads block the executor for hundreds of milliseconds on the exact parse the doc comment at `engine.rs:132-137` warns about.
 - **Fix:** `resp.bytes().await` then `spawn_blocking(|| serde_json::from_slice(...))` in `projections.rs::players` (add a `get_bytes` helper; don't change the shared path).
 - **Effort:** S
 - **Grade lift:** B → B (finishes B3-from-the-first-audit properly)
 
-#### G5 — League load serialises six independent fetches
+#### ~~G5~~ ✓ done 2026-08-30 — League load serialises six independent fetches
 - **Where:** `src-tauri/src/engine.rs:271-292` (league → draft → users sequential), `:354-359` (players, season projections, weekly projections sequential — the third an 18-request fan-out)
 - **What's wrong:** At 8s timeout each, a cold load pays serial latency for parallel work; sibling files already use `join!`/`buffer_unordered`.
 - **Fix:** `tokio::join!` draft with users; `try_join!` the three projection loads.
 - **Effort:** S
 - **Grade lift:** B → B+ (~one round of latency instead of several on first load)
 
-#### G6 — The waiver/standings inner loops re-clone what a scratch buffer already solved
+#### ~~G6~~ ✓ done 2026-08-30 — The waiver/standings inner loops re-clone what a scratch buffer already solved
 - **Where:** `src-tauri/src/season_moves.rs:62-70` (`base.to_vec()` per candidate ≈ 23k String allocs/rebuild); `season_view_standings.rs:39` + `season_lineup.rs:100-115` + `season_lookup.rs:17-24` (candidates rebuilt per week ≈ 10.8k allocs)
 - **What's wrong:** `season_trades.rs:47-59` established the `scratch: &mut Vec` pattern; these two call sites weren't converted. Positions are week-invariant but resolved per week.
 - **Fix:** Give `marginal_gain` the scratch parameter; hoist candidate construction per roster and overwrite only `points` per week.
@@ -396,7 +426,7 @@ a second from duplicate clocks.
 - **Effort:** M
 - **Grade lift:** B → B+ (a bundle of S-fixes; do as one pass)
 
-#### G8 — Remaining blocking file I/O on the runtime thread
+#### ~~G8~~ ✓ done 2026-08-30 — Remaining blocking file I/O on the runtime thread
 - **Where:** `src-tauri/src/headshots.rs:123-168` (all fs ops in `cached_image`, called dozens of times concurrently per roster render); `season_history.rs:145-157` (multi-MB history read-modify-write per `load_season`)
 - **What's wrong:** The `*_off_thread` helpers exist for exactly this and these two paths don't use them.
 - **Fix:** Route both through `read_cache_any_off_thread`/`write_cache_off_thread` (or `tokio::fs` for the images).
@@ -413,28 +443,28 @@ missing 9 of 49 Rust files (including three added today), the frontend map is
 one line, the poller/caching architecture has no prose anywhere, and the one
 documented fixture-regeneration step names a path that doesn't exist on macOS.
 
-#### H1 — The fixture-regeneration instructions point at the wrong path
+#### ~~H1~~ ✓ done 2026-08-30 — The fixture-regeneration instructions point at the wrong path
 - **Where:** `draft-assistant/README.md` (Browser preview: "delete `/tmp/draft-assistant-cli`"); actual path is `std::env::temp_dir()` → `$TMPDIR/draft-assistant-cli` (`bin/dump_season.rs:38`, `dump_state.rs:52`)
 - **What's wrong:** Following the doc deletes nothing, so you regenerate fixtures from stale cache — precisely the failure the surrounding paragraph warns about. It's the only documented dev loop for the browser preview.
 - **Fix:** `rm -rf "${TMPDIR:-/tmp}/draft-assistant-cli"`, or better, add a `--fresh` flag to both binaries.
 - **Effort:** S
 - **Grade lift:** B− → B (the one actively wrong instruction)
 
-#### H2 — The poll/caching architecture exists only inside the code that implements it
+#### ~~H2~~ ✓ done 2026-08-30 — The poll/caching architecture exists only inside the code that implements it
 - **Where:** no README-level prose for: two pollers (3s draft, 30s season), `LiveEmitGate`, `AnalysisCache`/`ANALYSIS_EVERY`, `season_generation`; "Data sources" documents disk TTLs only
 - **What's wrong:** "Why didn't the screen update" is the most likely debugging question, and its answer is undocumented.
 - **Fix:** A "How it stays live" README section — one table: two pollers, three caches, what invalidates each.
 - **Effort:** S
 - **Grade lift:** B− → B
 
-#### H3 — The Rust module map is missing 9 of 49 files, including three from today
+#### ~~H3~~ ✓ done 2026-08-30 — The Rust module map is missing 9 of 49 files, including three from today
 - **Where:** `draft-assistant/README.md:130-180`; missing `season_calls.rs` (the biggest new module), `season_injury.rs`, `season_sources.rs`, `season_types.rs`, `season_trends_view.rs`, `cache.rs`, `poll.rs`, `mock_league.rs`, `main.rs`
 - **What's wrong:** The map was updated for one of today's two refactors and not the other.
 - **Fix:** Add the nine lines under the existing groupings.
 - **Effort:** S
 - **Grade lift:** B− → B
 
-#### H4 — The frontend layout map is a single line
+#### ~~H4~~ ✓ done 2026-08-30 — The frontend layout map is a single line
 - **Where:** `README.md:132-136` — five entries for all of `src/`; `session.ts`, `boardIdentity.ts`, `lazyScreens.tsx`, `prefs.ts`, `theme.ts`, `format.ts`, both types files are absent
 - **What's wrong:** A newcomer can't discover that `session.ts` owns the polling lifecycle or that `boardIdentity.ts` is a subtle load-bearing cache.
 - **Fix:** Expand `src/` to the per-file granularity the Rust side gets.
