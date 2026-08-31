@@ -8,7 +8,13 @@ default-run = "draft-assistant"
 
 [lib]
 name = "draft_assistant_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# rlib only. The staticlib and cdylib outputs exist purely so an iOS or Android
+# shell can link the lib, and -- like the reqwest note below -- those targets
+# are not real for this app. Measured on an isolated target dir, dropping them
+# takes a touch-and-rebuild from ~2.4s to ~1.8s and stops writing a 366 MB
+# static archive on every build: a modest win, not a dramatic one. Add them
+# back if a mobile target ever becomes real.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
