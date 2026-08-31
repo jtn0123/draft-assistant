@@ -60,6 +60,7 @@ pub struct StoredLeague {
 
 // ---------- engine ----------
 
+#[derive(Clone)]
 pub struct LoadedLeague {
     pub league: League,
     pub draft: Draft,

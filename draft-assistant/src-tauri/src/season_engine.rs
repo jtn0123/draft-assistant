@@ -22,7 +22,7 @@ const WEEK_SWEEP_TTL_SECS: u64 = 6 * 3600;
 const LAST_SEASON_TTL_SECS: u64 = 30 * 24 * 3600;
 
 /// Everything in-season, already fetched.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct LoadedSeason {
     pub week: u32,
     pub season: u32,

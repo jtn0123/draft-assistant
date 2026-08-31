@@ -4,8 +4,7 @@ use crate::chat::{self, ChatMessage, ChatModel, ChatReply, Effort};
 use crate::chat_cli;
 use crate::chat_context;
 use crate::engine::AppConfig;
-use crate::season::build_season_view;
-use crate::state::{view_from, AppState};
+use crate::state::{season_view_for_chat, view_from, AppState};
 use tauri::State;
 
 pub const PROVIDER_API: &str = "api";
@@ -151,22 +150,23 @@ pub async fn ask_claude(
         (resolve_provider(&config, key.is_some(), cli.is_some()), key)
     };
 
-    let context = {
+    // Building a season view is seconds of arithmetic. It must not happen with
+    // the pollers' mutexes held, so the season screen's own view is reused and
+    // any build that is unavoidable runs off the runtime thread.
+    let context = if screen == "season" {
+        let view = season_view_for_chat(
+            &state.loaded,
+            &state.season,
+            &state.config,
+            &state.last_season_view,
+        )
+        .await?;
+        chat_context::season_context(&view)
+    } else {
         let loaded = state.loaded.lock().await;
         let loaded = loaded.as_ref().ok_or("no league loaded")?;
-        if screen == "season" {
-            let season = state.season.lock().await;
-            let season = season.as_ref().ok_or("season data not loaded")?;
-            let config = state.config.lock().await;
-            chat_context::season_context(&build_season_view(
-                loaded,
-                season,
-                config.my_user_id.as_deref(),
-            ))
-        } else {
-            let config = state.config.lock().await;
-            chat_context::draft_context(&view_from(loaded, &config))
-        }
+        let config = state.config.lock().await;
+        chat_context::draft_context(&view_from(loaded, &config))
     };
 
     let model = ChatModel::parse(&model);

@@ -78,6 +78,7 @@ pub fn run() {
                 poll_generation: Arc::new(AtomicU64::new(0)),
                 season_polling: Arc::new(AtomicBool::new(false)),
                 season_generation: Arc::new(AtomicU64::new(0)),
+                last_season_view: Arc::new(Mutex::new(None)),
             });
             Ok(())
         })
