@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { setAvatarMode, useAvatarMode } from "./avatars";
 import { setChime, useChime } from "./prefs";
+import { stableAvailable } from "./boardIdentity";
 import { useSeasonSession } from "./session";
 import type { DraftView, PollHealth, StoredLeague } from "./types";
 import type { SeasonView } from "./season-types";
@@ -109,7 +110,10 @@ export default function App() {
   // ---------- data ----------
 
   const applyView = useCallback((next: DraftView) => {
-    setView(next);
+    // Hand the board back the array it has already sorted when the new view
+    // says exactly the same thing about the players (see boardIdentity.ts).
+    // Most updates move a clock or a status, not the several-hundred-row pool.
+    setView((prev) => stableAvailable(prev, next));
     setPollHealth({
       last_success_at: next.data_health.poll_last_success_at ?? next.generated_at,
       consecutive_failures: next.data_health.poll_consecutive_failures ?? 0,
