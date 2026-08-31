@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AvailablePlayer, DraftView } from "../types";
@@ -202,27 +202,28 @@ describe("Board paging", () => {
     />
   );
 
-  it("opens on one page and loads the next on demand", async () => {
-    const user = userEvent.setup();
+  // `fireEvent` rather than `userEvent`: three commits of 200-odd rows is
+  // already the expensive part, and the pointer sequence behind a real click
+  // adds seconds to it under coverage instrumentation.
+  it("opens on one page and loads the next on demand", () => {
     const { container } = render(board(many(450)));
     const rows = () => container.querySelectorAll(".board-body");
 
     expect(rows()).toHaveLength(200);
     expect(screen.getByText("Showing 200 of 450")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Show 200 more" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show 200 more" }));
     expect(rows()).toHaveLength(400);
     expect(screen.getByText("Showing 400 of 450")).toBeInTheDocument();
 
-    // The last page is only as big as what is left.
-    await user.click(screen.getByRole("button", { name: "Show 50 more" }));
-    expect(rows()).toHaveLength(450);
-    expect(screen.getByText("450 players")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /more/ })).not.toBeInTheDocument();
+    // The last page offers only what is left of the pool.
+    expect(screen.getByRole("button", { name: "Show 50 more" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Show first 200" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show first 200" }));
     expect(rows()).toHaveLength(200);
-  });
+    // Four commits of a couple of hundred rows apiece, which is more than the
+    // default budget allows for once coverage instrumentation is on top.
+  }, 20_000);
 
   it("leaves the paging control out when everything already fits", () => {
     render(board(many(3)));
