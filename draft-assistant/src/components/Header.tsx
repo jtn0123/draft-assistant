@@ -144,24 +144,84 @@ export function Header({
   settingsRows: SettingsRow[];
   footerNote: string;
 }) {
+  // Wraps the gear and the menu together, so focus moving between the two
+  // does not read as leaving.
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuBox = useRef<HTMLDivElement>(null);
+  const gearRef = useRef<HTMLButtonElement>(null);
+  const firstRow = useRef<HTMLButtonElement>(null);
+  // Closing usually means handing focus back to the gear. Tabbing or clicking
+  // away is the exception: the user has already chosen where to go next.
+  const returnFocus = useRef(true);
+  const wasOpen = useRef(false);
 
   // A menu that only closes via its own button is a trap on a desktop app.
   useEffect(() => {
     if (!settingsOpen) return undefined;
+    const close = (restore: boolean) => {
+      returnFocus.current = restore;
+      onToggleSettings();
+    };
     const onDown = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) onToggleSettings();
+      if (!menuRef.current?.contains(event.target as Node)) close(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onToggleSettings();
+      if (event.key === "Escape") close(true);
     };
+    // Tabbing past the last row used to leave the menu open behind the user.
+    const onFocusOut = (event: FocusEvent) => {
+      const next = event.relatedTarget as Node | null;
+      if (next !== null && menuRef.current?.contains(next) !== true) close(false);
+    };
+    const box = menuRef.current;
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
+    box?.addEventListener("focusout", onFocusOut);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      box?.removeEventListener("focusout", onFocusOut);
     };
   }, [settingsOpen, onToggleSettings]);
+
+  // Opening puts the keyboard on the first setting; closing puts it back on
+  // the gear, so nobody has to Tab their way home from the top of the page.
+  useEffect(() => {
+    if (settingsOpen) {
+      wasOpen.current = true;
+      firstRow.current?.focus();
+      return;
+    }
+    if (wasOpen.current && returnFocus.current) gearRef.current?.focus();
+    wasOpen.current = false;
+    returnFocus.current = true;
+  }, [settingsOpen]);
+
+  // Up and down walk the menu, Home and End jump to its ends — the moves the
+  // menu role already promises. Every item sits at tabIndex -1, so Tab leaves
+  // the menu (and closes it) rather than crawling through six settings.
+  const onMenuKey = (event: React.KeyboardEvent) => {
+    const items = [
+      ...(menuBox.current?.querySelectorAll<HTMLElement>(
+        '[role="menuitem"], [role="menuitemcheckbox"]',
+      ) ?? []),
+    ];
+    if (items.length === 0) return;
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+    let next = -1;
+    if (step !== 0) {
+      next =
+        at < 0 ? (step === 1 ? 0 : items.length - 1) : (at + step + items.length) % items.length;
+    } else if (event.key === "Home") {
+      next = 0;
+    } else if (event.key === "End") {
+      next = items.length - 1;
+    }
+    if (next < 0) return;
+    event.preventDefault();
+    items[next]?.focus();
+  };
 
   return (
     <header className="app-header">
@@ -233,21 +293,47 @@ export function Header({
           className={`btn-ghost btn-square${settingsOpen ? " is-on" : ""}`}
           onClick={onToggleSettings}
           title="Settings"
+          ref={gearRef}
+          aria-haspopup="menu"
           aria-expanded={settingsOpen}
         >
           <GearIcon />
         </button>
 
         {settingsOpen && (
-          <div className="settings-menu">
-            <div className="settings-menu-head">
+          <div
+            className="settings-menu"
+            role="menu"
+            aria-label="Settings"
+            ref={menuBox}
+            onKeyDown={onMenuKey}
+          >
+            <div className="settings-menu-head" role="none">
               <span className="eyebrow">Settings</span>
-              <button type="button" className="link-btn" onClick={onToggleSettings}>
+              <button
+                type="button"
+                className="link-btn"
+                role="menuitem"
+                tabIndex={-1}
+                onClick={onToggleSettings}
+              >
                 Done
               </button>
             </div>
-            {settingsRows.map((row) => (
-              <button key={row.label} type="button" className="settings-row" onClick={row.onSelect}>
+            {settingsRows.map((row, index) => (
+              <button
+                key={row.label}
+                type="button"
+                className="settings-row"
+                // The row's setting is its state, not a word in its label: a
+                // screen reader should say "on", not read "On" as part of the
+                // name and leave the listener to guess it was a control.
+                role="menuitemcheckbox"
+                aria-checked={row.on}
+                tabIndex={-1}
+                ref={index === 0 ? firstRow : undefined}
+                onClick={row.onSelect}
+              >
                 <span className="settings-row-text">
                   <span className="settings-row-label">{row.label}</span>
                   <span className="muted settings-row-note">{row.note}</span>
@@ -257,7 +343,9 @@ export function Header({
                 </span>
               </button>
             ))}
-            <span className="muted settings-footer">{footerNote}</span>
+            <span className="muted settings-footer" role="none">
+              {footerNote}
+            </span>
           </div>
         )}
       </div>

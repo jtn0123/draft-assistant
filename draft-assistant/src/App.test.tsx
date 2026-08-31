@@ -211,7 +211,9 @@ describe("App live workflow", () => {
     render(<App />);
     await screen.findByText(initial.league.name);
     await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(screen.getByRole("button", { name: /Refresh data/ }));
+    // The settings rows are menu items with their own on/off state, not plain
+    // buttons — see Header.test.tsx.
+    await user.click(screen.getByRole("menuitemcheckbox", { name: /Refresh data/ }));
     expect(
       await screen.findByText("Projections refreshed — board rebuilt from 312 players"),
     ).toBeInTheDocument();
