@@ -1,30 +1,20 @@
 // The draft cockpit's top strip: round, pick, who is on the clock, and the
 // upcoming pick queue.
 
-import { useEffect, useState } from "react";
-import type { DraftView } from "../types";
+import { useMemo, useState } from "react";
+import type { DraftView, TeamRoster } from "../types";
+import { useNow } from "../clock";
 import { clockLabel, pickLabel, spanLabel } from "../format";
 
 /** How many upcoming picks to show before the "+n" expander. */
 const COLLAPSED = 4;
-
-/** The wall clock, re-read every second while a deadline is set. */
-function useNow(deadlineMs: number | null): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (deadlineMs === null) return undefined;
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [deadlineMs]);
-  return now;
-}
 
 /**
  * The pick clock as "0:41", re-rendered every second while a deadline is set.
  * Null when nothing is on the clock, so callers can leave the cell out.
  */
 function useClock(deadlineMs: number | null): string | null {
-  return clockLabel(deadlineMs, useNow(deadlineMs));
+  return clockLabel(deadlineMs, useNow(deadlineMs !== null));
 }
 
 /** Whole seconds left on the clock, or null when nothing is running. */
@@ -78,7 +68,7 @@ export function ClockBanner({ view }: { view: DraftView }) {
   const preDraft = d.status === "pre_draft" && d.total_picks_made === 0;
   const complete = d.status === "complete";
   const deadline = complete ? null : d.clock_deadline_ms;
-  const now = useNow(deadline);
+  const now = useNow(deadline !== null);
   const clock = clockLabel(deadline, now);
   // Everything that decides what the sentence says, and nothing that ticks.
   const situation = `${d.status}|${String(d.is_my_pick)}|${d.current_pick}|${d.on_clock_slot}`;
@@ -151,19 +141,24 @@ interface QueueEntry {
   onClock: boolean;
 }
 
-function buildQueue(view: DraftView): QueueEntry[] {
-  const d = view.draft;
-  const total = d.teams * d.rounds;
+function buildQueue(
+  currentPick: number,
+  teams: number,
+  rounds: number,
+  mySlot: number | null,
+  rosters: TeamRoster[],
+): QueueEntry[] {
+  const total = teams * rounds;
   const entries: QueueEntry[] = [];
-  for (let pick = d.current_pick; pick <= total && entries.length < 24; pick += 1) {
-    const slot = slotForPick(pick, d.teams);
-    const roster = view.rosters.find((r) => r.slot === slot);
+  const names = new Map(rosters.map((r) => [r.slot, r.display_name]));
+  for (let pick = currentPick; pick <= total && entries.length < 24; pick += 1) {
+    const slot = slotForPick(pick, teams);
     entries.push({
       pickNo: pick,
-      label: pickLabel(pick, d.teams),
-      team: roster?.display_name ?? `Slot ${slot}`,
-      isMine: d.my_slot === slot,
-      onClock: pick === d.current_pick,
+      label: pickLabel(pick, teams),
+      team: names.get(slot) ?? `Slot ${slot}`,
+      isMine: mySlot === slot,
+      onClock: pick === currentPick,
     });
   }
   return entries;
@@ -178,8 +173,15 @@ function slotForPick(pickNo: number, teams: number): number {
 
 export function SnakeStrip({ view }: { view: DraftView }) {
   const [expanded, setExpanded] = useState(false);
-  const clock = useClock(view.draft.status === "complete" ? null : view.draft.clock_deadline_ms);
-  const queue = buildQueue(view);
+  const { current_pick, teams, rounds, my_slot, status, clock_deadline_ms } = view.draft;
+  const rosters = view.rosters;
+  const clock = useClock(status === "complete" ? null : clock_deadline_ms);
+  // The queue is 24 picks of snake arithmetic and as many roster lookups, and
+  // this strip re-renders every second while the clock runs.
+  const queue = useMemo(
+    () => buildQueue(current_pick, teams, rounds, my_slot, rosters),
+    [current_pick, teams, rounds, my_slot, rosters],
+  );
   if (queue.length === 0) return null;
 
   const shown = expanded ? queue : queue.slice(0, COLLAPSED);

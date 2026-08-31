@@ -117,3 +117,46 @@ describe("what a screen reader hears", () => {
     expect(announcement()).toContain("The draft is finished.");
   });
 });
+
+// Grade item G7. The banner and the strip used to own a timer each, so the
+// draft subtree re-rendered twice a second out of step with itself.
+describe("the banner and the strip on one clock", () => {
+  it("starts a single interval for both of them", () => {
+    const view = fixture();
+    view.draft.clock_deadline_ms = NOW + 41_000;
+    const start = vi.spyOn(window, "setInterval");
+
+    render(
+      <>
+        <ClockBanner view={view} />
+        <SnakeStrip view={view} />
+      </>,
+    );
+
+    expect(start).toHaveBeenCalledTimes(1);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    // Both readings come from the same tick, so they cannot disagree.
+    expect(screen.getAllByText("0:40")).toHaveLength(2);
+    start.mockRestore();
+  });
+
+  it("does not rebuild the pick queue for a tick of the clock", () => {
+    const view = fixture();
+    view.draft.clock_deadline_ms = NOW + 41_000;
+    const { container } = render(<SnakeStrip view={view} />);
+    const chips = () => [...container.querySelectorAll(".snake-chip")];
+    const before = chips();
+    expect(before.length).toBeGreaterThan(0);
+
+    // The queue's only reason to read the rosters is being rebuilt.
+    const lookups = vi.spyOn(view.rosters, "map");
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(lookups).not.toHaveBeenCalled();
+    lookups.mockRestore();
+    expect(chips().map((c) => c.textContent)).toEqual(before.map((c) => c.textContent));
+  });
+});
