@@ -49,6 +49,27 @@ pub struct SourceHealth {
     pub rosters: SourceStatus,
 }
 
+/// One round of live fetches, before anything has been locked to apply them.
+///
+/// Fetching and applying are separate steps on purpose. Three requests at an
+/// eight-second timeout with three retries apiece is tens of seconds in the
+/// worst case, and the `season` mutex used to be held for all of it — which
+/// stopped `get_season`, `load_season` and every chat question behind it, and
+/// queued the next poll tick behind the current one. Now the fetch runs with
+/// nothing locked and only the fold below takes the lock.
+pub struct LiveFetch {
+    pub matchups: Result<Vec<Matchup>, String>,
+    pub scores: Result<Vec<ScoreGame>, String>,
+    pub rosters: Result<Vec<Roster>, String>,
+}
+
+impl LiveFetch {
+    /// Fold this round into the season. The short half: no network, no waiting.
+    pub fn apply(self, season: &mut LoadedSeason, now: u64) -> Result<(), String> {
+        apply_refresh(season, self.matchups, self.scores, self.rosters, now)
+    }
+}
+
 /// Fold one round of live fetches into the season.
 ///
 /// Every source that answered is applied and stamped; every source that failed

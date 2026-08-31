@@ -215,10 +215,51 @@ Two things follow from this that are easy to trip over:
 
 ```
 src/                        React + TS strict UI
-  App.tsx                   screen switching, polling, shared state
-  api.ts                    the IPC surface (+ browser-fixture fallback)
-  components/               Board, ThisWeek, SeasonTabs, Trends, Games, Chat
-  avatars.ts, zoom.ts       useSyncExternalStore modules
+  main.tsx                  mounts App, plus the picture-zoom layer
+  App.tsx                   screen switching, league setup, the draft poller,
+                            shared state
+  api.ts                    the IPC surface (+ browser-fixture fallback), and
+                            the schema-version check on every payload
+  session.ts                the season screen's data lifecycle: first load,
+                            starting and stopping the live poller, retry
+  boardIdentity.ts          keeps the available-players array identity stable
+                            when an update did not actually change it, so the
+                            board does not re-sort for nothing
+  types.ts                  mirrors the Rust DraftView structs
+  season-types.ts           mirrors the Rust SeasonView structs
+  chat-types.ts             mirrors the Rust chat structs
+  format.ts                 shared display helpers (numbers, percents, clocks)
+  theme.ts                  light/dark: follow the OS, remember an override
+  prefs.ts                  small shared settings, e.g. the on-the-clock chime
+  avatars.ts                Headshots/Team-logos choice + per-session picture
+                            cache in front of the backend's disk cache
+  zoom.ts                   whichever picture is currently shown large
+  components/
+    lazyScreens.tsx         the code-split boundary: each screen and the chat
+                            become their own chunk, fetched when first shown
+    ErrorBoundary.tsx       catches a screen that fails to render, so one bad
+                            chunk does not blank the whole window
+    Header.tsx              league identity, Draft/Season toggle, sync badge,
+                            settings menu
+    DraftScreen.tsx         the draft cockpit, assembled from the parts below
+    ClockBanner.tsx         round, pick, who is on the clock, the pick queue
+    Panels.tsx              the three recommendation cards and the left rail
+    Board.tsx               the player board: sortable, filterable
+    SeasonScreen.tsx        the in-season screen: header stats, main column,
+                            tabbed rail
+    ThisWeek.tsx            start/sit calls, head-to-head lineup, waivers
+    SeasonTabs.tsx          the right rail: Standings, Games, My team, League,
+                            Last season
+    GamesTab.tsx            live NFL scoreboard joined to both sides' starters
+    TrendsTab.tsx           every team's strength over time + why it moved
+    Chat.tsx                the Ask Claude panel: pickers, thread, composer
+    Overlays.tsx            modal confirm and the toast strip
+    useFocusTrap.ts         the one focus trap, shared by everything modal
+    bits.tsx                the visual primitives both screens share
+  *.css                     ten stylesheets, one per area; `check:css` refuses
+                            to let a class be styled from more than one
+  *.test.ts / *.test.tsx    vitest, beside the file each one tests
+  test/                     the vitest setup and its async settle helper
 src-tauri/src/
   shared
     sleeper.rs              API client + response types

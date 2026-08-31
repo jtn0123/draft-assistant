@@ -104,10 +104,22 @@ pub async fn refresh_season(state: State<'_, AppState>) -> Result<SeasonView, St
             .league_id
             .clone()
     };
+    let watching = {
+        let season = state.season.lock().await;
+        let season = season.as_ref().ok_or("season data not loaded")?;
+        (season.season, season.week)
+    };
+    // Fetched with nothing locked: three requests with retries behind them can
+    // run for tens of seconds, and everything else that needs the season would
+    // be waiting the whole time.
+    let fetched = state
+        .engine
+        .fetch_live(&league_id, watching.0, watching.1)
+        .await;
     {
         let mut season = state.season.lock().await;
         let season = season.as_mut().ok_or("season data not loaded")?;
-        state.engine.refresh_live(season, &league_id).await?;
+        fetched.apply(season, crate::engine::now_secs())?;
     }
     season_view_from(&state).await
 }

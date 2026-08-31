@@ -10,7 +10,7 @@ use crate::engine::{now_secs, Engine, REQUEST_CONCURRENCY};
 use crate::season::LastSeasonRow;
 use crate::season_api::{Matchup, Roster, ScoreGame, Transaction};
 use crate::season_history::History;
-use crate::season_sources::{apply_refresh, SourceHealth};
+use crate::season_sources::{LiveFetch, SourceHealth};
 use crate::sleeper::League;
 use crate::sleeper_error::to_message;
 use futures_util::StreamExt;
@@ -93,10 +93,20 @@ pub trait SeasonLoader {
         force: bool,
     ) -> Result<LoadedSeason, String>;
 
-    /// Refresh only the fast-moving slice: this week's scoring and the NFL
-    /// scoreboard. `Err` when every request failed.
+    /// Pull the fast-moving slice — this week's scoring and the NFL scoreboard
+    /// — without touching any shared state. Callers that hold the season
+    /// behind a lock run this first, with nothing locked, and fold the result
+    /// in afterwards.
     #[allow(async_fn_in_trait)]
-    async fn refresh_live(&self, season: &mut LoadedSeason, league_id: &str) -> Result<(), String>;
+    async fn fetch_live(&self, league_id: &str, season: u32, week: u32) -> LiveFetch;
+
+    /// Fetch and fold in one step, for callers that already own the season
+    /// outright. `Err` when every request failed.
+    #[allow(async_fn_in_trait)]
+    async fn refresh_live(&self, season: &mut LoadedSeason, league_id: &str) -> Result<(), String> {
+        let fetched = self.fetch_live(league_id, season.season, season.week).await;
+        fetched.apply(season, now_secs())
+    }
 }
 
 impl Engine {
@@ -393,22 +403,21 @@ impl SeasonLoader for Engine {
 
     /// Refresh only the fast-moving parts: this week's scoring and the NFL
     /// scoreboard. Used by the in-season poller.
-    async fn refresh_live(&self, season: &mut LoadedSeason, league_id: &str) -> Result<(), String> {
+    ///
+    /// Which endpoint gave what, and what that means for the staleness clock,
+    /// is decided in `season_sources` where it can be tested without a
+    /// network.
+    async fn fetch_live(&self, league_id: &str, season: u32, week: u32) -> LiveFetch {
         let (matchups, scores, rosters) = tokio::join!(
-            self.client.matchups(league_id, season.week),
-            self.client.nfl_scores(season.season, season.week),
+            self.client.matchups(league_id, week),
+            self.client.nfl_scores(season, week),
             self.client.rosters(league_id)
         );
-        // Which endpoint gave what, and what that means for the staleness
-        // clock, is decided in `season_sources` where it can be tested without
-        // a network.
-        apply_refresh(
-            season,
-            matchups.map_err(to_message),
-            scores.map_err(to_message),
-            rosters.map_err(to_message),
-            now_secs(),
-        )
+        LiveFetch {
+            matchups: matchups.map_err(to_message),
+            scores: scores.map_err(to_message),
+            rosters: rosters.map_err(to_message),
+        }
     }
 }
 

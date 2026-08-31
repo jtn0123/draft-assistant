@@ -6,7 +6,9 @@ mod common;
 
 use draft_assistant_lib::engine::LoadedLeague;
 use draft_assistant_lib::poll::{season_tick, SeasonPollMemory, SeasonTick};
+use draft_assistant_lib::season_api::{Matchup, Roster};
 use draft_assistant_lib::season_engine::{LoadedSeason, SeasonLoader};
+use draft_assistant_lib::season_sources::LiveFetch;
 use draft_assistant_lib::sleeper::League;
 use std::cell::Cell;
 use tokio::sync::Mutex;
@@ -15,9 +17,12 @@ use tokio::sync::Mutex;
 /// screen can repeat it back verbatim.
 const OUTAGE: &str = "matchups: request failed; scores: request failed; rosters: request failed";
 
-/// A season loader whose live refresh fails whenever `failing` is set.
+/// A season loader whose live refresh fails whenever `failing` is set, and
+/// which otherwise hands back the fixture's own rows unchanged.
 struct Flaky {
     failing: Cell<bool>,
+    matchups: Vec<Matchup>,
+    rosters: Vec<Roster>,
 }
 
 impl SeasonLoader for Flaky {
@@ -30,17 +35,19 @@ impl SeasonLoader for Flaky {
         Err("the poller never loads a season".to_string())
     }
 
-    async fn refresh_live(
-        &self,
-        season: &mut LoadedSeason,
-        _league_id: &str,
-    ) -> Result<(), String> {
+    async fn fetch_live(&self, _league_id: &str, _season: u32, _week: u32) -> LiveFetch {
         if self.failing.get() {
-            return Err(OUTAGE.to_string());
+            return LiveFetch {
+                matchups: Err("request failed".into()),
+                scores: Err("request failed".into()),
+                rosters: Err("request failed".into()),
+            };
         }
-        // A real refresh moves the staleness clock and the live totals.
-        season.fetched_at += 30;
-        Ok(())
+        LiveFetch {
+            matchups: Ok(self.matchups.clone()),
+            scores: Ok(Vec::new()),
+            rosters: Ok(self.rosters.clone()),
+        }
     }
 }
 
@@ -59,6 +66,8 @@ impl Harness {
         Self {
             engine: Flaky {
                 failing: Cell::new(false),
+                matchups: season.matchups.clone(),
+                rosters: season.rosters.clone(),
             },
             loaded: Mutex::new(Some(loaded)),
             season: Mutex::new(Some(season)),
@@ -187,5 +196,59 @@ async fn scores_that_have_not_moved_do_not_push_a_view() {
             .expect("health is reported even when nothing moved")
             .consecutive_failures,
         0
+    );
+}
+
+/// A loader that reports whether the season mutex was free while its three
+/// live requests were in flight.
+struct Watcher {
+    season: std::sync::Arc<Mutex<Option<LoadedSeason>>>,
+    free_during_fetch: Cell<Option<bool>>,
+}
+
+impl SeasonLoader for Watcher {
+    async fn load_season(
+        &self,
+        _league: &League,
+        _my_user_id: Option<&str>,
+        _force: bool,
+    ) -> Result<LoadedSeason, String> {
+        Err("the poller never loads a season".to_string())
+    }
+
+    async fn fetch_live(&self, _league_id: &str, _season: u32, _week: u32) -> LiveFetch {
+        self.free_during_fetch
+            .set(Some(self.season.try_lock().is_ok()));
+        LiveFetch {
+            matchups: Ok(Vec::new()),
+            scores: Ok(Vec::new()),
+            rosters: Ok(Vec::new()),
+        }
+    }
+}
+
+/// The whole point of splitting fetch from apply. Three requests at an
+/// eight-second timeout with retries behind them is tens of seconds, and the
+/// season mutex used to be held for every bit of it — so `get_season`,
+/// `load_season` and every chat question waited, and the next tick queued up
+/// behind this one.
+#[tokio::test]
+async fn the_live_requests_run_with_the_season_mutex_free() {
+    let (loaded, season, config) = common::fixture();
+    let season = std::sync::Arc::new(Mutex::new(Some(season)));
+    let engine = Watcher {
+        season: season.clone(),
+        free_during_fetch: Cell::new(None),
+    };
+    let loaded = Mutex::new(Some(loaded));
+    let config = Mutex::new(config);
+    let mut memory = SeasonPollMemory::new(20);
+
+    season_tick(&engine, &loaded, &season, &config, &mut memory).await;
+
+    assert_eq!(
+        engine.free_during_fetch.get(),
+        Some(true),
+        "the season mutex was held across the network requests"
     );
 }

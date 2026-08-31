@@ -237,13 +237,24 @@ pub async fn season_tick<E: SeasonLoader>(
         return SeasonTick::default();
     };
 
+    let watching = {
+        let season = season_ref.lock().await;
+        let Some(season) = season.as_ref() else {
+            return SeasonTick::default();
+        };
+        (season.season, season.week)
+    };
+    // The three requests run with nothing locked. Each has an eight-second
+    // timeout and retries, so holding `season` across them stalled every
+    // command that needs it and queued the next tick behind this one.
+    let fetched = engine.fetch_live(&league_id, watching.0, watching.1).await;
     let mut errors = Vec::new();
     {
         let mut season = season_ref.lock().await;
         let Some(season) = season.as_mut() else {
             return SeasonTick::default();
         };
-        if let Err(error) = engine.refresh_live(season, &league_id).await {
+        if let Err(error) = fetched.apply(season, now_secs()) {
             errors.push(error);
         }
     }
