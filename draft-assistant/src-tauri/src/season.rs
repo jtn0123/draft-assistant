@@ -16,7 +16,7 @@
 //! touchdown does not trigger a thousand lineup solves.
 
 use crate::engine::{now_secs, LoadedLeague};
-use crate::season_activity::ActivityItem;
+use crate::season_activity::{self, ActivityItem};
 use crate::season_api::Roster;
 use crate::season_deals::TradeDone;
 use crate::season_engine::LoadedSeason;
@@ -79,16 +79,22 @@ pub struct SeasonView {
 
 /// The parts of a season view that cost real time to compute and cannot change
 /// from live scoring: rest-of-season projections and playoff odds, waiver
-/// targets, and trade ideas.
+/// targets, trade ideas, and the three feed sections.
 ///
 /// Rebuilding these means roughly 1,600 lineup solves plus a playoff
-/// simulation plus a trade search — none of which a touchdown can affect. The
-/// live poller computes them once and hands them back on every later tick.
+/// simulation plus a trade search, and a diff over forty weeks of history for
+/// twelve teams — none of which a touchdown can affect. The live poller
+/// computes them once and hands them back on every later tick.
 #[derive(Debug, Clone)]
 pub struct SeasonAnalysis {
     pub standings: Vec<StandingsRow>,
     pub waivers: Vec<WaiverTarget>,
     pub trades: Vec<TradeIdea>,
+    /// The transaction half of the activity feed. The live-facing half — the
+    /// empty starter slots — is recomputed every tick and is not in here.
+    pub activity: Vec<ActivityItem>,
+    pub recent_trades: Vec<TradeDone>,
+    pub trends: TrendsView,
     /// Epoch seconds this analysis was computed. Carried with the analysis so
     /// a view built from it reports the age of the ideas it is showing rather
     /// than the moment it happened to be re-serialised.
@@ -102,6 +108,16 @@ impl SeasonAnalysis {
             standings: view.standings.clone(),
             waivers: view.waivers.clone(),
             trades: view.trades.clone(),
+            // The lineup gaps at the head of the feed came off rosters that
+            // the next tick will have refreshed, so they are left behind.
+            activity: view
+                .activity
+                .iter()
+                .filter(|item| item.kind != season_activity::LINEUP_KIND)
+                .cloned()
+                .collect(),
+            recent_trades: view.recent_trades.clone(),
+            trends: view.trends.clone(),
             as_of: view.analysis_as_of_secs,
         }
     }
@@ -233,7 +249,23 @@ pub fn build_season_view_cached(
     let roster = roster_rows(season, &lookup, weekly, week, my_roster, &head_to_head);
 
     // ---------- feeds ----------
-    let activity = season_view_feeds::activity(season, rules, &lookup, &team_name);
+    // All three read only the transaction log and the league history, both set
+    // once at load, so a cached analysis carries them. The empty-starter-slot
+    // items at the head of the feed are the exception: they come off rosters
+    // the live poll refreshes, so they are gathered fresh every time.
+    let mut activity = season_view_feeds::lineup_gaps(season, rules, &team_name);
+    activity.extend(match cached {
+        Some(analysis) => analysis.activity.clone(),
+        None => season_view_feeds::transaction_activity(season, &lookup, &team_name),
+    });
+    let recent_trades = match cached {
+        Some(analysis) => analysis.recent_trades.clone(),
+        None => season_view_feeds::recent_trades(season, &lookup, my_roster_id, &team_name),
+    };
+    let trends = match cached {
+        Some(analysis) => analysis.trends.clone(),
+        None => season_view_feeds::trends(season, &lookup, my_roster_id, &team_name),
+    };
 
     let win_odds =
         season_odds::win_probability(head_to_head.my_projected, head_to_head.opp_projected);
@@ -275,10 +307,10 @@ pub fn build_season_view_cached(
         live,
         roster,
         trades,
-        recent_trades: season_view_feeds::recent_trades(season, &lookup, my_roster_id, &team_name),
+        recent_trades,
         activity,
         last_season: season.last_season.clone(),
-        trends: season_view_feeds::trends(season, &lookup, my_roster_id, &team_name),
+        trends,
         team_avatars,
         data_health: SeasonHealth {
             fetched_at: season.fetched_at,

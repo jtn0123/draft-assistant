@@ -16,22 +16,32 @@ const ACTIVITY_LIMIT: usize = 12;
 /// How many weeks of history the trends panel reaches back over.
 const TRENDS_LIMIT: usize = 40;
 
-/// Recent transactions, with any lineup gaps noticed right now pinned on top.
-pub fn activity(
+/// The transaction half of the activity feed. Transactions only arrive with a
+/// full load, so this is what the analysis cache carries between ticks.
+pub fn transaction_activity(
     season: &LoadedSeason,
-    rules: &RosterRules,
     lookup: &Lookup,
     team_name: &impl Fn(u32) -> String,
 ) -> Vec<ActivityItem> {
-    let mut activity = season_activity::activity(
+    season_activity::activity(
         &season.transactions,
         team_name,
         &|id| lookup.name(id),
         ACTIVITY_LIMIT,
-    );
-    let gaps = season_activity::lineup_gaps(&season.rosters, rules, team_name, season.fetched_at);
-    activity.splice(0..0, gaps);
-    activity
+    )
+}
+
+/// The empty starting slots there are right now, which lead the feed.
+///
+/// Deliberately not cached: rosters are refreshed on every live tick, and a
+/// frozen "you have an empty slot" warning is worse than none at all. It is a
+/// dozen rosters, so recomputing it costs nothing.
+pub fn lineup_gaps(
+    season: &LoadedSeason,
+    rules: &RosterRules,
+    team_name: &impl Fn(u32) -> String,
+) -> Vec<ActivityItem> {
+    season_activity::lineup_gaps(&season.rosters, rules, team_name, season.fetched_at)
 }
 
 /// Completed trades this week and last, both sides named.

@@ -129,6 +129,11 @@ fn describe(
     })
 }
 
+/// The `kind` every lineup-gap item carries. Named here because the analysis
+/// cache has to tell these apart from the transaction items: gaps are read off
+/// live rosters and must be recomputed every tick, transactions are not.
+pub const LINEUP_KIND: &str = "Lineup";
+
 /// One "Lineup" activity item per roster that has left a starting slot empty
 /// this week. Sleeper writes "0" (or nothing) into a starter slot nobody
 /// fills; starters are in the league's slot order with the bench excluded.
@@ -170,7 +175,7 @@ pub fn lineup_gaps(
                 )
             };
             Some(ActivityItem {
-                kind: "Lineup".to_string(),
+                kind: LINEUP_KIND.to_string(),
                 text,
                 created,
                 roster_id: Some(roster.roster_id),

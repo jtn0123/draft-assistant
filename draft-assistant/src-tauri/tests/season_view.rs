@@ -213,6 +213,9 @@ fn a_cached_analysis_is_reused_verbatim_and_the_live_slice_is_not() {
         standings: Vec::new(),
         waivers: Vec::new(),
         trades: Vec::new(),
+        activity: Vec::new(),
+        recent_trades: Vec::new(),
+        trends: Default::default(),
         as_of: 1_700_000_000,
     };
     let cheap = build_season_view_cached(
@@ -224,6 +227,11 @@ fn a_cached_analysis_is_reused_verbatim_and_the_live_slice_is_not() {
     assert!(cheap.standings.is_empty(), "standings were recomputed");
     assert!(cheap.waivers.is_empty(), "waivers were recomputed");
     assert!(cheap.trades.is_empty(), "trades were recomputed");
+    assert!(
+        cheap.recent_trades.is_empty(),
+        "completed trades were recomputed"
+    );
+    assert!(cheap.trends.series.is_empty(), "trends were recomputed");
 
     // Everything outside the analysis is still built fresh.
     assert_eq!(cheap.week, full.week);
@@ -245,6 +253,65 @@ fn a_cached_analysis_is_reused_verbatim_and_the_live_slice_is_not() {
     assert_eq!(reused.standings.len(), full.standings.len());
     assert_eq!(reused.waivers.len(), full.waivers.len());
     assert_eq!(reused.trades.len(), full.trades.len());
+    assert_eq!(reused.activity.len(), full.activity.len());
+    assert_eq!(reused.recent_trades.len(), full.recent_trades.len());
+    assert_eq!(reused.trends.series.len(), full.trends.series.len());
+}
+
+#[test]
+fn the_feeds_come_from_the_cache_but_the_empty_slots_do_not() {
+    use draft_assistant_lib::season::{build_season_view_cached, SeasonAnalysis};
+
+    let (loaded, season, config) = common::fixture();
+    let full = build_season_view_cached(&loaded, &season, config.my_user_id.as_deref(), None);
+    // The fixture's feed leads with a lineup gap, then transactions.
+    assert_eq!(full.activity[0].kind, "Lineup");
+    assert!(full.activity.len() > 1, "the fixture has transaction items");
+    assert!(!full.recent_trades.is_empty());
+    assert!(!full.trends.series.is_empty());
+
+    // Mark every cached feed so anything recomputed is obvious.
+    let mut planted = SeasonAnalysis::of(&full);
+    assert!(
+        planted.activity.iter().all(|i| i.kind != "Lineup"),
+        "gaps are read off live rosters, so they must not be carried"
+    );
+    for item in &mut planted.activity {
+        item.text = "carried over".to_string();
+    }
+    for trade in &mut planted.recent_trades {
+        trade.transaction_id = "carried over".to_string();
+    }
+    planted.trends.series[0].name = "carried over".to_string();
+
+    let reused = build_season_view_cached(
+        &loaded,
+        &season,
+        config.my_user_id.as_deref(),
+        Some(&planted),
+    );
+
+    // The transaction half of the feed, the completed trades and the whole
+    // trends panel are the cached copies — none of them was rebuilt.
+    assert!(
+        reused.activity[1..]
+            .iter()
+            .all(|i| i.text == "carried over"),
+        "the transaction feed was recomputed"
+    );
+    assert!(
+        reused
+            .recent_trades
+            .iter()
+            .all(|t| t.transaction_id == "carried over"),
+        "completed trades were recomputed"
+    );
+    assert_eq!(reused.trends.series[0].name, "carried over");
+
+    // The empty-starter-slot items still describe the rosters as they are now.
+    assert_eq!(reused.activity[0].kind, "Lineup");
+    assert_eq!(reused.activity[0].text, full.activity[0].text);
+    assert_eq!(reused.activity.len(), full.activity.len());
 }
 
 #[test]
