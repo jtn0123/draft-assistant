@@ -6,7 +6,7 @@
 // retrying — can be exercised on its own rather than only through the whole
 // rendered app.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { SeasonView } from "./season-types";
 
@@ -35,6 +35,19 @@ export function useSeasonSession(
   const [season, setSeason] = useState<SeasonView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Held in a ref so a caller that hands us a fresh closure on every render
+  // cannot, by itself, re-run the load or restart the poller.
+  const onErrorRef = useRef(onError);
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
+
+  // Whether the one-off load has already been kicked off. A ref rather than a
+  // read of `season`, because every pushed live update replaces `season` — and
+  // if that were an input to the effects below, each update would tear the
+  // whole lifecycle down and build it again.
+  const loadedRef = useRef(false);
+
   // Live updates are pushed from the backend whenever the score moves.
   useEffect(() => {
     const un = api.onSeasonUpdated(setSeason);
@@ -43,34 +56,48 @@ export function useSeasonSession(
     };
   }, []);
 
+  // The first load: once, the first time the screen is showing and a league
+  // is ready.
+  useEffect(() => {
+    if (!active || !ready || loadedRef.current) return undefined;
+    loadedRef.current = true;
+    let live = true;
+    api
+      .loadSeason(false)
+      .then(setSeason)
+      .catch((e) => {
+        // A failed first load must not lock the screen out of ever loading;
+        // opening it again is allowed to try once more.
+        loadedRef.current = false;
+        if (!live) return;
+        setError(String(e));
+        onErrorRef.current(String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [active, ready]);
+
+  // Polling runs for exactly as long as the screen is showing. Nothing else
+  // is allowed to restart it, so the backend's own thirty-second timer gets to
+  // keep its schedule instead of being cancelled and recreated on every tick.
   useEffect(() => {
     if (!active || !ready) return undefined;
-    let cancelled = false;
-    if (season === null) {
-      api
-        .loadSeason(false)
-        .then((next) => {
-          if (!cancelled) setSeason(next);
-        })
-        .catch((e) => {
-          if (cancelled) return;
-          setError(String(e));
-          onError(String(e));
-        });
-    }
     api.startSeasonPolling(LIVE_INTERVAL).catch(() => undefined);
     return () => {
-      cancelled = true;
       // Stop polling as soon as the screen is not showing: nothing renders it.
       api.stopSeasonPolling().catch(() => undefined);
     };
-  }, [active, ready, season, onError]);
+  }, [active, ready]);
 
   const retry = useCallback(() => {
     setError(null);
     api
       .loadSeason(true)
-      .then(setSeason)
+      .then((next) => {
+        loadedRef.current = true;
+        setSeason(next);
+      })
       .catch((e) => setError(String(e)));
   }, []);
 

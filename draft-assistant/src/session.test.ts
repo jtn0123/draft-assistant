@@ -81,6 +81,26 @@ describe("useSeasonSession", () => {
     await waitFor(() => expect(result.current.season?.week).toBe(3));
   });
 
+  it("keeps polling through a pushed update instead of restarting it", async () => {
+    mocks.loadSeason.mockResolvedValue(view(2));
+    const { result, rerender } = renderHook(
+      // A fresh callback on every render, the way an inline arrow in a
+      // component would be: neither it nor the update may restart the poller.
+      () => useSeasonSession(true, true, () => undefined),
+    );
+    await waitFor(() => expect(result.current.season?.week).toBe(2));
+    expect(mocks.startSeasonPolling).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => expect(pushUpdate).not.toBeNull());
+    act(() => pushUpdate?.(view(3)));
+    await waitFor(() => expect(result.current.season?.week).toBe(3));
+    rerender();
+
+    expect(mocks.startSeasonPolling).toHaveBeenCalledTimes(1);
+    expect(mocks.stopSeasonPolling).not.toHaveBeenCalled();
+    expect(mocks.loadSeason).toHaveBeenCalledTimes(1);
+  });
+
   it("reports a failure once, to both the caller and the toast", async () => {
     mocks.loadSeason.mockRejectedValue(new Error("Sleeper timed out"));
     const onError = vi.fn();
