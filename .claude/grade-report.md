@@ -26,9 +26,35 @@ that survived every prior round.
 | I | Developer Experience & Tooling | B+ | 4 |
 | **Overall** | | **B+** | **47** |
 
-**Top 5 highest-leverage fixes:** C1, B1, B2, D1, D2
+**Top 5 highest-leverage fixes:** C1, B1, B2, D1, D2 — all done.
 
-Baselines measured this run: Rust 74.77% lines / 212 tests; frontend 88.97%
+### Executed 2026-08-30 evening — 18 of 47 items
+
+The user asked for the top 15; 18 landed (D3, A3 and I4 fell out of their
+neighbours). One commit each, `5a7245e`..`81d1327`. Done: **A2, A3, B1, B2, B3,
+B4, C1, C2, D1, D2, D3, D4, G1, G2, G3, I1, I3, I4.**
+
+Three findings were sharpened by the work rather than merely applied:
+
+- **B2 was proved, not assumed.** A test with 120 mediocre free agents ranked
+  ahead of a 25-pt/wk streamer fails on the old code (the streamer is invisible)
+  and passes after. The bug was real.
+- **G1's premise was half wrong, and the agent caught it.** The activity feed
+  also computes empty-lineup-slot warnings from `rosters`, which *do* refresh
+  live. Caching the whole feed would have frozen "your RB slot is empty" for ten
+  minutes. Transactions are cached; the empty-slot check still runs every tick.
+- **I1 found a test-suite blind spot.** Type-aware lint revealed every mocked
+  `askClaude` reply in `Chat.test.tsx` was missing four fields the backend
+  actually sends — a shape no coverage percentage would have flagged.
+
+Post-execution baselines: Rust **76.56%** lines / **245** tests (floor raised
+68 → 74); frontend **89.42%** lines / **173** tests, now genuinely gated;
+entry CSS 35 → 15 kB; pre-commit runs tests in ~11s. `npm run verify` green.
+
+**Remaining open (29):** A1, A4, all of E and F, G4-G8, all of H, I2, and the
+D items not listed above. E, F and H are untouched by this wave.
+
+Baselines at audit time: Rust 74.77% lines / 212 tests; frontend 88.97%
 lines / 160 tests; `npm audit` and `cargo audit` clean; `npm run verify` green.
 
 ---
@@ -49,14 +75,14 @@ terminal error from a retryable one without string-matching.
 - **Effort:** M
 - **Grade lift:** B+ → A− (closes the last layering inversion)
 
-#### A2 — Stringly-typed errors everywhere: `Result<_, String>` is the only error type in the crate
+#### ~~A2~~ ✓ done 2026-08-30 — Stringly-typed errors everywhere: `Result<_, String>` is the only error type in the crate
 - **Where:** 74 occurrences across 15 files; the retryable bit is computed and then discarded at `sleeper.rs:288`
 - **What's wrong:** Callers cannot distinguish "league not found" (terminal) from "HTTP 503" (retryable) without matching message text. The transport layer already knows which is which and flattens it away.
 - **Fix:** Introduce a small `SleeperError { NotFound, Http(StatusCode), Transport, Decode }` with `impl Display`; the Tauri boundary keeps serialising to a string. Convert the transport layer first; let the rest migrate opportunistically.
 - **Effort:** M
 - **Grade lift:** B+ → A− (retry/UX decisions become principled instead of textual)
 
-#### A3 — Two different position resolvers can disagree about the same roster
+#### ~~A3~~ ✓ done 2026-08-30 — Two different position resolvers can disagree about the same roster
 - **Where:** `src-tauri/src/season_history.rs:62` (uses `player_meta` directly) vs `season_view_standings.rs:24` (uses `Lookup::position`, which prefers the board)
 - **What's wrong:** When board and metadata disagree (board carries the league-scored position), Trends "strength" and the standings projection are computed from different lineups for the same team.
 - **Fix:** Pass a `Lookup` into `take_snapshot` so both paths resolve positions identically.
@@ -82,28 +108,28 @@ command stalls both pollers, a league switch mid-load can cross-contaminate
 files, config saves can fail silently, and the waiver search structurally
 misses the players waivers exist for.
 
-#### B1 — Asking the chat a question stalls both pollers
+#### ~~B1~~ ✓ done 2026-08-30 — Asking the chat a question stalls both pollers
 - **Where:** `src-tauri/src/commands_chat.rs:154-171`
 - **What's wrong:** `ask_claude` runs the full `build_season_view` (4,000-iteration Monte Carlo, ~1,600 lineup solves, the trade search) synchronously on the async runtime thread while holding all three mutexes. Every question freezes the 30s season poller and the 3s draft poller until it finishes.
 - **Fix:** Reuse the poller's cached analysis (store the last `SeasonView` or `SeasonAnalysis` in `AppState` and hand it to `chat_context::season_context`); at minimum clone the three inputs, drop the guards, and run the build inside `tokio::task::spawn_blocking`.
 - **Effort:** M
 - **Grade lift:** B → B+ (removes the biggest interactive stall in the app)
 
-#### B2 — The waiver search never sees the hot streamer it exists to find
+#### ~~B2~~ ✓ done 2026-08-30 — The waiver search never sees the hot streamer it exists to find
 - **Where:** `src-tauri/src/season_view_market.rs:31-41`, `season_moves.rs:101`
 - **What's wrong:** The free-agent pool is materialised in board order — sorted by *season* rank — then truncated to `CANDIDATE_POOL` before weekly evaluation. A free agent with high weekly points but a low season rank (the breakout/streamer case) is never evaluated. The other 540+ `FreeAgent` structs are allocated and thrown away.
 - **Fix:** Sort (or `select_nth_unstable_by`) free agents on `weekly_points` before truncating, and truncate in `season_view_market` so the discarded ones are never allocated. Add a test: a low-season-rank, high-week player must appear as a target.
 - **Effort:** S
 - **Grade lift:** B → B+ (a user-visible product-correctness fix)
 
-#### B3 — League switch during a season load cross-contaminates state
+#### ~~B3~~ ✓ done 2026-08-30 — League switch during a season load cross-contaminates state
 - **Where:** `src-tauri/src/commands_season.rs:20-35`; history write at `season_history.rs:147`
 - **What's wrong:** `load_season` clones the league, drops the lock, awaits a multi-second network load, then re-locks and records history against whatever `loaded` holds *now*. If `add_league` ran in the gap, league A's roster snapshot is written into league B's history file and `state.season` holds league A's data under league B.
 - **Fix:** Re-check `loaded.league.league_id` after the await and return `Err("league changed during load")`, or add a generation counter like the pollers already use.
 - **Effort:** S
 - **Grade lift:** B → B (removes a data-corruption path)
 
-#### B4 — `save_config` discards every failure; the league list can silently vanish
+#### ~~B4~~ ✓ done 2026-08-30 — `save_config` discards every failure; the league list can silently vanish
 - **Where:** `src-tauri/src/engine.rs:224-243`; callers at `commands_draft.rs:50,70`, `commands_chat.rs:70`, `engine.rs:268`
 - **What's wrong:** `fs::write` errors return early unreported, `rename(..).ok()` swallows the result. Four commands report success to the UI when the config never reached disk — the user's leagues disappear on next launch with no error.
 - **Fix:** Return `Result<(), String>` and propagate at all four call sites (`write_cache_checked` at `engine.rs:177` is the in-repo precedent).
@@ -142,14 +168,14 @@ a systematic accessibility gap: ARIA is applied but incomplete (no focus trap
 on the confirm dialog, no live announcement of the app's most important
 moment, load-bearing info in hover-only tooltips), and nothing lints for it.
 
-#### C1 — The season poll is torn down and restarted on every incoming update
+#### ~~C1~~ ✓ done 2026-08-30 — The season poll is torn down and restarted on every incoming update
 - **Where:** `src/session.ts:47-67`
 - **What's wrong:** `season` is in the effect's dependency array and the cleanup calls `api.stopSeasonPolling()`. Every push from `onSeasonUpdated` changes `season`, so the backend's 30s timer is cancelled and recreated on each tick — an unbounded stop/start race in which the interval never runs its own schedule.
 - **Fix:** Split into two effects: one keyed on `[active, ready]` that owns start/stop polling; one for the initial load guarded by a `useRef` instead of reading `season` from deps.
 - **Effort:** S
 - **Grade lift:** B → B+ (fixes a live-polling correctness bug)
 
-#### C2 — The Live badge freezes instead of degrading when the stream dies
+#### ~~C2~~ ✓ done 2026-08-30 — The Live badge freezes instead of degrading when the stream dies
 - **Where:** `src/components/SeasonScreen.tsx:64-88`; swallowed rejection at `session.ts:61,65`
 - **What's wrong:** The badge computes its age during render, and the screen only re-renders when data arrives — so if the poll dies, the badge reads "Live · 8s ago" forever. When `sources` is absent it renders `pill-live` with no staleness check. `startSeasonPolling` rejections are `.catch(() => undefined)`-ed, so a poller that never starts produces a frozen screen with zero signal.
 - **Fix:** A 10s heartbeat interval inside `LiveBadge` so age recomputes without data; apply the staleness threshold in the `sources === undefined` branch too; route the rejections through `onError`.
@@ -203,28 +229,28 @@ backend module is at 0%, no test anywhere drives the real Tauri app, and
 today's lazy-chunk split added a failure mode (rejected `import()`) with no
 error boundary to catch it.
 
-#### D1 — [FE] The frontend coverage gate is dead configuration
+#### ~~D1~~ ✓ done 2026-08-30 — [FE] The frontend coverage gate is dead configuration
 - **Where:** `vitest.config.ts:12` (thresholds declared) vs `package.json:12` (`vitest run`, no `--coverage`) and `.github/workflows/verify.yml:41`
 - **What's wrong:** The 80/80/75/70 thresholds only fire if a human types `--coverage` by hand. Rust is gated in CI; the frontend is not. A commit dropping `App.tsx` to 40% passes green.
 - **Fix:** Add `"test:coverage": "vitest run --coverage"`; run it in CI's verify step; keep bare `vitest run` for the fast local loop.
 - **Effort:** S
 - **Grade lift:** B → B+ (turns claimed gates into real ones)
 
-#### D2 — [both] The season poller has no health channel; failures are silently eaten
+#### ~~D2~~ ✓ done 2026-08-30 — [both] The season poller has no health channel; failures are silently eaten
 - **Where:** `src-tauri/src/commands_season.rs:124` (`.is_ok()` discards the error); `src/session.ts:61,65` (`.catch(() => undefined)`)
 - **What's wrong:** The draft poller aggregates errors and emits `poll-health`; the season poller emits nothing on failure. Sleeper can be down all Sunday and the UI shows a stale scoreboard with no signal. (Pairs with C2 — this is the backend half.)
 - **Fix:** Collect the error, call `poll::record_poll_outcome`, emit a `season-poll-health` event, render it in `SeasonScreen`; replace both swallowed rejections with `setError`.
 - **Effort:** M
 - **Grade lift:** B → B+ (reliability signal for the season half of the app)
 
-#### D3 — [BE] `commands_season.rs` is 0.00% covered — the most stateful backend file
+#### ~~D3~~ ✓ done 2026-08-30 — [BE] `commands_season.rs` is 0.00% covered — the most stateful backend file
 - **Where:** `src-tauri/src/commands_season.rs` (190/190 regions missed); no integration test references it
 - **What's wrong:** The 30s poller loop, `LiveEmitGate`/`AnalysisCache` wiring, and the generation guard live entirely outside test reach because the loop body is welded to `tauri::async_runtime::spawn`.
 - **Fix:** Extract the loop body into `async fn season_tick(...) -> TickOutcome` in `poll.rs` (the `DraftPollMemory` precedent) and unit-test it against `mock_league.rs`. Combines naturally with D2.
 - **Effort:** M
 - **Grade lift:** B → B+ (the draft poller got this treatment; the season poller never did)
 
-#### D4 — [FE] No error boundary — a failed lazy chunk blanks the whole window
+#### ~~D4~~ ✓ done 2026-08-30 — [FE] No error boundary — a failed lazy chunk blanks the whole window
 - **Where:** `src/App.tsx:395,399,415` (Suspense wrappers); zero `ErrorBoundary`/`componentDidCatch` hits in the tree
 - **What's wrong:** Suspense handles the pending promise, not a rejected one. A corrupt chunk or torn install unmounts the entire tree to a blank window — a failure mode today's split made non-hypothetical.
 - **Fix:** A ~20-line `ErrorBoundary` class around each Suspense with a "Reload" button; test by throwing from a mocked lazy import.
@@ -321,21 +347,21 @@ incomplete so three sections still rebuild per tick, the board emit deep-clones
 thread via the network path, and the frontend re-renders the draft screen twice
 a second from duplicate clocks.
 
-#### G1 — Three sections rebuild every 30s from inputs that only change at load
+#### ~~G1~~ ✓ done 2026-08-30 — Three sections rebuild every 30s from inputs that only change at load
 - **Where:** `src-tauri/src/season.rs:277-281`; `refresh_live` writes only matchups/scores/rosters (`season_engine.rs:389-399`)
 - **What's wrong:** `activity`, `recent_trades`, and `trends` (a 40-snapshot × 12-team diff) depend solely on `transactions`/`history`, set once at load — yet run on every tick. This is the exact waste `SeasonAnalysis` exists to eliminate; the fields were never added.
 - **Fix:** Add all three to `SeasonAnalysis` and `::of`; read from `cached` in the same `match` pattern as lines 173/199/207.
 - **Effort:** S
 - **Grade lift:** B → B+ (finishes the analysis cache's own design)
 
-#### G2 — All ten stylesheets load eagerly, blunting today's code-split
+#### ~~G2~~ ✓ done 2026-08-30 — All ten stylesheets load eagerly, blunting today's code-split
 - **Where:** `src/App.tsx:22-31`; ~1,400 lines (~60% of CSS) belong to lazy screens
 - **What's wrong:** JS is split but `board.css`, `season*.css`, `trends.css`, `live.css`, `chat.css` still ship in the entry chunk and parse before first paint.
 - **Fix:** Move each sheet's import into its owning lazy component; Vite emits per-chunk CSS automatically. Keep `theme/App/components/zoom` eager.
 - **Effort:** S
 - **Grade lift:** B → B+ (completes the lazy-load story)
 
-#### G3 — The board emit deep-clones ~700 players and rescans per position every 3s
+#### ~~G3~~ ✓ done 2026-08-30 — The board emit deep-clones ~700 players and rescans per position every 3s
 - **Where:** `src-tauri/src/view.rs:271-280` (clone), `:282-304` (per-position tier scan ≈ 3,600 iterations), `:308-310` (per-pick String building to inspect 6 picks) — all under lock in the poll tick
 - **What's wrong:** Four owned strings per player per tick, then a full-vector walk per draftable position, then JSON serialisation of it all.
 - **Fix:** One-pass tier map (`HashMap<&str,(u32,u32)>`); slice the last 6 picks; serialise a borrowed view struct (or emit top-N with a tail command).
@@ -424,7 +450,7 @@ gaps: the lint config isn't type-aware (so the promise bugs in C1/C2 were
 invisible to it), nothing lints accessibility, the pre-commit hook runs zero
 tests, and the Rust coverage floor has 6.8 points of dead slack.
 
-#### I1 — ESLint isn't type-aware; the season-poll bugs were invisible to it
+#### ~~I1~~ ✓ done 2026-08-30 — ESLint isn't type-aware; the season-poll bugs were invisible to it
 - **Where:** `eslint.config.js:22-26` (`recommended`, not `recommendedTypeChecked`)
 - **What's wrong:** No `no-floating-promises`/`no-misused-promises` in an app whose whole data layer is async IPC; it would have flagged `session.ts:61,65` directly.
 - **Fix:** Switch to `recommendedTypeChecked` with `projectService: true`; fix the handful of real findings the first run surfaces.
@@ -438,14 +464,14 @@ tests, and the Rust coverage floor has 6.8 points of dead slack.
 - **Effort:** M
 - **Grade lift:** B+ → A− (stops the a11y gap from regrowing)
 
-#### I3 — The pre-commit hook runs zero tests and coverage never runs locally
+#### ~~I3~~ ✓ done 2026-08-30 — The pre-commit hook runs zero tests and coverage never runs locally
 - **Where:** `.githooks/pre-commit` (five lint/type steps); `package.json:23` (`verify:fast`, same set); `test:frontend` has no `--coverage`
 - **What's wrong:** The fastest behavioral signal is a full `verify` (with a vite build and full cargo test) or a CI round trip — no middle rung; no developer ever sees a coverage number locally.
 - **Fix:** Add `verify:mid` = `verify:fast` + `test:frontend` (~10s measured) and make it the hook; keep cargo tests in full verify.
 - **Effort:** S
 - **Grade lift:** B+ → B+ (a 10-second behavioral gate before every commit)
 
-#### I4 — The Rust coverage floor can't catch a regression, and the tool install swallows failures
+#### ~~I4~~ ✓ done 2026-08-30 — The Rust coverage floor can't catch a regression, and the tool install swallows failures
 - **Where:** `.github/workflows/verify.yml:59-60` — `--fail-under-lines 68` vs measured 74.77%; `cargo install cargo-llvm-cov --locked || true`
 - **What's wrong:** 6.8 points of slack — enough to delete every test in `season_calls.rs` and pass; the `|| true` turns install failures into a confusing "command not found" a line later.
 - **Fix:** Raise to `--fail-under-lines 74`; pin the cargo-llvm-cov version; drop `|| true`.
