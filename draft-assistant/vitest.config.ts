@@ -10,7 +10,8 @@ export default defineConfig({
     css: true,
     coverage: {
       provider: "v8",
-      // The floor, not the goal — raise these as coverage climbs.
+      // The floor, not the goal — raise these as coverage climbs. Enforced by
+      // `npm run test:coverage`, which `npm run verify` (and therefore CI) runs.
       thresholds: { lines: 80, statements: 80, functions: 75, branches: 70 },
     },
   },
