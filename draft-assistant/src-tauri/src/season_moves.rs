@@ -57,19 +57,42 @@ fn lineup_total(rules: &RosterRules, candidates: &[Candidate]) -> f64 {
         .sum()
 }
 
-/// Marginal value of adding one player to a roster's best lineup, given that
-/// roster's baseline total. The caller passes the baseline because it is the
-/// same for every candidate considered against the same roster — recomputing
-/// it per candidate doubled the number of lineup solves.
-fn marginal_gain(
-    rules: &RosterRules,
-    base: &[Candidate],
+/// A roster set up for repeated what-if tests: its candidates plus one spare
+/// slot at the end, and the total its best lineup puts up as it stands.
+///
+/// The baseline is computed once because it is the same for every candidate
+/// tested against this roster, and the roster itself is copied once, when the
+/// pool is built. Rebuilding it per candidate — a fresh `Vec<Candidate>`, two
+/// `String`s apiece — cost a full roster clone for every (free agent, roster)
+/// pair, which at sixty agents against a twelve-team league is some seven
+/// hundred of them per rebuild. `season_trades` already worked this way; this
+/// call site was simply never converted.
+struct Pool {
+    /// The roster, with a spare slot at the end that each candidate in turn is
+    /// written into. Its contents are always overwritten before being read.
+    scratch: Vec<Candidate>,
     baseline: f64,
-    addition: &Candidate,
-) -> f64 {
-    let mut with = base.to_vec();
-    with.push(addition.clone());
-    (lineup_total(rules, &with) - baseline).max(0.0)
+}
+
+impl Pool {
+    fn new(rules: &RosterRules, candidates: Vec<Candidate>) -> Self {
+        let baseline = lineup_total(rules, &candidates);
+        let mut scratch = candidates;
+        scratch.push(Candidate {
+            player_id: String::new(),
+            position: String::new(),
+            points: 0.0,
+        });
+        Self { scratch, baseline }
+    }
+
+    /// How much this roster's best lineup improves with `addition` in it.
+    fn gain_from(&mut self, rules: &RosterRules, addition: &Candidate) -> f64 {
+        if let Some(slot) = self.scratch.last_mut() {
+            slot.clone_from(addition);
+        }
+        (lineup_total(rules, &self.scratch) - self.baseline).max(0.0)
+    }
 }
 
 /// Rank free agents by how much they would improve my starting lineup.
@@ -86,50 +109,47 @@ pub fn waiver_targets(
     rival_candidates: &impl Fn(&[String]) -> Vec<Candidate>,
     budget_left: Option<f64>,
 ) -> Vec<WaiverTarget> {
-    let baseline = lineup_total(rules, my_candidates);
+    let mut mine = Pool::new(rules, my_candidates.to_vec());
+    let baseline = mine.baseline;
     // Each rival's roster and baseline are identical for every free agent we
-    // consider, so build them once instead of once per (agent, rival) pair —
-    // that was 60 x 13 reconstructions per refresh.
-    let rival_pools: Vec<(Vec<Candidate>, f64)> = rivals
+    // consider, so build them once instead of once per (agent, rival) pair.
+    let mut rival_pools: Vec<Pool> = rivals
         .iter()
-        .map(|r| {
-            let candidates = rival_candidates(r.player_ids);
-            let total = lineup_total(rules, &candidates);
-            (candidates, total)
-        })
+        .map(|r| Pool::new(rules, rival_candidates(r.player_ids)))
         .collect();
-    let mut scored: Vec<WaiverTarget> = free_agents
-        .iter()
-        .take(CANDIDATE_POOL)
-        .filter_map(|fa| {
-            let addition = Candidate {
-                player_id: fa.player_id.clone(),
-                position: fa.position.clone(),
-                points: fa.weekly_points,
-            };
-            let gain = marginal_gain(rules, my_candidates, baseline, &addition);
-            if gain <= 0.05 {
-                return None;
+    let mut addition = Candidate {
+        player_id: String::new(),
+        position: String::new(),
+        points: 0.0,
+    };
+    let mut scored: Vec<WaiverTarget> = Vec::new();
+    for fa in free_agents.iter().take(CANDIDATE_POOL) {
+        addition.player_id.clone_from(&fa.player_id);
+        addition.position.clone_from(&fa.position);
+        addition.points = fa.weekly_points;
+
+        let gain = mine.gain_from(rules, &addition);
+        if gain <= 0.05 {
+            continue;
+        }
+        let mut rival_count = 0;
+        for pool in &mut rival_pools {
+            if pool.gain_from(rules, &addition) > 0.05 {
+                rival_count += 1;
             }
-            let rival_count = rival_pools
-                .iter()
-                .filter(|(candidates, total)| {
-                    marginal_gain(rules, candidates, *total, &addition) > 0.05
-                })
-                .count();
-            let fraction = if baseline > 0.0 { gain / baseline } else { 0.0 };
-            Some(WaiverTarget {
-                player_id: fa.player_id.clone(),
-                name: fa.name.clone(),
-                position: fa.position.clone(),
-                team: fa.team.clone(),
-                gain_points: gain,
-                gain_fraction: fraction,
-                suggested_bid: budget_left.map(|budget| suggest_bid(budget, fraction, rival_count)),
-                rivals: rival_count,
-            })
-        })
-        .collect();
+        }
+        let fraction = if baseline > 0.0 { gain / baseline } else { 0.0 };
+        scored.push(WaiverTarget {
+            player_id: fa.player_id.clone(),
+            name: fa.name.clone(),
+            position: fa.position.clone(),
+            team: fa.team.clone(),
+            gain_points: gain,
+            gain_fraction: fraction,
+            suggested_bid: budget_left.map(|budget| suggest_bid(budget, fraction, rival_count)),
+            rivals: rival_count,
+        });
+    }
     scored.sort_by(|a, b| b.gain_points.total_cmp(&a.gain_points));
     scored.truncate(MAX_TARGETS);
     scored

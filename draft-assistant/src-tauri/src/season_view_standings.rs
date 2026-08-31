@@ -7,7 +7,7 @@
 
 use crate::engine::LoadedLeague;
 use crate::season_engine::LoadedSeason;
-use crate::season_lineup::{candidates_for, optimal_lineup};
+use crate::season_lineup::weekly_lineup_totals;
 use crate::season_lookup::Lookup;
 use crate::season_odds::{self, ScheduledGame, StandingsRow, TeamSeason};
 
@@ -34,18 +34,15 @@ pub fn standings_rows(
             losses: r.settings.losses,
             ties: r.settings.ties,
             points_for: r.settings.points_for(),
-            weekly_projection: ((week + 1)..=last_regular)
-                .map(|w| {
-                    let candidates = candidates_for(r.player_ids(), &position_of, weekly, w);
-                    (
-                        w,
-                        optimal_lineup(rules, &candidates)
-                            .iter()
-                            .map(|s| s.points)
-                            .sum(),
-                    )
-                })
-                .collect(),
+            // Positions are resolved once per roster here, not once per
+            // (roster, week) — the answer cannot change from week to week.
+            weekly_projection: weekly_lineup_totals(
+                rules,
+                r.player_ids(),
+                &position_of,
+                weekly,
+                (week + 1)..=last_regular,
+            ),
         })
         .collect();
 

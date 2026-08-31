@@ -80,19 +80,36 @@ pub fn optimal_lineup(rules: &RosterRules, candidates: &[Candidate]) -> Vec<Line
     filled.into_iter().map(|(_, slot)| slot).collect()
 }
 
-/// Total points of the best lineup this roster can field in one week.
-pub fn optimal_points(
+/// The best-lineup total this roster can field, week by week.
+///
+/// A player's position does not change from one week to the next, so the
+/// candidate list is built once per roster and only the points are rewritten
+/// for each week. Built per (roster, week) instead — which is what the
+/// standings and the Trends snapshot both used to do — twelve rosters over
+/// fourteen weeks cost thousands of dictionary lookups and twice as many
+/// throwaway `String`s on every rebuild.
+pub fn weekly_lineup_totals(
     rules: &RosterRules,
     player_ids: &[String],
     position_of: &impl Fn(&str) -> Option<String>,
     weekly: &WeeklyPoints,
-    week: u32,
-) -> f64 {
-    let candidates = candidates_for(player_ids, position_of, weekly, week);
-    optimal_lineup(rules, &candidates)
-        .iter()
-        .map(|s| s.points)
-        .sum()
+    weeks: impl IntoIterator<Item = u32>,
+) -> Vec<(u32, f64)> {
+    // Week 0 scores nothing; every entry is overwritten below before it is read.
+    let mut candidates = candidates_for(player_ids, position_of, weekly, 0);
+    weeks
+        .into_iter()
+        .map(|week| {
+            for candidate in &mut candidates {
+                candidate.points = weekly.get_or_zero(&candidate.player_id, week);
+            }
+            let total = optimal_lineup(rules, &candidates)
+                .iter()
+                .map(|s| s.points)
+                .sum();
+            (week, total)
+        })
+        .collect()
 }
 
 /// Build week-scored candidates for every player on a roster. Players with no

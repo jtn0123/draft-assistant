@@ -14,7 +14,7 @@
 use crate::cache::safe_key;
 use crate::engine::{now_secs, Engine, LoadedLeague};
 use crate::season_engine::LoadedSeason;
-use crate::season_lineup::optimal_points;
+use crate::season_lineup::weekly_lineup_totals;
 use crate::season_lookup::Lookup;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -78,8 +78,9 @@ pub fn take_snapshot(
         .iter()
         .map(|roster| {
             let ids = roster.player_ids();
-            let total: f64 = (first..=last)
-                .map(|w| optimal_points(rules, ids, &position_of, weekly, w))
+            let total: f64 = weekly_lineup_totals(rules, ids, &position_of, weekly, first..=last)
+                .iter()
+                .map(|(_, points)| points)
                 .sum();
             let players = ids
                 .iter()
