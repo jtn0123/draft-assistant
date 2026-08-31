@@ -149,7 +149,7 @@ export function Board({
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("pts");
   const [direction, setDirection] = useState<Direction>("desc");
-  const [showAll, setShowAll] = useState(false);
+  const [limit, setLimit] = useState(PAGE);
   const searchRef = useRef<HTMLInputElement>(null);
 
   // "/" jumps to search from anywhere on the screen, unless already typing.
@@ -187,7 +187,12 @@ export function Board({
     // moved the clock no longer re-filters and re-sorts the whole board.
   }, [players, pos, query, sortKey, direction]);
 
-  const visible = showAll ? matching : matching.slice(0, PAGE);
+  // Paged rather than all-or-nothing. Every row carries two `PlayerName`s, a
+  // headshot with its own state, effect and store subscription, and a logo —
+  // so the old "Show all" put roughly 1,800 nodes and 600 store subscribers
+  // into one synchronous commit. A page at a time keeps each commit the size
+  // of the first one.
+  const visible = matching.slice(0, limit);
   const hasFilters = pos !== "ALL" || query.trim() !== "";
 
   const sortBy = (key: SortKey) => {
@@ -251,7 +256,9 @@ export function Board({
       </div>
 
       {loading ? (
-        <div className="board-loading">
+        // Announced, because a silent skeleton is indistinguishable from a
+        // screen that has finished loading with nothing on it.
+        <div className="board-loading" role="status">
           {SKELETON_WIDTHS.map((width, i) => (
             <div className="board-row board-skeleton" key={i}>
               <span className="skel" />
@@ -296,9 +303,18 @@ export function Board({
           Sorted by {SORT_LABEL[sortKey]}, {direction === "asc" ? "low to high" : "high to low"} ·
           click any column
         </span>
-        {matching.length > PAGE && (
-          <button type="button" className="btn-ghost btn-row" onClick={() => setShowAll((s) => !s)}>
-            {showAll ? `Show first ${PAGE}` : `Show all ${matching.length}`}
+        {matching.length > limit && (
+          <button
+            type="button"
+            className="btn-ghost btn-row"
+            onClick={() => setLimit((l) => l + PAGE)}
+          >
+            Show {Math.min(PAGE, matching.length - limit)} more
+          </button>
+        )}
+        {limit > PAGE && (
+          <button type="button" className="btn-ghost btn-row" onClick={() => setLimit(PAGE)}>
+            Show first {PAGE}
           </button>
         )}
       </div>

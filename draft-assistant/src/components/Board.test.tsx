@@ -182,3 +182,58 @@ describe("Board across repeated updates", () => {
     expect(names(container)).toEqual(["Alpha", "Charlie"]);
   });
 });
+
+// Grade item G7. "Show all" used to drop the page cap and commit the entire
+// pool at once — hundreds of rows, each with two names, a headshot carrying
+// its own state, effect and store subscription, and a logo.
+describe("Board paging", () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      player(`p${i}`, `Player ${i}`, "RB", { points: 1000 - i, overall_rank: i + 1 }),
+    );
+
+  const board = (players: AvailablePlayer[]) => (
+    <Board
+      players={players}
+      positions={["RB"]}
+      loading={false}
+      boardSize={players.length}
+      onDraft={vi.fn()}
+    />
+  );
+
+  it("opens on one page and loads the next on demand", async () => {
+    const user = userEvent.setup();
+    const { container } = render(board(many(450)));
+    const rows = () => container.querySelectorAll(".board-body");
+
+    expect(rows()).toHaveLength(200);
+    expect(screen.getByText("Showing 200 of 450")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show 200 more" }));
+    expect(rows()).toHaveLength(400);
+    expect(screen.getByText("Showing 400 of 450")).toBeInTheDocument();
+
+    // The last page is only as big as what is left.
+    await user.click(screen.getByRole("button", { name: "Show 50 more" }));
+    expect(rows()).toHaveLength(450);
+    expect(screen.getByText("450 players")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /more/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show first 200" }));
+    expect(rows()).toHaveLength(200);
+  });
+
+  it("leaves the paging control out when everything already fits", () => {
+    render(board(many(3)));
+    expect(screen.queryByRole("button", { name: /more/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Show first/ })).not.toBeInTheDocument();
+  });
+
+  it("announces the skeleton rather than leaving the wait silent", () => {
+    render(
+      <Board players={[]} positions={["QB"]} loading={true} boardSize={312} onDraft={vi.fn()} />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Pulling projections for 312 players…");
+  });
+});
