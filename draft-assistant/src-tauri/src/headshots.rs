@@ -122,6 +122,7 @@ impl Engine {
     async fn cached_image(&self, key: &str, url: &str) -> Result<Option<String>, String> {
         let dir = self.headshot_dir();
         std::fs::create_dir_all(&dir).map_err(|e| format!("headshots dir: {e}"))?;
+        crate::cache::owner_only_dir(&dir);
         let image = dir.join(format!("{key}.img"));
         let miss = dir.join(format!("{key}.none"));
 

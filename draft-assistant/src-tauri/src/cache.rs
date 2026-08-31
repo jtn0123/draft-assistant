@@ -44,11 +44,42 @@ pub(crate) fn envelope_json<T: Serialize>(fetched_at: u64, data: &T) -> Result<S
     serde_json::to_string(&Cached { fetched_at, data }).map_err(|e| format!("serialize: {e}"))
 }
 
+/// Lock a freshly written cache file down to its owner.
+///
+/// Cache files hold league rosters, member names and Sleeper user ids. The
+/// default 0644 leaves all of that readable by every account and every process
+/// on the machine, so permissions are narrowed before the file is put in
+/// place. Unix only; Windows has no equivalent mode and keeps the default.
+pub(crate) fn owner_only(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).ok();
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// Lock a directory we created down to its owner, for the same reason.
+pub(crate) fn owner_only_dir(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).ok();
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
 /// Write to a temp file, then rename over the target. The rename is atomic, so
 /// a crash mid-write leaves the previous cache intact rather than a truncated
 /// file that fails to parse.
+///
+/// The mode is narrowed before the rename, so the file is never visible to
+/// anyone else even for an instant.
 pub(crate) fn replace_file(tmp: PathBuf, final_path: PathBuf, json: String) -> Result<(), String> {
     std::fs::write(&tmp, json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    owner_only(&tmp);
     std::fs::rename(&tmp, &final_path).map_err(|e| format!("replace {}: {e}", final_path.display()))
 }
 
@@ -112,6 +143,37 @@ mod tests {
         assert_eq!(safe_key("../../etc/passwd"), "etcpasswd");
         assert_eq!(safe_key("a/b\\c"), "abc");
         assert_eq!(safe_key(""), "");
+    }
+
+    /// Cache files hold rosters, league member names and Sleeper user ids.
+    /// Written at the default 0644 they were readable by every other account
+    /// and process on the machine.
+    #[cfg(unix)]
+    #[test]
+    fn a_written_cache_file_is_readable_only_by_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp("mode");
+        let target = dir.join("private.json");
+        write_atomic(dir.join("private.tmp"), target.clone(), 1, &vec![1u32]).unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "cache file mode was {:o}",
+            mode & 0o777
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cache_directory_is_reachable_only_by_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp("dirmode");
+        owner_only_dir(&dir);
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700, "cache dir mode was {:o}", mode & 0o777);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

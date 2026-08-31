@@ -3,30 +3,86 @@
 
 import { useEffect, useState } from "react";
 import type { DraftView } from "../types";
-import { clockLabel, pickLabel } from "../format";
+import { clockLabel, pickLabel, spanLabel } from "../format";
 
 /** How many upcoming picks to show before the "+n" expander. */
 const COLLAPSED = 4;
 
-/**
- * The pick clock as "0:41", re-rendered every second while a deadline is set.
- * Null when nothing is on the clock, so callers can leave the cell out.
- */
-function useClock(deadlineMs: number | null): string | null {
+/** The wall clock, re-read every second while a deadline is set. */
+function useNow(deadlineMs: number | null): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (deadlineMs === null) return undefined;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, [deadlineMs]);
-  return clockLabel(deadlineMs, now);
+  return now;
+}
+
+/**
+ * The pick clock as "0:41", re-rendered every second while a deadline is set.
+ * Null when nothing is on the clock, so callers can leave the cell out.
+ */
+function useClock(deadlineMs: number | null): string | null {
+  return clockLabel(deadlineMs, useNow(deadlineMs));
+}
+
+/** Whole seconds left on the clock, or null when nothing is running. */
+function secondsLeft(deadlineMs: number | null, nowMs: number): number | null {
+  if (deadlineMs === null) return null;
+  return Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
+}
+
+/**
+ * One sentence saying who is picking, for people who cannot see the banner.
+ *
+ * It repeats the round, the pick and the time left rather than relying on the
+ * green highlight, because the highlight is the only thing that currently
+ * says "this one is yours".
+ */
+function clockSentence(d: DraftView["draft"], left: number | null): string {
+  if (d.status === "complete") return "The draft is finished.";
+  if (d.status === "pre_draft" && d.total_picks_made === 0) {
+    return "The draft has not started yet.";
+  }
+  const pick = `pick ${pickLabel(d.current_pick, d.teams)}`;
+  const time = left === null ? "" : `, ${spanLabel(left)} left`;
+  if (d.is_my_pick) return `You are on the clock — ${pick}${time}.`;
+  const who = d.on_clock_name ?? `slot ${d.on_clock_slot}`;
+  const wait =
+    d.picks_until_mine === null
+      ? ""
+      : ` ${d.picks_until_mine} pick${d.picks_until_mine === 1 ? "" : "s"} until your turn.`;
+  return `${who} is on the clock — ${pick}${time}.${wait}`;
+}
+
+/**
+ * Hold a sentence steady until the situation itself changes.
+ *
+ * The banner re-renders once a second while the clock runs. A live region
+ * rebuilt on every one of those renders would interrupt a screen reader every
+ * second to say almost exactly the same thing, which is worse than saying
+ * nothing at all. So the sentence is captured only when `key` changes — a new
+ * pick, the turn changing hands, the draft starting or finishing — and the
+ * wording taken at that moment is what the region keeps until the next
+ * change. The seconds are read once, on the way in, and then left alone.
+ */
+function useHeldSentence(key: string, sentence: string): string {
+  const [held, setHeld] = useState({ key, sentence });
+  if (held.key !== key) setHeld({ key, sentence });
+  return held.key === key ? held.sentence : sentence;
 }
 
 export function ClockBanner({ view }: { view: DraftView }) {
   const d = view.draft;
   const preDraft = d.status === "pre_draft" && d.total_picks_made === 0;
   const complete = d.status === "complete";
-  const clock = useClock(complete ? null : d.clock_deadline_ms);
+  const deadline = complete ? null : d.clock_deadline_ms;
+  const now = useNow(deadline);
+  const clock = clockLabel(deadline, now);
+  // Everything that decides what the sentence says, and nothing that ticks.
+  const situation = `${d.status}|${String(d.is_my_pick)}|${d.current_pick}|${d.on_clock_slot}`;
+  const announcement = useHeldSentence(situation, clockSentence(d, secondsLeft(deadline, now)));
 
   return (
     <div className={d.is_my_pick ? "clock is-mine" : "clock"}>
@@ -38,20 +94,30 @@ export function ClockBanner({ view }: { view: DraftView }) {
         <span className="label">Pick</span>
         <span className="clock-big num">{pickLabel(d.current_pick, d.teams)}</span>
       </div>
-      <div className="clock-main">
+      {/* The one thing in the app worth interrupting someone for. The visible
+          wording is hidden from screen readers so the region reads as the one
+          sentence above rather than saying half of it twice. */}
+      <div className="clock-main" role="status" aria-live="assertive" aria-atomic="true">
+        <span className="sr-only">{announcement}</span>
         {complete ? (
-          <span className="clock-status">Draft complete</span>
+          <span className="clock-status" aria-hidden="true">
+            Draft complete
+          </span>
         ) : preDraft ? (
-          <span className="clock-status">Draft has not started</span>
+          <span className="clock-status" aria-hidden="true">
+            Draft has not started
+          </span>
         ) : d.is_my_pick ? (
-          <span className="clock-status is-you">You are on the clock</span>
+          <span className="clock-status is-you" aria-hidden="true">
+            You are on the clock
+          </span>
         ) : (
           <>
-            <span className="clock-status">
+            <span className="clock-status" aria-hidden="true">
               On the clock: {d.on_clock_name ?? `Slot ${d.on_clock_slot}`}
             </span>
             {d.picks_until_mine !== null && (
-              <span className="mid clock-sub">
+              <span className="mid clock-sub" aria-hidden="true">
                 {d.picks_until_mine} pick{d.picks_until_mine === 1 ? "" : "s"} until you
               </span>
             )}

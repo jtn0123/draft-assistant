@@ -106,6 +106,9 @@ pub struct Engine {
 impl Engine {
     pub fn new(data_dir: PathBuf) -> Self {
         std::fs::create_dir_all(&data_dir).ok();
+        // Everything under here — rosters, league member names, Sleeper user
+        // ids, the players dictionary — is the user's alone to read.
+        crate::cache::owner_only_dir(&data_dir);
         Self {
             client: SleeperClient::new(),
             data_dir,
@@ -235,11 +238,7 @@ impl Engine {
         let tmp = self.cache_path("config.json.tmp");
         std::fs::write(&tmp, json)
             .map_err(|e| format!("could not save your settings to {}: {e}", tmp.display()))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600)).ok();
-        }
+        crate::cache::owner_only(&tmp);
         if live.exists() {
             std::fs::copy(&live, self.cache_path("config.json.bak")).ok();
         }
