@@ -7,23 +7,52 @@
 
 ## Summary
 
-**Status: 48 of 54 items done, 2 partly, 4 closed without a code change.** Every item
-below carries an **Outcome** line saying what happened to it. Work landed in
-commits `c3847e5` (first fifteen) and `0f8ccb7` (second fifteen); see
-`TOP15.md` and `NEXT15.md` for the running order.
+**Status (final, after the focus wave of 2026-08-30 evening): 50 of 54 items
+done, 2 partly (A2, G8 — both deliberate and argued on the item), 2 closed
+without a code change (F1 false positive, H4).** Every item below carries an
+**Outcome** line saying what happened to it. Work landed in commits `c3847e5`
+(first fifteen), `0f8ccb7` (second fifteen), and the focus wave `4cecd63`
+through `c144643`; see `TOP15.md`, `NEXT15.md` and the root `TRACKER.md`.
 
-| ID | Category | Grade at audit | Grade now | Items | Open |
+| ID | Category | Grade at audit | Final grade | Items | Open |
 |----|----------|-----|-----|-------|------|
-| A | Architecture & Design | B− | **B+** | 6 | A2, A5 |
+| A | Architecture & Design | B− | **A−** | 6 | A2 (half, deliberate) |
 | B | Backend Quality | B− | **A−** | 7 | — |
 | C | Frontend Quality | B | **A−** | 7 | — |
 | D | Testing & Reliability | B− | **A−** | 6 | — |
 | E | Security | A− | **A** | 5 | — |
 | F | Dependencies & Tech Currency | A− | **A** | 4 | F1 (false positive) |
-| G | Performance & Scalability | C+ | **B+** | 8 | G7, G8 (both partly) |
+| G | Performance & Scalability | C+ | **A−** | 8 | G8 (partly, deliberate) |
 | H | Documentation & Onboarding | C+ | **B+** | 5 | H4 |
 | I | Developer Experience & Tooling | B− | **A−** | 6 | — |
-| **Overall** | | **B−** | **A−** | **54** | **5** |
+| **Overall** | | **B−** | **A−** | **54** | **2** |
+
+### The focus wave (stability · performance · lazy load · week-one assistant · status)
+
+Landed after the second round, on top of the audit items:
+
+- **A5 done** — `build_season_view` split into six one-purpose section modules
+  (`season_view_matchup/live/standings/market/feeds` + `season_lookup`);
+  the golden tests passed **unmodified**, proving zero behavior change.
+  `season_view_parts.rs` (the grab-bag) is deleted. Took half of A2 with it.
+- **G7 done properly** — `boardIdentity.ts` deep-compares incoming players and
+  reuses the old array only when observationally identical, so no-op poll ticks
+  skip the sort and the ~400 row re-renders while staleness stays impossible
+  by construction (the concern that kept it partial is solved, not waived).
+- **Lazy loading (beyond the audit)** — entry bundle 273 → 228 KB; DraftScreen,
+  SeasonScreen, and Chat are separate chunks and Chat isn't fetched until opened.
+- **Status honesty (beyond the audit)** — per-source freshness (matchups /
+  scores / rosters) with a plain-language tooltip on the Live badge, and
+  trade/waiver ideas admit their age when served from the analysis cache.
+- **Week-one assistant (beyond the audit)** — every lineup call carries a
+  plain-English reason and a real kickoff deadline; Q/D/O injury tags on both
+  sides; Out/Doubtful starters raise their own call.
+- **Two stability fixes found along the way** — the poll now notices a
+  commissioner *replacing* a pick (`poll.rs` hashes pick ids, not just count),
+  and the pre-commit hook works from git worktrees.
+
+Final numbers: Rust coverage **74.8%** lines (gate 68), frontend **~89%**
+(gates 80/80/75/70); 160 frontend + 160+ Rust tests; `npm run verify` green.
 
 ### What moved the grades
 
@@ -64,13 +93,12 @@ item itself:
   this codebase relies on.
 - **H4 (CLAUDE.md).** The conventions now live in the root README instead, so
   there is one place for them to be right.
-- **A2 and A5 (season-layer structure).** Real, but tidiness rather than
-  defects, and A5 is a refactor of the app's most load-bearing function. See
-  "Where the remaining risk sits" below.
 
-Two more were left partly done — **G7** (caching the board sort would render
-stale numbers after a refresh) and **G8** (changing how every image is delivered
-is not worth ~33% on a local bridge). Both are argued on the items.
+Two are partly done, both deliberately: **A2** (the six season endpoints stay
+out of `sleeper.rs` until a wider split of that file; the `matchup_for`/
+`opponent_of` half landed with A5) and **G8** (changing how every image is
+delivered is not worth ~33% on a local bridge). Both are argued on the items.
+**A5 and G7 have since landed in full** — see "The focus wave" above.
 
 ### Where the remaining risk sits
 
@@ -449,8 +477,8 @@ The caching design is good (`avatars.ts:46-57` memoizes in-flight promises; back
 - **Effort:** M
 - **Grade lift:** C+ → B−
 
-#### G7 — Board filter+sort re-runs every tick with an O(n log n × getter) comparator  *(⚠ partly done 2026-08-30)*
-- **Outcome:** The comparator is now O(1) via decorate-sort-undecorate. The recompute was **deliberately left in place**: "Refresh data" can rebuild the board with the same players and new projections, so a memo keyed on the player list would render stale points. Correctness beat the remaining milliseconds.
+#### ~~G7~~ ✓ done 2026-08-30 (evening) — Board filter+sort re-runs every tick with an O(n log n × getter) comparator
+- **Outcome:** Fully closed in `c8ca01e`. First pass made the comparator O(1) (decorate-sort-undecorate) but left the recompute, because a memo keyed on player identity would render stale points after "Refresh data". The focus wave solved that properly: `src/boardIdentity.ts` deep-compares every field of every incoming player and splices the *old array* back in only when the two are observationally identical — so the memo key (array identity) is now meaningful, no-op ticks skip the sort and the ~400 memoized row re-renders, and staleness is impossible by construction. Tests cover both directions: changed projections always render, identical ticks never re-sort.
 - **Where:** `src/components/Board.tsx:131-142`
 - **What's wrong:** `view.available` is a fresh identity each event, so the memo never hits; `column.value()` runs per comparison.
 - **Fix:** Precompute sort keys, then sort; memoize on `total_picks_made` + length instead of array identity.
