@@ -319,6 +319,32 @@ describe("Board sorting", () => {
     expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
   });
 
+  // A blank Team, Bye or Surv used to ride the sort direction: `compare`
+  // returned +1 for a missing value and the caller multiplied by the sign, so
+  // flipping the column sent every free agent and every no-bye player to the
+  // top of the board — over the players you were actually reading.
+  it("keeps blanks at the bottom whichever way a column is pointing", () => {
+    const { names, sortBy } = board();
+
+    // Bravo has no team; Charlie (KC) and Alpha (SF) do.
+    sortBy("Team");
+    expect(names()).toEqual(["Charlie", "Alpha", "Bravo"]);
+    sortBy("Team");
+    expect(names()).toEqual(["Alpha", "Charlie", "Bravo"]);
+
+    // Bravo has no bye week either.
+    sortBy("Bye");
+    expect(names()[2]).toBe("Bravo");
+    sortBy("Bye");
+    expect(names()[2]).toBe("Bravo");
+
+    // Charlie is the one with no survival number.
+    sortBy("Surv");
+    expect(names()[2]).toBe("Charlie");
+    sortBy("Surv");
+    expect(names()[2]).toBe("Charlie");
+  });
+
   it("flips direction when the same column is clicked again, and says which", () => {
     const { names, sortBy } = board();
     sortBy("Player");

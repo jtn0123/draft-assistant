@@ -70,13 +70,18 @@ const SORT_LABEL: Record<SortKey, string> = {
   surv: "survival",
 };
 
-function compare(a: string | number | null, b: string | number | null): number {
-  // Missing values sort last in either direction rather than reading as zero.
+/** Order two cells, blanks last whichever way the column points.
+ *
+ * The direction is applied in here rather than by the caller: a blank that
+ * answered "after you" would have become "before you" the moment the sort was
+ * flipped, floating every free agent to the top of a descending Team sort.
+ */
+function compare(a: string | number | null, b: string | number | null, sign: number): number {
   if (a === null && b === null) return 0;
   if (a === null) return 1;
   if (b === null) return -1;
-  if (typeof a === "string" && typeof b === "string") return a.localeCompare(b);
-  return Number(a) - Number(b);
+  if (typeof a === "string" && typeof b === "string") return a.localeCompare(b) * sign;
+  return (Number(a) - Number(b)) * sign;
 }
 
 /** True when the key press landed somewhere already taking text. */
@@ -176,7 +181,7 @@ export function Board({
     // `column.value` is doing string work on every one of those calls.
     return filtered
       .map((player) => ({ player, key: column.value(player) }))
-      .sort((a, b) => compare(a.key, b.key) * sign)
+      .sort((a, b) => compare(a.key, b.key, sign))
       .map(({ player }) => player);
     // `players` stays in the dependency list on purpose, and nothing coarser
     // belongs here: a rebuilt board can carry the same players with new
