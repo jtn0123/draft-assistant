@@ -146,7 +146,7 @@ origin/main worktree.
 |---|---|---|---|
 | 1 | Chat UX: saved sessions, suggested questions, budget cap, Markdown rendering (keep local's model/effort picker + styling) | done `be66ffe` | Sessions saved per screen in local storage (no draft id to file under, so no Rust command); spend cap prices the tokens the backend already returns; Markdown answers minus clickable links (no opener plugin here). Suggested questions already existed via `chat_suggestions`. |
 | 2 | Keeper support + traded picks + pick deadline + third-round reversal (Rust domain + minimal UI in local's style) | todo | |
-| 3 | LeaguePicker (multi-league selection) | todo | |
+| 3 | LeaguePicker (multi-league selection) | done `d5b1c9f` | Switch-league dialog off the Settings menu (local's scrim/focus-trap/buttons, not origin's header select); lists leagues the app has loaded plus a new `sleeper_leagues` lookup of the saved Sleeper account, or a pasted league/draft ID; the draft poller is stopped before the load and the season session is keyed on the league id so a switch drops and reloads it. |
 | 4 | Season replay mode (`?replay=` fixture loading) — evaluate if local's fixture mode already covers it | todo | |
 | 5 | Compare origin lineup advice vs local `season_lineup.rs`; graft anything better | todo | |
 | 6 | Review t3code branch (pick-trade pricing/backtest) for porting | todo | |
