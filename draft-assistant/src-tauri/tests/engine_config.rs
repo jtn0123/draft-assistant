@@ -2,6 +2,7 @@
 //! storage with sanitized cache filenames. Everything here is disk-only.
 
 use draft_assistant_lib::engine::{AppConfig, Engine, StoredLeague};
+use draft_assistant_lib::picks::ManualPickStore;
 use draft_assistant_lib::sleeper::Pick;
 use std::path::PathBuf;
 
@@ -25,6 +26,7 @@ fn pick(pick_no: u32, player_id: &str) -> Pick {
         player_id: player_id.into(),
         picked_by: None,
         metadata: None,
+        is_keeper: None,
     }
 }
 

@@ -33,6 +33,22 @@ describe("SidePanel", () => {
     expect(screen.getByText("Won't last to 3.02")).toBeInTheDocument();
   });
 
+  it("marks a kept player on my roster so the round beside them makes sense", () => {
+    const view = fixture();
+    const roster = view.my_roster;
+    if (roster === null) throw new Error("the fixture has a roster");
+    roster.players[0].round = 13;
+    roster.players[0].is_keeper = true;
+
+    render(<SidePanel view={view} />);
+    // A 13th-round player in the first round of the draft is only explicable
+    // as a keeper, so the roster says so.
+    const tag = screen.getByTitle("Kept from last season");
+    expect(tag).toHaveTextContent("R13 · K");
+    // Everyone else is drafted, and carries no tag.
+    expect(screen.getAllByTitle("Kept from last season")).toHaveLength(1);
+  });
+
   it("falls back to a bare heading once I have no picks left", () => {
     const view = fixture();
     view.draft.is_my_pick = false;

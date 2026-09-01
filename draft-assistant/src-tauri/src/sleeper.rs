@@ -74,6 +74,10 @@ pub struct DraftSettings {
     pub rounds: u32,
     #[serde(default)]
     pub pick_timer: Option<u32>,
+    /// Snake drafts only: the round from which the order reverses a second
+    /// time ("third-round reversal" = 3). 0 or absent = plain snake.
+    #[serde(default)]
+    pub reversal_round: Option<u32>,
     // Roster shape, present on mock drafts (which have no league to read it
     // from). All optional: league drafts carry it too but we prefer the league.
     #[serde(default)]
@@ -126,6 +130,10 @@ pub struct Draft {
     /// this gives the current pick's deadline.
     #[serde(default)]
     pub last_picked: Option<u64>,
+    /// draft slot (1-based, string key) -> league roster id: the only bridge
+    /// between slots and the roster ids traded picks are recorded against.
+    #[serde(default)]
+    pub slot_to_roster_id: Option<HashMap<String, u32>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +148,10 @@ pub struct Pick {
     pub picked_by: Option<String>,
     #[serde(default)]
     pub metadata: Option<PickMeta>,
+    /// Sleeper's keeper flag, and only a hint — it arrives null on plenty of
+    /// genuine keepers. See `crate::picks::keeper_pick_nos` for the real test.
+    #[serde(default)]
+    pub is_keeper: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

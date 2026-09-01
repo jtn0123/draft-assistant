@@ -2,6 +2,8 @@
 
 use crate::draft;
 use crate::engine::{self, AppConfig, StoredLeague};
+use crate::keepers;
+use crate::picks::{self, ManualPickStore};
 use crate::poll::{record_poll_outcome, DraftPollMemory};
 use crate::sleeper::Pick;
 use crate::sleeper_error::to_message;
@@ -115,11 +117,14 @@ pub async fn refresh_picks(state: State<'_, AppState>) -> Result<DraftView, Stri
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
     loaded.api_picks = picks;
-    if engine::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
+    if picks::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
         state
             .engine
             .save_manual_picks(&draft_id, &loaded.manual_picks)?;
     }
+    // A keeper is only recognisable while it sits ahead of the clock, so the
+    // judgement is made and written down on every refresh.
+    keepers::note_keepers(state.engine.as_ref(), loaded);
     loaded.poll_last_success_at = Some(engine::now_secs());
     loaded.poll_consecutive_failures = 0;
     loaded.poll_last_error = None;
@@ -165,17 +170,20 @@ pub async fn record_manual_pick(
     if picks.iter().any(|p| p.player_id == player_id) {
         return Err("player already drafted".into());
     }
-    let pick_no = picks.len() as u32 + 1;
-    if pick_no > teams * loaded.draft.settings.rounds {
-        return Err("draft is complete".into());
-    }
+    // The first *gap*, not the pick count: keepers already in the book would
+    // otherwise push the manual pick several rounds past the real clock.
+    let rounds = loaded.draft.settings.rounds;
+    let pick_no = view::next_open_pick(&picks, teams, rounds)
+        .ok_or_else(|| "draft is complete".to_string())?;
+    let (order, _) = draft::DraftOrder::from_draft(&loaded.draft);
     loaded.manual_picks.push(Pick {
         round: (pick_no - 1) / teams + 1,
         pick_no,
-        draft_slot: draft::slot_for_pick(pick_no, teams).unwrap_or(1),
+        draft_slot: draft::slot_for_pick(pick_no, teams, order).unwrap_or(1),
         player_id,
         picked_by: None,
         metadata: None,
+        is_keeper: None,
     });
     if let Err(error) = state
         .engine
@@ -265,7 +273,7 @@ pub async fn start_polling(
                             Ok(picks) => {
                                 changed |= memory.picks_changed(&picks);
                                 loaded.api_picks = picks;
-                                if engine::reconcile_manual_picks(
+                                if picks::reconcile_manual_picks(
                                     &loaded.api_picks,
                                     &mut loaded.manual_picks,
                                 ) {
@@ -275,6 +283,7 @@ pub async fn start_polling(
                                         errors.push(error);
                                     }
                                 }
+                                errors.extend(keepers::note_keepers(engine.as_ref(), loaded));
                             }
                             Err(error) => errors.push(error.to_string()),
                         }

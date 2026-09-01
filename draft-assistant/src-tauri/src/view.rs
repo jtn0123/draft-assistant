@@ -6,8 +6,15 @@ use crate::draft::{self, TeamRoster};
 use crate::engine::{now_secs, AppConfig, LoadedLeague};
 use crate::recommend::{recommend, Recommendation};
 use crate::sleeper::Pick;
+use crate::traded_picks::PickOwnership;
 use serde::Serialize;
 use std::collections::HashMap;
+
+/// The pick list lives in `picks` and the tier scan in `board`; both are
+/// re-exported here because callers have always reached for them through the
+/// view, which is the one place the whole draft state comes together.
+pub use crate::board::tier_alerts;
+pub use crate::picks::{keeper_pick_nos, merged_picks, next_open_pick};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DraftStatus {
@@ -29,6 +36,13 @@ pub struct DraftStatus {
     /// Epoch milliseconds when the current pick's timer expires. Present only
     /// while drafting with a pick timer and a recorded last pick.
     pub clock_deadline_ms: Option<u64>,
+    /// Every pick the plain snake gets wrong — because it was traded, or
+    /// because the league uses third-round reversal: pick number -> the slot
+    /// whose manager makes it. Empty in an ordinary snake league. The
+    /// frontend's queue reads this so it never names the wrong manager.
+    pub pick_slot_overrides: HashMap<u32, u32>,
+    /// Pick numbers held by keepers: already in the book, nobody's turn.
+    pub keeper_picks: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -164,51 +178,6 @@ pub fn position_run(positions: &[String], window: u32, min_count: u32) -> Option
         })
 }
 
-/// The best tier still on the board at each position, and how many players are
-/// left in it — one alert per draftable position that has anyone left, in the
-/// order the league rosters them.
-///
-/// `available` is in board order, so the first player seen at a position sets
-/// that position's tier and everyone later in the same tier adds to the count.
-/// One pass fills every position: scanning the whole board once per position
-/// gave the same answer for several times the work.
-pub fn tier_alerts(available: &[AvailablePlayer], positions: Vec<String>) -> Vec<TierAlert> {
-    let mut top: HashMap<&str, (u32, u32)> = HashMap::new();
-    for a in available {
-        let (tier, left) = top
-            .entry(a.player.position.as_str())
-            .or_insert((a.player.tier, 0));
-        if *tier == a.player.tier {
-            *left += 1;
-        }
-    }
-    positions
-        .into_iter()
-        .filter_map(|pos| {
-            top.get(pos.as_str())
-                .map(|&(tier, players_left)| TierAlert {
-                    position: pos,
-                    tier,
-                    players_left,
-                })
-        })
-        .collect()
-}
-
-/// Merge API picks with manual fallback picks. API picks are authoritative;
-/// manual picks only fill pick numbers beyond what the API has reported.
-pub fn merged_picks(api: &[Pick], manual: &[Pick]) -> Vec<Pick> {
-    let mut picks = api.to_vec();
-    let api_max = picks.iter().map(|p| p.pick_no).max().unwrap_or(0);
-    for m in manual {
-        if m.pick_no > api_max {
-            picks.push(m.clone());
-        }
-    }
-    picks.sort_by_key(|p| p.pick_no);
-    picks
-}
-
 pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let league = &loaded.league;
     let draft = &loaded.draft;
@@ -217,10 +186,19 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
     let picks = merged_picks(&loaded.api_picks, &loaded.manual_picks);
     let total_picks = picks.len();
-    let current_pick = (total_picks as u32 + 1).min(teams * rounds);
-    let draft_over = total_picks as u32 >= teams * rounds;
+    // Where the draft has got to is the first *gap*, not the pick count: a
+    // keeper league opens with picks already in the book at 11, 20, 177 …,
+    // and counting them puts the clock several rounds ahead of itself.
+    let open_pick = next_open_pick(&picks, teams, rounds);
+    let current_pick = open_pick.unwrap_or(teams * rounds);
+    let draft_over = open_pick.is_none();
     let current_round = (current_pick - 1) / teams + 1;
-    let on_clock_slot = draft::slot_for_pick(current_pick, teams);
+    let keepers = crate::keepers::known_keepers(loaded, teams, rounds);
+    let (order, order_warning) = draft::DraftOrder::from_draft(draft);
+    // Who actually picks where: the snake (third-round reversal included),
+    // corrected for picks that changed hands.
+    let ownership = PickOwnership::from_draft(draft, &loaded.traded_picks, teams, rounds, order);
+    let on_clock_slot = ownership.owner_slot(current_pick);
 
     // Slot display names: draft_order user ids resolved via league users.
     let mut slot_names: HashMap<u32, String> = HashMap::new();
@@ -262,16 +240,23 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     });
     let (my_slot, slot_warning) = validated_slot(my_slot, teams);
 
+    // Mine by ownership, not by slot — a pick I traded away is not mine, and
+    // one I acquired is. Picks already in the book (my own keepers) are not
+    // picks I still get to make.
+    let made: std::collections::HashSet<u32> = picks.iter().map(|p| p.pick_no).collect();
     let my_next_picks: Vec<u32> = my_slot
         .map(|slot| {
-            draft::picks_for_slot(slot, teams, rounds)
+            ownership
+                .picks_owned_by(slot)
                 .into_iter()
-                .filter(|&p| p >= current_pick)
+                .filter(|p| *p >= current_pick && !made.contains(p))
                 .collect()
         })
         .unwrap_or_default();
-    let is_my_pick = !draft_over && my_slot == on_clock_slot;
-    let picks_until_mine = my_next_picks.first().map(|&p| p - current_pick);
+    let is_my_pick = !draft_over && my_slot.is_some() && my_slot == on_clock_slot;
+    let picks_until_mine = my_next_picks
+        .first()
+        .map(|&mine| crate::picks::picks_until(current_pick, mine, &picks));
     // Survival is judged at my next pick AFTER the one I'm making now (or the
     // upcoming one if I'm not on the clock).
     let survival_pick = if is_my_pick {
@@ -300,7 +285,28 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         }
     };
 
-    let rosters = draft::build_rosters(&picks, teams, &loaded.roster_rules, &slot_names, name_of);
+    // Whose roster a pick lands on: the user who made it, else (manual picks
+    // carry no user) whoever owns that pick number.
+    let user_slots: HashMap<&str, u32> = draft
+        .draft_order
+        .iter()
+        .flat_map(|o| o.iter().map(|(u, s)| (u.as_str(), *s)))
+        .collect();
+    let slot_of = |p: &Pick| -> Option<u32> {
+        p.picked_by
+            .as_deref()
+            .and_then(|u| user_slots.get(u).copied())
+            .or_else(|| ownership.owner_slot(p.pick_no))
+    };
+    let rosters = draft::build_rosters(
+        &picks,
+        teams,
+        &loaded.roster_rules,
+        &slot_names,
+        &keepers,
+        slot_of,
+        name_of,
+    );
     let my_roster = my_slot.and_then(|slot| rosters.get((slot - 1) as usize).cloned());
 
     // Available players with survival probabilities.
@@ -326,10 +332,18 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
     let tier_alerts = tier_alerts(&available, loaded.roster_rules.draftable_positions());
 
+    // What has actually happened, oldest first. A keeper is in the book but
+    // it is not news: it was entered before anyone was on the clock, and a
+    // keeper at pick 177 would otherwise be the whole activity feed.
+    let happened: Vec<&Pick> = picks
+        .iter()
+        .filter(|p| p.pick_no < current_pick && !keepers.contains(&p.pick_no))
+        .collect();
+
     // Position run: 4+ of the same position in the last 6 picks. Only those
     // six can be in it, so only those six are looked up.
     let position_run = {
-        let recent = &picks[picks.len().saturating_sub(RUN_WINDOW as usize)..];
+        let recent = &happened[happened.len().saturating_sub(RUN_WINDOW as usize)..];
         let positions: Vec<String> = recent.iter().map(|p| name_of(&p.player_id).1).collect();
         position_run(&positions, RUN_WINDOW, RUN_MIN)
     };
@@ -343,17 +357,18 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         current_pick,
     );
 
-    let recent_picks: Vec<RecentPick> = picks
+    let recent_picks: Vec<RecentPick> = happened
         .iter()
         .rev()
         .take(10)
         .map(|p| {
             let (name, position, team) = name_of(&p.player_id);
+            let slot = slot_of(p).unwrap_or(p.draft_slot);
             RecentPick {
                 pick_no: p.pick_no,
                 round: p.round,
-                slot: p.draft_slot,
-                slot_name: slot_names.get(&p.draft_slot).cloned(),
+                slot,
+                slot_name: slot_names.get(&slot).cloned(),
                 player_id: p.player_id.clone(),
                 name,
                 position,
@@ -364,6 +379,9 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
     let mut warnings = loaded.warnings.clone();
     warnings.extend(slot_warning);
+    warnings.extend(order_warning);
+    let mut keeper_picks: Vec<u32> = keepers.iter().copied().collect();
+    keeper_picks.sort_unstable();
 
     DraftView {
         schema_version: "1.1".into(),
@@ -404,6 +422,8 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
                 draft.settings.pick_timer,
             )
             .filter(|_| !draft_over),
+            pick_slot_overrides: ownership.overrides(),
+            keeper_picks,
         },
         my_roster,
         rosters,

@@ -283,6 +283,7 @@ mod tests {
             team: None,
             pick_no: n,
             round: n,
+            is_keeper: false,
         }
     }
 

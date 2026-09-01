@@ -208,6 +208,7 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
             teams: 4,
             rounds: 6,
             pick_timer: None,
+            reversal_round: None,
             slots_qb: None,
             slots_rb: None,
             slots_wr: None,
@@ -228,6 +229,7 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
         metadata: None,
         creators: None,
         last_picked: None,
+        slot_to_roster_id: None,
     };
     let loaded = LoadedLeague {
         league,
@@ -251,6 +253,8 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
         roster_rules: RosterRules::new(&roster_positions),
         api_picks: Vec::new(),
         manual_picks: Vec::new(),
+        traded_picks: Vec::new(),
+        keeper_pick_nos: Default::default(),
         poll_last_success_at: None,
         poll_consecutive_failures: 0,
         poll_last_error: None,

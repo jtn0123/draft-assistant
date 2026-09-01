@@ -141,18 +141,26 @@ interface QueueEntry {
   onClock: boolean;
 }
 
+/**
+ * The next two dozen picks, in the order they will actually happen.
+ *
+ * Two things the plain snake below cannot know about, so the backend hands
+ * them over: `overrides` names the slot for any pick that changed hands or
+ * was moved by third-round reversal, and `keepers` lists the picks that are
+ * already in the book — a keeper is nobody's turn and never reaches a clock.
+ */
 function buildQueue(
-  currentPick: number,
-  teams: number,
-  rounds: number,
-  mySlot: number | null,
+  d: DraftView["draft"],
   rosters: TeamRoster[],
+  keepers: Set<number>,
 ): QueueEntry[] {
+  const { current_pick: currentPick, teams, rounds, my_slot: mySlot } = d;
   const total = teams * rounds;
   const entries: QueueEntry[] = [];
   const names = new Map(rosters.map((r) => [r.slot, r.display_name]));
   for (let pick = currentPick; pick <= total && entries.length < 24; pick += 1) {
-    const slot = slotForPick(pick, teams);
+    if (keepers.has(pick)) continue;
+    const slot = d.pick_slot_overrides[String(pick)] ?? slotForPick(pick, teams);
     entries.push({
       pickNo: pick,
       label: pickLabel(pick, teams),
@@ -173,14 +181,14 @@ function slotForPick(pickNo: number, teams: number): number {
 
 export function SnakeStrip({ view }: { view: DraftView }) {
   const [expanded, setExpanded] = useState(false);
-  const { current_pick, teams, rounds, my_slot, status, clock_deadline_ms } = view.draft;
+  const draft = view.draft;
   const rosters = view.rosters;
-  const clock = useClock(status === "complete" ? null : clock_deadline_ms);
+  const clock = useClock(draft.status === "complete" ? null : draft.clock_deadline_ms);
   // The queue is 24 picks of snake arithmetic and as many roster lookups, and
   // this strip re-renders every second while the clock runs.
   const queue = useMemo(
-    () => buildQueue(current_pick, teams, rounds, my_slot, rosters),
-    [current_pick, teams, rounds, my_slot, rosters],
+    () => buildQueue(draft, rosters, new Set(draft.keeper_picks)),
+    [draft, rosters],
   );
   if (queue.length === 0) return null;
 

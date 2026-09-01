@@ -1,6 +1,6 @@
 //! Deterministic draft simulation shared by the CLI and regression tests.
 
-use crate::draft::slot_for_pick;
+use crate::draft::{slot_for_pick, DraftOrder};
 use crate::engine::{AppConfig, LoadedLeague};
 use crate::sleeper::Pick;
 use crate::view::build_view;
@@ -14,7 +14,8 @@ pub fn apply_simulated_pick(
 ) -> Option<String> {
     let teams = loaded.draft.settings.teams;
     let view = build_view(loaded, config);
-    let slot = slot_for_pick(pick_no, teams);
+    let (order, _) = DraftOrder::from_draft(&loaded.draft);
+    let slot = slot_for_pick(pick_no, teams, order);
     let player_id = if view.draft.my_slot == slot {
         view.recommendations
             .iter()
@@ -40,6 +41,7 @@ pub fn apply_simulated_pick(
         player_id: player_id.clone(),
         picked_by: None,
         metadata: None,
+        is_keeper: None,
     });
     Some(player_id)
 }

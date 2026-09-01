@@ -228,7 +228,10 @@ export function SidePanel({ view }: { view: DraftView }) {
                   <PosBadge position={p.position} />
                   <PlayerName name={p.name} team={p.team} playerId={p.player_id} />
                 </span>
-                <span className="muted">R{p.round}</span>
+                <span className="muted" title={p.is_keeper ? "Kept from last season" : undefined}>
+                  R{p.round}
+                  {p.is_keeper ? " · K" : ""}
+                </span>
               </li>
             ))}
           </ul>

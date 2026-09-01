@@ -117,7 +117,9 @@
     ],
     "total_picks_made": 26,
     "manual_picks_active": true,
-    "clock_deadline_ms": null
+    "clock_deadline_ms": null,
+    "pick_slot_overrides": {},
+    "keeper_picks": []
   },
   "my_roster": {
     "slot": 2,
@@ -129,7 +131,8 @@
         "position": "RB",
         "team": "ATL",
         "pick_no": 2,
-        "round": 1
+        "round": 1,
+        "is_keeper": false
       }
     ],
     "open_starters": [
@@ -166,7 +169,8 @@
           "position": "RB",
           "team": "DET",
           "pick_no": 1,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -202,7 +206,8 @@
           "position": "RB",
           "team": "ATL",
           "pick_no": 2,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -238,7 +243,8 @@
           "position": "WR",
           "team": "CIN",
           "pick_no": 3,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "10229",
@@ -246,7 +252,8 @@
           "position": "WR",
           "team": "KC",
           "pick_no": 26,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -282,7 +289,8 @@
           "position": "WR",
           "team": "LAR",
           "pick_no": 4,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "7569",
@@ -290,7 +298,8 @@
           "position": "WR",
           "team": "HOU",
           "pick_no": 25,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -326,7 +335,8 @@
           "position": "RB",
           "team": "SF",
           "pick_no": 5,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "8137",
@@ -334,7 +344,8 @@
           "position": "WR",
           "team": "DAL",
           "pick_no": 24,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -366,7 +377,8 @@
           "position": "WR",
           "team": "SEA",
           "pick_no": 6,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "11604",
@@ -374,7 +386,8 @@
           "position": "TE",
           "team": "LV",
           "pick_no": 23,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -406,7 +419,8 @@
           "position": "RB",
           "team": "IND",
           "pick_no": 7,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "4984",
@@ -414,7 +428,8 @@
           "position": "QB",
           "team": "BUF",
           "pick_no": 22,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -446,7 +461,8 @@
           "position": "WR",
           "team": "DAL",
           "pick_no": 8,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "8130",
@@ -454,7 +470,8 @@
           "position": "TE",
           "team": "ARI",
           "pick_no": 21,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -486,7 +503,8 @@
           "position": "WR",
           "team": "DET",
           "pick_no": 9,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "3198",
@@ -494,7 +512,8 @@
           "position": "RB",
           "team": "BAL",
           "pick_no": 20,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -526,7 +545,8 @@
           "position": "RB",
           "team": "BUF",
           "pick_no": 10,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "8151",
@@ -534,7 +554,8 @@
           "position": "RB",
           "team": "KC",
           "pick_no": 19,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -570,7 +591,8 @@
           "position": "WR",
           "team": "MIN",
           "pick_no": 11,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "5859",
@@ -578,7 +600,8 @@
           "position": "WR",
           "team": "NE",
           "pick_no": 18,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -614,7 +637,8 @@
           "position": "RB",
           "team": "MIA",
           "pick_no": 12,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "8112",
@@ -622,7 +646,8 @@
           "position": "WR",
           "team": "ATL",
           "pick_no": 17,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -654,7 +679,8 @@
           "position": "RB",
           "team": "PHI",
           "pick_no": 13,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "9224",
@@ -662,7 +688,8 @@
           "position": "RB",
           "team": "CIN",
           "pick_no": 16,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
@@ -698,7 +725,8 @@
           "position": "RB",
           "team": "LV",
           "pick_no": 14,
-          "round": 1
+          "round": 1,
+          "is_keeper": false
         },
         {
           "player_id": "12507",
@@ -706,7 +734,8 @@
           "position": "RB",
           "team": "LAC",
           "pick_no": 15,
-          "round": 2
+          "round": 2,
+          "is_keeper": false
         }
       ],
       "open_starters": [
