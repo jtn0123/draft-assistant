@@ -176,11 +176,7 @@ pub fn build_matchup<'a>(
 
 /// My lineup, slot by slot, against the one the opponent has set — the rows
 /// behind both halves of the head-to-head table.
-pub fn matchup_rows(
-    lookup: &Lookup,
-    mine: &[LineupSlot],
-    theirs: &[LineupSlot],
-) -> Vec<MatchupRow> {
+fn matchup_rows(lookup: &Lookup, mine: &[LineupSlot], theirs: &[LineupSlot]) -> Vec<MatchupRow> {
     let describe = |id: Option<&str>| {
         (
             id.map(|id| lookup.name(id)).unwrap_or_default(),
@@ -216,7 +212,7 @@ pub fn matchup_rows(
 }
 
 /// The lineup a roster currently has set, slot by slot, in league slot order.
-pub fn current_lineup(
+fn current_lineup(
     loaded: &LoadedLeague,
     starters: &[String],
     points_of: &impl Fn(&str) -> f64,
@@ -248,7 +244,7 @@ pub fn current_lineup(
 }
 
 /// The prose behind one start/sit call: the projection difference, in words.
-pub fn why_start(
+fn why_start(
     lookup: &Lookup,
     weekly: &WeeklyPoints,
     week: u32,

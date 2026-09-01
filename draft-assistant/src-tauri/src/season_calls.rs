@@ -31,7 +31,7 @@ impl WeekFacts<'_> {
 
     /// One line, in plain words, for why a swap is being suggested — whatever
     /// the data actually supports, beyond the point difference itself.
-    pub fn short_reason(&self, player_out: &str) -> String {
+    fn short_reason(&self, player_out: &str) -> String {
         if player_out.is_empty() {
             return "that starting spot is empty right now".to_string();
         }
@@ -157,7 +157,7 @@ impl WeekFacts<'_> {
 
 /// NFL team abbreviation -> the kickoff of its game this week, in epoch
 /// milliseconds. Games with no start time or no teams named are left out.
-pub fn kickoff_by_team(scores: &[ScoreGame]) -> HashMap<String, i64> {
+fn kickoff_by_team(scores: &[ScoreGame]) -> HashMap<String, i64> {
     let mut out = HashMap::new();
     for game in scores {
         let (Some(meta), Some(start)) = (game.meta(), game.start_time) else {

@@ -41,7 +41,7 @@ pub fn position_cv(position: &str) -> f64 {
 /// week in ways a scoring distribution does not cover — a benched back, a
 /// game script, an injury in the first quarter — and those upsets land in the
 /// tails, where the normal is thin.
-pub const SPREAD_CALIBRATION: f64 = 1.3;
+const SPREAD_CALIBRATION: f64 = 1.3;
 
 /// Two starters on the same NFL team rise and fall together — a quarterback
 /// and his receiver most of all. Applied between same-team starters on one
@@ -85,7 +85,7 @@ pub fn starters_of(
 
 /// A side's variance: each starter's own, plus the covariance of the pairs
 /// who share an NFL team.
-pub fn team_variance(starters: &[Starter]) -> f64 {
+fn team_variance(starters: &[Starter]) -> f64 {
     let sigmas: Vec<f64> = starters
         .iter()
         .map(|s| position_cv(&s.position) * s.points)

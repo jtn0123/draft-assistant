@@ -77,7 +77,7 @@ impl LiveFetch {
 /// reason. The overall `fetched_at` advances whenever anything arrived,
 /// because the screen really did get newer — `Err` only when nothing did, so
 /// the staleness clock does not reset on data that never came.
-pub fn apply_refresh(
+fn apply_refresh(
     season: &mut LoadedSeason,
     matchups: Result<Vec<Matchup>, String>,
     scores: Result<Vec<ScoreGame>, String>,

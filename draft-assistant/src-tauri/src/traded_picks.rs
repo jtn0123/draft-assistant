@@ -90,9 +90,11 @@ impl PickOwnership {
         }
     }
 
-    /// The plain snake, with no trades and no slot map — what a mock draft
-    /// and every test that does not care about ownership wants.
-    pub fn plain(teams: u32, rounds: u32, order: DraftOrder) -> Self {
+    /// The plain snake, with no trades and no slot map. Every production path
+    /// goes through `from_draft`, which knows about trades; this is the
+    /// baseline the ownership and draft-order tests compare against.
+    #[cfg(test)]
+    pub(crate) fn plain(teams: u32, rounds: u32, order: DraftOrder) -> Self {
         Self {
             teams,
             rounds,

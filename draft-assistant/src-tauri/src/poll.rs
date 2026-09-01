@@ -150,7 +150,7 @@ pub struct LiveEmitGate {
 }
 
 impl LiveEmitGate {
-    pub fn should_emit(&mut self, my_points: f64, opp_points: f64) -> bool {
+    fn should_emit(&mut self, my_points: f64, opp_points: f64) -> bool {
         let totals = (
             (my_points * 100.0).round() as u64,
             (opp_points * 100.0).round() as u64,

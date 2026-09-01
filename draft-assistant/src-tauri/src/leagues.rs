@@ -14,7 +14,7 @@ use tauri::State;
 
 /// Read-only account endpoint, declared here rather than in `sleeper.rs` for
 /// the same reason the in-season ones are: next to the code that needs it.
-pub trait UserLeagues {
+trait UserLeagues {
     /// Every NFL league the account plays in that season.
     #[allow(async_fn_in_trait)]
     async fn user_leagues(&self, user_id: &str, season: &str) -> Result<Vec<League>, SleeperError>;

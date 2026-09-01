@@ -8,8 +8,8 @@ use crate::engine::AppConfig;
 use crate::state::{season_view_for_chat, view_from, AppState};
 use tauri::State;
 
-pub const PROVIDER_API: &str = "api";
-pub const PROVIDER_CLI: &str = "claude_code";
+const PROVIDER_API: &str = "api";
+const PROVIDER_CLI: &str = "claude_code";
 
 #[derive(serde::Serialize)]
 pub struct ChatSettings {
@@ -36,7 +36,7 @@ pub struct ChatSettings {
 
 /// Which route a question takes. An explicit choice wins; otherwise the CLI
 /// when it is installed and no key has been added, else the API.
-pub fn resolve_provider(config: &AppConfig, has_key: bool, cli_available: bool) -> &'static str {
+fn resolve_provider(config: &AppConfig, has_key: bool, cli_available: bool) -> &'static str {
     match config.chat_provider.as_deref() {
         Some(PROVIDER_CLI) if cli_available => PROVIDER_CLI,
         Some(PROVIDER_API) => PROVIDER_API,

@@ -60,7 +60,7 @@ fn is_world_writable(_dir: &Path) -> bool {
 
 /// One prompt from a whole thread. The CLI takes a single prompt per run, so
 /// earlier turns are replayed as a transcript ahead of the live question.
-pub fn render_prompt(messages: &[ChatMessage]) -> String {
+fn render_prompt(messages: &[ChatMessage]) -> String {
     let (last, earlier) = match messages.split_last() {
         Some(split) => split,
         None => return String::new(),
@@ -103,7 +103,7 @@ struct CliResult {
 }
 
 /// Turn the CLI's JSON into the same reply the API path produces.
-pub fn parse_result(stdout: &str, requested: ChatModel) -> Result<ChatReply, String> {
+fn parse_result(stdout: &str, requested: ChatModel) -> Result<ChatReply, String> {
     let parsed: CliResult = serde_json::from_str(stdout.trim())
         .map_err(|e| format!("unexpected Claude Code output: {e}"))?;
     if parsed.is_error {

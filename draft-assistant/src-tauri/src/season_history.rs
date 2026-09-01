@@ -20,9 +20,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 /// Minimum spacing between routine snapshots.
-pub const MIN_GAP_SECS: u64 = 6 * 3600;
+const MIN_GAP_SECS: u64 = 6 * 3600;
 /// Roughly a season of six-hourly snapshots plus roster-change extras.
-pub const MAX_SNAPSHOTS: usize = 400;
+const MAX_SNAPSHOTS: usize = 400;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerSnap {
@@ -133,7 +133,7 @@ fn roster_sets(snapshot: &Snapshot) -> HashMap<u32, HashSet<&str>> {
 /// Record when enough time has passed, or when any roster changed — a trade
 /// should show up on the graph the next time the screen opens, not six hours
 /// later.
-pub fn should_record(history: &History, next: &Snapshot) -> bool {
+fn should_record(history: &History, next: &Snapshot) -> bool {
     let Some(last) = history.snapshots.last() else {
         return true;
     };

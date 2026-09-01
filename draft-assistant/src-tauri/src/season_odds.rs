@@ -74,7 +74,7 @@ impl TeamSeason {
         f64::from(self.wins) + f64::from(self.ties) * 0.5
     }
 
-    pub fn projected_total(&self) -> f64 {
+    fn projected_total(&self) -> f64 {
         self.points_for + self.weekly_projection.iter().map(|(_, p)| p).sum::<f64>()
     }
 }

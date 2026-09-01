@@ -22,14 +22,14 @@ const FRESH_SECS: u64 = 30 * 24 * 3600;
 const MISS_SECS: u64 = 3 * 24 * 3600;
 
 /// Sleeper ids are numeric; a team code ("DET") is a defence with no photo.
-pub fn is_player_id(id: &str) -> bool {
+fn is_player_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 12 && id.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Where an avatar reference points, and what to file it under. Sleeper gives
 /// either a bare hash (the account picture) or a full uploads URL (a custom
 /// team picture); anything else is refused rather than fetched.
-pub fn avatar_target(reference: &str, full: bool) -> Option<(String, String)> {
+fn avatar_target(reference: &str, full: bool) -> Option<(String, String)> {
     let reference = reference.trim();
     let hex = |s: &str| !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_hexdigit());
     let prefix = if full { "avf" } else { "av" };
@@ -48,7 +48,7 @@ pub fn avatar_target(reference: &str, full: bool) -> Option<(String, String)> {
 
 /// What the bytes are, from their magic number — the CDN says `.jpg` but
 /// serves PNG, so the extension cannot be trusted.
-pub fn mime_of(bytes: &[u8]) -> Option<&'static str> {
+fn mime_of(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
         Some("image/png")
     } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
@@ -61,7 +61,7 @@ pub fn mime_of(bytes: &[u8]) -> Option<&'static str> {
 }
 
 /// Standard base64, no dependencies.
-pub fn base64(bytes: &[u8]) -> String {
+fn base64(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
@@ -87,7 +87,7 @@ pub fn base64(bytes: &[u8]) -> String {
     out
 }
 
-pub fn data_url(bytes: &[u8]) -> Option<String> {
+fn data_url(bytes: &[u8]) -> Option<String> {
     let mime = mime_of(bytes)?;
     Some(format!("data:{mime};base64,{}", base64(bytes)))
 }
@@ -148,14 +148,16 @@ fn store_on_disk(image: &Path, miss: &Path, bytes: &[u8], usable: bool) {
 /// A separate trait rather than more inherent methods on `Engine`: fetching
 /// player photos has nothing to do with loading a league, and stating the seam
 /// here means `Engine`'s real surface can be read off its trait list.
-pub trait ImageCache {
+pub(crate) trait ImageCache {
     /// A player's photo as a data URL, or `None` if Sleeper has none.
     #[allow(async_fn_in_trait)]
     async fn headshot(&self, player_id: &str) -> Result<Option<String>, String>;
     /// A manager's team picture as a data URL. `full` asks for the large copy.
     #[allow(async_fn_in_trait)]
     async fn avatar(&self, reference: &str, full: bool) -> Result<Option<String>, String>;
-    /// How many images are currently cached on disk.
+    /// How many images are currently cached on disk. Only the cache's own
+    /// tests count them; the Settings note reads the number off the view.
+    #[cfg(test)]
     fn headshot_count(&self) -> usize;
 }
 
@@ -226,7 +228,8 @@ impl ImageCache for Engine {
         self.cached_image(&key, &url).await
     }
 
-    /// How many photos are on disk, for the Settings note.
+    /// How many photos are on disk.
+    #[cfg(test)]
     fn headshot_count(&self) -> usize {
         std::fs::read_dir(self.headshot_dir())
             .map(|d| {

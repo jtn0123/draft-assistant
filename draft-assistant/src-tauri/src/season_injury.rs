@@ -7,8 +7,8 @@
 
 /// The three tags worth showing, in their shortest form.
 pub const OUT: &str = "O";
-pub const DOUBTFUL: &str = "D";
-pub const QUESTIONABLE: &str = "Q";
+const DOUBTFUL: &str = "D";
+const QUESTIONABLE: &str = "Q";
 
 /// Sleeper's `injury_status` boiled down to one letter, or nothing at all.
 pub fn injury_code(status: Option<&str>) -> Option<&'static str> {

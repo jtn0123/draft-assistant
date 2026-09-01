@@ -55,7 +55,7 @@ impl LeagueUser {
 /// Both the current league and the previous one need exactly this map, and
 /// building it twice is how the two came to disagree about which of a team
 /// name and a handle wins.
-pub fn label_map(users: &[LeagueUser]) -> HashMap<String, String> {
+pub(crate) fn label_map(users: &[LeagueUser]) -> HashMap<String, String> {
     users
         .iter()
         .filter_map(|u| u.label().map(|n| (u.user_id.clone(), n)))
@@ -63,7 +63,7 @@ pub fn label_map(users: &[LeagueUser]) -> HashMap<String, String> {
 }
 
 /// user_id -> the picture to draw for their team, where they have one.
-pub fn avatar_map(users: &[LeagueUser]) -> HashMap<String, String> {
+pub(crate) fn avatar_map(users: &[LeagueUser]) -> HashMap<String, String> {
     users
         .iter()
         .filter_map(|u| u.avatar_ref().map(|a| (u.user_id.clone(), a)))

@@ -138,7 +138,7 @@ fn validated_slot(slot: Option<u32>, teams: u32) -> (Option<u32>, Option<String>
 
 /// When the current pick's timer runs out, from Sleeper's `last_picked`
 /// stamp and the draft's `pick_timer`. Only meaningful mid-draft.
-pub fn clock_deadline_ms(
+fn clock_deadline_ms(
     status: &str,
     last_picked: Option<u64>,
     pick_timer: Option<u32>,
