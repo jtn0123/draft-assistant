@@ -268,25 +268,28 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     } else {
         my_next_picks.first().copied()
     };
+    // …and judged against the market, not the board. A keeper sitting between
+    // here and that pick is already in the book: nobody selects at its number,
+    // so it must not age the ADP the survival is read off. With 27 keepers the
+    // unadjusted number said a first-rounder was gone before a name had been
+    // called. Identical to `survival_pick` in a league with no keepers.
+    let survival_market_pick = survival_pick.map(|pick| draft::market_pick(pick, &keepers));
 
     let taken: std::collections::HashSet<&str> =
         picks.iter().map(|p| p.player_id.as_str()).collect();
 
+    // Board first, then Sleeper's player dictionary — the season screen's
+    // `Lookup`, rather than a second copy of it. The copy this replaces had no
+    // first-name/last-name fallback, so a player the dictionary spells only in
+    // parts (plenty of defences and rookies) rendered on the draft side as a
+    // raw numeric id.
+    let lookup = crate::season_lookup::Lookup { loaded };
     let name_of = |player_id: &str| -> (String, String, Option<String>) {
-        if let Some(&i) = loaded.board_index.get(player_id) {
-            let p = &loaded.board[i];
-            (p.name.clone(), p.position.clone(), p.team.clone())
-        } else if let Some(meta) = loaded.player_meta.get(player_id) {
-            (
-                meta.full_name
-                    .clone()
-                    .unwrap_or_else(|| player_id.to_string()),
-                meta.position.clone().unwrap_or_default(),
-                meta.team.clone(),
-            )
-        } else {
-            (player_id.to_string(), String::new(), None)
-        }
+        (
+            lookup.name(player_id),
+            lookup.position(player_id).unwrap_or_default(),
+            lookup.team(player_id),
+        )
     };
 
     // Whose roster a pick lands on: the user who made it, else (manual picks
@@ -328,7 +331,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             .iter()
             .filter(|p| !taken.contains(p.player_id.as_str()))
             .map(|p| AvailablePlayer {
-                survival_next: survival_pick
+                survival_next: survival_market_pick
                     .and_then(|pick| p.adp.map(|adp| draft::survival_probability(adp, pick))),
                 player: p.clone(),
             }),

@@ -128,6 +128,40 @@ export function injuryWord(code: string): string {
   return code;
 }
 
+/**
+ * Sleeper's raw `injury_status` reduced to the one-letter tag the rest of the
+ * app draws. The season screen gets its codes from the backend
+ * (`season_injury.rs`); the draft board carries the dictionary's own spelling,
+ * which is a dozen words for three ideas — and "QUESTIONABLE" beside a name is
+ * wider than the whole player column once the chat panel is open.
+ *
+ * Anything the list does not know ("Probable", a blank) is no tag at all.
+ */
+export function injuryTag(status: string | null | undefined): string | null {
+  switch (status?.trim().toLowerCase()) {
+    case "questionable":
+    case "q":
+      return "Q";
+    case "doubtful":
+    case "d":
+      return "D";
+    case "out":
+    case "o":
+    case "ir":
+    case "pup":
+    case "sus":
+    case "susp":
+    case "suspended":
+    case "na":
+    case "dnr":
+    case "cov":
+    case "covid":
+      return "O";
+    default:
+      return null;
+  }
+}
+
 /** "2d 6h", "6h 12m", "48m" — how long until a deadline. */
 export function untilLabel(ms: number | null): string {
   if (ms === null) return "–";

@@ -3,7 +3,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { AvailablePlayer, Position } from "../types";
-import { fmt, pct } from "../format";
+import { fmt, injuryTag, pct } from "../format";
 import { PlayerName, SortHead } from "./bits";
 
 const PAGE = 200;
@@ -108,7 +108,12 @@ const BoardRow = memo(function BoardRow({
     <div className="board-row board-body">
       <span className="muted right">{p.overall_rank}</span>
       <span className="board-player">
-        <PlayerName name={p.name} team={p.team} tag={p.injury_status} playerId={p.player_id} />
+        <PlayerName
+          name={p.name}
+          team={p.team}
+          tag={injuryTag(p.injury_status)}
+          playerId={p.player_id}
+        />
       </span>
       <span className={`pos-badge pos-${p.position}`}>
         <span>{p.position}</span>

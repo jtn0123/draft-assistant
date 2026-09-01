@@ -173,3 +173,40 @@ describe("SidePanel across repeated updates", () => {
     expect(risky(container)).toEqual([names[0], names[2]]);
   });
 });
+
+describe("SidePanel pick market", () => {
+  it("prices every round the draft has learned, cheapest last", () => {
+    const view = fixture();
+    view.pick_prices = [
+      { round: 1, points: 82.4, example: "Alpha Back" },
+      { round: 2, points: 40, example: "Beta Wideout" },
+      { round: 3, points: 40, example: null },
+    ];
+
+    render(<SidePanel view={view} />);
+    expect(screen.getByText("Pick market")).toBeInTheDocument();
+    const rows = [...document.querySelectorAll(".price-row")];
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "R1Alpha Back82",
+      "R2Beta Wideout40",
+      "R3\u201440",
+    ]);
+    // Said in full on the row itself, so the number cannot be read as a
+    // projection.
+    expect(rows[0].getAttribute("title")).toMatch(/median VORP taken in this round/);
+  });
+
+  it("stays away entirely until the draft has rounds to learn from", () => {
+    const view = fixture();
+    view.pick_prices = [];
+    render(<SidePanel view={view} />);
+    expect(screen.queryByText("Pick market")).not.toBeInTheDocument();
+  });
+
+  it("survives a view captured before pick pricing existed", () => {
+    const view = fixture();
+    delete view.pick_prices;
+    render(<SidePanel view={view} />);
+    expect(screen.queryByText("Pick market")).not.toBeInTheDocument();
+  });
+});

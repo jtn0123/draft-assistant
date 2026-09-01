@@ -32,6 +32,41 @@ function player(
 }
 
 describe("Board", () => {
+  it("shows an injury as a one-letter tag that still reads in full", () => {
+    // Sleeper's dictionary spells this "Questionable"; uppercased in the row
+    // it was wider than the whole player column with the chat panel open, and
+    // ran over the position badge beside it.
+    render(
+      <Board
+        players={[player("wr", "Sore Wideout", "WR", { injury_status: "Questionable" })]}
+        positions={["WR"]}
+        loading={false}
+        boardSize={1}
+        onDraft={vi.fn()}
+      />,
+    );
+
+    const tag = screen.getByTitle("Questionable");
+    expect(tag).toHaveTextContent("Q");
+    expect(tag.textContent).toBe("QQuestionable");
+    // "Q" alone is what the eye sees; the word is there for a screen reader.
+    expect(tag.querySelector('[aria-hidden="true"]')?.textContent).toBe("Q");
+  });
+
+  it("says nothing about a status it does not recognise", () => {
+    render(
+      <Board
+        players={[player("wr", "Fine Wideout", "WR", { injury_status: "Probable" })]}
+        positions={["WR"]}
+        loading={false}
+        boardSize={1}
+        onDraft={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTitle("Probable")).not.toBeInTheDocument();
+    expect(document.querySelector(".tag")).toBeNull();
+  });
+
   it("builds position filters from league data, including kicker", async () => {
     const user = userEvent.setup();
     render(

@@ -9,7 +9,8 @@
 mod common;
 
 use draft_assistant_lib::engine::LoadedLeague;
-use draft_assistant_lib::sleeper::Pick;
+use draft_assistant_lib::simulation::apply_simulated_pick;
+use draft_assistant_lib::sleeper::{Pick, PlayerMeta};
 use draft_assistant_lib::traded_picks::TradedPick;
 use draft_assistant_lib::view::{build_view, DraftView};
 use std::collections::HashMap;
@@ -223,4 +224,93 @@ fn an_auction_draft_is_modelled_as_a_snake_and_says_so() {
         "{:?}",
         v.data_health.warnings
     );
+}
+
+/// The survival percentage the board and the rail show for one player.
+fn survival_of(v: &DraftView, player_id: &str) -> f64 {
+    v.available
+        .iter()
+        .find(|p| p.player.player_id == player_id)
+        .and_then(|p| p.survival_next)
+        .unwrap_or_else(|| panic!("{player_id} is on the board with a survival"))
+}
+
+#[test]
+fn survival_is_judged_against_real_picks_not_keeper_slots() {
+    // Slot 1 is mine and pick 1 is open, so survival is judged at my *next*
+    // pick, 8. q2's ADP is 7: on a clean board he is a coin-flip at best.
+    let (mut loaded, config) = league();
+    let clean = view(&loaded, &config);
+    assert_eq!(clean.draft.my_next_picks.first().copied(), Some(1));
+    assert_eq!(clean.draft.my_next_picks.get(1).copied(), Some(8));
+    // Pinned against the model itself, so no-keeper behaviour provably has
+    // not moved: pick 8 of the board is still position 8 of the market.
+    let pinned = draft_assistant_lib::draft::survival_probability(7.0, 8);
+    assert!((survival_of(&clean, "q2") - pinned).abs() < 1e-12);
+
+    // Now the same league with picks 2..=7 already in the book as keepers.
+    // Six of the seven picks in front of mine take nobody's turn, so only one
+    // player is actually selected before pick 8 arrives.
+    loaded.api_picks = ["w3", "w4", "q3", "r5", "w6", "q4"]
+        .iter()
+        .enumerate()
+        .map(|(i, id)| pick(i as u32 + 2, id, true))
+        .collect();
+    let kept = view(&loaded, &config);
+    assert_eq!(kept.draft.current_pick, 1, "the clock has not moved");
+    assert_eq!(kept.draft.my_next_picks.get(1).copied(), Some(8));
+    assert_eq!(
+        survival_of(&kept, "q2"),
+        draft_assistant_lib::draft::survival_probability(7.0, 2)
+    );
+    assert!(
+        survival_of(&kept, "q2") > survival_of(&clean, "q2") + 0.3,
+        "a keeper-heavy book is far kinder: {} vs {}",
+        survival_of(&kept, "q2"),
+        survival_of(&clean, "q2")
+    );
+}
+
+#[test]
+fn a_simulated_pick_lands_on_the_roster_that_owns_it() {
+    let (mut loaded, config) = league();
+    with_roster_map(&mut loaded);
+    // Slot 3 (roster 20) sent me (roster 40) its round 1, which is pick 3.
+    loaded.traded_picks = vec![traded(1, 20, 40)];
+
+    let taken = apply_simulated_pick(&mut loaded, &config, 3).expect("a candidate");
+    assert_eq!(
+        loaded.manual_picks[0].draft_slot, 1,
+        "the slot that owns the pick, not the one it started with"
+    );
+    let v = view(&loaded, &config);
+    assert_eq!(v.my_roster.as_ref().map(|r| r.players.len()), Some(1));
+    assert_eq!(v.my_roster.expect("my roster").players[0].player_id, taken);
+    assert!(v.rosters[2].players.is_empty(), "not the original slot");
+}
+
+#[test]
+fn a_player_the_dictionary_spells_in_parts_is_not_shown_as_an_id() {
+    let (mut loaded, config) = league();
+    loaded.player_meta.insert(
+        "9999".to_string(),
+        PlayerMeta {
+            full_name: None,
+            first_name: Some("Jane".into()),
+            last_name: Some("Kicker".into()),
+            position: Some("K".into()),
+            team: Some("SEA".into()),
+            fantasy_positions: None,
+            injury_status: None,
+            years_exp: None,
+            age: None,
+        },
+    );
+    loaded.api_picks = vec![pick(1, "9999", false)];
+
+    let v = view(&loaded, &config);
+    assert_eq!(v.recent_picks.len(), 1);
+    assert_eq!(v.recent_picks[0].name, "Jane Kicker");
+    assert_eq!(v.recent_picks[0].position, "K");
+    assert_eq!(v.rosters[0].players[0].name, "Jane Kicker");
 }

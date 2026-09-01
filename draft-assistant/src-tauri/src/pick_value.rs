@@ -76,35 +76,9 @@ pub fn pick_prices(loaded: &LoadedLeague) -> Vec<PickPrice> {
     prices
 }
 
-/// Price a set of rounds, naming any round the draft has no price for.
-pub fn price_rounds(prices: &[PickPrice], rounds: &[u32]) -> Result<Vec<PickPrice>, String> {
-    rounds
-        .iter()
-        .map(|round| {
-            prices
-                .iter()
-                .find(|p| p.round == *round)
-                .cloned()
-                .ok_or_else(|| format!("no round {round} in this draft"))
-        })
-        .collect()
-}
-
-pub fn total(prices: &[PickPrice]) -> f64 {
-    prices.iter().map(|p| p.points).sum()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn price(round: u32, points: f64) -> PickPrice {
-        PickPrice {
-            round,
-            points,
-            example: None,
-        }
-    }
 
     #[test]
     fn a_round_costs_what_its_median_pick_was_worth() {
@@ -112,14 +86,6 @@ mod tests {
         let mut taken: Vec<(f64, &str)> = vec![(30.0, "a"), (10.0, "b"), (20.0, "c")];
         taken.sort_by(|x, y| x.0.total_cmp(&y.0));
         assert_eq!(taken[median_index(taken.len())].1, "c");
-    }
-
-    #[test]
-    fn a_round_the_draft_never_reached_is_named_not_ignored() {
-        let prices = vec![price(1, 80.0), price(2, 40.0)];
-        assert_eq!(price_rounds(&prices, &[1]).unwrap(), vec![price(1, 80.0)]);
-        let error = price_rounds(&prices, &[9]).unwrap_err();
-        assert!(error.contains("round 9"), "{error}");
     }
 
     #[test]
@@ -133,11 +99,5 @@ mod tests {
             ceiling = *p;
         }
         assert_eq!(points, [80.0, 40.0, 16.0, 16.0, 12.0]);
-    }
-
-    #[test]
-    fn two_picks_cost_the_sum_of_both() {
-        assert!((total(&[price(1, 80.0), price(4, 12.5)]) - 92.5).abs() < 1e-9);
-        assert_eq!(total(&[]), 0.0);
     }
 }

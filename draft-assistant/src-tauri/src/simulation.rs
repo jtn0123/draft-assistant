@@ -1,8 +1,9 @@
 //! Deterministic draft simulation shared by the CLI and regression tests.
 
-use crate::draft::{slot_for_pick, DraftOrder};
+use crate::draft::DraftOrder;
 use crate::engine::{AppConfig, LoadedLeague};
 use crate::sleeper::Pick;
+use crate::traded_picks::PickOwnership;
 use crate::view::build_view;
 
 /// Apply one simulated pick. The user's slot follows the balanced
@@ -15,7 +16,19 @@ pub fn apply_simulated_pick(
     let teams = loaded.draft.settings.teams;
     let view = build_view(loaded, config);
     let (order, _) = DraftOrder::from_draft(&loaded.draft);
-    let slot = slot_for_pick(pick_no, teams, order);
+    // Who makes this pick, not where it started: the plain snake credited a
+    // traded pick to the slot that used to own it, so the simulator drafted on
+    // the wrong manager's behalf and `dump_state` fixtures carried the pick on
+    // the wrong roster. `build_view` has always used ownership; this is the
+    // same answer.
+    let slot = PickOwnership::from_draft(
+        &loaded.draft,
+        &loaded.traded_picks,
+        teams,
+        loaded.draft.settings.rounds,
+        order,
+    )
+    .owner_slot(pick_no);
     let player_id = if view.draft.my_slot == slot {
         view.recommendations
             .iter()
@@ -37,6 +50,8 @@ pub fn apply_simulated_pick(
     loaded.manual_picks.push(Pick {
         round: (pick_no - 1) / teams + 1,
         pick_no,
+        // The owning slot: a simulated pick has no drafter to name, and the
+        // roster it lands on is read from ownership either way.
         draft_slot: slot?,
         player_id: player_id.clone(),
         picked_by: None,

@@ -72,13 +72,6 @@ pub fn slot_for_pick(pick_no: u32, teams: u32, order: DraftOrder) -> Option<u32>
     Some(if forward { idx + 1 } else { teams - idx })
 }
 
-/// All overall pick numbers (1-based) belonging to a slot.
-pub fn picks_for_slot(slot: u32, teams: u32, rounds: u32, order: DraftOrder) -> Vec<u32> {
-    (1..=teams.saturating_mul(rounds))
-        .filter(|&p| slot_for_pick(p, teams, order) == Some(slot))
-        .collect()
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct RosterEntry {
     pub player_id: String,
@@ -100,10 +93,13 @@ pub struct TeamRoster {
     pub open_starters: Vec<(String, u32)>,
 }
 
-/// Fill starters greedily in roster_positions order: dedicated slots first,
-/// then flex takes leftover eligible players. Returns open (unfilled) slots.
-/// P(player still available at overall pick `at_pick`), given their ADP.
+/// P(player still available at market position `at_pick`), given their ADP.
 /// Selection pick modeled as Normal(adp, sigma) with sigma growing with ADP.
+///
+/// `at_pick` is a *market* position, not an overall pick number: ADP counts
+/// selections, so anything that is not a selection must not advance it. Pass
+/// `market_pick` of the overall pick, never the overall pick itself — in a
+/// league with no keepers the two are the same number.
 pub fn survival_probability(adp: f64, at_pick: u32) -> f64 {
     if adp <= 0.0 || adp >= 500.0 {
         // No real ADP signal — assume safe.
@@ -112,6 +108,22 @@ pub fn survival_probability(adp: f64, at_pick: u32) -> f64 {
     let sigma = (0.22 * adp).max(3.0);
     let z = (at_pick as f64 - adp) / sigma;
     (1.0 - crate::scoring::norm_cdf(z)).clamp(0.01, 0.99)
+}
+
+/// Where an overall pick number sits in the *market* an ADP is measured in:
+/// how many selections will have been made by the time it arrives.
+///
+/// Keepers are entered as picks hours before anybody is on the clock, and
+/// nobody ever selects at those numbers — a keeper league's overall pick 27
+/// can be the fourth player actually chosen. Measuring an ADP against 27 there
+/// says a first-rounder is long gone before a single name has been called, and
+/// every survival percentage, the "Won't last" rail and the survival lines on
+/// the recommendation cards were pessimistic all night because of it.
+///
+/// With no keepers this is the identity: the market and the board agree.
+pub fn market_pick(at_pick: u32, keepers: &std::collections::HashSet<u32>) -> u32 {
+    let ahead = keepers.iter().filter(|&&k| k < at_pick).count() as u32;
+    at_pick.saturating_sub(ahead).max(1)
 }
 
 /// Group picks into per-slot rosters.
@@ -162,6 +174,14 @@ pub fn build_rosters(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::traded_picks::PickOwnership;
+    use std::collections::HashSet;
+
+    /// The pick numbers a slot makes, read off the live path the app uses.
+    /// `PickOwnership::plain` is the same snake with no trades applied.
+    fn picks_for_slot(slot: u32, teams: u32, rounds: u32, order: DraftOrder) -> Vec<u32> {
+        PickOwnership::plain(teams, rounds, order).picks_owned_by(slot)
+    }
 
     #[test]
     fn snake_order_14_teams() {
@@ -247,6 +267,31 @@ mod tests {
         assert!(survival_probability(1.5, 27) < 0.05);
         // ADP 100 player is nearly certain at pick 27.
         assert!(survival_probability(100.0, 27) > 0.95);
+    }
+
+    #[test]
+    fn keepers_in_front_of_a_pick_do_not_advance_the_market() {
+        // Twenty-three of the twenty-six picks before 27 are keepers, so only
+        // three players have actually been chosen when 27 arrives.
+        let keepers: HashSet<u32> = (1..=23).collect();
+        assert_eq!(market_pick(27, &keepers), 4);
+        // Keepers behind the pick have already been counted out of it, and
+        // keepers beyond it are somebody else's problem.
+        let later: HashSet<u32> = [40, 55].into_iter().collect();
+        assert_eq!(market_pick(27, &later), 27);
+        // No keepers at all: the market and the board are the same number.
+        assert_eq!(market_pick(27, &HashSet::new()), 27);
+        // A pick whose every predecessor is kept is still the first selection.
+        assert_eq!(market_pick(5, &(1..=4).collect()), 1);
+    }
+
+    #[test]
+    fn a_keeper_heavy_book_makes_the_same_player_likelier_to_last() {
+        let keepers: HashSet<u32> = (1..=20).collect();
+        let clean = survival_probability(20.0, market_pick(27, &HashSet::new()));
+        let kept = survival_probability(20.0, market_pick(27, &keepers));
+        assert!(clean < 0.15, "pessimistic without keepers: {clean}");
+        assert!(kept > 0.9, "seven real picks away: {kept}");
     }
 
     #[test]

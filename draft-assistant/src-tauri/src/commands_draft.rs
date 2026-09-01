@@ -1,7 +1,7 @@
 //! Tauri commands for the draft screen.
 
 use crate::draft;
-use crate::engine::{self, AppConfig, StoredLeague};
+use crate::engine::{AppConfig, StoredLeague};
 use crate::keepers;
 use crate::picks::{self, ManualPickStore};
 use crate::poll::{record_poll_outcome, DraftPollMemory};
@@ -123,11 +123,14 @@ pub async fn refresh_picks(state: State<'_, AppState>) -> Result<DraftView, Stri
             .save_manual_picks(&draft_id, &loaded.manual_picks)?;
     }
     // A keeper is only recognisable while it sits ahead of the clock, so the
-    // judgement is made and written down on every refresh.
-    keepers::note_keepers(state.engine.as_ref(), loaded);
-    loaded.poll_last_success_at = Some(engine::now_secs());
-    loaded.poll_consecutive_failures = 0;
-    loaded.poll_last_error = None;
+    // judgement is made and written down on every refresh. A keeper set that
+    // fails to save is reported here exactly as the background poller reports
+    // it — the same tick, collected and recorded, rather than dropped on the
+    // floor because this path happens to be the manual one.
+    let errors: Vec<String> = keepers::note_keepers(state.engine.as_ref(), loaded)
+        .into_iter()
+        .collect();
+    record_poll_outcome(loaded, &errors);
     // Also refresh draft status/order — it flips to "drafting" at start time.
     if let Ok(draft) = draft {
         loaded.draft = draft;

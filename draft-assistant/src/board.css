@@ -1,4 +1,5 @@
-/* The player board: controls, sortable header, rows, and its states. */
+/* The player board: controls, sortable header, rows, and its states — plus
+   the pick market, the one rail panel that belongs only to this screen. */
 
 /* ---------- board ---------- */
 
@@ -218,4 +219,46 @@
   width: 20px;
   height: 20px;
   flex-basis: 20px;
+}
+
+/* The injury tag gets the same discipline as the name beside it. The player
+   column is `minmax(0, 1fr)`, so opening the chat panel takes 380px straight
+   out of it — and a tag that could not shrink (`flex: 0 0 auto`) simply ran
+   out of its column and over the position badge. The one-letter tags the row
+   draws never reach this cap; it is here so nothing longer can escape either. */
+.board-player .tag {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- pick market ---------- */
+
+/* What a pick in each round of this draft has cost, in the currency the rest
+   of the screen already speaks. Rail-only, so it ships in this chunk with the
+   rest of the draft screen. */
+.price-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.price-row {
+  display: grid;
+  grid-template-columns: 2.4em minmax(0, 1fr) 3.6em;
+  gap: 8px;
+  font-size: 12px;
+  align-items: baseline;
+  color: var(--ink);
+  padding: 3px 0;
+}
+
+.price-row + .price-row {
+  border-top: 1px solid var(--hair);
+}
+
+.price-points {
+  text-align: right;
 }

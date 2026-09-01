@@ -172,7 +172,16 @@ function buildQueue(
   return entries;
 }
 
-/** Snake order: odd rounds run 1..n, even rounds run n..1. */
+/**
+ * Snake order: odd rounds run 1..n, even rounds run n..1.
+ *
+ * INVARIANT: this is the baseline `PickOwnership::overrides` (traded_picks.rs)
+ * is measured against — it emits an entry for every pick a *plain* snake gets
+ * wrong, and nothing else. So this function must stay a plain snake: teach it
+ * about third-round reversal or traded picks and the two sides double-correct,
+ * silently naming the wrong manager on exactly the picks that matter most.
+ * Anything new the order depends on belongs in the overrides, not here.
+ */
 function slotForPick(pickNo: number, teams: number): number {
   const round = Math.floor((pickNo - 1) / teams) + 1;
   const index = (pickNo - 1) % teams;
