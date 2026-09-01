@@ -6,8 +6,6 @@ import type { PollHealth } from "../types";
 import { age } from "../format";
 import { setChime, useChime, type Screen } from "../prefs";
 
-export type { Screen };
-
 export interface SettingsRow {
   label: string;
   note: string;

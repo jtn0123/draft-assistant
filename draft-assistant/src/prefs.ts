@@ -27,10 +27,6 @@ const lineupView = persisted<LineupView>(
   "Table",
 );
 
-export function chimeOn(): boolean {
-  return chime.get() === "on";
-}
-
 export function setChime(next: boolean): void {
   chime.set(next ? "on" : "off");
 }

@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("./api", () => ({ api: mocks }));
 
-import { reloadSeason, useSeasonSession, type SeasonSession } from "./session";
+import { useSeasonSession, type SeasonSession } from "./session";
 
 const view = (week: number) => ({ schema_version: "1.1", week }) as unknown as SeasonView;
 
@@ -252,14 +252,6 @@ describe("a retry that fails too", () => {
     });
     await waitFor(() => expect(result.current.error).toMatch(/still down/));
     expect(result.current.season).toBeNull();
-  });
-});
-
-describe("reloadSeason", () => {
-  it("always bypasses the cache", async () => {
-    mocks.loadSeason.mockResolvedValue(view(9));
-    await expect(reloadSeason()).resolves.toEqual(view(9));
-    expect(mocks.loadSeason).toHaveBeenCalledWith(true);
   });
 });
 

@@ -2,7 +2,6 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { persisted, usePersisted } from "./persisted";
 import {
-  chimeOn,
   resetPrefs,
   setChime,
   setLineupView,
@@ -127,14 +126,13 @@ describe("preferences that were saved by an earlier version", () => {
     expect(result.current.screen).toBe("season");
     expect(result.current.chime).toBe(true);
     expect(result.current.lineup).toBe("Table");
-    expect(chimeOn()).toBe(true);
   });
 });
 
 describe("a preference when storage will not play", () => {
   it("falls back to its default rather than throwing", () => {
     lockedStorage();
-    expect(chimeOn()).toBe(true);
+    expect(renderHook(() => useChime()).result.current).toBe(true);
     expect(renderHook(() => useScreen()).result.current).toBe("season");
   });
 
@@ -147,7 +145,6 @@ describe("a preference when storage will not play", () => {
     });
 
     expect(result.current).toBe(false);
-    expect(chimeOn()).toBe(false);
   });
 });
 

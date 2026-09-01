@@ -55,6 +55,9 @@ function samePlayer(a: AvailablePlayer, b: AvailablePlayer): boolean {
 /**
  * Whether two available-player lists carry the same data in the same order.
  * Order counts: the board's sort is only ever stable relative to its input.
+ *
+ * Only `stableAvailable` below calls this; it is exported so the comparison
+ * can be tested field by field, which is the part that has to be exhaustive.
  */
 export function sameAvailable(a: AvailablePlayer[], b: AvailablePlayer[]): boolean {
   if (a === b) return true;

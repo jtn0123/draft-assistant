@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { ChatMessage, ChatSettings, ThreadEntry } from "../chat-types";
 import { formatUsd, overBudget, setChatBudget, useChatBudget } from "../chatCost";
-import type { Screen } from "./Header";
+import type { Screen } from "../prefs";
 import { ChatControls } from "./ChatControls";
 import { ChatKeyForm } from "./ChatKeyForm";
 import { ChatSessionBar } from "./ChatSessionBar";

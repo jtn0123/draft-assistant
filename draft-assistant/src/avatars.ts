@@ -18,6 +18,11 @@ function read(): AvatarMode {
   }
 }
 
+/**
+ * The current mode, read without subscribing. Components use `useAvatarMode`;
+ * this backs it as `useSyncExternalStore`'s snapshot, and is exported so a
+ * test can read the mode outside a render.
+ */
 export function avatarMode(): AvatarMode {
   return mode;
 }

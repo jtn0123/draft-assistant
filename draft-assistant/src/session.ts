@@ -147,8 +147,3 @@ export function useSeasonSession(
 
   return { season, error, pollHealth, retry };
 }
-
-/** Force a fresh season load, for the Settings "Refresh data" path. */
-export async function reloadSeason(): Promise<SeasonView> {
-  return api.loadSeason(true);
-}
