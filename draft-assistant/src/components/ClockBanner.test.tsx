@@ -160,3 +160,52 @@ describe("the banner and the strip on one clock", () => {
     expect(chips().map((c) => c.textContent)).toEqual(before.map((c) => c.textContent));
   });
 });
+
+// The strip does its own snake arithmetic, which knows nothing about picks
+// that changed hands, third-round reversal, or keepers. The backend hands it
+// the corrections; these are about the strip actually applying them.
+describe("the queue under league rules the plain snake cannot see", () => {
+  const chipTexts = (container: HTMLElement) =>
+    [...container.querySelectorAll(".snake-chip")].map((c) => c.textContent);
+  const pickLabels = (container: HTMLElement) =>
+    [...container.querySelectorAll(".snake-pick")].map((p) => p.textContent);
+
+  it("names the slot that owns a pick, not the one it started with", () => {
+    const view = fixture();
+    // Pick 27 is slot 2 (mine) in the snake; say it was traded to slot 5.
+    view.draft.pick_slot_overrides = { "27": 5 };
+    const { container } = render(<SnakeStrip view={view} />);
+
+    const first = chipTexts(container)[0] ?? "";
+    expect(first).toContain("ChrisWitz");
+    expect(first).not.toContain("YOU");
+  });
+
+  it("marks a pick acquired from somebody else as mine", () => {
+    const view = fixture();
+    view.draft.pick_slot_overrides = { "28": 2 };
+    const { container } = render(<SnakeStrip view={view} />);
+
+    expect(chipTexts(container)[1]).toContain("YOU");
+  });
+
+  it("leaves out picks that are already in the book as keepers", () => {
+    const view = fixture();
+    view.draft.keeper_picks = [28, 29];
+    const { container } = render(<SnakeStrip view={view} />);
+
+    const picks = pickLabels(container);
+    expect(picks[0]).toBe(pickLabel(27, view.draft.teams));
+    // 28 and 29 are nobody's turn, so 30 comes next.
+    expect(picks[1]).toBe(pickLabel(30, view.draft.teams));
+  });
+
+  it("still draws a plain snake when the league has no such rules", () => {
+    const view = fixture();
+    const { container } = render(<SnakeStrip view={view} />);
+
+    const picks = pickLabels(container);
+    expect(picks[0]).toBe(pickLabel(27, view.draft.teams));
+    expect(picks[1]).toBe(pickLabel(28, view.draft.teams));
+  });
+});

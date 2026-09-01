@@ -306,6 +306,7 @@ mod tests {
                 },
                 picked_by: None,
                 metadata: None,
+                is_keeper: None,
             })
             .collect()
     }

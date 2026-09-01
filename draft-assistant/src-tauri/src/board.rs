@@ -4,6 +4,7 @@ use crate::roster::RosterRules;
 use crate::scoring;
 use crate::sleeper::{Draft, League, PlayerMeta, ProjectionRow};
 use crate::valuation::{self, ReplacementModel, ScoredPlayer};
+use crate::view::TierAlert;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -224,4 +225,35 @@ pub fn build_board(
         players: scored,
         replacement: model,
     }
+}
+
+/// The best tier still on the board at each position, and how many players are
+/// left in it — one alert per draftable position that has anyone left, in the
+/// order the league rosters them.
+///
+/// `available` is in board order, so the first player seen at a position sets
+/// that position's tier and everyone later in the same tier adds to the count.
+/// One pass fills every position: scanning the whole board once per position
+/// gave the same answer for several times the work.
+pub fn tier_alerts(available: &[AvailablePlayer], positions: Vec<String>) -> Vec<TierAlert> {
+    let mut top: HashMap<&str, (u32, u32)> = HashMap::new();
+    for a in available {
+        let (tier, left) = top
+            .entry(a.player.position.as_str())
+            .or_insert((a.player.tier, 0));
+        if *tier == a.player.tier {
+            *left += 1;
+        }
+    }
+    positions
+        .into_iter()
+        .filter_map(|pos| {
+            top.get(pos.as_str())
+                .map(|&(tier, players_left)| TierAlert {
+                    position: pos,
+                    tier,
+                    players_left,
+                })
+        })
+        .collect()
 }

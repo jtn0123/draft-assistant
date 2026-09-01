@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppConfig, DraftView, PollHealth, StoredLeague } from "./types";
 import type { SeasonView } from "./season-types";
 import type { ChatReply, ChatRequest, ChatSettings } from "./chat-types";
+import { ReplayFeed, replaySource } from "./replay";
 
 const DRAFT_VIEW_SCHEMA_VERSION = "1.1";
 const SEASON_VIEW_SCHEMA_VERSION = "1.0";
@@ -110,6 +111,13 @@ const tauriApi: Api = {
  * Browser fallback for UI development: serves a captured real state dump
  * (public/dev-fixture.json) so the full interface renders outside Tauri.
  * Mutating calls only simulate what they can locally.
+ *
+ * `?replay=<url>` and `?replay-season=<url>` point either dump somewhere else
+ * — at a file `scripts/replay-sleeper.mjs` keeps rewriting, typically — and
+ * that turns the preview live: the source is re-read on a timer and every
+ * newer dump reaches the screens through the very listeners the desktop
+ * poller feeds. Without those parameters nothing changes: two fixtures, read
+ * once, and live sync says it needs the desktop app.
  */
 function browserApi(): Api {
   // A rejected promise, not a synchronous throw: callers of these methods
@@ -117,30 +125,29 @@ function browserApi(): Api {
   // desktop app does.
   const readOnly = (advice: string): Promise<never> =>
     Promise.reject(new Error(`browser preview is read-only — ${advice}`));
-  let cached: DraftView | null = null;
-  let cachedSeason: SeasonView | null = null;
-  const seasonFixture = async (): Promise<SeasonView> => {
-    if (cachedSeason === null) {
-      const resp = await fetch("/dev-season-fixture.json");
-      if (!resp.ok) {
-        throw new Error(
-          "season fixture missing (browser preview needs public/dev-season-fixture.json)",
-        );
-      }
-      cachedSeason = validateSeasonView((await resp.json()) as SeasonView);
-    }
-    return cachedSeason;
-  };
-  const fixture = async (): Promise<DraftView> => {
-    if (cached === null) {
-      const resp = await fetch("/dev-fixture.json");
-      if (!resp.ok)
-        throw new Error(
-          "dev fixture missing (browser preview only works with public/dev-fixture.json)",
-        );
-      cached = validateDraftView((await resp.json()) as DraftView);
-    }
-    return cached;
+  const search = window.location.search;
+  const draft = new ReplayFeed<DraftView>({
+    source: replaySource(search, "replay", "/dev-fixture.json"),
+    missing: "dev fixture missing (browser preview only works with public/dev-fixture.json)",
+    what: "draft state",
+    validate: validateDraftView,
+    generatedAt: (view) => view.generated_at,
+  });
+  const season = new ReplayFeed<SeasonView>({
+    source: replaySource(search, "replay-season", "/dev-season-fixture.json"),
+    missing: "season fixture missing (browser preview needs public/dev-season-fixture.json)",
+    what: "season scores",
+    validate: validateSeasonView,
+    generatedAt: (view) => view.generated_at,
+  });
+  const fixture = () => draft.current();
+  const seasonFixture = () => season.current();
+  // Live sync in the preview means the replay timer; with no replay source
+  // there is nothing to poll, and the preview says so as it always did.
+  const startFeed = <V>(feed: ReplayFeed<V>, advice: string): Promise<void> => {
+    if (!feed.live) return readOnly(advice);
+    feed.start();
+    return Promise.resolve();
   };
   return {
     addLeague: fixture,
@@ -164,8 +171,10 @@ function browserApi(): Api {
       return [{ league_id: v.league.league_id, name: v.league.name, season: v.league.season }];
     },
     getState: fixture,
-    refreshPicks: fixture,
-    refreshData: fixture,
+    refreshPicks: () => draft.refresh(),
+    // Only the dump can be re-read here; the projections behind it are the
+    // engine's, and the preview has no engine.
+    refreshData: () => draft.refresh(),
     recordManualPick: () => readOnly("run the desktop app to draft"),
     undoManualPick: () => readOnly("run the desktop app to draft"),
     exportState: () => Promise.resolve("browser preview — no export"),
@@ -183,17 +192,23 @@ function browserApi(): Api {
             ? `https://sleepercdn.com/avatars/${full ? "" : "thumbs/"}${reference}`
             : null,
       ),
-    startPolling: () => readOnly("live sync requires the desktop app"),
-    stopPolling: () => Promise.resolve(),
-    onDraftUpdated: () => Promise.resolve(() => undefined),
-    onPollHealth: () => Promise.resolve(() => undefined),
+    startPolling: () => startFeed(draft, "live sync requires the desktop app"),
+    stopPolling: () => {
+      draft.stop();
+      return Promise.resolve();
+    },
+    onDraftUpdated: (handler) => Promise.resolve(draft.onView(handler)),
+    onPollHealth: (handler) => Promise.resolve(draft.onHealth(handler)),
     loadSeason: seasonFixture,
     getSeason: seasonFixture,
-    refreshSeason: seasonFixture,
-    startSeasonPolling: () => readOnly("live scoring requires the desktop app"),
-    stopSeasonPolling: () => Promise.resolve(),
-    onSeasonUpdated: () => Promise.resolve(() => undefined),
-    onSeasonPollHealth: () => Promise.resolve(() => undefined),
+    refreshSeason: () => season.refresh(),
+    startSeasonPolling: () => startFeed(season, "live scoring requires the desktop app"),
+    stopSeasonPolling: () => {
+      season.stop();
+      return Promise.resolve();
+    },
+    onSeasonUpdated: (handler) => Promise.resolve(season.onView(handler)),
+    onSeasonPollHealth: (handler) => Promise.resolve(season.onHealth(handler)),
     setApiKey: () => Promise.resolve(false),
     setChatProvider: () => Promise.resolve("api"),
     chatSettings: () =>

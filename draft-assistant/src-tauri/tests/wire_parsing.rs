@@ -7,6 +7,7 @@
 use draft_assistant_lib::sleeper::{
     Draft, League, LeagueUser, Pick, PlayerMeta, ProjectionRow, SleeperClient,
 };
+use draft_assistant_lib::traded_picks::TradedPick;
 use std::collections::HashMap;
 
 #[test]
@@ -135,6 +136,7 @@ fn draft_parses_mock_draft_payload() {
     assert_eq!(draft.settings.teams, 12);
     assert_eq!(draft.settings.rounds, 15);
     assert_eq!(draft.settings.pick_timer, Some(60));
+    assert_eq!(draft.settings.reversal_round, Some(0));
     assert_eq!(draft.settings.slots_qb, Some(1));
     assert_eq!(draft.settings.slots_super_flex, Some(0));
     assert_eq!(draft.settings.slots_def, Some(1));
@@ -166,6 +168,43 @@ fn draft_minimal_payload_defaults_everything_optional() {
     assert!(draft.metadata.is_none());
     assert!(draft.creators.is_none());
     assert!(draft.last_picked.is_none());
+    assert!(draft.settings.reversal_round.is_none());
+    assert!(draft.slot_to_roster_id.is_none());
+}
+
+#[test]
+fn a_keeper_league_draft_carries_its_reversal_round_and_slot_map() {
+    let json = r#"{
+        "draft_id": "d2",
+        "status": "drafting",
+        "type": "snake",
+        "settings": {"teams": 14, "rounds": 15, "reversal_round": 3},
+        "slot_to_roster_id": {"1": 14, "2": 13, "13": 11}
+    }"#;
+    let draft: Draft = serde_json::from_str(json).unwrap();
+    assert_eq!(draft.settings.reversal_round, Some(3));
+    let slots = draft.slot_to_roster_id.as_ref().unwrap();
+    assert_eq!(slots.get("13"), Some(&11));
+    assert_eq!(slots.len(), 3);
+}
+
+#[test]
+fn traded_picks_parse_and_an_empty_list_is_normal() {
+    let json = r#"[
+        {"season": "2026", "round": 11, "roster_id": 11, "owner_id": 2,
+         "previous_owner_id": 11},
+        {"season": "2026", "round": 12, "roster_id": 2, "owner_id": 11}
+    ]"#;
+    let traded: Vec<TradedPick> = serde_json::from_str(json).unwrap();
+    assert_eq!(traded.len(), 2);
+    assert_eq!(traded[0].season, "2026");
+    assert_eq!((traded[0].round, traded[0].roster_id), (11, 11));
+    assert_eq!(traded[0].owner_id, 2);
+    assert_eq!(traded[0].previous_owner_id, Some(11));
+    assert!(traded[1].previous_owner_id.is_none());
+    assert!(serde_json::from_str::<Vec<TradedPick>>("[]")
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -185,10 +224,14 @@ fn picks_parse_with_and_without_metadata() {
                 "years_exp": "8"
             }
         },
-        {"round": 1, "pick_no": 2, "draft_slot": 2, "player_id": "6786"}
+        {"round": 1, "pick_no": 2, "draft_slot": 2, "player_id": "6786"},
+        {"round": 2, "pick_no": 20, "draft_slot": 9, "player_id": "1234",
+         "is_keeper": true},
+        {"round": 3, "pick_no": 33, "draft_slot": 4, "player_id": "5678",
+         "is_keeper": null}
     ]"#;
     let picks: Vec<Pick> = serde_json::from_str(json).unwrap();
-    assert_eq!(picks.len(), 2);
+    assert_eq!(picks.len(), 4);
     assert_eq!(picks[0].pick_no, 1);
     assert_eq!(picks[0].draft_slot, 1);
     assert_eq!(picks[0].player_id, "4034");
@@ -200,6 +243,12 @@ fn picks_parse_with_and_without_metadata() {
     assert_eq!(meta.team.as_deref(), Some("SF"));
     assert!(picks[1].picked_by.is_none());
     assert!(picks[1].metadata.is_none());
+    // Sleeper's keeper flag: set, absent and explicitly null all parse, and
+    // the last two are indistinguishable — which is why keeper-ness is really
+    // decided by where a pick sits.
+    assert_eq!(picks[2].is_keeper, Some(true));
+    assert!(picks[1].is_keeper.is_none());
+    assert!(picks[3].is_keeper.is_none());
 }
 
 #[test]

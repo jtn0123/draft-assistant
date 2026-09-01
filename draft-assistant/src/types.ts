@@ -29,6 +29,8 @@ export interface RosterEntry {
   team: string | null;
   pick_no: number;
   round: number;
+  /** Kept from last season rather than drafted tonight. */
+  is_keeper: boolean;
 }
 
 export interface TeamRoster {
@@ -56,6 +58,14 @@ export interface DraftStatus {
   manual_picks_active: boolean;
   /** Epoch ms when the current pick's timer expires; null when no clock runs. */
   clock_deadline_ms: number | null;
+  /**
+   * Picks the plain snake gets wrong — traded away, or moved by third-round
+   * reversal: pick number (as a string key) -> the slot that makes it. Empty
+   * in an ordinary league.
+   */
+  pick_slot_overrides: Record<string, number>;
+  /** Picks already in the book as keepers: nobody's turn, ever. */
+  keeper_picks: number[];
 }
 
 export interface TierAlert {

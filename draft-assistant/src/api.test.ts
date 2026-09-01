@@ -20,11 +20,13 @@ const draftView = {
 } as unknown as DraftView;
 const seasonView = { schema_version: "1.0" } as unknown as SeasonView;
 
-async function load(shell: boolean) {
+async function load(shell: boolean, search = "") {
   vi.resetModules();
   const w = window as unknown as Record<string, unknown>;
   if (shell) w.__TAURI_INTERNALS__ = {};
   else delete w.__TAURI_INTERNALS__;
+  // The browser arm reads the query string once, as the module is created.
+  window.history.replaceState(null, "", `/${search}`);
   return import("./api");
 }
 
@@ -32,6 +34,8 @@ afterEach(() => {
   invoke.mockReset();
   listen.mockReset();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  window.history.replaceState(null, "", "/");
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 });
 
@@ -209,5 +213,73 @@ describe("browser arm", () => {
     expect((await api.onPollHealth(() => undefined))()).toBeUndefined();
     expect((await api.onSeasonUpdated(() => undefined))()).toBeUndefined();
     expect((await api.onSeasonPollHealth(() => undefined))()).toBeUndefined();
+  });
+});
+
+describe("replay arm", () => {
+  /** A fetch that answers each URL with the newest dump written for it. */
+  const replayFetch = (dumps: Record<string, unknown>) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve(dumps[url]) }),
+      ),
+    );
+
+  it("reads the draft state from ?replay and pushes newer dumps to the listeners", async () => {
+    vi.useFakeTimers();
+    const dumps: Record<string, unknown> = {
+      "/live-state.json": { ...draftView, generated_at: 100 },
+    };
+    replayFetch(dumps);
+    const { api } = await load(false, "?replay=/live-state.json");
+    const seen: DraftView[] = [];
+    const health: unknown[] = [];
+    await api.onDraftUpdated((v) => seen.push(v));
+    await api.onPollHealth((h) => health.push(h));
+
+    expect((await api.getState()).generated_at).toBe(100);
+    // Live sync is no longer refused: it is the replay timer.
+    await expect(api.startPolling()).resolves.toBeUndefined();
+
+    dumps["/live-state.json"] = { ...draftView, generated_at: 101 };
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(seen.map((v) => v.generated_at)).toEqual([101]);
+    expect(health).toEqual([{ last_success_at: 101, consecutive_failures: 0, last_error: null }]);
+
+    await api.stopPolling();
+    dumps["/live-state.json"] = { ...draftView, generated_at: 102 };
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("replays the season from its own parameter, leaving the draft on its fixture", async () => {
+    vi.useFakeTimers();
+    const dumps: Record<string, unknown> = {
+      "/dev-fixture.json": draftView,
+      "/live-season.json": { ...seasonView, generated_at: 5 },
+    };
+    replayFetch(dumps);
+    const { api } = await load(false, "?replay-season=/live-season.json");
+    const seen: SeasonView[] = [];
+    await api.onSeasonUpdated((v) => seen.push(v));
+    expect((await api.loadSeason()).generated_at).toBe(5);
+    await expect(api.startSeasonPolling()).resolves.toBeUndefined();
+    // The draft half was never pointed anywhere, so it stays read-only.
+    await expect(api.startPolling()).rejects.toThrow(/read-only/);
+
+    dumps["/live-season.json"] = { ...seasonView, generated_at: 6 };
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(seen.map((v) => v.generated_at)).toEqual([6]);
+    await api.stopSeasonPolling();
+  });
+
+  it("says a replay source answered with a page rather than a dump", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.reject(new SyntaxError("<")) })),
+    );
+    const { api } = await load(false, "?replay=/typo.json");
+    await expect(api.getState()).rejects.toThrow(/it is not a state dump/);
   });
 });

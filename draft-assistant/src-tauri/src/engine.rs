@@ -5,17 +5,18 @@
 //! and the model can see.
 
 use crate::board::{build_board, BoardPlayer};
-use crate::cache::{
-    envelope_json, fresh_enough, read_cached, replace_file, safe_key, write_atomic,
-};
+use crate::cache::{envelope_json, fresh_enough, read_cached, replace_file, write_atomic};
+use crate::keepers::KeeperStore;
 use crate::mock_league::synthesize_league;
+use crate::picks::{reconcile_manual_picks, ManualPickStore};
 use crate::roster::RosterRules;
 use crate::sleeper::{Draft, League, Pick, PlayerMeta, SleeperClient};
 use crate::sleeper_error::to_message;
+use crate::traded_picks::TradedPick;
 use crate::valuation::ReplacementModel;
 use crate::weekly::WeeklyPoints;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -75,6 +76,14 @@ pub struct LoadedLeague {
     pub roster_rules: RosterRules,
     pub api_picks: Vec<Pick>,
     pub manual_picks: Vec<Pick>,
+    /// Draft picks that changed hands, from `/draft/{id}/traded_picks`. Empty
+    /// in a league that trades none, and whenever the fetch fails — in which
+    /// case pick ownership falls back to the plain snake.
+    pub traded_picks: Vec<TradedPick>,
+    /// Pick numbers known to be keepers: flagged by Sleeper, or seen sitting
+    /// ahead of the clock at some point. Remembered on disk because a keeper
+    /// stays a keeper once the draft passes its slot.
+    pub keeper_pick_nos: HashSet<u32>,
     pub poll_last_success_at: Option<u64>,
     pub poll_consecutive_failures: u32,
     pub poll_last_error: Option<String>,
@@ -111,6 +120,8 @@ pub struct Engine {
 /// - [`crate::headshots::ImageCache`] — player photos and manager avatars
 /// - [`crate::season_engine::SeasonLoader`] — loading and refreshing a season
 /// - [`crate::season_history::HistoryStore`] — Trends snapshots
+/// - [`crate::picks::ManualPickStore`] — picks the user typed in by hand
+/// - [`crate::keepers::KeeperStore`] — which picks this league keeps
 impl Engine {
     pub fn new(data_dir: PathBuf) -> Self {
         std::fs::create_dir_all(&data_dir).ok();
@@ -187,27 +198,16 @@ impl Engine {
         fetched_at
     }
 
-    fn write_cache_checked<T: Serialize>(&self, name: &str, data: &T) -> Result<u64, String> {
+    pub(crate) fn write_cache_checked<T: Serialize>(
+        &self,
+        name: &str,
+        data: &T,
+    ) -> Result<u64, String> {
         let fetched_at = now_secs();
         let tmp = self.cache_path(&format!("{name}.tmp"));
         write_atomic(tmp, self.cache_path(name), fetched_at, data)
             .map_err(|e| format!("{name}: {e}"))?;
         Ok(fetched_at)
-    }
-
-    fn manual_picks_cache_name(draft_id: &str) -> String {
-        format!("manual_picks_{}.json", safe_key(draft_id))
-    }
-
-    pub fn load_manual_picks(&self, draft_id: &str) -> Vec<Pick> {
-        self.read_cache_any(&Self::manual_picks_cache_name(draft_id))
-            .map(|(_, picks)| picks)
-            .unwrap_or_default()
-    }
-
-    pub fn save_manual_picks(&self, draft_id: &str, picks: &[Pick]) -> Result<(), String> {
-        self.write_cache_checked(&Self::manual_picks_cache_name(draft_id), &picks)?;
-        Ok(())
     }
 
     /// Read the config, falling back to the last good copy if the live file
@@ -318,11 +318,28 @@ impl Engine {
         user_avatars: HashMap<String, String>,
         force: bool,
     ) -> Result<LoadedLeague, String> {
+        // The picks and the trade list are independent reads of the same
+        // draft, so they go out together.
+        let (picks, traded) = tokio::join!(
+            self.client.picks(&draft.draft_id),
+            self.client.traded_picks(&draft.draft_id)
+        );
         let (api_picks, poll_last_success_at, poll_consecutive_failures, poll_last_error) =
-            match self.client.picks(&draft.draft_id).await.map_err(to_message) {
+            match picks.map_err(to_message) {
                 Ok(picks) => (picks, Some(now_secs()), 0, None),
                 Err(error) => (Vec::new(), None, 1, Some(error)),
             };
+        // A missing trade list is not worth failing a load over: pick
+        // ownership simply falls back to the plain snake.
+        let (traded_picks, traded_warning) = match traded.map_err(to_message) {
+            Ok(traded) => (traded, None),
+            Err(error) => (
+                Vec::new(),
+                Some(format!(
+                    "traded draft picks unavailable ({error}); pick order shown as a plain snake"
+                )),
+            ),
+        };
         let mut manual_picks = self.load_manual_picks(&draft.draft_id);
         if reconcile_manual_picks(&api_picks, &mut manual_picks) {
             self.save_manual_picks(&draft.draft_id, &manual_picks)?;
@@ -356,6 +373,7 @@ impl Engine {
         warnings.extend(players_warning);
         warnings.extend(projections_warning);
         warnings.extend(weekly_warning);
+        warnings.extend(traded_warning);
         if let Some(error) = &poll_last_error {
             warnings.push(format!("initial picks refresh failed: {error}"));
         }
@@ -383,6 +401,7 @@ impl Engine {
             .map(|(i, p)| (p.player_id.clone(), i))
             .collect();
 
+        let keeper_pick_nos = self.load_keepers(&draft.draft_id);
         Ok(LoadedLeague {
             league,
             draft,
@@ -394,6 +413,8 @@ impl Engine {
             roster_rules,
             api_picks,
             manual_picks,
+            traded_picks,
+            keeper_pick_nos,
             poll_last_success_at,
             poll_consecutive_failures,
             poll_last_error,
@@ -407,20 +428,10 @@ impl Engine {
     }
 }
 
-pub(crate) fn reconcile_manual_picks(api: &[Pick], manual: &mut Vec<Pick>) -> bool {
-    let before = manual.len();
-    let api_max = api.iter().map(|pick| pick.pick_no).max().unwrap_or(0);
-    let api_players: std::collections::HashSet<&str> =
-        api.iter().map(|pick| pick.player_id.as_str()).collect();
-    manual.retain(|pick| pick.pick_no > api_max && !api_players.contains(pick.player_id.as_str()));
-    manual.len() != before
-}
-
 #[cfg(test)]
 mod reliability_tests {
     use super::*;
     use crate::cache::Cached;
-    use crate::sleeper::Pick;
 
     fn test_dir(label: &str) -> PathBuf {
         let unique = format!(
@@ -429,17 +440,6 @@ mod reliability_tests {
             now_secs()
         );
         std::env::temp_dir().join(unique)
-    }
-
-    fn pick(pick_no: u32, player_id: &str) -> Pick {
-        Pick {
-            round: 1,
-            pick_no,
-            draft_slot: pick_no,
-            player_id: player_id.into(),
-            picked_by: None,
-            metadata: None,
-        }
     }
 
     #[test]
@@ -461,24 +461,6 @@ mod reliability_tests {
             engine.read_cache_any::<Vec<u32>>("test.json"),
             Some((1, vec![10, 20]))
         );
-
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn manual_picks_survive_reload_and_reconcile_with_api_progress() {
-        let dir = test_dir("manual-picks");
-        let engine = Engine::new(dir.clone());
-        let manual = vec![pick(1, "manual-1"), pick(2, "manual-2")];
-
-        engine.save_manual_picks("draft-123", &manual).unwrap();
-        let mut reloaded = engine.load_manual_picks("draft-123");
-        assert_eq!(reloaded.len(), 2);
-
-        let api = vec![pick(1, "api-1")];
-        assert!(reconcile_manual_picks(&api, &mut reloaded));
-        assert_eq!(reloaded.len(), 1);
-        assert_eq!(reloaded[0].pick_no, 2);
 
         std::fs::remove_dir_all(dir).unwrap();
     }

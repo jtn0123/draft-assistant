@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 /// The documented v1 API root. Declared once here; `season_api` imports it
-/// rather than repeating the host.
+/// rather than repeating the host. Both roots are rewritten on the way out by
+/// `sleeper_host::route`, which is how a debug build can be pointed at the
+/// replay server instead.
 pub(crate) const BASE: &str = "https://api.sleeper.app/v1";
 /// Root for the undocumented endpoints (projections, scores).
 pub(crate) const BASE_UNDOC: &str = "https://api.sleeper.app";
@@ -74,6 +76,10 @@ pub struct DraftSettings {
     pub rounds: u32,
     #[serde(default)]
     pub pick_timer: Option<u32>,
+    /// Snake drafts only: the round from which the order reverses a second
+    /// time ("third-round reversal" = 3). 0 or absent = plain snake.
+    #[serde(default)]
+    pub reversal_round: Option<u32>,
     // Roster shape, present on mock drafts (which have no league to read it
     // from). All optional: league drafts carry it too but we prefer the league.
     #[serde(default)]
@@ -126,6 +132,10 @@ pub struct Draft {
     /// this gives the current pick's deadline.
     #[serde(default)]
     pub last_picked: Option<u64>,
+    /// draft slot (1-based, string key) -> league roster id: the only bridge
+    /// between slots and the roster ids traded picks are recorded against.
+    #[serde(default)]
+    pub slot_to_roster_id: Option<HashMap<String, u32>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +150,10 @@ pub struct Pick {
     pub picked_by: Option<String>,
     #[serde(default)]
     pub metadata: Option<PickMeta>,
+    /// Sleeper's keeper flag, and only a hint — it arrives null on plenty of
+    /// genuine keepers. See `crate::picks::keeper_pick_nos` for the real test.
+    #[serde(default)]
+    pub is_keeper: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,49 +215,7 @@ impl ProjectionRow {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct LeagueUserMeta {
-    /// Custom team name. Users who never set one have no key here.
-    #[serde(default)]
-    pub team_name: Option<String>,
-    /// Custom team picture, as a full sleepercdn URL.
-    #[serde(default)]
-    pub avatar: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LeagueUser {
-    pub user_id: String,
-    #[serde(default)]
-    pub display_name: Option<String>,
-    /// Sleeper avatar hash for the account itself.
-    #[serde(default)]
-    pub avatar: Option<String>,
-    #[serde(default)]
-    pub metadata: Option<LeagueUserMeta>,
-}
-
-impl LeagueUser {
-    /// What to call this team: their custom name, else their handle.
-    pub fn label(&self) -> Option<String> {
-        self.metadata
-            .as_ref()
-            .and_then(|m| m.team_name.clone())
-            .filter(|n| !n.trim().is_empty())
-            .or_else(|| self.display_name.clone())
-    }
-
-    /// The picture to draw for this team: their custom team image when they
-    /// uploaded one, else their account avatar. `None` for the default egg.
-    pub fn avatar_ref(&self) -> Option<String> {
-        self.metadata
-            .as_ref()
-            .and_then(|m| m.avatar.clone())
-            .filter(|a| !a.trim().is_empty())
-            .or_else(|| self.avatar.clone())
-            .filter(|a| !a.trim().is_empty())
-    }
-}
+pub use crate::sleeper_users::{LeagueUser, LeagueUserMeta};
 
 /// The one thing that speaks HTTP to Sleeper.
 ///
@@ -390,13 +362,15 @@ impl SleeperClient {
         &self,
         url: &str,
     ) -> Result<T, SleeperError> {
-        self.with_retries(|| self.get_json_once(url)).await
+        let url = crate::sleeper_host::route(url);
+        self.with_retries(|| self.get_json_once(&url)).await
     }
 
     /// A GET that hands back the raw body, for payloads too big to parse on
     /// the runtime thread. Same retry policy as `get_json`.
     pub(crate) async fn get_bytes(&self, url: &str) -> Result<Vec<u8>, SleeperError> {
-        self.with_retries(|| self.get_bytes_once(url)).await
+        let url = crate::sleeper_host::route(url);
+        self.with_retries(|| self.get_bytes_once(&url)).await
     }
 
     /// Resolve a Sleeper username to its user id.
