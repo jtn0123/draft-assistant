@@ -152,3 +152,16 @@ origin/main worktree.
 | 6 | Review t3code branch for porting | constants + `pick_value.rs` merged `49b0142` | Calibrated spread constants live in `season_spread.rs`; `pick_value.rs` ported with tests, exposed as additive `pick_prices` on the draft view. Remaining from the port-worthy list: backtest harness, season-aware sync-badge threshold, calibration note — item 8. Skipped: t3code's wdio e2e (local's is better organised), trade-offer UI (needs origin's whole evaluator). |
 | 7 | Push unified main (`--force-with-lease`) after user confirms; delete /private/tmp/da-fix | blocked-on-user | |
 | 8 | Backtest harness (t3code) + season-aware sync-badge threshold + calibration note | done `c1ac2b6` | `backtest.rs` (stats core, 10 tests) + `cargo run --bin backtest` replay `season_odds::win_probability` itself, so the calibration tables cannot drift from the shipped odds; own disk cache, since the app's is crate-private and TTL-shaped. Sync badge needed no fix — local's season poller runs at 30s and `SOURCE_STALE_SECS` is already 3 polls of it. Calibration note is one muted line under "Win odds" (`src/odds.ts`). |
+
+---
+## Improvement wave 1 (2026-08-31, from the post-merge report card)
+
+Source: graded audit + screenshot pass + dead-code sweep. Three territory agents in
+parallel (chat / season / draft), then a cleanup+fixtures pass on main after merge.
+
+| # | Fix | Status | Notes |
+|---|---|---|---|
+| A | Chat: real server-side spend cap, $0 CLI route, context knows keepers/trades/prices, key_store shown, single key entry, ET timestamps, chat wire tests | in flight | |
+| B | Season: best/set win-odds split, tiebreak unified (wins+0.5·ties), trade feed names picks, pregame zeros quieted, staleness vocab unified, lookup/label dedup | in flight | |
+| C | Draft: keeper-aware survival, pick market rendered, simulation via PickOwnership, tag-overflow CSS, name-lookup fallback, dead picks_for_slot removed | in flight | |
+| D | Cleanup: fixture regen + schema bumps + round-trip test, App.test.tsx onto appHarness + ApiMock keyed by Api, pub→private sweep, dead exports | queued (after A–C merge) | |
