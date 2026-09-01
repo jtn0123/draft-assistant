@@ -11,7 +11,7 @@ use crate::season_engine::LoadedSeason;
 use crate::season_lineup::{candidates_for, Candidate};
 use crate::season_lookup::Lookup;
 use crate::season_moves::{self, FreeAgent, RivalRoster, WaiverTarget, CANDIDATE_POOL};
-use crate::season_trades::{self, TradeIdea, TradePartner};
+use crate::season_trades::{self, PlayerDesc, TradeIdea, TradePartner};
 
 /// The best available free agents, ranked by what they would add to my lineup.
 pub fn waiver_targets(
@@ -112,7 +112,9 @@ pub fn trade_ideas(
             candidates,
         })
         .collect();
-    season_trades::trade_ideas(rules, my_candidates, &partners, &|id| {
-        (lookup.name(id), lookup.position(id).unwrap_or_default())
+    season_trades::trade_ideas(rules, my_candidates, &partners, &|id| PlayerDesc {
+        name: lookup.name(id),
+        position: lookup.position(id).unwrap_or_default(),
+        team: lookup.team(id),
     })
 }

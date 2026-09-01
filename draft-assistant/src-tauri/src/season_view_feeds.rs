@@ -27,6 +27,7 @@ pub fn transaction_activity(
         &season.transactions,
         team_name,
         &|id| lookup.name(id),
+        &|id| lookup.team(id),
         ACTIVITY_LIMIT,
     )
 }

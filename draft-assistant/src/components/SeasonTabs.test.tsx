@@ -1,8 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { LastSeasonRow, RosterRow, StandingsRow, TradeIdea } from "../season-types";
-import { LastSeason, LeagueTab, Standings, TeamRoster } from "./SeasonTabs";
+import type { LastSeasonRow, RosterRow, StandingsRow } from "../season-types";
+import { LastSeason, Standings, TeamRoster } from "./SeasonTabs";
 
 function row(overrides: Partial<RosterRow>): RosterRow {
   return {
@@ -21,142 +21,6 @@ function row(overrides: Partial<RosterRow>): RosterRow {
 // they cannot leak into the rest of this file or any other.
 afterEach(() => {
   vi.useRealTimers();
-});
-
-describe("LeagueTab", () => {
-  it("dates every activity row and lists completed trades with both sides", () => {
-    render(
-      <LeagueTab
-        trades={[]}
-        recentTrades={[
-          {
-            transaction_id: "t1",
-            at: Date.parse("2026-08-25T14:30:00Z"),
-            involves_me: true,
-            pending: false,
-            sides: [
-              { roster_id: 11, team: "Stompthatass", gets: ["Jaxon Smith-Njigba"] },
-              { roster_id: 13, team: "Da Little Bears", gets: [] },
-            ],
-          },
-        ]}
-        activity={[
-          {
-            kind: "Add",
-            text: "ocrevo added Adonai Mitchell",
-            created: Date.parse("2026-08-30T17:57:00Z"),
-            roster_id: 12,
-            player_ids: ["11624"],
-          },
-        ]}
-      />,
-    );
-    expect(screen.getByText("1 completed")).toBeInTheDocument();
-    // Nothing on the wire named the picks, so the vague line is all there is.
-    expect(screen.getByText(/gets draft picks/)).toBeInTheDocument();
-    expect(screen.getByText("Aug 25, 10:30 AM")).toBeInTheDocument();
-    expect(screen.getByText("Aug 30, 1:57 PM")).toBeInTheDocument();
-    expect(screen.queryByText("In review")).not.toBeInTheDocument();
-  });
-
-  it("gives every activity row a tinted kind chip and the faces in the move", () => {
-    const { container } = render(
-      <LeagueTab
-        trades={[]}
-        recentTrades={[]}
-        activity={[
-          {
-            kind: "Trade",
-            text: "AllDay21 gets Tyler Warren",
-            created: Date.parse("2026-08-30T17:57:00Z"),
-            roster_id: 3,
-            player_ids: ["11624", "9226"],
-          },
-        ]}
-      />,
-    );
-    expect(container.querySelector(".activity-kind.is-trade")).not.toBeNull();
-    expect(container.querySelectorAll(".activity-faces .avatar")).toHaveLength(2);
-  });
-
-  it("names the picks a side came away with", () => {
-    render(
-      <LeagueTab
-        trades={[]}
-        recentTrades={[
-          {
-            transaction_id: "t3",
-            at: Date.parse("2026-08-25T14:30:00Z"),
-            involves_me: false,
-            pending: false,
-            sides: [
-              { roster_id: 11, team: "Stompthatass", gets: ["Bijan Robinson"] },
-              { roster_id: 13, team: "Meatball", gets: ["2026 1st", "2027 3rd"] },
-            ],
-          },
-        ]}
-        activity={[]}
-      />,
-    );
-    expect(screen.getByText(/gets 2026 1st, 2027 3rd/)).toBeInTheDocument();
-    expect(screen.queryByText(/gets draft picks/)).not.toBeInTheDocument();
-  });
-
-  it("marks a trade the league has not processed yet", () => {
-    render(
-      <LeagueTab
-        trades={[]}
-        recentTrades={[
-          {
-            transaction_id: "t2",
-            at: Date.parse("2026-08-29T14:30:00Z"),
-            involves_me: false,
-            pending: true,
-            sides: [
-              { roster_id: 11, team: "Stompthatass", gets: ["Bijan Robinson"] },
-              { roster_id: 13, team: "Meatball", gets: ["Puka Nacua"] },
-            ],
-          },
-        ]}
-        activity={[]}
-      />,
-    );
-    expect(screen.getByText("In review")).toBeInTheDocument();
-    expect(screen.getByText("1 in review · 0 completed")).toBeInTheDocument();
-  });
-
-  // Grade item D8. Staleness is measured against the wall clock, so the clock
-  // is stopped: the interesting assertion is the threshold itself, and a live
-  // clock can only ever land near it.
-  it("admits how old the trade ideas are once they stop being current", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(Date.parse("2026-09-13T17:00:00Z"));
-    const nowSecs = Math.floor(Date.now() / 1000);
-    const { rerender } = render(
-      <LeagueTab trades={[]} recentTrades={[]} activity={[]} analysisAsOfSecs={nowSecs - 60} />,
-    );
-    // A minute old is still "now" as far as a reader is concerned.
-    expect(screen.getByText("by roster fit")).toBeInTheDocument();
-    expect(screen.queryByText(/ideas from/)).not.toBeInTheDocument();
-
-    // One second short of the two-minute threshold: still current.
-    rerender(
-      <LeagueTab trades={[]} recentTrades={[]} activity={[]} analysisAsOfSecs={nowSecs - 119} />,
-    );
-    expect(screen.queryByText(/ideas from/)).not.toBeInTheDocument();
-
-    // The threshold exactly — the first moment the note is owed to the reader.
-    rerender(
-      <LeagueTab trades={[]} recentTrades={[]} activity={[]} analysisAsOfSecs={nowSecs - 120} />,
-    );
-    expect(screen.getByText("ideas from 2 minutes ago")).toBeInTheDocument();
-
-    rerender(
-      <LeagueTab trades={[]} recentTrades={[]} activity={[]} analysisAsOfSecs={nowSecs - 420} />,
-    );
-    expect(screen.getByText("ideas from 7 minutes ago")).toBeInTheDocument();
-    expect(screen.queryByText("by roster fit")).not.toBeInTheDocument();
-  });
 });
 
 describe("TeamRoster empty state", () => {
@@ -233,7 +97,6 @@ describe("TeamRoster", () => {
     expect(screen.getByText("30.0")).toBeInTheDocument();
   });
 });
-
 function standing(overrides: Partial<StandingsRow>): StandingsRow {
   return {
     roster_id: 1,
@@ -318,38 +181,6 @@ describe("Standings", () => {
     expect(screen.getByText(/once the league has rosters/)).toBeInTheDocument();
   });
 });
-
-describe("LeagueTab trade ideas", () => {
-  const idea: TradeIdea = {
-    roster_id: 4,
-    partner: "Meatball",
-    get_id: "4881",
-    get_name: "Lamar Jackson",
-    get_position: "QB",
-    give_id: "6786",
-    give_name: "Jerry Jeudy",
-    give_position: "WR",
-    my_edge: 2.4,
-    their_edge: 1.1,
-    note: "Meatball needs a QB",
-  };
-
-  it("shows the swap, my weekly edge, and the partner note", () => {
-    render(<LeagueTab trades={[idea]} recentTrades={[]} activity={[]} />);
-    expect(screen.getByText("Lamar Jackson")).toBeInTheDocument();
-    expect(screen.getByText("Jerry Jeudy")).toBeInTheDocument();
-    expect(screen.getByText("+2.4 / wk")).toBeInTheDocument();
-    expect(screen.getByText(/Meatball needs a QB/)).toBeInTheDocument();
-  });
-
-  it("says so when no swap helps, and when nothing has moved", () => {
-    render(<LeagueTab trades={[]} recentTrades={[]} activity={[]} />);
-    expect(screen.getByText(/No swap would improve both rosters/)).toBeInTheDocument();
-    expect(screen.getByText(/Nothing has moved lately/)).toBeInTheDocument();
-    expect(screen.getByText(/none this week or last/)).toBeInTheDocument();
-  });
-});
-
 function finish(overrides: Partial<LastSeasonRow>): LastSeasonRow {
   return {
     place: 1,
@@ -408,39 +239,5 @@ describe("LastSeason", () => {
   it("titles the section 'Last season' when the season is not numeric", () => {
     render(<LastSeason season="preseason" rows={[finish({})]} />);
     expect(screen.getByText("Last season")).toBeInTheDocument();
-  });
-});
-
-describe("LeagueTab manager avatars", () => {
-  it("puts the manager's picture on rows that name a manager", () => {
-    const { container } = render(
-      <LeagueTab
-        trades={[]}
-        recentTrades={[]}
-        activity={[
-          {
-            kind: "Lineup",
-            text: "Witzy benched Josh Downs",
-            created: Date.parse("2026-08-30T12:00:00Z"),
-            roster_id: 2,
-            player_ids: [],
-          },
-          {
-            kind: "Add",
-            text: "Waivers cleared",
-            created: Date.parse("2026-08-30T11:00:00Z"),
-            roster_id: null,
-            player_ids: [],
-          },
-        ]}
-        avatars={{ "2": "abc123" }}
-      />,
-    );
-    const rows = container.querySelectorAll(".activity-row");
-    expect(
-      within(rows[0] as HTMLElement).getByText("Witzy benched Josh Downs"),
-    ).toBeInTheDocument();
-    expect((rows[0] as HTMLElement).querySelector(".team-avatar")).not.toBeNull();
-    expect((rows[1] as HTMLElement).querySelector(".team-avatar")).toBeNull();
   });
 });

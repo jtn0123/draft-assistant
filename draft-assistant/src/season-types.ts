@@ -165,9 +165,14 @@ export interface TradeIdea {
   get_id: string;
   get_name: string;
   get_position: string;
+  /** His NFL team, so the row falls back to a team mark when Sleeper has no
+   * headshot of him rather than drawing an empty circle. */
+  get_team: string | null;
   give_id: string;
   give_name: string;
   give_position: string;
+  /** His NFL team — same reason as `get_team`. */
+  give_team: string | null;
   my_edge: number;
   their_edge: number;
   note: string;
@@ -189,6 +194,15 @@ export interface TradeDone {
   pending: boolean;
 }
 
+/** One face in a feed row. */
+export interface ActivityPlayer {
+  id: string;
+  /** His name, which captions the zoomed picture. */
+  name: string;
+  /** His NFL team, for the fallback mark when there is no headshot. */
+  team: string | null;
+}
+
 export interface ActivityItem {
   kind: string;
   text: string;
@@ -196,7 +210,7 @@ export interface ActivityItem {
   /** The team the move belongs to, for its manager's picture. */
   roster_id: number | null;
   /** The players involved, so the row can show their faces. */
-  player_ids: string[];
+  players: ActivityPlayer[];
 }
 
 export interface LastSeasonRow {

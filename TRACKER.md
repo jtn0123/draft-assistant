@@ -17,7 +17,7 @@ Follow-ups found during this work:
 ---
 ## Trends/League tab debug (2026-08-31) — `a2cafae`
 
-Five bugs found by driving the running app rather than reading it. All five are fixed in `a2cafae`.
+Six bugs found by driving the running app rather than reading it. Bugs 1-5 are fixed in `a2cafae`; bug 6 (the blank League-tab headshots) landed separately.
 
 | # | Bug | Fix | Pinned by |
 |---|---|---|---|
@@ -26,9 +26,11 @@ Five bugs found by driving the running app rather than reading it. All five are 
 | 3 | Trends fallback copy always blamed the third reading, but `plottable` needs three readings **and** movement — five flat snapshots told the user to wait for a third they already had. | The two cases read differently: "…across 5 readings. No team has moved enough to plot yet." | `TrendsTab.test.tsx` — one test per branch |
 | 4 | `public/dev-season-fixture.json` stored the *derived* `recent_trades[].sides[].gets`, and three of five trades still had `"gets": []` from before `season_deals` learned to name traded picks. The preview and the whole Playwright suite only ever saw the "gets draft picks" fallback. The Rust side was already correct. | Patched with the labels the current code produces ("2027 2nd", "2026 1st, 2027 3rd"); every other value byte-stable. | `fixture_shape.rs` — "every trade side in the season fixture names what it got" |
 | 5 | `TrendChange.at` had no unit doc; `TradeDone.at` next door is milliseconds and the UI divides only that one by 1000. Both correct today, but the two call sites read as contradictory. | Doc comment stating seconds and naming the contrast. (`TrendPoint.at` was already documented.) | n/a — doc only |
+| 6 | Mike Evans (and one or two others) had a blank picture in the League tab only. Two independent causes: (a) `avatars.ts` cached a *rejected* `api.headshot` as if it were the answer "no photo", so one network blip blanked that face for the whole session — the on-disk cache held a valid 24 KB `2216.img` and had not been written to in a day, because the frontend never asked again; (b) both League-tab call sites passed `team={null}` (the `TradeIdea` and `ActivityItem` payloads carried no NFL team), so a player with no photo got an empty circle instead of the team logo every other screen falls back to. | (a) `remember()` caches only real answers: a resolved `null` stays cached (Sleeper genuinely has no photo), a rejection is dropped from the map so the next mount or tab switch re-asks — no retry timer, no storm. (b) `TradeIdea` gained `get_team`/`give_team`, and `ActivityItem.player_ids` became `players[{id,name,team}]` — the name also fixes the zoom caption, which read as the literal word "player". Season schema 1.1 → 1.2 on both sides, fixture patched. | `avatars.test.ts` — rejection not cached / resolved null cached / url cached; `SeasonTabs.league.test.tsx` — a face with no photo renders `avatar-logo`, not `avatar-blank`; `season_trades.rs`, `season_activity.rs`, `season_view_more.rs` |
 
 Notes:
 - `fixture_shape.rs` compares key **paths**, so an empty-but-present array contributes nothing and passes. The new test is the cheap half of the missing check: every side of a real trade received something. A general "derived array the code would now populate" guard would mean replaying the fixture's transactions through the view builder, which needs the real league's players and rosters — the thing that file explains it cannot regenerate.
+- Bug 6 also fixed a false blind spot in `fixture_shape.rs`: `activity[].players[]` is empty on lineup-gap rows and populated on transaction rows, which the old `shape()` reported as an unpinnable section. A prefix the same document populates *somewhere* is not a blind spot, and is no longer treated as one.
 - Bug 1 was invisible to every checked-in fixture and to the Playwright suite; it needed a 5-snapshot season replay to surface at all.
 
 ---

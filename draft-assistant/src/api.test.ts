@@ -18,7 +18,7 @@ const draftView = {
   schema_version: "1.2",
   league: { league_id: "L1", name: "Test", season: "2026" },
 } as unknown as DraftView;
-const seasonView = { schema_version: "1.1" } as unknown as SeasonView;
+const seasonView = { schema_version: "1.2" } as unknown as SeasonView;
 
 async function load(shell: boolean, search = "") {
   vi.resetModules();

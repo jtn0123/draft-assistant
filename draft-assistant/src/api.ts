@@ -10,7 +10,7 @@ import { ReplayFeed, replaySource } from "./replay";
 // with the fixtures in public/ — src-tauri/tests/fixture_shape.rs fails if the
 // fixtures and the structs disagree about a single field.
 const DRAFT_VIEW_SCHEMA_VERSION = "1.2";
-const SEASON_VIEW_SCHEMA_VERSION = "1.1";
+const SEASON_VIEW_SCHEMA_VERSION = "1.2";
 
 export function validateDraftView(value: DraftView): DraftView {
   if (value.schema_version !== DRAFT_VIEW_SCHEMA_VERSION) {

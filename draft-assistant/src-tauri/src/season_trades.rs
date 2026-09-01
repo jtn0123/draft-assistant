@@ -16,6 +16,17 @@ const MAX_TRADES: usize = 4;
 /// noise of a weekly projection, and not worth the message.
 const MIN_EDGE: f64 = 0.5;
 
+/// Who a player is, for the row that names him: enough to print the name, the
+/// position badge, and — when Sleeper has no photo — his team's mark instead
+/// of an empty circle.
+#[derive(Debug, Clone)]
+pub struct PlayerDesc {
+    pub name: String,
+    pub position: String,
+    /// NFL team, or None for a free agent.
+    pub team: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TradeIdea {
     pub roster_id: u32,
@@ -24,10 +35,15 @@ pub struct TradeIdea {
     pub get_id: String,
     pub get_name: String,
     pub get_position: String,
+    /// His NFL team, so the row can fall back to a team mark when there is no
+    /// headshot for him.
+    pub get_team: Option<String>,
     /// The player I would give up.
     pub give_id: String,
     pub give_name: String,
     pub give_position: String,
+    /// His NFL team — same reason as `get_team`.
+    pub give_team: Option<String>,
     /// My weekly lineup improvement.
     pub my_edge: f64,
     /// Their weekly lineup improvement — positive, or they would decline.
@@ -90,7 +106,7 @@ pub fn trade_ideas(
     rules: &RosterRules,
     mine: &[Candidate],
     partners: &[TradePartner],
-    describe: &impl Fn(&str) -> (String, String),
+    describe: &impl Fn(&str) -> PlayerDesc,
 ) -> Vec<TradeIdea> {
     let my_baseline = lineup_total(rules, mine);
     let my_loss = cost_of_losing(rules, mine, my_baseline);
@@ -125,17 +141,19 @@ pub fn trade_ideas(
                 if their_edge < MIN_EDGE {
                     continue;
                 }
-                let (get_name, get_position) = describe(&theirs.player_id);
-                let (give_name, give_position) = describe(&ours.player_id);
+                let get = describe(&theirs.player_id);
+                let give = describe(&ours.player_id);
                 ideas.push(TradeIdea {
                     roster_id: partner.roster_id,
                     partner: partner.name.clone(),
                     get_id: theirs.player_id.clone(),
-                    get_name,
-                    get_position,
+                    get_name: get.name,
+                    get_position: get.position,
+                    get_team: get.team,
                     give_id: ours.player_id.clone(),
-                    give_name,
-                    give_position,
+                    give_name: give.name,
+                    give_position: give.position,
+                    give_team: give.team,
                     my_edge,
                     their_edge,
                     note: format!(
@@ -251,8 +269,10 @@ mod tests {
             }];
 
             let brute = ideas_by_brute_force(&rules, &mine, &partners);
-            let pruned = trade_ideas(&rules, &mine, &partners, &|id| {
-                (id.to_string(), "RB".to_string())
+            let pruned = trade_ideas(&rules, &mine, &partners, &|id| PlayerDesc {
+                name: id.to_string(),
+                position: "RB".to_string(),
+                team: None,
             });
 
             // trade_ideas keeps one idea per partner, so the check is that
@@ -289,7 +309,7 @@ mod tests {
         }
     }
 
-    fn describe(id: &str) -> (String, String) {
+    fn describe(id: &str) -> PlayerDesc {
         let position = if id.starts_with("rb") {
             "RB"
         } else if id.starts_with("te") {
@@ -297,7 +317,50 @@ mod tests {
         } else {
             "WR"
         };
-        (id.to_uppercase(), position.to_string())
+        PlayerDesc {
+            name: id.to_uppercase(),
+            position: position.to_string(),
+            team: Some("SF".to_string()),
+        }
+    }
+
+    #[test]
+    fn both_sides_of_an_idea_carry_the_players_nfl_team() {
+        // Without it the League tab has nothing to fall back to when Sleeper
+        // has no headshot, and draws an empty circle.
+        let rules = rules(&["RB", "TE", "BN", "BN"]);
+        let mine = vec![
+            candidate("rb1", "RB", 20.0),
+            candidate("rb2", "RB", 18.0),
+            candidate("te1", "TE", 4.0),
+        ];
+        let theirs = vec![
+            candidate("te2", "TE", 17.0),
+            candidate("te3", "TE", 15.0),
+            candidate("rb3", "RB", 5.0),
+        ];
+        let ideas = trade_ideas(
+            &rules,
+            &mine,
+            &[TradePartner {
+                roster_id: 2,
+                name: "them".into(),
+                candidates: &theirs,
+            }],
+            &|id| PlayerDesc {
+                name: id.to_uppercase(),
+                position: "TE".into(),
+                team: if id.starts_with("te") {
+                    Some("KC".into())
+                } else {
+                    None
+                },
+            },
+        );
+        assert_eq!(ideas.len(), 1);
+        assert_eq!(ideas[0].get_team.as_deref(), Some("KC"));
+        // A free agent genuinely has no team, and says so rather than lying.
+        assert_eq!(ideas[0].give_team, None);
     }
 
     #[test]

@@ -9,6 +9,19 @@ use crate::season_api::{Roster, Transaction};
 use serde::Serialize;
 use std::collections::HashMap;
 
+/// One face in a feed row: who he is, and what to draw when Sleeper has no
+/// photo of him.
+#[derive(Debug, Clone, Serialize)]
+pub struct ActivityPlayer {
+    pub id: String,
+    /// His name, which captions the zoomed picture. Without it the caption
+    /// read as the literal word "player".
+    pub name: String,
+    /// His NFL team, so a player with no headshot falls back to a team mark
+    /// rather than an empty circle.
+    pub team: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ActivityItem {
     /// "Waiver", "Trade", "Add", "Drop".
@@ -20,7 +33,7 @@ pub struct ActivityItem {
     pub roster_id: Option<u32>,
     /// The players involved, so the row can show their faces. Adds first,
     /// then drops; capped, since a row only has space for a few.
-    pub player_ids: Vec<String>,
+    pub players: Vec<ActivityPlayer>,
 }
 
 /// Turn raw transactions into the league activity feed.
@@ -28,29 +41,37 @@ pub fn activity(
     transactions: &[Transaction],
     team_name: &impl Fn(u32) -> String,
     player_name: &impl Fn(&str) -> String,
+    player_team: &impl Fn(&str) -> Option<String>,
     limit: usize,
 ) -> Vec<ActivityItem> {
     let mut items: Vec<ActivityItem> = transactions
         .iter()
         .filter(|t| t.status == "complete")
-        .filter_map(|t| describe(t, team_name, player_name))
+        .filter_map(|t| describe(t, team_name, player_name, player_team))
         .collect();
     items.sort_by_key(|i| std::cmp::Reverse(i.created));
     items.truncate(limit);
     items
 }
 
-/// Player ids out of an adds/drops map, in the same order the names come out.
-fn ids_for(
+/// The players out of an adds/drops map, in the same order the names come out.
+fn players_for(
     map: &Option<HashMap<String, u32>>,
     player_name: &impl Fn(&str) -> String,
-) -> Vec<String> {
+    player_team: &impl Fn(&str) -> Option<String>,
+) -> Vec<ActivityPlayer> {
     let mut ids: Vec<String> = map
         .as_ref()
         .map(|m| m.keys().cloned().collect())
         .unwrap_or_default();
     ids.sort_by_key(|id| player_name(id));
-    ids
+    ids.into_iter()
+        .map(|id| ActivityPlayer {
+            name: player_name(&id),
+            team: player_team(&id),
+            id,
+        })
+        .collect()
 }
 
 fn names_for(
@@ -69,6 +90,7 @@ fn describe(
     transaction: &Transaction,
     team_name: &impl Fn(u32) -> String,
     player_name: &impl Fn(&str) -> String,
+    player_team: &impl Fn(&str) -> Option<String>,
 ) -> Option<ActivityItem> {
     let adds = names_for(&transaction.adds, player_name);
     let drops = names_for(&transaction.drops, player_name);
@@ -117,15 +139,15 @@ fn describe(
         },
         _ => return None,
     };
-    let mut player_ids = ids_for(&transaction.adds, player_name);
-    player_ids.extend(ids_for(&transaction.drops, player_name));
-    player_ids.truncate(4);
+    let mut players = players_for(&transaction.adds, player_name, player_team);
+    players.extend(players_for(&transaction.drops, player_name, player_team));
+    players.truncate(4);
     Some(ActivityItem {
         kind: kind.to_string(),
         text,
         created: transaction.created,
         roster_id: transaction.roster_ids.first().copied(),
-        player_ids,
+        players,
     })
 }
 
@@ -179,7 +201,7 @@ pub fn lineup_gaps(
                 text,
                 created,
                 roster_id: Some(roster.roster_id),
-                player_ids: Vec::new(),
+                players: Vec::new(),
             })
         })
         .collect()
@@ -230,6 +252,7 @@ mod tests {
             ],
             &team,
             &player,
+            &|id| Some(id.to_string()),
             10,
         );
         assert_eq!(items[0].kind, "Drop");
@@ -239,10 +262,48 @@ mod tests {
     }
 
     #[test]
+    fn every_face_in_a_row_carries_its_name_and_nfl_team() {
+        // The feed only ever had ids, so the League tab had nothing to fall
+        // back to when Sleeper has no photo, and no caption for the zoom.
+        let items = activity(
+            &[transaction(
+                "free_agent",
+                100,
+                &[("2216", 1)],
+                &[("11575", 1)],
+            )],
+            &|id| format!("Team{id}"),
+            &|id| match id {
+                "2216" => "Mike Evans".into(),
+                _ => "Ray Davis".into(),
+            },
+            &|id| match id {
+                "2216" => Some("TB".into()),
+                _ => None,
+            },
+            10,
+        );
+        let faces = &items[0].players;
+        assert_eq!(faces.len(), 2);
+        // Adds first, then drops.
+        assert_eq!(faces[0].id, "2216");
+        assert_eq!(faces[0].name, "Mike Evans");
+        assert_eq!(faces[0].team.as_deref(), Some("TB"));
+        assert_eq!(faces[1].id, "11575");
+        assert_eq!(faces[1].team, None);
+    }
+
+    #[test]
     fn incomplete_transactions_never_reach_the_feed() {
         let mut failed = transaction("waiver", 100, &[("x", 1)], &[]);
         failed.status = "failed".into();
-        let items = activity(&[failed], &|id| format!("T{id}"), &|id| id.into(), 10);
+        let items = activity(
+            &[failed],
+            &|id| format!("T{id}"),
+            &|id| id.into(),
+            &|_| None,
+            10,
+        );
         assert!(items.is_empty());
     }
 

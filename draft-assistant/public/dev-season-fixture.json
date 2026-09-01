@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "generated_at": 1788127760,
   "analysis_as_of_secs": 1788127752,
   "league": {
@@ -1398,9 +1398,11 @@
       "get_id": "6786",
       "get_name": "CeeDee Lamb",
       "get_position": "WR",
+      "get_team": "DAL",
       "give_id": "7543",
       "give_name": "Travis Etienne",
       "give_position": "RB",
+      "give_team": "NO",
       "my_edge": 3.882161179053611,
       "their_edge": 0.5480472040659521,
       "note": "Mitch's Cousin  gains +0.5/wk too \u2014 both sides start a better lineup"
@@ -1411,9 +1413,11 @@
       "get_id": "JAX",
       "get_name": "Jacksonville Jaguars",
       "get_position": "DEF",
+      "get_team": "JAX",
       "give_id": "11646",
       "give_name": "Jalen Coker",
       "give_position": "WR",
+      "give_team": "CAR",
       "my_edge": 2.7600000000000193,
       "their_edge": 2.137131584813318,
       "note": "AllDay21 gains +2.1/wk too \u2014 both sides start a better lineup"
@@ -1424,9 +1428,11 @@
       "get_id": "LV",
       "get_name": "Las Vegas Raiders",
       "get_position": "DEF",
+      "get_team": "LV",
       "give_id": "9500",
       "give_name": "Josh Downs",
       "give_position": "WR",
+      "give_team": "IND",
       "my_edge": 1.277326438736111,
       "their_edge": 0.9202313233633816,
       "note": "ClemDawg Millionaires gains +0.9/wk too \u2014 both sides start a better lineup"
@@ -1437,9 +1443,11 @@
       "get_id": "LAR",
       "get_name": "Los Angeles Rams",
       "get_position": "DEF",
+      "get_team": "LAR",
       "give_id": "4217",
       "give_name": "George Kittle",
       "give_position": "TE",
+      "give_team": "SF",
       "my_edge": 0.8000000000000114,
       "their_edge": 1.9017922612531208,
       "note": "fisher23 gains +1.9/wk too \u2014 both sides start a better lineup"
@@ -1565,23 +1573,31 @@
       "text": "Stompthatass has an empty DEF slot",
       "created": 1788127759000,
       "roster_id": 11,
-      "player_ids": []
+      "players": []
     },
     {
       "kind": "Lineup",
       "text": "McSleeper26 has an empty DEF slot",
       "created": 1788127759000,
       "roster_id": 13,
-      "player_ids": []
+      "players": []
     },
     {
       "kind": "Add",
       "text": "Mitch's Cousin  added Kaleb Johnson and dropped Ray Davis",
       "created": 1788112093885,
       "roster_id": 7,
-      "player_ids": [
-        "12504",
-        "11575"
+      "players": [
+        {
+          "id": "12504",
+          "name": "Kaleb Johnson",
+          "team": "PIT"
+        },
+        {
+          "id": "11575",
+          "name": "Ray Davis",
+          "team": "BUF"
+        }
       ]
     },
     {
@@ -1589,9 +1605,17 @@
       "text": "ocrevo added Adonai Mitchell and dropped Antonio Williams",
       "created": 1788111529263,
       "roster_id": 6,
-      "player_ids": [
-        "11625",
-        "13301"
+      "players": [
+        {
+          "id": "11625",
+          "name": "Adonai Mitchell",
+          "team": "NYJ"
+        },
+        {
+          "id": "13301",
+          "name": "Antonio Williams",
+          "team": "WAS"
+        }
       ]
     },
     {
@@ -1599,8 +1623,12 @@
       "text": "Ruggs and Tuggs added Devaughn Vele",
       "created": 1788037269832,
       "roster_id": 9,
-      "player_ids": [
-        "11834"
+      "players": [
+        {
+          "id": "11834",
+          "name": "Devaughn Vele",
+          "team": "NO"
+        }
       ]
     },
     {
@@ -1608,9 +1636,17 @@
       "text": "Mitch's Cousin  added Darren Waller and dropped Eli Stowers",
       "created": 1788014467418,
       "roster_id": 7,
-      "player_ids": [
-        "2505",
-        "13349"
+      "players": [
+        {
+          "id": "2505",
+          "name": "Darren Waller",
+          "team": "CAR"
+        },
+        {
+          "id": "13349",
+          "name": "Eli Stowers",
+          "team": "PHI"
+        }
       ]
     },
     {
@@ -1618,8 +1654,12 @@
       "text": "Mitch's Cousin  added Chicago Bears",
       "created": 1787971794671,
       "roster_id": 7,
-      "player_ids": [
-        "CHI"
+      "players": [
+        {
+          "id": "CHI",
+          "name": "Chicago Bears",
+          "team": "CHI"
+        }
       ]
     },
     {
@@ -1627,8 +1667,12 @@
       "text": "Mitch's Cousin  added Eli Stowers",
       "created": 1787971775147,
       "roster_id": 7,
-      "player_ids": [
-        "13349"
+      "players": [
+        {
+          "id": "13349",
+          "name": "Eli Stowers",
+          "team": "PHI"
+        }
       ]
     },
     {
@@ -1636,8 +1680,12 @@
       "text": "Mitch's Cousin  added Ray Davis",
       "created": 1787971762725,
       "roster_id": 7,
-      "player_ids": [
-        "11575"
+      "players": [
+        {
+          "id": "11575",
+          "name": "Ray Davis",
+          "team": "BUF"
+        }
       ]
     },
     {
@@ -1645,8 +1693,12 @@
       "text": "Mitch's Cousin  added Samaje Perine",
       "created": 1787971756570,
       "roster_id": 7,
-      "player_ids": [
-        "4147"
+      "players": [
+        {
+          "id": "4147",
+          "name": "Samaje Perine",
+          "team": "CIN"
+        }
       ]
     },
     {
@@ -1654,8 +1706,12 @@
       "text": "Mitch's Cousin  added Cam Ward",
       "created": 1787971748491,
       "roster_id": 7,
-      "player_ids": [
-        "12522"
+      "players": [
+        {
+          "id": "12522",
+          "name": "Cam Ward",
+          "team": "TEN"
+        }
       ]
     },
     {
@@ -1663,9 +1719,17 @@
       "text": "Stompthatass added Marvin Mims and dropped Najee Harris",
       "created": 1787971735400,
       "roster_id": 11,
-      "player_ids": [
-        "9494",
-        "7528"
+      "players": [
+        {
+          "id": "9494",
+          "name": "Marvin Mims",
+          "team": "DEN"
+        },
+        {
+          "id": "7528",
+          "name": "Najee Harris",
+          "team": "NYG"
+        }
       ]
     },
     {
@@ -1673,9 +1737,17 @@
       "text": "ClemDawg Millionaires added Las Vegas Raiders and dropped Jack Bech",
       "created": 1787969675658,
       "roster_id": 5,
-      "player_ids": [
-        "LV",
-        "12483"
+      "players": [
+        {
+          "id": "LV",
+          "name": "Las Vegas Raiders",
+          "team": "LV"
+        },
+        {
+          "id": "12483",
+          "name": "Jack Bech",
+          "team": "LV"
+        }
       ]
     },
     {
@@ -1683,8 +1755,12 @@
       "text": "Stompthatass added Ryan Flournoy",
       "created": 1787968457127,
       "roster_id": 11,
-      "player_ids": [
-        "11783"
+      "players": [
+        {
+          "id": "11783",
+          "name": "Ryan Flournoy",
+          "team": "DAL"
+        }
       ]
     }
   ],

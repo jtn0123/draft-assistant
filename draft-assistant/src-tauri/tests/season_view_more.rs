@@ -67,7 +67,13 @@ fn activity_leads_with_lineup_gaps_then_newest_transactions() {
         "User One gets Rival Wideout \u{b7} User Two gets Alpha Wideout, 2027 2nd"
     );
     assert_eq!(v.activity[2].text, "User Two claimed Roster Filler for $12");
-    assert_eq!(v.activity[2].player_ids, vec!["fa2".to_string()]);
+    let faces = &v.activity[2].players;
+    assert_eq!(faces.len(), 1);
+    assert_eq!(faces[0].id, "fa2");
+    // The face carries who he is, so the row can caption him and fall back to
+    // his team's mark when Sleeper has no photo of him.
+    assert_eq!(faces[0].name, "Roster Filler");
+    assert_eq!(faces[0].team.as_deref(), Some("LV"));
 }
 
 #[test]

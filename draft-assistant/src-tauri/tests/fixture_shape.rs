@@ -107,6 +107,22 @@ struct Shape {
 fn shape(value: &Value) -> Shape {
     let mut out = Shape::default();
     paths(value, "", &mut out);
+    // A list whose elements are themselves lists — `activity[].players[]` —
+    // is empty in some elements and populated in others: the lineup-gap rows
+    // name no players, the transaction rows do. That is not a blind spot,
+    // because the same document already pins what belongs underneath. Only a
+    // prefix this document populated *nowhere* hides anything.
+    let populated: BTreeSet<String> = out
+        .empty_arrays
+        .iter()
+        .filter(|prefix| {
+            out.keys
+                .iter()
+                .any(|key| key.starts_with(&format!("{prefix}.")))
+        })
+        .cloned()
+        .collect();
+    out.empty_arrays.retain(|p| !populated.contains(p));
     out
 }
 

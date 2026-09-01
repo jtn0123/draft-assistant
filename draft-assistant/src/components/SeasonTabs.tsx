@@ -223,9 +223,13 @@ export function LeagueTab({
           <div className="trade-row" key={`${trade.roster_id}-${trade.get_id}`}>
             <div className="trade-line">
               <span className="ellipsis trade-players">
-                <PlayerName name={trade.get_name} team={null} playerId={trade.get_id} />
+                <PlayerName name={trade.get_name} team={trade.get_team} playerId={trade.get_id} />
                 <span className="muted">for</span>
-                <PlayerName name={trade.give_name} team={null} playerId={trade.give_id} />
+                <PlayerName
+                  name={trade.give_name}
+                  team={trade.give_team}
+                  playerId={trade.give_id}
+                />
               </span>
               <span className="trade-edge">{signed(trade.my_edge)} / wk</span>
             </div>
@@ -254,10 +258,15 @@ export function LeagueTab({
                 )}
                 {item.text}
               </span>
-              {item.player_ids.length > 0 && (
+              {item.players.length > 0 && (
                 <span className="activity-faces">
-                  {item.player_ids.map((id) => (
-                    <Headshot key={id} playerId={id} team={null} />
+                  {item.players.map((player) => (
+                    <Headshot
+                      key={player.id}
+                      playerId={player.id}
+                      team={player.team}
+                      name={player.name}
+                    />
                   ))}
                 </span>
               )}

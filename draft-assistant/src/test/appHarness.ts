@@ -170,7 +170,7 @@ export function fakeStorage(initial: Record<string, string> = {}): Map<string, s
 /** A season view with one standings row, the user's own. */
 export function seasonFixture(overrides: Partial<SeasonView> = {}): SeasonView {
   return {
-    schema_version: "1.1",
+    schema_version: "1.2",
     generated_at: 0,
     team_avatars: {},
     league: {

@@ -111,6 +111,50 @@ describe("headshotSrc", () => {
     await expect(headshotSrc("4046")).resolves.toBeNull();
   });
 
+  it("remembers that Sleeper has no photo, and does not ask twice", async () => {
+    // A resolved null is a real answer: the player has no picture at all.
+    mocks.headshot.mockResolvedValue(null);
+    expect(await headshotSrc("4046")).toBeNull();
+    expect(await headshotSrc("4046")).toBeNull();
+    expect(mocks.headshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not remember a failed request, so the next render asks again", async () => {
+    // One network blip used to blank that player's face for the whole
+    // session, because the rejection was cached as if it were an answer.
+    mocks.headshot.mockRejectedValueOnce(new Error("offline"));
+    expect(await headshotSrc("2216")).toBeNull();
+    expect(mocks.headshot).toHaveBeenCalledTimes(1);
+
+    mocks.headshot.mockResolvedValue("asset://evans.png");
+    expect(await headshotSrc("2216")).toBe("asset://evans.png");
+    expect(mocks.headshot).toHaveBeenCalledTimes(2);
+
+    // ...and the answer that finally arrived is cached like any other.
+    expect(await headshotSrc("2216")).toBe("asset://evans.png");
+    expect(mocks.headshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets a reset outlive a failure that has not settled yet", async () => {
+    // The rejection lands after the cache was cleared and re-filled; it must
+    // not delete the entry that replaced it.
+    let fail: (e: Error) => void = () => undefined;
+    mocks.headshot.mockReturnValueOnce(
+      new Promise<string | null>((_, reject) => {
+        fail = reject;
+      }),
+    );
+    const first = headshotSrc("2216");
+    resetAvatarCache();
+    mocks.headshot.mockResolvedValue("asset://evans.png");
+    expect(await headshotSrc("2216")).toBe("asset://evans.png");
+
+    fail(new Error("offline"));
+    expect(await first).toBeNull();
+    expect(await headshotSrc("2216")).toBe("asset://evans.png");
+    expect(mocks.headshot).toHaveBeenCalledTimes(2);
+  });
+
   it("asks again after the cache is dropped", async () => {
     mocks.headshot.mockResolvedValue(null);
     await headshotSrc("4046");
@@ -145,5 +189,17 @@ describe("teamAvatarSrc", () => {
     mocks.avatar.mockRejectedValue(new Error("offline"));
     await expect(teamAvatarSrc("abc123")).resolves.toBeNull();
     await expect(teamAvatarSrc("abc123", true)).resolves.toBeNull();
+  });
+
+  it("does not remember a failed request, but does remember a real absence", async () => {
+    mocks.avatar.mockRejectedValueOnce(new Error("offline"));
+    expect(await teamAvatarSrc("abc123")).toBeNull();
+    mocks.avatar.mockResolvedValue(null);
+    expect(await teamAvatarSrc("abc123")).toBeNull();
+    expect(mocks.avatar).toHaveBeenCalledTimes(2);
+    // The second answer was a resolved null — a manager with no picture — so
+    // nothing asks a third time.
+    expect(await teamAvatarSrc("abc123")).toBeNull();
+    expect(mocks.avatar).toHaveBeenCalledTimes(2);
   });
 });

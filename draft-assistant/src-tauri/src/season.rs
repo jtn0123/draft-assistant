@@ -39,7 +39,7 @@ use std::collections::HashSet;
 /// Bumped whenever `SeasonView` gains, loses, or renames a serialized field.
 /// Gated in `src/api.ts` and pinned against the checked-in
 /// `public/dev-season-fixture.json` by `tests/fixture_shape.rs`.
-pub const SEASON_SCHEMA_VERSION: &str = "1.1";
+pub const SEASON_SCHEMA_VERSION: &str = "1.2";
 
 pub use crate::season_sources::{SourceHealth, SourceStatus};
 pub use crate::season_types::{

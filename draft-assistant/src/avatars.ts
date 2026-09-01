@@ -48,17 +48,50 @@ export function useAvatarMode(): AvatarMode {
   );
 }
 
+/**
+ * Cache `request` under `key`, but only if it produces an answer.
+ *
+ * "No picture" comes back two different ways and they must not be conflated.
+ * A *resolved* null is an answer — Sleeper genuinely has no photo for this
+ * player — and is worth remembering for the session so every render does not
+ * re-ask. A *rejection* is not an answer: the request failed (offline, a
+ * transport error, the backend's `headshot fetch: …`), and remembering it
+ * would blank that one face until the app restarts, which is exactly the bug
+ * where a single network blip left a player's picture permanently empty.
+ *
+ * So on rejection the entry is dropped again and the caller is told "nothing
+ * for now" — the component falls back to the team logo, and the *next* time
+ * something asks for this id (a remount, a tab switch, a refresh) the request
+ * is made afresh. Deliberately no retry timer or automatic re-render: a
+ * failure should simply not be remembered as an answer, and turning one blip
+ * into a background retry loop across every visible face is worse than a
+ * logo that becomes a photo again the next time you come back to the tab.
+ */
+function remember(
+  cache: Map<string, Promise<string | null>>,
+  key: string,
+  request: Promise<string | null>,
+): Promise<string | null> {
+  const pending: Promise<string | null> = request.catch(() => {
+    // Only forget our own entry: a reset (or a later ask that already
+    // replaced it) must not have its answer torn out by this stale failure.
+    if (cache.get(key) === pending) cache.delete(key);
+    return null;
+  });
+  cache.set(key, pending);
+  return pending;
+}
+
 const resolved = new Map<string, Promise<string | null>>();
 
 /** The image source for a player, or null when Sleeper has no photo. Each id
- * is asked of the backend once per session; the backend keeps it on disk. */
+ * is asked of the backend once per session; the backend keeps it on disk. A
+ * request that *fails* is not an answer and is not remembered — see
+ * {@link remember}. */
 export function headshotSrc(playerId: string): Promise<string | null> {
-  let pending = resolved.get(playerId);
-  if (pending === undefined) {
-    pending = api.headshot(playerId).catch(() => null);
-    resolved.set(playerId, pending);
-  }
-  return pending;
+  const pending = resolved.get(playerId);
+  if (pending !== undefined) return pending;
+  return remember(resolved, playerId, api.headshot(playerId));
 }
 
 const teams = new Map<string, Promise<string | null>>();
@@ -68,12 +101,9 @@ const teams = new Map<string, Promise<string | null>>();
  * the 280px copy Sleeper serves for the zoomed view. */
 export function teamAvatarSrc(reference: string, full = false): Promise<string | null> {
   const key = full ? `full:${reference}` : reference;
-  let pending = teams.get(key);
-  if (pending === undefined) {
-    pending = api.avatar(reference, full).catch(() => null);
-    teams.set(key, pending);
-  }
-  return pending;
+  const pending = teams.get(key);
+  if (pending !== undefined) return pending;
+  return remember(teams, key, api.avatar(reference, full));
 }
 
 /** Test hook: forget everything resolved so far. */
