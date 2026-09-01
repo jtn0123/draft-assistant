@@ -169,6 +169,37 @@ describe("the sync pill", () => {
     expect(screen.getByText("Last try failed: network timeout")).toBeInTheDocument();
   });
 
+  it("borrows the season screen's word for a feed that has stopped", () => {
+    // The season header already stamps its data "Not updating" a few
+    // centimetres away. Two words for one state read as two states.
+    const off = (screen_: "season" | "draft") => (
+      <Header
+        leagueName="Dynasty Warriors"
+        subtitle="Week 3"
+        meta="14-team full-PPR"
+        screen={screen_}
+        onScreen={() => {}}
+        polling={false}
+        pollHealth={null}
+        onUndo={() => {}}
+        chatOpen={false}
+        onToggleChat={() => {}}
+        settingsOpen={false}
+        onToggleSettings={() => {}}
+        settingsRows={rows()}
+        footerNote="read-only connection"
+      />
+    );
+    const { unmount } = render(off("season"));
+    expect(screen.getByText("Not updating")).toHaveClass("pill-off");
+    expect(screen.queryByText("Live sync off")).not.toBeInTheDocument();
+    unmount();
+
+    // The draft screen has no such badge, so it keeps its own wording.
+    render(off("draft"));
+    expect(screen.getByText("Live sync off")).toHaveClass("pill-off");
+  });
+
   it("says nothing extra while sync is healthy", () => {
     render(
       <Harness

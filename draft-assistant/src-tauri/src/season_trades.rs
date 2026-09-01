@@ -7,7 +7,7 @@
 //! naturally suppresses lopsided offers nobody would take.
 
 use crate::roster::RosterRules;
-use crate::season_lineup::{optimal_lineup, Candidate};
+use crate::season_lineup::{lineup_total, Candidate};
 use serde::Serialize;
 
 /// Most one-for-one offers to report.
@@ -33,13 +33,6 @@ pub struct TradeIdea {
     /// Their weekly lineup improvement — positive, or they would decline.
     pub their_edge: f64,
     pub note: String,
-}
-
-fn lineup_total(rules: &RosterRules, candidates: &[Candidate]) -> f64 {
-    optimal_lineup(rules, candidates)
-        .iter()
-        .map(|s| s.points)
-        .sum()
 }
 
 /// Swap `out_id` for `incoming` and return the resulting best-lineup total.

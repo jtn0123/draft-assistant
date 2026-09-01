@@ -53,7 +53,17 @@ function hasMovement(series: TeamSeries[]): boolean {
  * where they started. A dot rather than a bar because the interesting range
  * starts well above zero, and this rather than fourteen near-flat lines
  * whenever there are too few readings for a line to say anything. */
-function Ranked({ series, avatars }: { series: TeamSeries[]; avatars: Record<string, string> }) {
+function Ranked({
+  series,
+  avatars,
+  showMovement,
+}: {
+  series: TeamSeries[];
+  avatars: Record<string, string>;
+  /** False before any team has actually moved: a column of "0.0" reads as
+   *  measured stillness rather than as nothing having been measured. */
+  showMovement: boolean;
+}) {
   const now = series
     .map((s) => ({
       s,
@@ -66,7 +76,9 @@ function Ranked({ series, avatars }: { series: TeamSeries[]; avatars: Record<str
   const bounds = extent(now.flatMap((r) => [r.v, r.from]));
   const lo = Math.floor(bounds.lo / 5) * 5;
   const hi = Math.ceil(bounds.hi / 5) * 5;
-  const pct = (v: number) => ((v - lo) / Math.max(1, hi - lo)) * 100;
+  // Position along the shared track, 0..100. Named for what it is rather than
+  // `pct`, which in this codebase is format.ts's "0.62 -> 62%".
+  const along = (v: number) => ((v - lo) / Math.max(1, hi - lo)) * 100;
   return (
     <div className="trend-ranked">
       {now.map(({ s, v, from }) => {
@@ -86,28 +98,28 @@ function Ranked({ series, avatars }: { series: TeamSeries[]; avatars: Record<str
                 <span
                   className="trend-tail"
                   style={{
-                    left: `${Math.min(pct(from), pct(v))}%`,
-                    width: `${Math.abs(pct(v) - pct(from))}%`,
+                    left: `${Math.min(along(from), along(v))}%`,
+                    width: `${Math.abs(along(v) - along(from))}%`,
                   }}
                 />
               )}
               <span
                 className="trend-mark"
-                style={{ left: `${pct(v)}%` }}
+                style={{ left: `${along(v)}%` }}
                 title={`${fmt(v, 1)}/wk`}
               />
             </span>
             <span className="trend-right mid">{fmt(v, 1)}</span>
             <span
               className={
-                flat
+                !showMovement || flat
                   ? "trend-right muted"
                   : delta > 0
                     ? "trend-right trend-pos"
                     : "trend-right trend-act"
               }
             >
-              {flat ? "0.0" : signed(delta)}
+              {!showMovement ? "—" : flat ? "0.0" : signed(delta)}
             </span>
           </div>
         );
@@ -291,11 +303,16 @@ function Legend({
   focus,
   onFocus,
   avatars,
+  showMovement,
 }: {
   series: TeamSeries[];
   focus: number | null;
   onFocus: (rosterId: number | null) => void;
   avatars: Record<string, string>;
+  /** Movement needs a run of readings behind it to mean anything — the same
+   *  three the chart itself waits for. Below that the column is em-dashed
+   *  rather than filled with the zeros of a series that has not moved yet. */
+  showMovement: boolean;
 }) {
   return (
     <div className="trend-legend" aria-label="Teams">
@@ -323,17 +340,17 @@ function Legend({
             <span className="trend-swatch" aria-hidden="true" />
             <TeamAvatar avatar={avatars[String(s.roster_id)]} name={s.name} />
             <span className="ellipsis">{s.name}</span>
-            <span className="trend-right mid">{last ? fmt(last.strength, 1) : "–"}</span>
+            <span className="trend-right mid">{last ? fmt(last.strength, 1) : "—"}</span>
             <span
               className={
-                delta === null || flat
+                !showMovement || delta === null || flat
                   ? "trend-right muted"
                   : delta >= 0
                     ? "trend-right trend-pos"
                     : "trend-right trend-act"
               }
             >
-              {delta === null ? "–" : flat ? "0.0" : signed(delta)}
+              {!showMovement || delta === null ? "—" : flat ? "0.0" : signed(delta)}
             </span>
           </button>
         );
@@ -384,6 +401,12 @@ export function TrendsTab({
   // Two readings plot as a slope; a dot plot with a tail says the same
   // thing far more legibly. Lines earn their place from the third on.
   const plottable = snapshots >= 3 && hasMovement(series);
+  // The movement column answers "how far has this team come since the first
+  // reading", so one reading cannot answer it: every row is its own baseline
+  // and the whole column prints "0.0", which reads as fourteen teams measured
+  // as standing still rather than as nothing measured yet. Em-dashed until a
+  // second snapshot gives the subtraction something to subtract.
+  const showMovement = snapshots >= 2;
 
   if (series.length === 0) {
     return <Empty>Trends start with the first Season load — check back after the next one.</Empty>;
@@ -412,7 +435,13 @@ export function TrendsTab({
         (plottable ? (
           <>
             <Chart series={series} focus={focus} onFocus={setFocus} />
-            <Legend series={series} focus={focus} onFocus={setFocus} avatars={avatars} />
+            <Legend
+              series={series}
+              focus={focus}
+              onFocus={setFocus}
+              avatars={avatars}
+              showMovement={showMovement}
+            />
           </>
         ) : (
           <>
@@ -421,11 +450,17 @@ export function TrendsTab({
                 ? "One reading so far — here is where everyone stands. The line chart starts from the third."
                 : `Where everyone stands, and how far they have moved across ${snapshots} readings. The line chart starts from the third.`}
             </p>
-            <Ranked series={series} avatars={avatars} />
+            <Ranked series={series} avatars={avatars} showMovement={showMovement} />
           </>
         ))}
       {mode === "Table" && (
-        <Legend series={series} focus={focus} onFocus={setFocus} avatars={avatars} />
+        <Legend
+          series={series}
+          focus={focus}
+          onFocus={setFocus}
+          avatars={avatars}
+          showMovement={showMovement}
+        />
       )}
       <div className="tab-head-spaced">
         <PanelHead title="Why it moved" note="newest first" />

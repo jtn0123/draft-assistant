@@ -270,14 +270,8 @@ impl Engine {
         );
         let draft = draft.map_err(to_message)?;
         let users = users.unwrap_or_default();
-        let user_names: HashMap<String, String> = users
-            .iter()
-            .filter_map(|u| u.label().map(|n| (u.user_id.clone(), n)))
-            .collect();
-        let user_avatars: HashMap<String, String> = users
-            .iter()
-            .filter_map(|u| u.avatar_ref().map(|a| (u.user_id.clone(), a)))
-            .collect();
+        let user_names = crate::sleeper::label_map(&users);
+        let user_avatars = crate::sleeper::avatar_map(&users);
         self.assemble(league, draft, user_names, user_avatars, force)
             .await
     }

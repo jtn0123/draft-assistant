@@ -267,6 +267,7 @@ mod tests {
             adds: Some(adds.iter().map(|(p, r)| ((*p).to_string(), *r)).collect()),
             drops: Some(drops.iter().map(|(p, r)| ((*p).to_string(), *r)).collect()),
             roster_ids: vec![1, 2],
+            draft_picks: Vec::new(),
             settings: Default::default(),
         }
     }

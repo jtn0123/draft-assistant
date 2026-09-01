@@ -444,8 +444,10 @@ function seasonFixture(): SeasonView {
     header: {
       opponent_name: "punt_god",
       my_projected: 122.4,
+      my_set_projected: 118.1,
       opp_projected: 108.9,
-      win_odds: 0.62,
+      win_odds_best: 0.62,
+      win_odds_set: 0.55,
       playoff_odds: 0.88,
       locks_in_ms: null,
     },

@@ -147,6 +147,19 @@ pub struct TransactionSettings {
     pub waiver_bid: Option<i64>,
 }
 
+/// A future draft pick that changed hands inside a trade.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradedPick {
+    /// The draft year, as Sleeper sends it: "2027".
+    #[serde(default)]
+    pub season: String,
+    #[serde(default)]
+    pub round: u32,
+    /// The roster the pick belongs to after the trade.
+    #[serde(default)]
+    pub owner_id: Option<u32>,
+}
+
 /// A waiver claim, free-agent add, or trade. `adds`/`drops` map player_id to
 /// the roster_id on the receiving/losing end.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,6 +178,9 @@ pub struct Transaction {
     pub drops: Option<HashMap<String, u32>>,
     #[serde(default)]
     pub roster_ids: Vec<u32>,
+    /// Future picks moved by this trade. Empty on every other kind.
+    #[serde(default)]
+    pub draft_picks: Vec<TradedPick>,
     #[serde(default)]
     pub settings: Option<TransactionSettings>,
 }

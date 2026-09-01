@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type {
+  LineupChoice,
   SeasonHealth,
   SeasonTab,
   SeasonView,
@@ -189,6 +190,10 @@ export function SeasonScreen({
   pollHealth?: PollHealth | null;
 }) {
   const [tab, setTab] = useState<SeasonTab>("Standings");
+  // Which lineup the whole screen is talking about. It lived inside
+  // LineupCompare while the header quoted best-lineup odds regardless, so the
+  // screen could say "74% to win" and "2.8 sitting on your bench" at once.
+  const [lineup, setLineup] = useState<LineupChoice>("Best");
   const selectedTab = useRef<HTMLButtonElement>(null);
   // Only move focus when the keyboard drove the change; clicking a tab should
   // not yank focus, and neither should the first render.
@@ -217,6 +222,12 @@ export function SeasonScreen({
     setTab(next);
   };
   const { header, matchup } = view;
+  // One lineup, one score, one probability. Both numbers are computed in the
+  // Rust view against the same opponent, so picking here cannot make them
+  // disagree the way a single scalar and a local toggle could.
+  const best = lineup === "Best";
+  const myProjected = best ? header.my_projected : header.my_set_projected;
+  const winOdds = best ? header.win_odds_best : header.win_odds_set;
 
   return (
     <div className="season-screen">
@@ -226,12 +237,18 @@ export function SeasonScreen({
           <span className="season-stat-value ellipsis">
             {header.opponent_name === null
               ? `Week ${view.week} · bye`
-              : `vs ${header.opponent_name} · ${fmt(header.my_projected, 1)} – ${fmt(header.opp_projected, 1)}`}
+              : `vs ${header.opponent_name} · ${fmt(myProjected, 1)} – ${fmt(header.opp_projected, 1)}`}
           </span>
         </div>
         {/* The note sits on the first of the two odds and speaks for both:
-            one line, so a percentage is read as a model rather than a promise. */}
-        <HeaderStat label="Win odds" value={pct(header.win_odds)} sub={ODDS_NOTE} />
+            one line, so a percentage is read as a model rather than a promise.
+            Which lineup it prices comes first, because that is the half a
+            reader can act on. */}
+        <HeaderStat
+          label="Win odds"
+          value={pct(winOdds)}
+          sub={`${best ? "best lineup" : "lineup as set"} · ${ODDS_NOTE}`}
+        />
         <HeaderStat label="Playoffs" value={pct(header.playoff_odds)} />
         <HeaderStat
           label="Locks in"
@@ -251,7 +268,7 @@ export function SeasonScreen({
       <div className="season-body">
         <div className="season-main">
           <CallsToMake calls={view.calls} pointsOnTable={view.points_on_table} />
-          <LineupCompare matchup={matchup} winOdds={header.win_odds} />
+          <LineupCompare matchup={matchup} which={lineup} onWhich={setLineup} winOdds={winOdds} />
           <Waivers
             waivers={view.waivers}
             budgetLeft={view.waiver_budget_left}
@@ -290,7 +307,7 @@ export function SeasonScreen({
             {tab === "Games" && (
               <GamesTab
                 live={view.live}
-                myProjected={header.my_projected}
+                myProjected={myProjected}
                 oppProjected={header.opp_projected}
                 opponentName={header.opponent_name}
               />

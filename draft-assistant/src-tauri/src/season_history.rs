@@ -99,10 +99,10 @@ pub fn take_snapshot(
                         id.clone(),
                         PlayerSnap {
                             points: weekly.mean_from(id, first, last),
-                            injury: loaded
-                                .player_meta
-                                .get(id)
-                                .and_then(|m| m.injury_status.clone()),
+                            // Through the same `Lookup` the rest of the view
+                            // reads injuries with: the board's status wins over
+                            // the dictionary's, and blanks read as no status.
+                            injury: lookup.injury(id),
                         },
                     )
                 })

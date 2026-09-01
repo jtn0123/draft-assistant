@@ -1,8 +1,36 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SeasonView, SourceHealth } from "../season-types";
+import type { MatchupView, SeasonView, SourceHealth } from "../season-types";
 import { ODDS_NOTE } from "../odds";
 import { SeasonScreen } from "./SeasonScreen";
+
+/** A matchup whose set lineup is worse than the best one available — the
+ *  state in which the header and the lineup panel used to disagree. */
+function matchup(): MatchupView {
+  const row = {
+    slot: "QB",
+    my_player_id: "a",
+    my_name: "Jalen Hurts",
+    my_team: "PHI",
+    my_points: 22.4,
+    opp_player_id: "b",
+    opp_name: "Baker Mayfield",
+    opp_team: "TB",
+    opp_points: 15.2,
+    margin: 7.2,
+  };
+  return {
+    my_name: "Trust the Process",
+    opp_name: "punt_god",
+    my_avatar: null,
+    opp_avatar: null,
+    my_projected: 122.4,
+    opp_projected: 108.9,
+    rows: [row],
+    set_projected: 118.1,
+    set_rows: [{ ...row, my_name: "Bryce Young", my_points: 18.1, margin: 2.9 }],
+  };
+}
 
 // Grade item D8. The badge's whole job is to notice how long ago something
 // happened, so every test here runs against a clock that is standing still:
@@ -39,8 +67,10 @@ function view(overrides: Partial<SeasonView> = {}): SeasonView {
     header: {
       opponent_name: "punt_god",
       my_projected: 122.4,
+      my_set_projected: 118.1,
       opp_projected: 108.9,
-      win_odds: 0.62,
+      win_odds_best: 0.62,
+      win_odds_set: 0.55,
       playoff_odds: 0.88,
       locks_in_ms: null,
     },
@@ -83,9 +113,28 @@ describe("the odds", () => {
   // has to be next to the number rather than buried in a tooltip or a doc.
   it("says what the win odds were calibrated on, in one muted line", () => {
     render(<SeasonScreen view={view()} />);
-    const note = screen.getByText(ODDS_NOTE);
+    const note = screen.getByText(new RegExp(ODDS_NOTE));
     expect(note).toHaveClass("muted");
     expect(note.closest(".season-stat")).toHaveTextContent("Win odds");
+  });
+
+  // fireEvent rather than userEvent: this file runs on a frozen clock, which
+  // userEvent's own delays would sit and wait on forever.
+  it("prices the header off the lineup the screen is showing", () => {
+    render(<SeasonScreen view={view({ matchup: matchup() })} />);
+
+    // Best: the projection and the percentage are both the best lineup's.
+    expect(screen.getByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
+    expect(screen.getByText("62%")).toBeInTheDocument();
+    expect(screen.getByText(/^best lineup · /)).toBeInTheDocument();
+
+    // Switching the panel moves the header with it. The screen used to say
+    // "62% to win" while the same screen said points were on the bench.
+    fireEvent.click(screen.getByRole("button", { name: "Set" }));
+    expect(screen.getByText("vs punt_god · 118.1 – 108.9")).toBeInTheDocument();
+    expect(screen.getByText("55%")).toBeInTheDocument();
+    expect(screen.queryByText("62%")).not.toBeInTheDocument();
+    expect(screen.getByText(/^lineup as set · /)).toBeInTheDocument();
   });
 });
 

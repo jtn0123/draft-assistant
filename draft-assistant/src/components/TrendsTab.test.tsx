@@ -85,6 +85,18 @@ describe("TrendsTab", () => {
     expect(screen.getByText("−2.0")).toBeInTheDocument();
   });
 
+  it("em-dashes the movement column while there is only one reading", () => {
+    const { container } = render(<TrendsTab trends={view(1)} />);
+    const moves = [...container.querySelectorAll(".trend-rank-row")].map(
+      (r) => r.lastElementChild?.textContent,
+    );
+    // Every team is its own baseline on the first snapshot, so "0.0" here
+    // would be reporting a measurement nobody has taken yet.
+    expect(moves).toEqual(["—", "—"]);
+    // The strength column is real data and still prints.
+    expect(screen.getByText("130.0")).toBeInTheDocument();
+  });
+
   it("calls sub-tenth drift flat instead of printing a signed zero", () => {
     const flat = view(2);
     flat.series[0].points[1].strength = flat.series[0].points[0].strength - 0.02;
