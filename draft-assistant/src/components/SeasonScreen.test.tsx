@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SeasonView, SourceHealth } from "../season-types";
+import { ODDS_NOTE } from "../odds";
 import { SeasonScreen } from "./SeasonScreen";
 
 // Grade item D8. The badge's whole job is to notice how long ago something
@@ -75,6 +76,17 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("the odds", () => {
+  // A bare "62%" reads as a promise. The note is what makes it a model, so it
+  // has to be next to the number rather than buried in a tooltip or a doc.
+  it("says what the win odds were calibrated on, in one muted line", () => {
+    render(<SeasonScreen view={view()} />);
+    const note = screen.getByText(ODDS_NOTE);
+    expect(note).toHaveClass("muted");
+    expect(note.closest(".season-stat")).toHaveTextContent("Win odds");
+  });
 });
 
 describe("the live badge", () => {

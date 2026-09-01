@@ -14,6 +14,7 @@ import type { PollHealth } from "../types";
 import { age, fmt, lockLabel, nowSecs, pct, spanLabel, untilLabel } from "../format";
 import { CallsToMake, LineupCompare, Waivers } from "./ThisWeek";
 import { GamesTab } from "./GamesTab";
+import { ODDS_NOTE } from "../odds";
 import { LastSeason, LeagueTab, Standings, TeamRoster } from "./SeasonTabs";
 import { TrendsTab } from "./TrendsTab";
 
@@ -228,7 +229,9 @@ export function SeasonScreen({
               : `vs ${header.opponent_name} · ${fmt(header.my_projected, 1)} – ${fmt(header.opp_projected, 1)}`}
           </span>
         </div>
-        <HeaderStat label="Win odds" value={pct(header.win_odds)} />
+        {/* The note sits on the first of the two odds and speaks for both:
+            one line, so a percentage is read as a model rather than a promise. */}
+        <HeaderStat label="Win odds" value={pct(header.win_odds)} sub={ODDS_NOTE} />
         <HeaderStat label="Playoffs" value={pct(header.playoff_odds)} />
         <HeaderStat
           label="Locks in"
