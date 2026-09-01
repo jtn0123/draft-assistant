@@ -1475,7 +1475,9 @@
         {
           "roster_id": 1,
           "team": "AllDay21",
-          "gets": []
+          "gets": [
+            "2027 2nd"
+          ]
         },
         {
           "roster_id": 9,
@@ -1495,7 +1497,9 @@
         {
           "roster_id": 1,
           "team": "AllDay21",
-          "gets": []
+          "gets": [
+            "2027 1st"
+          ]
         },
         {
           "roster_id": 6,
@@ -1515,12 +1519,17 @@
         {
           "roster_id": 4,
           "team": "fisher23",
-          "gets": []
+          "gets": [
+            "2027 3rd"
+          ]
         },
         {
           "roster_id": 6,
           "team": "ocrevo",
-          "gets": []
+          "gets": [
+            "2027 2nd",
+            "2028 4th"
+          ]
         }
       ],
       "involves_me": false,
@@ -1533,12 +1542,17 @@
         {
           "roster_id": 2,
           "team": "Witzy\u2019s Blitzys",
-          "gets": []
+          "gets": [
+            "2027 1st",
+            "2028 3rd"
+          ]
         },
         {
           "roster_id": 4,
           "team": "fisher23",
-          "gets": []
+          "gets": [
+            "2027 2nd"
+          ]
         }
       ],
       "involves_me": true,

@@ -114,6 +114,20 @@ describe("CallsToMake", () => {
     render(<CallsToMake calls={[call("WR", 4, "why")]} pointsOnTable={4} />);
     expect(document.querySelector(".call-note")).toBeNull();
   });
+
+  // The whole row is the button that opens the reason, so the player's
+  // picture must render as a plain image: the zoom wrapper is a button, and a
+  // button inside a button is invalid HTML that leaves keyboard and
+  // screen-reader users with a control they cannot reach or explain.
+  it("nests no button inside the call row", () => {
+    const { container } = render(
+      <CallsToMake calls={[call("WR", 4, "why"), call("TE", 3, "why")]} pointsOnTable={7} />,
+    );
+    expect(container.querySelectorAll(".call-row").length).toBe(2);
+    // The picture is still drawn, just not as its own control.
+    expect(container.querySelectorAll(".call-row img").length).toBe(2);
+    expect(container.querySelectorAll("button button")).toHaveLength(0);
+  });
 });
 
 const bestRow = {

@@ -136,11 +136,17 @@ export function Headshot({
   playerId,
   team,
   name,
+  interactive = true,
 }: {
   playerId: string | null | undefined;
   team: string | null | undefined;
   /** Caption for the zoomed view; the row's own name text. */
   name?: string;
+  /** Pass `false` inside a row that is itself a button or a link: the zoom
+   * wrapper is a `<button>`, and a button inside a button is invalid HTML
+   * that leaves keyboard and screen-reader users with an ambiguous control.
+   * The picture is drawn exactly the same, just without the zoom. */
+  interactive?: boolean;
 }) {
   const mode = useAvatarMode();
   const isPlayer = typeof playerId === "string" && /^\d+$/.test(playerId);
@@ -175,29 +181,45 @@ export function Headshot({
   if (url === null) {
     const logo = teamLogo(fallbackTeam);
     if (logo === null) return <span className="avatar avatar-blank" aria-hidden="true" />;
+    const mark = <TeamLogo team={fallbackTeam} className="avatar avatar-logo" />;
+    if (!interactive) return mark;
     return (
       <Zoomable src={logo} label={caption}>
-        <TeamLogo team={fallbackTeam} className="avatar avatar-logo" />
+        {mark}
       </Zoomable>
     );
   }
+  const face = (
+    <img
+      className="avatar headshot"
+      src={url}
+      alt=""
+      width={22}
+      height={22}
+      onError={() => setSrc({ id: wanted, url: null })}
+    />
+  );
+  if (!interactive) return face;
   return (
     <Zoomable src={url} label={caption}>
-      <img
-        className="avatar headshot"
-        src={url}
-        alt=""
-        width={22}
-        height={22}
-        onError={() => setSrc({ id: wanted, url: null })}
-      />
+      {face}
     </Zoomable>
   );
 }
 
 /** A manager's team picture. Renders the team's initial while it loads and
  * when they never set one, so the row's shape never depends on the network. */
-export function TeamAvatar({ avatar, name }: { avatar?: string | null; name: string }) {
+export function TeamAvatar({
+  avatar,
+  name,
+  interactive = true,
+}: {
+  avatar?: string | null;
+  name: string;
+  /** Pass `false` inside a row that is itself a button or a link — see
+   * {@link Headshot}. Same picture, no nested control. */
+  interactive?: boolean;
+}) {
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
@@ -220,9 +242,11 @@ export function TeamAvatar({ avatar, name }: { avatar?: string | null; name: str
       </span>
     );
   }
+  const mark = <img className="team-avatar" src={src} alt="" width={18} height={18} />;
+  if (!interactive) return mark;
   return (
     <Zoomable src={src} label={name} avatar={avatar ?? undefined}>
-      <img className="team-avatar" src={src} alt="" width={18} height={18} />
+      {mark}
     </Zoomable>
   );
 }
@@ -233,6 +257,7 @@ export function PlayerName({
   tag,
   tagTitle,
   playerId,
+  interactive = true,
 }: {
   name: string;
   team: string | null | undefined;
@@ -242,6 +267,9 @@ export function PlayerName({
   tagTitle?: string;
   /** When given, shows the player's headshot instead of the team logo. */
   playerId?: string | null;
+  /** Pass `false` inside a row that is itself a button or a link — see
+   * {@link Headshot}. */
+  interactive?: boolean;
 }) {
   // A player who is Out or Doubtful is the one worth colouring; Questionable
   // is common enough that shouting about it would be noise.
@@ -255,7 +283,7 @@ export function PlayerName({
       {playerId === undefined ? (
         <TeamLogo team={team} />
       ) : (
-        <Headshot playerId={playerId} team={team} name={name} />
+        <Headshot playerId={playerId} team={team} name={name} interactive={interactive} />
       )}
       <span className="ellipsis">{name}</span>
       {tag && (

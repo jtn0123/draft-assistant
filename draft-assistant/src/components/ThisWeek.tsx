@@ -60,10 +60,14 @@ export function CallsToMake({
             >
               <span className="eyebrow">{call.slot}</span>
               <span className="call-players">
+                {/* The whole row is the button that opens the reason, so the
+                 * headshot renders as a plain picture: a zoom button nested
+                 * inside it would be invalid HTML. */}
                 <PlayerName
                   name={call.player_in}
                   team={call.player_in_team}
                   playerId={call.player_in_id}
+                  interactive={false}
                 />
                 <span className="muted small">over</span>
                 <span className="mid ellipsis">{call.player_out}</span>

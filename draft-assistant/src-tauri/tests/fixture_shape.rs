@@ -211,3 +211,37 @@ const DRAFT_UNPOPULATED: &[&str] = &[];
 /// Arrays the four-team fixture league leaves empty in the season view: it has
 /// no roster with a surplus to offer, so the trade finder proposes nothing.
 const SEASON_UNPOPULATED: &[&str] = &["trades[]"];
+
+/// The path comparison above is blind to a *value* that has gone stale: an
+/// empty-but-present array contributes no paths, so `recent_trades[].sides[]`
+/// kept passing while three of the five deals still carried `"gets": []` —
+/// captured before `season_deals::picks_for` learned to name traded picks, and
+/// rendering as the uninformative "gets draft picks" fallback in the preview
+/// and the whole Playwright suite.
+///
+/// A general "derived array the code would now populate" check would mean
+/// replaying the fixture's own transactions through the view builder, which
+/// needs the real league's players and rosters — the very thing this file
+/// explains it cannot regenerate. This is the cheap half: every side of a real
+/// trade received *something*, so an empty `gets` in the fixture is stale by
+/// construction, whatever the reason.
+#[test]
+fn every_trade_side_in_the_season_fixture_names_what_it_got() {
+    let fixture = repo_file("dev-season-fixture.json");
+    let deals = fixture["recent_trades"]
+        .as_array()
+        .expect("recent_trades is an array");
+    assert!(!deals.is_empty(), "the fixture has no trades to check");
+    for deal in deals {
+        for side in deal["sides"].as_array().expect("sides is an array") {
+            let gets = side["gets"].as_array().expect("gets is an array");
+            assert!(
+                !gets.is_empty(),
+                "trade {} side {} has an empty `gets`: a side that received nothing is a stale \
+                 capture, and prints as the \"draft picks\" fallback",
+                deal["transaction_id"],
+                side["team"],
+            );
+        }
+    }
+}

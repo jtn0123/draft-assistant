@@ -29,6 +29,9 @@ pub struct TeamSeries {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TrendChange {
+    /// Seconds since epoch — the snapshot's `taken_at`, not milliseconds.
+    /// `TradeDone::at` next door is milliseconds; the two are not the same
+    /// unit and the UI divides only that one by 1000.
     pub at: u64,
     pub week: u32,
     pub roster_id: u32,

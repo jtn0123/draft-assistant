@@ -338,8 +338,14 @@ function Legend({
             onClick={() => onFocus(s.roster_id === focus ? null : s.roster_id)}
           >
             <span className="trend-swatch" aria-hidden="true" />
-            <TeamAvatar avatar={avatars[String(s.roster_id)]} name={s.name} />
-            <span className="ellipsis">{s.name}</span>
+            {/* Picture and name are one grid cell, so the row's four children
+             * line up with the four declared columns; splitting them put the
+             * avatar in the flexible column and wrapped the delta onto a
+             * second line. Not zoomable: the row itself is the button. */}
+            <span className="ellipsis team-cell">
+              <TeamAvatar avatar={avatars[String(s.roster_id)]} name={s.name} interactive={false} />
+              <span className="ellipsis">{s.name}</span>
+            </span>
             <span className="trend-right mid">{last ? fmt(last.strength, 1) : "—"}</span>
             <span
               className={
@@ -448,7 +454,11 @@ export function TrendsTab({
             <p className="empty-note">
               {snapshots < 2
                 ? "One reading so far — here is where everyone stands. The line chart starts from the third."
-                : `Where everyone stands, and how far they have moved across ${snapshots} readings. The line chart starts from the third.`}
+                : `Where everyone stands, and how far they have moved across ${snapshots} readings. ${
+                    snapshots < 3
+                      ? "The line chart starts from the third."
+                      : "No team has moved enough to plot yet."
+                  }`}
             </p>
             <Ranked series={series} avatars={avatars} showMovement={showMovement} />
           </>

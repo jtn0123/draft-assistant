@@ -1,8 +1,20 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({ avatar: vi.fn() }));
+vi.mock("../api", () => ({ api: mocks }));
+
 import type { TrendsView } from "../season-types";
+import { resetAvatarCache } from "../avatars";
 import { dateLabel } from "../format";
 import { TrendsTab } from "./TrendsTab";
+import { settle } from "../test/settle";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  resetAvatarCache();
+  mocks.avatar.mockResolvedValue("data:image/png;base64,AAAA");
+});
 
 const T0 = Date.parse("2026-09-03T14:00:00Z") / 1000;
 const DAY = 86_400;
@@ -119,6 +131,24 @@ describe("TrendsTab", () => {
     expect(screen.getByRole("button", { name: /Witzy/ })).toBeInTheDocument();
   });
 
+  it("says nothing has moved once there are readings enough to plot", () => {
+    // Five readings, all flat: the chart is withheld because no line would
+    // go anywhere, not because the third reading is still to come.
+    const flat = view(5);
+    for (const s of flat.series) for (const p of s.points) p.strength = s.points[0].strength;
+    render(<TrendsTab trends={flat} />);
+    expect(screen.getByText(/across 5 readings/)).toBeInTheDocument();
+    expect(screen.getByText(/No team has moved enough to plot yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/starts from the third/)).not.toBeInTheDocument();
+  });
+
+  it("says the chart starts from the third while there are only two readings", () => {
+    render(<TrendsTab trends={view(2)} />);
+    expect(screen.getByText(/across 2 readings/)).toBeInTheDocument();
+    expect(screen.getByText(/The line chart starts from the third/)).toBeInTheDocument();
+    expect(screen.queryByText(/No team has moved enough/)).not.toBeInTheDocument();
+  });
+
   it("labels dates in Eastern time", () => {
     expect(dateLabel(Date.parse("2026-09-04T03:30:00Z") / 1000)).toBe("Sep 3");
     expect(dateLabel(Date.parse("2026-09-04T03:30:00Z") / 1000, true)).toBe("Sep 3, 11:30 PM");
@@ -163,5 +193,38 @@ describe("TrendsTab with a long history", () => {
     const after = [...chart.querySelectorAll("path.trend-line")];
     expect(after).toEqual(before);
     expect(after.map((p) => p.getAttribute("d"))).toEqual(before.map((p) => p.getAttribute("d")));
+  });
+});
+
+// A legend row is itself a button, so the team picture inside it must not be
+// the zoom button: a button inside a button is invalid HTML, and it also put
+// the avatar in the flexible column and wrapped the delta onto a second line.
+describe("the trends legend row", () => {
+  const avatars = { "2": "aaa", "7": "bbb" };
+
+  it("nests no button inside the legend row, in either view", async () => {
+    const { container } = render(<TrendsTab trends={view(3)} avatars={avatars} />);
+    await settle(() => {});
+    expect(container.querySelectorAll("img.team-avatar").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll(".trend-legend-row").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll("button button")).toHaveLength(0);
+
+    await settle(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Table" }));
+    });
+    expect(container.querySelectorAll(".trend-legend-row").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll("button button")).toHaveLength(0);
+  });
+
+  it("keeps picture and name in one cell so the row has four children", async () => {
+    const { container } = render(<TrendsTab trends={view(3)} avatars={avatars} />);
+    await settle(() => {});
+    const row = container.querySelector(".trend-legend-row") as HTMLElement;
+    // Four children for the four declared grid columns; a fifth would wrap.
+    expect(row.children).toHaveLength(4);
+    const cell = row.children[1] as HTMLElement;
+    expect(cell.className).toContain("team-cell");
+    expect(cell.querySelector("img.team-avatar")).not.toBeNull();
+    expect(cell.textContent).toContain("Witzy's Blitzys");
   });
 });
