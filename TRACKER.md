@@ -161,7 +161,7 @@ parallel (chat / season / draft), then a cleanup+fixtures pass on main after mer
 
 | # | Fix | Status | Notes |
 |---|---|---|---|
-| A | Chat: real server-side spend cap, $0 CLI route, context knows keepers/trades/prices, key_store shown, single key entry, ET timestamps, chat wire tests | in flight | |
+| A | Chat: server-side cap, $0 CLI route, league rules in context, key_store, single key entry, wire tests | done `2e7082e`, merged | Cap enforced in `ask_claude` (cumulative per screen, persisted in AppConfig, $5 default, CLI turns cost $0); documented start-under-finish-over overshoot; composer warns instead of locking; context now explains keepers/traded picks/3RR/round prices and set-vs-best; wire tests against a std TcpListener stub. |
 | B | Season: best/set split, tiebreak, trade-pick names, pregame zeros, staleness vocab, dedup | done `8ff95aa`, merged `72f36c3` | Header + odds now priced off the lineup the screen shows (`win_odds` split into best/set, one state drives both); ties worth half a win everywhere; trades read "gets 2027 2nd"; pregame columns em-dash until real data; Trends threshold deliberately 2 snapshots (1 reading = everyone their own baseline). |
 | C | Draft: keeper-aware survival, pick market, ownership everywhere, tag CSS, lookup fallback | done `22176ef`, merged `e62f05c` | Survival judged against market picks (keepers excluded) — identity when no keepers, pinned by test; "Pick market" panel renders round prices; simulator + dump_state attribute picks to the owning manager; injury tag one letter (Q/D/O) with name-grade truncation. |
-| D | Cleanup: fixture regen + schema bumps + round-trip test, App.test.tsx onto appHarness + ApiMock keyed by Api, pub→private sweep, dead exports | queued (after A–C merge) | |
+| D | Cleanup: fixture regen + schema bumps + round-trip test, App.test.tsx onto appHarness + ApiMock keyed by Api, pub→private sweep, dead exports | in flight | |
