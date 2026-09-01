@@ -18,6 +18,17 @@ export default tseslint.config(
       globals: globals.node,
     },
   },
+  // The browser end-to-end suite. Node-side test code, not app code: no React
+  // rules, and not in the app's typechecked project either — Playwright brings
+  // its own types.
+  {
+    files: ["e2e-browser/**/*.ts"],
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 2022,
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
   {
     files: ["src/**/*.{ts,tsx}"],
     extends: [

@@ -87,7 +87,7 @@ the balanced recommendation) to exercise mid-draft state without a live draft.
 The UI degrades to a read-only preview when opened in a plain browser (vite dev
 server on :1420). It renders two captured dumps, and **both must be regenerated
 together** or the preview shows a current draft board beside a stale season
-screen:
+screen ([docs/replay.md](docs/replay.md) makes the preview move instead):
 
 ```
 cargo run --bin dump_state  -- <league_id> [username] ../public/dev-fixture.json
@@ -358,9 +358,9 @@ one failure that otherwise reaches the user: a command written, wired up in
 (i.e. `AppHandle<Wry>`) and so cannot be registered on the mock runtime;
 they are covered by the source-level check but not the IPC round trip.
 
-The capability set and the CSP are covered by `npm run test:e2e` below, which
-is a real window rather than a mock — but it is not in `verify`, so between
-runs of it the manual check is what stands in.
+The capability set and the CSP are covered by `npm run test:e2e` below, a real
+window rather than a mock — not in `verify`, so between runs the manual check
+stands in. `npm run test:e2e:browser` drives the preview: [docs/replay.md](docs/replay.md).
 
 ### Manual smoke check
 

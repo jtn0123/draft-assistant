@@ -43,6 +43,7 @@ pub mod secrets;
 pub mod simulation;
 pub mod sleeper;
 pub mod sleeper_error;
+pub mod sleeper_host;
 pub mod state;
 pub mod traded_picks;
 pub mod valuation;
