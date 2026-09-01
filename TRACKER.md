@@ -15,6 +15,23 @@ Follow-ups found during this work:
 - Pre-commit hook was broken for git worktrees (validated the main checkout). done `b4f2c39`
 
 ---
+## Trends/League tab debug (2026-08-31) — `a2cafae`
+
+Five bugs found by driving the running app rather than reading it. All five are fixed in `a2cafae`.
+
+| # | Bug | Fix | Pinned by |
+|---|---|---|---|
+| 1 | Trends legend row: `grid-template-columns` declares 4 columns, the markup rendered 5 children — avatar took the flexible column, the team name truncated to "Northe…" in the 52px value column, and the delta wrapped onto an implicit second row. Only reproducible with ≥3 snapshots *and* real movement, which the checked-in 2-snapshot fixture never had. | Picture and name wrapped in one `ellipsis team-cell`, the way `Ranked` already did it. Row height 51px → 29px, one grid row. | `TrendsTab.test.tsx` — "keeps picture and name in one cell so the row has four children" |
+| 2 | 15 `button > button` pairs in the DOM: `TeamAvatar`/`Headshot` always wrap their picture in `Zoomable` (a `<button>`), inside the trends legend row and the season calls row, which are themselves buttons. Invalid HTML with an inner control keyboard and screen-reader users cannot resolve. (Click-through was already prevented; this was validity/a11y only.) | Opt-in `interactive={false}` on `TeamAvatar`, `Headshot` and `PlayerName` renders the same picture with no button wrapper. Zoom kept everywhere it is standalone. | `TrendsTab.test.tsx` + `ThisWeek.test.tsx` — `querySelectorAll("button button")` is empty in both panels |
+| 3 | Trends fallback copy always blamed the third reading, but `plottable` needs three readings **and** movement — five flat snapshots told the user to wait for a third they already had. | The two cases read differently: "…across 5 readings. No team has moved enough to plot yet." | `TrendsTab.test.tsx` — one test per branch |
+| 4 | `public/dev-season-fixture.json` stored the *derived* `recent_trades[].sides[].gets`, and three of five trades still had `"gets": []` from before `season_deals` learned to name traded picks. The preview and the whole Playwright suite only ever saw the "gets draft picks" fallback. The Rust side was already correct. | Patched with the labels the current code produces ("2027 2nd", "2026 1st, 2027 3rd"); every other value byte-stable. | `fixture_shape.rs` — "every trade side in the season fixture names what it got" |
+| 5 | `TrendChange.at` had no unit doc; `TradeDone.at` next door is milliseconds and the UI divides only that one by 1000. Both correct today, but the two call sites read as contradictory. | Doc comment stating seconds and naming the contrast. (`TrendPoint.at` was already documented.) | n/a — doc only |
+
+Notes:
+- `fixture_shape.rs` compares key **paths**, so an empty-but-present array contributes nothing and passes. The new test is the cheap half of the missing check: every side of a real trade received something. A general "derived array the code would now populate" guard would mean replaying the fixture's transactions through the view builder, which needs the real league's players and rosters — the thing that file explains it cannot regenerate.
+- Bug 1 was invisible to every checked-in fixture and to the Playwright suite; it needed a 5-snapshot season replay to surface at all.
+
+---
 ## Earlier tracker (Claude Design import)
 
 Grades are for the working tree after the Claude Design import (nothing is committed yet).
