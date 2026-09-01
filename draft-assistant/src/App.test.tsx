@@ -45,7 +45,13 @@ import { resetPrefs } from "./prefs";
 import { settle } from "./test/settle";
 
 function fixture(): DraftView {
-  return structuredClone(fixtureJson) as unknown as DraftView;
+  const view = structuredClone(fixtureJson) as unknown as DraftView;
+  // These tests drive workflow — setup, errors, toasts, tabs — not board
+  // volume, and rendering the full 393-player board in every test is what
+  // pushed this file past the 5s budget under parallel worker load. Board
+  // rendering at scale is covered by App.screens.test.tsx.
+  view.available = view.available.slice(0, 24);
+  return view;
 }
 
 beforeEach(() => {
