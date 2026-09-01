@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./api", async () => ({ api: (await import("./test/appHarness")).harness().api }));
 
+import "./test/warmScreens";
 import App from "./App";
 import { resetPrefs } from "./prefs";
 import { resetThemePreference } from "./theme";

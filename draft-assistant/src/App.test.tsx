@@ -5,6 +5,7 @@ import type { DraftView } from "./types";
 
 vi.mock("./api", async () => ({ api: (await import("./test/appHarness")).harness().api }));
 
+import "./test/warmScreens";
 import App from "./App";
 import { resetPrefs } from "./prefs";
 import { settle } from "./test/settle";
