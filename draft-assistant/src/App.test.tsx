@@ -30,6 +30,26 @@ function fixture(): DraftView {
   return draftFixture(24);
 }
 
+/**
+ * The board's row actions, once the lazy DraftScreen chunk has arrived.
+ *
+ * The first "Draft" button is the Draft/Season mode toggle, so a row action
+ * only exists when more than one matches. Resolving that chunk is a real
+ * dynamic import, and under parallel worker load it does not reliably finish
+ * inside waitFor's 1s default — which is the whole of this flake. The
+ * assertion is unchanged; it just gets the time an import can take.
+ */
+async function rowDraftButtons(): Promise<HTMLElement[]> {
+  return waitFor(
+    () => {
+      const buttons = screen.getAllByRole("button", { name: "Draft" });
+      expect(buttons.length).toBeGreaterThan(1);
+      return buttons;
+    },
+    { timeout: 5000 },
+  );
+}
+
 beforeEach(() => {
   // The app opens on Season by default; these tests drive the draft board.
   // jsdom here has no storage, so give it a scratch one.
@@ -90,14 +110,7 @@ describe("App live workflow", () => {
     const stale = screen.getByText("Sync stale · 2 failures");
     expect(stale.closest("span")).toHaveAttribute("title", "network timeout");
 
-    // The first "Draft" button is the Draft/Season mode toggle, so reach into
-    // the board for a row action instead. The board arrives with the lazy
-    // DraftScreen chunk, so wait until more than the toggle matches.
-    const rowDraft = await waitFor(() => {
-      const buttons = screen.getAllByRole("button", { name: "Draft" });
-      expect(buttons.length).toBeGreaterThan(1);
-      return buttons;
-    });
+    const rowDraft = await rowDraftButtons();
     await user.click(rowDraft[rowDraft.length - 1]);
     // "Mark drafted" is also the rec-card action, so confirm inside the dialog.
     const dialog = screen.getByRole("dialog");
@@ -261,11 +274,7 @@ describe("when an action fails", () => {
     h.api.addLeague.mockResolvedValue(initial);
     render(<App />);
     await screen.findByText(initial.league.name);
-    const rows = await waitFor(() => {
-      const buttons = screen.getAllByRole("button", { name: "Draft" });
-      expect(buttons.length).toBeGreaterThan(1);
-      return buttons;
-    });
+    const rows = await rowDraftButtons();
     return rows[rows.length - 1];
   }
 
