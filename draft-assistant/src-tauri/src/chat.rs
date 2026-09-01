@@ -6,7 +6,6 @@
 //! the volatile part only.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 const ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
@@ -38,9 +37,25 @@ impl ChatModel {
     }
 
     /// Fable 5's thinking is always on — asking for it to be off is a 400.
-    fn can_disable_thinking(self) -> bool {
+    pub(crate) fn can_disable_thinking(self) -> bool {
         matches!(self, ChatModel::Opus5)
     }
+
+    /// Anthropic's published list price, in dollars per million tokens:
+    /// (input, output). The one place prices live — the panel shows what the
+    /// backend charged rather than pricing the turn a second time.
+    pub fn price_per_mtok(self) -> (f64, f64) {
+        match self {
+            ChatModel::Opus5 => (5.0, 25.0),
+            ChatModel::Fable5 => (10.0, 50.0),
+        }
+    }
+}
+
+/// What one answer cost at list price, in dollars.
+pub fn turn_cost(model: ChatModel, input_tokens: u32, output_tokens: u32) -> f64 {
+    let (input, output) = model.price_per_mtok();
+    (f64::from(input_tokens) * input + f64::from(output_tokens) * output) / 1_000_000.0
 }
 
 /// How hard Claude should think. "Off" maps to disabled thinking, the rest to
@@ -107,6 +122,16 @@ pub struct ChatReply {
     pub refused: bool,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Which route answered: "api" or "claude_code". The transports below do
+    /// not know which one they are, so the command layer fills this in.
+    pub provider: String,
+    /// What this turn cost in dollars — list price on the API route, and zero
+    /// on the CLI route, which is paid for by a subscription rather than by
+    /// the token. Also filled in by the command layer.
+    pub cost_usd: f64,
+    /// What this screen's chat has cost in total, after this turn, against
+    /// the cap in `chat_budget_usd`.
+    pub screen_spend_usd: f64,
 }
 
 // ---------- request wire types ----------
@@ -197,27 +222,24 @@ struct ApiErrorDetail {
     message: Option<String>,
 }
 
-/// The instruction the panel operates under. Kept separate from the volatile
-/// board state so the stable half caches.
-pub(crate) const GUIDANCE: &str = "\
-You are a fantasy football draft and season assistant embedded in a read-only \
-Sleeper second-screen app. You can see the user's live board, roster, and \
-clock in the context below.
-
-Answer in two or three short paragraphs at most. Lead with the recommendation, \
-then the reasoning, then the risk. Cite the numbers you were given (points, \
-VORP, tier, survival odds) rather than inventing any. If the context does not \
-contain what you would need, say so plainly instead of guessing.
-
-This app cannot draft, set a lineup, or write anything to Sleeper. Never tell \
-the user you have done something for them; tell them what to do.
-
-Do not include internal or system XML tags in your response.";
-
 /// Ask Claude about the current board.
 ///
 /// `context` is the serialized view (draft or season) the panel is showing.
 pub async fn ask(
+    http: &reqwest::Client,
+    api_key: &str,
+    model: ChatModel,
+    effort: Effort,
+    context: &str,
+    messages: &[ChatMessage],
+) -> Result<ChatReply, String> {
+    ask_at(ENDPOINT, http, api_key, model, effort, context, messages).await
+}
+
+/// The same request against an arbitrary endpoint. Only [`ask`] and the wire
+/// tests, which point it at a stub server, call this.
+async fn ask_at(
+    endpoint: &str,
     http: &reqwest::Client,
     api_key: &str,
     model: ChatModel,
@@ -239,7 +261,7 @@ pub async fn ask(
         system: vec![
             SystemBlock {
                 kind: "text",
-                text: GUIDANCE,
+                text: crate::chat_copy::GUIDANCE,
                 // Everything above this point is byte-identical every turn.
                 cache_control: Some(CacheControl { kind: "ephemeral" }),
             },
@@ -269,7 +291,7 @@ pub async fn ask(
     };
 
     let response = http
-        .post(ENDPOINT)
+        .post(endpoint)
         .header("x-api-key", api_key)
         .header("anthropic-version", API_VERSION)
         .header("content-type", "application/json")
@@ -331,69 +353,27 @@ pub async fn ask(
         refused,
         input_tokens: parsed.usage.input_tokens,
         output_tokens: parsed.usage.output_tokens,
+        provider: String::new(),
+        cost_usd: 0.0,
+        screen_spend_usd: 0.0,
     })
 }
 
-/// Model / effort pairs the UI is allowed to offer.
-pub fn effort_levels(model: ChatModel) -> Vec<&'static str> {
-    if model.can_disable_thinking() {
-        vec!["Off", "Low", "Medium", "High", "xhigh", "Max"]
-    } else {
-        // Fable 5 thinks on every turn; there is no off.
-        vec!["Low", "Medium", "High", "xhigh", "Max"]
-    }
+/// Minimal blocking helper so the tests here need no async runtime crate.
+#[cfg(test)]
+fn tokio_test_block<F: std::future::Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(future)
 }
 
-/// Per-level copy for the tooltips and the footer note.
-pub fn effort_note(effort: Effort) -> (&'static str, &'static str) {
-    match effort {
-        Effort::Off => (
-            "Adaptive thinking disabled — Claude answers without a reasoning pass",
-            "no extended thinking",
-        ),
-        Effort::Low => (
-            "Most efficient — significant token savings, some capability reduction",
-            "low effort · fastest",
-        ),
-        Effort::Medium => (
-            "Balanced — moderate token savings",
-            "medium effort · balanced",
-        ),
-        Effort::High => (
-            "Default — spends as many tokens as needed for excellent results",
-            "high effort · the default",
-        ),
-        Effort::XHigh => (
-            "For the hardest problems and long-horizon work",
-            "xhigh effort · sustained reasoning",
-        ),
-        Effort::Max => (
-            "No constraints on token spend — deepest analysis",
-            "max effort · deepest, slowest",
-        ),
-    }
-}
-
-/// Redact everything but the tail of a key, for display.
-pub fn mask_key(key: &str) -> String {
-    let visible: String = key
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    if key.len() <= 4 {
-        return "····".to_string();
-    }
-    format!("····{visible}")
-}
-
-/// Extra headers, exposed for tests and for callers that log requests.
-pub fn beta_headers() -> HashMap<&'static str, &'static str> {
-    HashMap::from([("anthropic-beta", FALLBACK_BETA)])
-}
+/// Response parsing against a real socket. Its own file only because this one
+/// is at the line cap.
+#[cfg(test)]
+#[path = "chat_wire_tests.rs"]
+mod wire_tests;
 
 #[cfg(test)]
 mod tests {
@@ -403,12 +383,6 @@ mod tests {
     fn model_ids_are_the_exact_published_strings() {
         assert_eq!(ChatModel::Opus5.id(), "claude-opus-5");
         assert_eq!(ChatModel::Fable5.id(), "claude-fable-5");
-    }
-
-    #[test]
-    fn only_opus_offers_thinking_off() {
-        assert!(effort_levels(ChatModel::Opus5).contains(&"Off"));
-        assert!(!effort_levels(ChatModel::Fable5).contains(&"Off"));
     }
 
     #[test]
@@ -438,12 +412,6 @@ mod tests {
     }
 
     #[test]
-    fn keys_are_masked_to_their_last_four() {
-        assert_eq!(mask_key("sk-ant-api03-abcd1234"), "····1234");
-        assert_eq!(mask_key("abc"), "····");
-    }
-
-    #[test]
     fn the_request_body_matches_the_documented_wire_shape() {
         let messages = [ChatMessage {
             role: "user".into(),
@@ -454,7 +422,7 @@ mod tests {
             max_tokens: MAX_TOKENS,
             system: vec![SystemBlock {
                 kind: "text",
-                text: GUIDANCE,
+                text: crate::chat_copy::GUIDANCE,
                 cache_control: Some(CacheControl { kind: "ephemeral" }),
             }],
             messages: &messages,
@@ -474,14 +442,5 @@ mod tests {
         // budget_tokens is removed on these models and 400s if sent.
         assert!(json["thinking"].get("budget_tokens").is_none());
         assert!(json.get("temperature").is_none());
-    }
-
-    /// Minimal blocking helper so these tests need no async runtime crate.
-    fn tokio_test_block<F: std::future::Future>(future: F) -> F::Output {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(future)
     }
 }

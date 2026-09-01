@@ -115,12 +115,26 @@ describe("how a chat is named and listed", () => {
     const line = describeSession({
       id: "s1",
       title: "Who should I take?",
-      startedAt: Date.UTC(2026, 7, 30, 12, 41),
+      startedAt: Date.UTC(2026, 7, 30, 16, 41),
       updatedAt: 0,
       questions: 1,
       costUsd: 0.666,
     });
-    expect(line).toContain("Who should I take? · 1 question · $0.67");
+    // Eastern time, like every other timestamp in the app — 16:41 UTC in
+    // August is 12:41 in New York, whatever this machine's clock is set to.
+    expect(line).toBe("Aug 30, 12:41 PM · Who should I take? · 1 question · $0.67");
+  });
+
+  it("shows a conversation worth less than a cent as more than nothing", () => {
+    const line = describeSession({
+      id: "s1",
+      title: "Quick one",
+      startedAt: Date.UTC(2026, 7, 30, 16, 41),
+      updatedAt: 0,
+      questions: 1,
+      costUsd: 0.004,
+    });
+    expect(line).toContain("· $0.004");
   });
 
   it("gives every new chat its own id", () => {

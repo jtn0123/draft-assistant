@@ -22,6 +22,9 @@ function settings(overrides: Partial<ChatSettings>): ChatSettings {
     key_hint: null,
     cli_available: false,
     provider: "api",
+    key_store: "keychain",
+    budget_usd: 5,
+    spend_usd: {},
     models: ["Opus 5", "Fable 5"],
     efforts: {
       "Opus 5": ["Off", "Low", "Medium", "High", "xhigh", "Max"],
@@ -42,6 +45,9 @@ function reply(overrides: Partial<ChatReply>): ChatReply {
     refused: false,
     input_tokens: 0,
     output_tokens: 0,
+    provider: "api",
+    cost_usd: 0,
+    screen_spend_usd: 0,
     ...overrides,
   };
 }
@@ -246,6 +252,33 @@ describe("API key form", () => {
     await userEvent.type(field, "sk-ant-test{Enter}");
     expect(mocks.setApiKey).toHaveBeenCalledWith("sk-ant-test");
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled());
+  });
+
+  it("asks for the key once, and points the composer at the form", async () => {
+    mocks.chatSettings.mockResolvedValue(settings({}));
+    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    await screen.findByLabelText("Anthropic API key");
+    // One call to action, not two: the form asks, the composer waits.
+    expect(screen.getByText("Add an Anthropic API key")).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "Ask Claude" });
+    expect(input).toBeDisabled();
+    expect(input).toHaveAttribute("placeholder", "Waiting on the key above…");
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
+  it("says where the key is actually kept", async () => {
+    mocks.chatSettings.mockResolvedValue(settings({ key_store: "keychain" }));
+    const { unmount } = render(
+      <Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
+    expect(await screen.findByText(/macOS Keychain/)).toBeInTheDocument();
+    unmount();
+
+    // No Keychain: the promise is weaker, and the form says so rather than
+    // leaving "stored locally" to cover both.
+    mocks.chatSettings.mockResolvedValue(settings({ key_store: "file" }));
+    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    expect(await screen.findByText(/kept in a file in this app's data directory/)).toBeVisible();
   });
 
   it("surfaces a save failure without losing the form", async () => {

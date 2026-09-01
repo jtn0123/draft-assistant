@@ -6,7 +6,8 @@
 //! the system prompt, exactly as it does over the API; the CLI's own tools are
 //! switched off so it can only read what it is given.
 
-use crate::chat::{ChatMessage, ChatModel, ChatReply, Effort, GUIDANCE};
+use crate::chat::{ChatMessage, ChatModel, ChatReply, Effort};
+use crate::chat_copy::GUIDANCE;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -130,6 +131,11 @@ pub fn parse_result(stdout: &str, requested: ChatModel) -> Result<ChatReply, Str
         refused,
         input_tokens: parsed.usage.input_tokens,
         output_tokens: parsed.usage.output_tokens,
+        // Filled in by `commands_chat`, which is the layer that knows which
+        // route ran and what it is allowed to cost.
+        provider: String::new(),
+        cost_usd: 0.0,
+        screen_spend_usd: 0.0,
     })
 }
 

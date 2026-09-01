@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { ChatMessage, ChatSettings, ThreadEntry } from "../chat-types";
-import { formatUsd, overBudget, setChatBudget, turnCost, useChatBudget } from "../chatCost";
+import { formatUsd, overBudget, setChatBudget, useChatBudget } from "../chatCost";
 import type { Screen } from "./Header";
 import { ChatControls } from "./ChatControls";
 import { ChatKeyForm } from "./ChatKeyForm";
@@ -74,6 +74,9 @@ export function Chat({
   }));
   /// Bumped after the key is saved, to re-read whether one is stored.
   const [settingsToken, setSettingsToken] = useState(0);
+  /// What every conversation on this screen has cost together — the total the
+  /// backend's cap is actually checked against, which this one chat's is not.
+  const [screenSpend, setScreenSpend] = useState(0);
   const nextId = useRef(Math.max(1, ...(opening.reopened?.entries ?? []).map((e) => e.id + 1)));
   const threadRef = useRef<HTMLDivElement>(null);
   const budget = useChatBudget();
@@ -109,6 +112,10 @@ export function Chat({
         if (cancelled) return;
         setSettings(next);
         setShowKeyForm(next.provider === "api" && !next.has_key);
+        // The backend holds the cap and the running total it is checked
+        // against; the stored copy here is only a cache of them.
+        setChatBudget(next.budget_usd);
+        setScreenSpend(next.spend_usd[screen] ?? 0);
       })
       .catch(() => {
         // Without settings the panel still renders, just with defaults.
@@ -117,7 +124,7 @@ export function Chat({
     return () => {
       cancelled = true;
     };
-  }, [settingsToken]);
+  }, [settingsToken, screen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -147,7 +154,20 @@ export function Chat({
     [settings, model],
   );
   const activeEffort = allowedEfforts.includes(effort) ? effort : DEFAULT_EFFORT;
-  const stopped = overBudget(spend.costUsd, budget);
+  // A warning, not a lock: the backend holds the real cap, counted across
+  // every conversation on this screen and charging the Claude Code route
+  // nothing. Disabling the composer here would stop questions over money that
+  // was never spent.
+  const nearingCap = overBudget(spend.costUsd, budget);
+
+  /** Keep the cap the panel warns on and the cap the backend enforces the
+   *  same number. A backend that refuses the write still warns correctly. */
+  const pickBudget = (next: number) => {
+    setChatBudget(next);
+    api.setChatBudget(next).catch(() => {
+      // Not stored for next time; this session still uses it.
+    });
+  };
 
   const add = (entry: Omit<ThreadEntry, "id">) => {
     const id = nextId.current++;
@@ -156,7 +176,7 @@ export function Chat({
 
   const send = async (text: string) => {
     const question = text.trim();
-    if (!question || sending || stopped) return;
+    if (!question || sending || showKeyForm) return;
     setDraft("");
     // The turns are built here rather than only in state, so the conversation
     // can be filed the moment it stops moving without waiting for a render.
@@ -182,13 +202,16 @@ export function Chat({
         },
       ];
       const thread = [...outgoing, { role: "assistant", content: reply.text }];
+      // The backend prices the turn, so a Claude Code answer adds nothing and
+      // the panel's total is the one the cap is actually checked against.
       const spent = {
         questions: spend.questions + 1,
-        costUsd: spend.costUsd + turnCost(model, reply.input_tokens, reply.output_tokens),
+        costUsd: spend.costUsd + reply.cost_usd,
       };
       setEntries(answered);
       setHistory(thread);
       setSpend(spent);
+      setScreenSpend(reply.screen_spend_usd);
       sessions.save({ entries: answered, history: thread, ...spent });
     } catch (e) {
       // The failed turn must not stay in history, or every retry resends it.
@@ -227,7 +250,7 @@ export function Chat({
   };
 
   const note = settings?.notes[activeEffort];
-  const composerOff = showKeyForm || sending || stopped;
+  const composerOff = showKeyForm || sending;
 
   return (
     <aside className="chat">
@@ -277,11 +300,12 @@ export function Chat({
         currentId={sessions.sessionId}
         saved={sessions.saved}
         spent={spend.costUsd}
+        screenSpent={screenSpend}
         budget={budget}
         disabled={sending}
         onOpen={sessions.open}
         onDelete={sessions.remove}
-        onBudget={setChatBudget}
+        onBudget={pickBudget}
       />
 
       {askingNew && (
@@ -307,6 +331,7 @@ export function Chat({
         {showKeyForm ? (
           <ChatKeyForm
             hint={settings?.key_hint ?? null}
+            store={settings?.key_store ?? null}
             onSaved={() => setSettingsToken((n) => n + 1)}
           />
         ) : entries.length === 0 ? (
@@ -339,10 +364,10 @@ export function Chat({
             {THINKING_NOTE[activeEffort] ?? "Thinking…"}
           </div>
         )}
-        {stopped && (
+        {nearingCap && (
           <div className="chat-stopped" role="status">
-            This chat has spent {formatUsd(spend.costUsd)} of its {formatUsd(budget)} budget — raise
-            the budget above, or start a new chat.
+            This chat has spent {formatUsd(spend.costUsd)} of its {formatUsd(budget)} budget — the
+            next question may be refused. Raise the budget above, or start a new chat.
           </div>
         )}
         {!showKeyForm && entries.length === 0 && suggestions.length > 0 && (
@@ -363,7 +388,9 @@ export function Chat({
         <div className="chat-input-row">
           <input
             className="text-input chat-input"
-            placeholder={showKeyForm ? "Add an API key to start" : "Ask about the board…"}
+            /* The form above is the one place a key is added; the composer
+               points at it rather than asking a second time. */
+            placeholder={showKeyForm ? "Waiting on the key above…" : "Ask about the board…"}
             value={draft}
             disabled={composerOff}
             onChange={(e) => setDraft(e.target.value)}

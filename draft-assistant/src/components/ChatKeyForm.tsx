@@ -4,7 +4,23 @@
 import { useState } from "react";
 import { api } from "../api";
 
-export function ChatKeyForm({ hint, onSaved }: { hint: string | null; onSaved: () => void }) {
+/** Where the key actually ends up, said plainly — "stored locally" is not the
+ *  same promise as "in the Keychain", and the user is entitled to know which
+ *  one they are getting. */
+const STORE_NOTE: Record<string, string> = {
+  keychain: "Kept in the macOS Keychain, under this app's own item.",
+  file: "No Keychain on this machine — kept in a file in this app's data directory, readable by your user account.",
+};
+
+export function ChatKeyForm({
+  hint,
+  store,
+  onSaved,
+}: {
+  hint: string | null;
+  store: "keychain" | "file" | null;
+  onSaved: () => void;
+}) {
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,9 +46,10 @@ export function ChatKeyForm({ hint, onSaved }: { hint: string | null; onSaved: (
       </span>
       <span className="mid small">
         {hint === null
-          ? "Ask Claude sends your board to the Anthropic API. The key is stored locally in this app's data directory and goes nowhere else."
+          ? "Ask Claude sends your board to the Anthropic API. The key stays on this Mac and goes nowhere else."
           : `Currently using ${hint}.`}
       </span>
+      {store !== null && <span className="muted small">{STORE_NOTE[store]}</span>}
       <input
         className="text-input"
         type="password"

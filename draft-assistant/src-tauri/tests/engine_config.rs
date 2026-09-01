@@ -43,6 +43,8 @@ fn config_without_key() -> AppConfig {
         }],
         anthropic_api_key: None,
         chat_provider: Some("api".into()),
+        chat_budget_usd: None,
+        chat_spend_usd: Default::default(),
     }
 }
 

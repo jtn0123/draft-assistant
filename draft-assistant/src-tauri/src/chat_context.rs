@@ -5,6 +5,62 @@
 //! board and everything situational, which is what makes the system prompt
 //! small enough to cache.
 
+use crate::chat_rules::{league_rules, LeagueRules};
+
+/// A comma-separated pick list, clipped so a manager who traded half a draft
+/// away cannot push the board out of the prompt.
+fn pick_list(picks: &[u32]) -> String {
+    let shown = picks
+        .iter()
+        .take(8)
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if picks.len() > 8 {
+        format!("{shown} and {} more", picks.len() - 8)
+    } else {
+        shown
+    }
+}
+
+/// The league's house rules, as the lines Claude reads them on. Empty for an
+/// ordinary snake with no keepers and no trades — most leagues, most nights.
+fn rules_lines(rules: &LeagueRules) -> String {
+    let mut out = String::new();
+    if rules.keepers_total > 0 {
+        out.push_str(&format!(
+            "Keepers: {} picks league-wide are already spent",
+            rules.keepers_total
+        ));
+        if rules.my_keeper_picks.is_empty() {
+            out.push_str(" — none of them yours.\n");
+        } else {
+            out.push_str(&format!(
+                " — yours at {}.\n",
+                pick_list(&rules.my_keeper_picks)
+            ));
+        }
+    }
+    if !rules.picks_gained.is_empty() || !rules.picks_lost.is_empty() {
+        out.push_str("Traded picks: ");
+        let mut halves = Vec::new();
+        if !rules.picks_gained.is_empty() {
+            halves.push(format!("you gained {}", pick_list(&rules.picks_gained)));
+        }
+        if !rules.picks_lost.is_empty() {
+            halves.push(format!("you lost {}", pick_list(&rules.picks_lost)));
+        }
+        out.push_str(&halves.join("; "));
+        out.push_str(".\n");
+    }
+    if let Some(round) = rules.reversal_round {
+        out.push_str(&format!(
+            "Third-round reversal: the order flips at round {round} instead of snaking, so it repeats the round before.\n"
+        ));
+    }
+    out
+}
+
 /// The draft screen's context block.
 pub fn draft_context(view: &crate::view::DraftView) -> String {
     let mut out = String::new();
@@ -23,6 +79,7 @@ pub fn draft_context(view: &crate::view::DraftView) -> String {
             .unwrap_or_else(|| "unknown".into()),
         view.draft.my_next_picks.iter().take(4).collect::<Vec<_>>()
     ));
+    out.push_str(&rules_lines(&league_rules(view)));
 
     if let Some(roster) = &view.my_roster {
         out.push_str("Your roster: ");
@@ -86,6 +143,19 @@ pub fn draft_context(view: &crate::view::DraftView) -> String {
             run.position, run.count, run.window
         ));
     }
+    if !view.pick_prices.is_empty() {
+        out.push_str("Round prices so far (points over replacement the round actually took): ");
+        out.push_str(
+            &view
+                .pick_prices
+                .iter()
+                .take(10)
+                .map(|p| format!("R{} {:.0}", p.round, p.points))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        out.push('\n');
+    }
     if !view.recent_picks.is_empty() {
         out.push_str("Recent picks: ");
         out.push_str(
@@ -98,6 +168,57 @@ pub fn draft_context(view: &crate::view::DraftView) -> String {
                 .join(", "),
         );
         out.push('\n');
+    }
+    out
+}
+
+/// "(Q)" after a name, and nothing at all for a player with no tag.
+fn tag(injury: &Option<String>) -> String {
+    match injury {
+        Some(code) if !code.is_empty() => format!(" ({code})"),
+        _ => String::new(),
+    }
+}
+
+/// The head-to-head lineup, both sides tagged with this week's injuries, and
+/// what the lineup that is actually set gives up against the best one. The
+/// distinction matters: the rows below are the *best* lineup, so without this
+/// Claude would read a start/sit recommendation as already taken.
+pub(crate) fn lineup_block(matchup: &crate::season::MatchupView, points_on_table: f64) -> String {
+    let mut out =
+        String::from("Best lineup (slot, yours, proj, theirs, proj; Q/D/O = injury tag):\n");
+    for row in &matchup.rows {
+        out.push_str(&format!(
+            "{}: {}{} {:.1} vs {}{} {:.1}\n",
+            row.slot,
+            row.my_name,
+            tag(&row.my_injury),
+            row.my_points,
+            row.opp_name,
+            tag(&row.opp_injury),
+            row.opp_points
+        ));
+    }
+    out.push_str(&format!(
+        "Your lineup as set projects {:.1} against a best of {:.1} — {:.1} left on the table.\n",
+        matchup.set_projected, matchup.my_projected, points_on_table
+    ));
+    let benched: Vec<String> = matchup
+        .set_rows
+        .iter()
+        .filter(|set| {
+            matchup
+                .rows
+                .iter()
+                .all(|best| best.my_player_id != set.my_player_id)
+        })
+        .map(|set| format!("{} {}{}", set.slot, set.my_name, tag(&set.my_injury)))
+        .collect();
+    if !benched.is_empty() {
+        out.push_str(&format!(
+            "Started but not in the best lineup: {}\n",
+            benched.join(", ")
+        ));
     }
     out
 }
@@ -119,13 +240,7 @@ pub fn season_context(view: &crate::season::SeasonView) -> String {
             view.header.win_odds_best * 100.0,
             view.header.playoff_odds * 100.0
         ));
-        out.push_str("Lineup (slot, yours, proj, theirs, proj):\n");
-        for row in &matchup.rows {
-            out.push_str(&format!(
-                "{}: {} {:.1} vs {} {:.1}\n",
-                row.slot, row.my_name, row.my_points, row.opp_name, row.opp_points
-            ));
-        }
+        out.push_str(&lineup_block(matchup, view.points_on_table));
     }
     if !view.calls.is_empty() {
         out.push_str("\nStart/sit calls available:\n");
@@ -172,6 +287,12 @@ pub fn season_context(view: &crate::season::SeasonView) -> String {
     }
     out
 }
+
+/// The lines these functions produce, pinned. Its own file only to keep this
+/// one inside the line cap.
+#[cfg(test)]
+#[path = "chat_context_tests.rs"]
+mod context_tests;
 
 /// Suggested prompts shown under the thread, tailored to the screen.
 pub fn suggestions(screen: &str) -> Vec<String> {

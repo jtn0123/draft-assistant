@@ -1,32 +1,11 @@
 // What a conversation has cost, and the cap the user set on it.
 //
-// The backend reports the tokens each answer used; the prices below turn
-// those into dollars so the panel can show a running total and stop asking
-// once the user's cap is reached. Prices are Anthropic's list rates per
-// million tokens for the two models the panel offers.
+// Nothing here prices a turn: the backend charges each answer against the
+// published rates (`chat.rs`) and reports the dollars back, because it is also
+// the side that enforces the cap and the side that knows the Claude Code route
+// costs nothing per token. This file owns the display and the cap's local half.
 
 import { persisted, usePersisted } from "./persisted";
-
-interface Price {
-  /** Dollars per million input tokens. */
-  input: number;
-  /** Dollars per million output tokens. */
-  output: number;
-}
-
-const PRICES: Record<string, Price> = {
-  "Opus 5": { input: 5, output: 25 },
-  "Fable 5": { input: 10, output: 50 },
-};
-
-/** The dearer of the two, so an unknown model is never under-counted. */
-const FALLBACK: Price = { input: 10, output: 50 };
-
-/** What one answer cost, in dollars. */
-export function turnCost(model: string, inputTokens: number, outputTokens: number): number {
-  const price = PRICES[model] ?? FALLBACK;
-  return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
-}
 
 /** "$0.42", or "$0.004" while a conversation is still worth less than a cent. */
 export function formatUsd(amount: number): string {
@@ -59,7 +38,9 @@ export function resetChatBudget(): void {
   budget.reset();
 }
 
-/** True once a conversation has spent everything the user allowed it. */
+/** True once a conversation has spent everything the user allowed it. A
+ *  warning only — the backend is what actually refuses the turn, against every
+ *  conversation on the screen rather than only this one. */
 export function overBudget(spent: number, cap: number): boolean {
   return cap > 0 && spent >= cap;
 }
