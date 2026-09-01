@@ -4,6 +4,7 @@
 use crate::board::AvailablePlayer;
 use crate::draft::{self, TeamRoster};
 use crate::engine::{now_secs, AppConfig, LoadedLeague};
+use crate::pick_value::{self, PickPrice};
 use crate::recommend::{recommend, Recommendation};
 use crate::sleeper::Pick;
 use crate::traded_picks::PickOwnership;
@@ -88,6 +89,9 @@ pub struct DraftView {
     pub replacement_baselines: HashMap<String, f64>,
     /// position -> number of league-wide startable players (incl. flex share)
     pub replacement_demand: HashMap<String, usize>,
+    /// What a pick in each round of this draft has been worth, in points over
+    /// replacement — empty until the draft has picks to learn from.
+    pub pick_prices: Vec<PickPrice>,
     pub data_health: DataHealth,
 }
 
@@ -433,6 +437,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         recommendations,
         recent_picks,
         replacement_demand: loaded.replacement_model.demand.clone(),
+        pick_prices: pick_value::pick_prices(loaded),
         replacement_baselines: loaded.replacement_model.baseline.clone(),
         data_health: DataHealth {
             players_fetched_at: loaded.players_fetched_at,

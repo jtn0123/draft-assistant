@@ -267,8 +267,7 @@ pub fn build_season_view_cached(
         None => season_view_feeds::trends(season, &lookup, my_roster_id, &team_name),
     };
 
-    let win_odds =
-        season_odds::win_probability(head_to_head.my_projected, head_to_head.opp_projected);
+    let win_odds = season_odds::win_probability(&head_to_head.my_spread, &head_to_head.opp_spread);
     let playoff_odds = my_roster_id
         .and_then(|id| standings.iter().find(|s| s.roster_id == id))
         .map(|s| s.playoff_odds)

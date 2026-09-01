@@ -72,16 +72,26 @@ pub fn take_snapshot(
     let last = loaded.league.last_regular_week().max(first);
     let weeks = f64::from(last - first + 1);
     let position_of = |id: &str| lookup.position(id);
+    let team_of = |id: &str| lookup.team(id);
+    let sidelined = |id: &str| lookup.is_sidelined(id);
 
     let teams = season
         .rosters
         .iter()
         .map(|roster| {
             let ids = roster.player_ids();
-            let total: f64 = weekly_lineup_totals(rules, ids, &position_of, weekly, first..=last)
-                .iter()
-                .map(|(_, points)| points)
-                .sum();
+            let total: f64 = weekly_lineup_totals(
+                rules,
+                ids,
+                &position_of,
+                &team_of,
+                &sidelined,
+                weekly,
+                first..=last,
+            )
+            .iter()
+            .map(|(_, points)| points)
+            .sum();
             let players = ids
                 .iter()
                 .map(|id| {

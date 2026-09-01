@@ -134,6 +134,14 @@ export interface PollHealth {
   last_error: string | null;
 }
 
+/** What a pick in one round of this draft has been worth, in points over
+ *  replacement — the median of what that round actually took. */
+export interface PickPrice {
+  round: number;
+  points: number;
+  example: string | null;
+}
+
 export interface DraftView {
   schema_version: string;
   generated_at: number;
@@ -148,6 +156,8 @@ export interface DraftView {
   recent_picks: RecentPick[];
   replacement_baselines: Record<string, number>;
   replacement_demand: Record<string, number>;
+  /** Optional: a fixture captured before pick pricing existed has none. */
+  pick_prices?: PickPrice[];
   data_health: DataHealth;
 }
 

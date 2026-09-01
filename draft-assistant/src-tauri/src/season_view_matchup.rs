@@ -16,6 +16,7 @@ use crate::season_lineup::{
     calls_from_diff, candidates_for, optimal_lineup, Candidate, LineupCall, LineupSlot,
 };
 use crate::season_lookup::Lookup;
+use crate::season_spread::{self, Starter};
 use crate::season_types::{MatchupRow, MatchupView};
 use crate::weekly::WeeklyPoints;
 
@@ -36,6 +37,11 @@ pub struct MatchupSection<'a> {
     /// Every player on my roster, scored for this week — the starting point
     /// for the waiver and trade searches too.
     pub my_candidates: Vec<Candidate>,
+    /// The two sides the win probability is priced off: my best lineup and
+    /// their set one, each resolved to position and NFL team so the spread
+    /// can account for volatility and stacks.
+    pub my_spread: Vec<Starter>,
+    pub opp_spread: Vec<Starter>,
 }
 
 /// Build the head-to-head section for `my_roster`.
@@ -51,13 +57,18 @@ pub fn build_matchup<'a>(
     let weekly = &loaded.weekly_points;
     let week = season.week;
     let position_of = |id: &str| lookup.position(id);
+    let team_of = |id: &str| lookup.team(id);
+    // Out and Doubtful players are scored at zero in every lineup solve: a
+    // stale projection on a player who will not play would otherwise put him
+    // in the optimal lineup and inflate both sides of the matchup.
+    let sidelined = |id: &str| lookup.is_sidelined(id);
     let projected = |id: &str| weekly.get_or_zero(id, week);
 
     let my_matchup = my_roster.and_then(|r| matchup_for(&season.matchups, r.roster_id));
     let opp_matchup = my_matchup.and_then(|mine| opponent_of(&season.matchups, mine));
 
     let my_candidates: Vec<Candidate> = my_roster
-        .map(|r| candidates_for(r.player_ids(), &position_of, weekly, week))
+        .map(|r| candidates_for(r.player_ids(), &position_of, &sidelined, weekly, week))
         .unwrap_or_default();
     let my_optimal = optimal_lineup(rules, &my_candidates);
     let my_current = my_matchup
@@ -89,8 +100,8 @@ pub fn build_matchup<'a>(
             .unwrap_or(i64::MAX)
             .saturating_mul(1000),
     };
-    let sidelined = facts.injury_calls(&my_current, &my_candidates, &calls, &eligible);
-    calls.extend(sidelined);
+    let injury_calls = facts.injury_calls(&my_current, &my_candidates, &calls, &eligible);
+    calls.extend(injury_calls);
     facts.finish(&mut calls);
 
     let opp_candidates: Vec<Candidate> = opp_matchup
@@ -99,12 +110,19 @@ pub fn build_matchup<'a>(
                 .rosters
                 .iter()
                 .find(|r| r.roster_id == m.roster_id)
-                .map(|r| candidates_for(r.player_ids(), &position_of, weekly, week))
+                .map(|r| candidates_for(r.player_ids(), &position_of, &sidelined, weekly, week))
         })
         .unwrap_or_default();
     let opp_optimal = optimal_lineup(rules, &opp_candidates);
+    // Their set lineup is scored for players who will actually take the field.
+    // Mine deliberately is not: my set lineup is the thing being advised on,
+    // and the call above measures its gain against the stale projection I am
+    // still carrying, honestly negative and all. Theirs is not advice — it is
+    // the number I am priced against, and crediting them for a starter listed
+    // Out inflates their score and my apparent risk with it.
+    let opp_projected_points = |id: &str| if sidelined(id) { 0.0 } else { projected(id) };
     let opp_current = opp_matchup
-        .map(|m| current_lineup(loaded, m.starter_ids(), &projected))
+        .map(|m| current_lineup(loaded, m.starter_ids(), &opp_projected_points))
         .unwrap_or_else(|| opp_optimal.clone());
 
     // The comparison shows my best lineup against their set one: I can change
@@ -138,6 +156,8 @@ pub fn build_matchup<'a>(
         points_on_table,
         my_projected,
         opp_projected,
+        my_spread: season_spread::starters_of(&my_optimal, &position_of, &team_of),
+        opp_spread: season_spread::starters_of(&opp_current, &position_of, &team_of),
         my_current,
         opp_current,
         my_candidates,

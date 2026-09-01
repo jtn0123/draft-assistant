@@ -191,4 +191,17 @@ fn full_draft_simulation_preserves_view_invariants() {
         .my_roster
         .as_ref()
         .is_some_and(|roster| roster.open_starters.is_empty()));
+
+    // Every round of a completed draft has a price, and a later pick is never
+    // dearer than an earlier one.
+    let prices = &final_view.pick_prices;
+    assert_eq!(prices.len(), loaded.draft.settings.rounds as usize);
+    assert!(prices
+        .windows(2)
+        .all(|pair| pair[1].points <= pair[0].points + 1e-9));
+    assert!(prices.iter().all(|price| price.example.is_some()));
+    assert!(
+        prices[0].points > 0.0,
+        "the first round must be worth something"
+    );
 }
