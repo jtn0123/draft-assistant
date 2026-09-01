@@ -1,9 +1,9 @@
 // Draft-screen panels: the three recommendation cards and the left rail
-// (roster, at-risk players, tier alerts, recent picks).
+// (roster, at-risk players, tier alerts, pick market, recent picks).
 
 import { useMemo, useState } from "react";
 import { api } from "../api";
-import type { DraftView, Recommendation } from "../types";
+import type { DraftView, PickPrice, Recommendation } from "../types";
 import { fmt, pct, pickLabel, posRank } from "../format";
 import { PlayerName, PosBadge, PanelHead, Empty } from "./bits";
 
@@ -289,6 +289,8 @@ export function SidePanel({ view }: { view: DraftView }) {
         )}
       </section>
 
+      <PickMarket prices={view.pick_prices ?? []} />
+
       <section className="panel">
         <PanelHead title="Recent picks" />
         <div className="recent-list">
@@ -307,6 +309,37 @@ export function SidePanel({ view }: { view: DraftView }) {
     </aside>
   );
 }
+
+/** The going rate for a pick in each round, in the only currency the rest of
+ * the screen speaks: points over replacement.
+ *
+ * Rendered only once the draft has rounds to learn from — before that the
+ * backend sends nothing rather than guessing, and an empty panel would just be
+ * a heading. The list is monotone by construction (`pick_value.rs` caps each
+ * round at the one before it), so it always reads top to bottom as cheaper. */
+function PickMarket({ prices }: { prices: PickPrice[] }) {
+  if (prices.length === 0) return null;
+  return (
+    <section className="panel">
+      <PanelHead title="Pick market" note={<span title={PRICE_NOTE}>VORP pts</span>} />
+      <div className="price-list">
+        {prices.map((price) => (
+          <div className="price-row" key={price.round} title={PRICE_NOTE}>
+            <span className="muted num">R{price.round}</span>
+            <span className="mid ellipsis">{price.example ?? "—"}</span>
+            <span className="num price-points">{fmt(price.points)}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Said in full wherever the number is shown, because "R7 · 12" on its own
+ * invites being read as a projection rather than a price. */
+const PRICE_NOTE =
+  "The median VORP taken in this round of this league's draft — what a pick " +
+  "there has actually been worth, and who went at that price.";
 
 /** The design only alarms a survival chance once it drops to a quarter. */
 function riskClass(survival: number | null): string {

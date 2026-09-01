@@ -120,3 +120,28 @@ test("an older dump is ignored, so a restarted recording cannot rewind the board
 test("live sync stays off, and says why, without a replay source", async ({ page }) => {
   await expect(page.locator(".header-actions")).toContainText(/Live sync off/i);
 });
+
+test("an injury tag stays inside its column with the chat panel open", async ({ page }) => {
+  // The fixture carries Sleeper's own spellings ("Questionable", "IR", "PUP")
+  // and the row draws each as one letter. Opening the chat takes 380px out of
+  // the player column, which is where a tag that could not shrink used to run
+  // straight over the position badge beside it.
+  await page.getByRole("button", { name: "Ask Claude" }).click();
+  await expect(page.locator(".board")).toBeVisible();
+
+  const rows = page.locator(".board-body").filter({ has: page.locator(".tag") });
+  const count = await rows.count();
+  expect(count).toBeGreaterThan(0);
+
+  for (let i = 0; i < count; i += 1) {
+    const tag = rows.nth(i).locator(".tag");
+    // One letter on screen; the spelled-out word rides along for a screen
+    // reader, off-screen and out of the layout.
+    await expect(tag.locator('[aria-hidden="true"]')).toHaveText(/^[QDO]$/);
+    const tagBox = await tag.boundingBox();
+    const badgeBox = await rows.nth(i).locator(".pos-badge").boundingBox();
+    if (tagBox === null || badgeBox === null) throw new Error("both are on screen");
+    // The tag ends before the badge begins: no overlap, at any width.
+    expect(tagBox.x + tagBox.width).toBeLessThanOrEqual(badgeBox.x);
+  }
+});

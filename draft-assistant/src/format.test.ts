@@ -3,6 +3,7 @@ import {
   age,
   clockLabel,
   ideasAgeNote,
+  injuryTag,
   injuryWord,
   kickoffLabel,
   nowSecs,
@@ -219,6 +220,28 @@ describe("clockLabel", () => {
     expect(clockLabel(90_000, 0)).toBe("1:30");
     expect(clockLabel(5_000, 9_000)).toBe("0:00");
     expect(clockLabel(null, 0)).toBeNull();
+  });
+});
+
+describe("injuryTag", () => {
+  it("reduces every spelling Sleeper uses to one of three letters", () => {
+    expect(injuryTag("Questionable")).toBe("Q");
+    expect(injuryTag("doubtful")).toBe("D");
+    for (const status of ["Out", "IR", "PUP", "Sus", "NA", "DNR", "  out  "]) {
+      expect(injuryTag(status)).toBe("O");
+    }
+  });
+
+  it("passes a code that is already short straight through", () => {
+    expect(injuryTag("Q")).toBe("Q");
+    expect(injuryTag("O")).toBe("O");
+  });
+
+  it("is no tag at all for anything it does not know", () => {
+    expect(injuryTag("Probable")).toBeNull();
+    expect(injuryTag("")).toBeNull();
+    expect(injuryTag(null)).toBeNull();
+    expect(injuryTag(undefined)).toBeNull();
   });
 });
 

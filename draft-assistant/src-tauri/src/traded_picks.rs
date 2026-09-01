@@ -136,6 +136,14 @@ impl PickOwnership {
     /// reversal as well as trades, because the frontend's own snake
     /// arithmetic knows about neither — anything that disagrees with a plain
     /// snake ends up here.
+    ///
+    /// INVARIANT: the baseline below is `DraftOrder::SNAKE` and must stay it,
+    /// because it is exactly what `slotForPick` in ClockBanner.tsx computes.
+    /// Comparing against `self.order` instead would drop every reversal pick
+    /// out of the overrides while the frontend still drew a plain snake — both
+    /// sides confidently naming a different manager. A linear draft is covered
+    /// the same way: every pick from round 2 on disagrees with a snake, so the
+    /// whole board arrives as overrides.
     pub fn overrides(&self) -> HashMap<u32, u32> {
         (1..=self.teams.saturating_mul(self.rounds))
             .filter_map(|p| {
@@ -236,6 +244,21 @@ mod tests {
         assert!(!overrides.contains_key(&1) && !overrides.contains_key(&15));
         assert_eq!(overrides.get(&29), Some(&14));
         assert_eq!(own.owner_slot(29), Some(14));
+    }
+
+    #[test]
+    fn a_linear_draft_arrives_as_overrides_from_round_two_on() {
+        // The frontend's queue only knows the snake, so every pick a linear
+        // draft spells differently has to be handed to it.
+        let own = PickOwnership::plain(14, 15, DraftOrder::LINEAR);
+        let overrides = own.overrides();
+        // Round 1 is the same either way; round 2 runs 1..14 instead of 14..1.
+        assert!(!overrides.contains_key(&1) && !overrides.contains_key(&14));
+        assert_eq!(overrides.get(&15), Some(&1));
+        assert_eq!(overrides.get(&28), Some(&14));
+        // The seven even rounds, in full: with an even team count no pick in
+        // a reversed round lands on the slot a forward round would give it.
+        assert_eq!(overrides.len(), 7 * 14);
     }
 
     #[test]
