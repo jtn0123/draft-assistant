@@ -1,11 +1,17 @@
-// The Ask Claude panel: model and effort pickers, the thread, and the
-// composer. Every answer is a real Messages API call against the current
-// board — there is no canned content here.
+// The Ask Claude panel: model and effort pickers, saved conversations, the
+// thread, and the composer. Every answer is a real Messages API call against
+// the current board — there is no canned content here.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { ChatMessage, ChatSettings, ThreadEntry } from "../chat-types";
+import { formatUsd, overBudget, setChatBudget, turnCost, useChatBudget } from "../chatCost";
 import type { Screen } from "./Header";
+import { ChatControls } from "./ChatControls";
+import { ChatKeyForm } from "./ChatKeyForm";
+import { ChatSessionBar } from "./ChatSessionBar";
+import { Markdown } from "./Markdown";
+import { beginChat, useChatSessions } from "./useChatSessions";
 
 // Ship with this chunk, not with the window. live.css owns the pulsing dot
 // this panel borrows while an answer is on its way.
@@ -14,23 +20,6 @@ import "../live.css";
 
 const DEFAULT_MODEL = "Opus 5";
 const DEFAULT_EFFORT = "High";
-
-/** The two ways an answer can reach Claude. */
-const PROVIDERS: [id: "claude_code" | "api", name: string, title: string][] = [
-  [
-    "claude_code",
-    "Claude Code",
-    "Runs the Claude Code CLI installed on this Mac, signed in with your Claude subscription — no API key needed",
-  ],
-  ["api", "API key", "Calls the Anthropic API directly with the key stored in this app"],
-];
-
-/** Model-button tooltips, from the design. */
-const MODEL_TITLE: Record<string, string> = {
-  "Opus 5": "Claude Opus 5 — adaptive thinking, supports all five effort levels",
-  "Fable 5":
-    "Claude Fable 5 — Mythos-class; thinking can't be turned off, effort is the only depth control",
-};
 
 /** "high effort" / "no thinking" — the effort as the context line names it. */
 function effortTag(level: string): string {
@@ -54,59 +43,6 @@ const THINKING_NOTE: Record<string, string> = {
   Max: "Simulating the rest of the round…",
 };
 
-function ApiKeyPrompt({ hint, onSaved }: { hint: string | null; onSaved: () => void }) {
-  const [key, setKey] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.setApiKey(key.trim());
-      setKey("");
-      onSaved();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="chat-key">
-      <span className="chat-key-title">
-        {hint === null ? "Add an Anthropic API key" : "Replace the stored key"}
-      </span>
-      <span className="mid small">
-        {hint === null
-          ? "Ask Claude sends your board to the Anthropic API. The key is stored locally in this app's data directory and goes nowhere else."
-          : `Currently using ${hint}.`}
-      </span>
-      <input
-        className="text-input"
-        type="password"
-        value={key}
-        placeholder="sk-ant-…"
-        onChange={(e) => setKey(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && key.trim()) void save();
-        }}
-        aria-label="Anthropic API key"
-      />
-      <button
-        type="button"
-        className="btn-primary"
-        disabled={!key.trim() || busy}
-        onClick={() => void save()}
-      >
-        {busy ? "Saving…" : "Save key"}
-      </button>
-      {error && <div className="error">{error}</div>}
-    </div>
-  );
-}
-
 export function Chat({
   screen,
   contextNote,
@@ -120,17 +56,48 @@ export function Chat({
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [effort, setEffort] = useState(DEFAULT_EFFORT);
   const [compact, setCompact] = useState(false);
-  const [entries, setEntries] = useState<ThreadEntry[]>([]);
-  const [history, setHistory] = useState<ChatMessage[]>([]);
+  // The conversation this panel opens with: the newest one stored for this
+  // screen, or a fresh one. Read while the state below is initialised, so a
+  // reopened thread paints once rather than appearing after an empty one.
+  const [opening] = useState(() => beginChat(screen));
+  const [entries, setEntries] = useState<ThreadEntry[]>(() => opening.reopened?.entries ?? []);
+  const [history, setHistory] = useState<ChatMessage[]>(() => opening.reopened?.history ?? []);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [askingNew, setAskingNew] = useState(false);
   const [showKeyForm, setShowKeyForm] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  /// What this conversation has asked and cost, restored with a saved one.
+  const [spend, setSpend] = useState(() => ({
+    questions: opening.reopened?.questions ?? 0,
+    costUsd: opening.reopened?.costUsd ?? 0,
+  }));
   /// Bumped after the key is saved, to re-read whether one is stored.
   const [settingsToken, setSettingsToken] = useState(0);
-  const nextId = useRef(1);
+  const nextId = useRef(Math.max(1, ...(opening.reopened?.entries ?? []).map((e) => e.id + 1)));
   const threadRef = useRef<HTMLDivElement>(null);
+  const budget = useChatBudget();
+
+  const clearThread = () => {
+    setEntries([]);
+    setHistory([]);
+    setSpend({ questions: 0, costUsd: 0 });
+  };
+
+  const sessions = useChatSessions({
+    screen,
+    opening,
+    onOpen: (chat) => {
+      // Ids come back with the conversation, so a new turn cannot collide
+      // with one that was stored.
+      nextId.current = Math.max(1, ...chat.entries.map((e) => e.id + 1));
+      setEntries(chat.entries);
+      setHistory(chat.history);
+      setSpend({ questions: chat.questions, costUsd: chat.costUsd });
+      setAskingNew(false);
+    },
+    onClear: clearThread,
+  });
 
   // Reloaded on mount and after the key changes; state is set from the
   // promise callback so the effect body stays synchronous-free.
@@ -180,6 +147,7 @@ export function Chat({
     [settings, model],
   );
   const activeEffort = allowedEfforts.includes(effort) ? effort : DEFAULT_EFFORT;
+  const stopped = overBudget(spend.costUsd, budget);
 
   const add = (entry: Omit<ThreadEntry, "id">) => {
     const id = nextId.current++;
@@ -188,9 +156,12 @@ export function Chat({
 
   const send = async (text: string) => {
     const question = text.trim();
-    if (!question || sending) return;
+    if (!question || sending || stopped) return;
     setDraft("");
-    add({ kind: "me", lines: [question] });
+    // The turns are built here rather than only in state, so the conversation
+    // can be filed the moment it stops moving without waiting for a render.
+    const asked = [...entries, { id: nextId.current++, kind: "me" as const, lines: [question] }];
+    setEntries(asked);
     const outgoing: ChatMessage[] = [...history, { role: "user", content: question }];
     setHistory(outgoing);
     setSending(true);
@@ -201,16 +172,33 @@ export function Chat({
         effort: activeEffort,
         messages: outgoing,
       });
-      add({
-        kind: "claude",
-        label: reply.refused ? "Declined" : undefined,
-        lines: reply.text.split("\n\n").filter((l) => l.trim() !== ""),
-      });
-      setHistory([...outgoing, { role: "assistant", content: reply.text }]);
+      const answered = [
+        ...asked,
+        {
+          id: nextId.current++,
+          kind: "claude" as const,
+          label: reply.refused ? "Declined" : undefined,
+          lines: reply.text.split("\n\n").filter((l) => l.trim() !== ""),
+        },
+      ];
+      const thread = [...outgoing, { role: "assistant", content: reply.text }];
+      const spent = {
+        questions: spend.questions + 1,
+        costUsd: spend.costUsd + turnCost(model, reply.input_tokens, reply.output_tokens),
+      };
+      setEntries(answered);
+      setHistory(thread);
+      setSpend(spent);
+      sessions.save({ entries: answered, history: thread, ...spent });
     } catch (e) {
       // The failed turn must not stay in history, or every retry resends it.
+      const failed = [
+        ...asked,
+        { id: nextId.current++, kind: "error" as const, lines: [String(e)] },
+      ];
       setHistory(history);
-      add({ kind: "error", lines: [String(e)] });
+      setEntries(failed);
+      sessions.save({ entries: failed, history, ...spend });
     } finally {
       setSending(false);
     }
@@ -226,17 +214,20 @@ export function Chat({
   };
 
   const startFresh = () => {
-    setEntries([]);
-    setHistory([]);
+    clearThread();
+    sessions.startNew();
     setAskingNew(false);
   };
 
   const carryThread = () => {
+    // A separate file from here on; the turns above it stay in both.
+    sessions.startNew();
     add({ kind: "divider", lines: ["New chat · carried the thread above as context"] });
     setAskingNew(false);
   };
 
   const note = settings?.notes[activeEffort];
+  const composerOff = showKeyForm || sending || stopped;
 
   return (
     <aside className="chat">
@@ -270,59 +261,28 @@ export function Chat({
         </div>
       </div>
 
-      <div className="chat-controls">
-        <div className="segmented" role="group" aria-label="Model">
-          {(settings?.models ?? [DEFAULT_MODEL]).map((name) => (
-            <button
-              key={name}
-              type="button"
-              className={name === model ? "seg is-on" : "seg"}
-              onClick={() => setModel(name)}
-              title={MODEL_TITLE[name]}
-              aria-pressed={name === model}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-        <span className="muted chat-model-note">
-          {model === "Fable 5" ? "thinking always on" : "adaptive thinking"}
-        </span>
-        <span className="label chat-effort-label">Effort</span>
-        <div className="segmented" role="group" aria-label="Effort">
-          {allowedEfforts.map((level) => (
-            <button
-              key={level}
-              type="button"
-              className={level === activeEffort ? "seg is-on" : "seg"}
-              onClick={() => setEffort(level)}
-              title={settings?.notes[level]?.[0]}
-              aria-pressed={level === activeEffort}
-            >
-              {level}
-            </button>
-          ))}
-        </div>
-        {settings?.cli_available && (
-          <>
-            <span className="label chat-effort-label">Via</span>
-            <div className="segmented" role="group" aria-label="Route">
-              {PROVIDERS.map(([id, name, title]) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={id === settings.provider ? "seg is-on" : "seg"}
-                  onClick={() => pickProvider(id)}
-                  title={title}
-                  aria-pressed={id === settings.provider}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+      <ChatControls
+        settings={settings}
+        models={settings?.models ?? [DEFAULT_MODEL]}
+        model={model}
+        onModel={setModel}
+        efforts={allowedEfforts}
+        effort={activeEffort}
+        onEffort={setEffort}
+        onProvider={pickProvider}
+      />
+
+      <ChatSessionBar
+        sessions={sessions.sessions}
+        currentId={sessions.sessionId}
+        saved={sessions.saved}
+        spent={spend.costUsd}
+        budget={budget}
+        disabled={sending}
+        onOpen={sessions.open}
+        onDelete={sessions.remove}
+        onBudget={setChatBudget}
+      />
 
       {askingNew && (
         <div className="chat-newbar">
@@ -345,7 +305,7 @@ export function Chat({
 
       <div className={compact ? "chat-thread is-compact" : "chat-thread"} ref={threadRef}>
         {showKeyForm ? (
-          <ApiKeyPrompt
+          <ChatKeyForm
             hint={settings?.key_hint ?? null}
             onSaved={() => setSettingsToken((n) => n + 1)}
           />
@@ -358,11 +318,15 @@ export function Chat({
           entries.map((entry) => (
             <div className={`msg is-${entry.kind}`} key={entry.id}>
               {entry.label && <span className="msg-label">{entry.label}</span>}
-              {entry.lines.map((line, i) => (
-                <span className="msg-line" key={i}>
-                  {line}
-                </span>
-              ))}
+              {entry.kind === "claude" ? (
+                <Markdown text={entry.lines.join("\n\n")} />
+              ) : (
+                entry.lines.map((line, i) => (
+                  <span className="msg-line" key={i}>
+                    {line}
+                  </span>
+                ))
+              )}
             </div>
           ))
         )}
@@ -375,6 +339,12 @@ export function Chat({
             {THINKING_NOTE[activeEffort] ?? "Thinking…"}
           </div>
         )}
+        {stopped && (
+          <div className="chat-stopped" role="status">
+            This chat has spent {formatUsd(spend.costUsd)} of its {formatUsd(budget)} budget — raise
+            the budget above, or start a new chat.
+          </div>
+        )}
         {!showKeyForm && entries.length === 0 && suggestions.length > 0 && (
           <div className="chat-suggestions">
             {suggestions.map((text) => (
@@ -382,6 +352,7 @@ export function Chat({
                 key={text}
                 type="button"
                 className="chat-suggestion"
+                disabled={composerOff}
                 onClick={() => void send(text)}
               >
                 {text}
@@ -394,7 +365,7 @@ export function Chat({
             className="text-input chat-input"
             placeholder={showKeyForm ? "Add an API key to start" : "Ask about the board…"}
             value={draft}
-            disabled={showKeyForm || sending}
+            disabled={composerOff}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") void send(draft);
@@ -404,7 +375,7 @@ export function Chat({
           <button
             type="button"
             className="btn-primary"
-            disabled={showKeyForm || sending || draft.trim() === ""}
+            disabled={composerOff || draft.trim() === ""}
             onClick={() => void send(draft)}
           >
             Send

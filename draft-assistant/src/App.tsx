@@ -403,6 +403,9 @@ export default function App() {
           <ErrorBoundary>
             <Suspense fallback={null}>
               <Chat
+                // Keyed by screen: each screen keeps its own saved chats, and
+                // the panel reads which one to reopen as it mounts.
+                key={screen}
                 screen={screen}
                 contextNote={
                   screen === "season" && season !== null
