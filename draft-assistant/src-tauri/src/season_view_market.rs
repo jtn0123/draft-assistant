@@ -26,7 +26,9 @@ pub fn waiver_targets(
     let weekly = &loaded.weekly_points;
     let week = season.week;
     let position_of = |id: &str| lookup.position(id);
-    let candidates_of = |ids: &[String]| candidates_for(ids, &position_of, weekly, week);
+    let sidelined = |id: &str| lookup.is_sidelined(id);
+    let candidates_of =
+        |ids: &[String]| candidates_for(ids, &position_of, &sidelined, weekly, week);
 
     let rostered = season_moves::rostered_ids(season.rosters.iter().map(Roster::player_ids));
     // The board arrives in season-rank order, but the gain below is measured
@@ -86,7 +88,9 @@ pub fn trade_ideas(
     let weekly = &loaded.weekly_points;
     let week = season.week;
     let position_of = |id: &str| lookup.position(id);
-    let candidates_of = |ids: &[String]| candidates_for(ids, &position_of, weekly, week);
+    let sidelined = |id: &str| lookup.is_sidelined(id);
+    let candidates_of =
+        |ids: &[String]| candidates_for(ids, &position_of, &sidelined, weekly, week);
 
     let partner_candidates: Vec<(u32, String, Vec<Candidate>)> = season
         .rosters

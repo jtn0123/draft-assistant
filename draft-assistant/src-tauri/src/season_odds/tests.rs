@@ -1,0 +1,151 @@
+use super::*;
+
+fn team(roster_id: u32, wins: u32, losses: u32, points: f64, weekly: f64) -> TeamSeason {
+    TeamSeason {
+        roster_id,
+        wins,
+        losses,
+        ties: 0,
+        points_for: points,
+        weekly_projection: (1..=4).map(|w| (w, weekly)).collect(),
+        // A nine-man lineup of the same middling position: what the spread
+        // model would have produced for a team projected `weekly`.
+        weekly_sigma: (1..=4)
+            .map(|w| (w, season_spread::team_sigma(&lineup(weekly))))
+            .collect(),
+    }
+}
+
+/// Nine equal starters, no stacks, adding up to `total`.
+fn lineup(total: f64) -> Vec<Starter> {
+    (0..9)
+        .map(|_| Starter {
+            position: "WR".into(),
+            team: None,
+            points: total / 9.0,
+        })
+        .collect()
+}
+
+fn round_robin(ids: &[u32], weeks: u32) -> Vec<ScheduledGame> {
+    let mut games = Vec::new();
+    for week in 1..=weeks {
+        for pair in ids.chunks(2) {
+            if let [home, away] = pair {
+                games.push(ScheduledGame {
+                    week,
+                    home: *home,
+                    away: *away,
+                });
+            }
+        }
+    }
+    games
+}
+
+#[test]
+fn level_teams_are_ordered_by_projection_not_roster_id() {
+    let teams = vec![team(1, 0, 0, 0.0, 100.0), team(2, 0, 0, 0.0, 130.0)];
+    let rows = standings(
+        &teams,
+        &round_robin(&[1, 2], 2),
+        1,
+        &|id| id.to_string(),
+        None,
+        1,
+    );
+    assert_eq!(rows[0].roster_id, 2);
+    assert_eq!(rows[0].seed, 1);
+    assert_eq!(rows[1].roster_id, 1);
+}
+
+#[test]
+fn odds_are_deterministic_for_the_same_state() {
+    let teams = vec![team(1, 2, 0, 250.0, 110.0), team(2, 0, 2, 200.0, 100.0)];
+    let schedule = round_robin(&[1, 2], 4);
+    let a = playoff_odds(&teams, &schedule, 1, 42);
+    let b = playoff_odds(&teams, &schedule, 1, 42);
+    assert_eq!(a, b);
+}
+
+#[test]
+fn a_better_team_with_a_better_record_makes_the_bracket_more_often() {
+    let teams = vec![team(1, 3, 0, 400.0, 130.0), team(2, 0, 3, 250.0, 90.0)];
+    let odds = playoff_odds(&teams, &round_robin(&[1, 2], 3), 1, 7);
+    assert!(odds[&1] > 0.85, "strong team odds {:?}", odds[&1]);
+    assert!(odds[&2] < 0.15, "weak team odds {:?}", odds[&2]);
+}
+
+#[test]
+fn every_team_makes_it_when_the_bracket_is_as_wide_as_the_league() {
+    let teams = vec![team(1, 1, 1, 200.0, 100.0), team(2, 1, 1, 200.0, 100.0)];
+    let odds = playoff_odds(&teams, &round_robin(&[1, 2], 2), 2, 3);
+    assert!((odds[&1] - 1.0).abs() < 1e-9);
+    assert!((odds[&2] - 1.0).abs() < 1e-9);
+}
+
+#[test]
+fn with_no_games_left_the_standings_decide_outright() {
+    let teams = vec![team(1, 1, 2, 200.0, 100.0), team(2, 2, 1, 190.0, 100.0)];
+    let odds = playoff_odds(&teams, &[], 1, 11);
+    assert_eq!(odds[&2], 1.0);
+    assert_eq!(odds[&1], 0.0);
+}
+
+#[test]
+fn win_probability_is_symmetric_and_ordered() {
+    assert!((win_probability(&lineup(110.0), &lineup(110.0)) - 0.5).abs() < 1e-6);
+    let favoured = win_probability(&lineup(125.0), &lineup(100.0));
+    assert!(favoured > 0.5 && favoured < 1.0);
+    assert!((favoured + win_probability(&lineup(100.0), &lineup(125.0)) - 1.0).abs() < 1e-6);
+    // Two empty lineups are a coin flip, not a divide by zero.
+    assert_eq!(win_probability(&[], &[]), 0.5);
+}
+
+#[test]
+fn a_steadier_lineup_needs_a_smaller_lead_to_be_favoured() {
+    // Same points on both sides of each matchup; only the spread differs.
+    // The quarterback-heavy side is likelier to hold a lead than the
+    // defense-heavy one is to hold the identical lead.
+    let side = |position: &str, total: f64| -> Vec<Starter> {
+        (0..9)
+            .map(|_| Starter {
+                position: position.into(),
+                team: None,
+                points: total / 9.0,
+            })
+            .collect()
+    };
+    let steady = win_probability(&side("QB", 120.0), &side("QB", 110.0));
+    let wild = win_probability(&side("DEF", 120.0), &side("DEF", 110.0));
+    assert!(steady > wild, "steady {steady} should beat wild {wild}");
+}
+
+#[test]
+fn stacking_a_lead_makes_it_less_safe() {
+    // The favourite's nine starters, all on one NFL team versus spread
+    // across the league. Same projection, correlated risk.
+    let side = |team: Option<&str>, total: f64| -> Vec<Starter> {
+        (0..9)
+            .map(|i| Starter {
+                position: "WR".into(),
+                team: team.map_or_else(|| Some(format!("T{i}")), |t| Some(t.to_string())),
+                points: total / 9.0,
+            })
+            .collect()
+    };
+    let spread_out = win_probability(&side(None, 120.0), &side(None, 110.0));
+    let stacked = win_probability(&side(Some("BUF"), 120.0), &side(None, 110.0));
+    assert!(stacked < spread_out, "{stacked} vs {spread_out}");
+}
+
+#[test]
+fn seeding_breaks_ties_on_points_and_flags_my_team() {
+    let teams = vec![team(1, 2, 0, 210.0, 100.0), team(2, 2, 0, 260.0, 100.0)];
+    let rows = standings(&teams, &[], 1, &|id| format!("team{id}"), Some(1), 5);
+    assert_eq!(rows[0].roster_id, 2);
+    assert_eq!(rows[0].seed, 1);
+    assert_eq!(rows[1].record, "2\u{2013}0");
+    assert!(rows[1].is_mine);
+    assert!(!rows[0].is_mine);
+}

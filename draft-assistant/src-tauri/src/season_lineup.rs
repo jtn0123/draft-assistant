@@ -5,6 +5,7 @@
 //! disagrees with the roster's current starters.
 
 use crate::roster::RosterRules;
+use crate::season_spread::{self, Starter};
 use crate::weekly::WeeklyPoints;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -80,7 +81,18 @@ pub fn optimal_lineup(rules: &RosterRules, candidates: &[Candidate]) -> Vec<Line
     filled.into_iter().map(|(_, slot)| slot).collect()
 }
 
-/// The best-lineup total this roster can field, week by week.
+/// One remaining week of a roster's outlook: the best lineup it can field and
+/// how far that score is expected to wander from its own projection.
+#[derive(Debug, Clone, Copy)]
+pub struct WeekOutlook {
+    pub week: u32,
+    pub points: f64,
+    /// Calibrated standard deviation of `points`, from the starters that made
+    /// the lineup — see [`crate::season_spread`].
+    pub sigma: f64,
+}
+
+/// The best lineup this roster can field, week by week, with its spread.
 ///
 /// A player's position does not change from one week to the next, so the
 /// candidate list is built once per roster and only the points are rewritten
@@ -88,37 +100,82 @@ pub fn optimal_lineup(rules: &RosterRules, candidates: &[Candidate]) -> Vec<Line
 /// standings and the Trends snapshot both used to do — twelve rosters over
 /// fourteen weeks cost thousands of dictionary lookups and twice as many
 /// throwaway `String`s on every rebuild.
+pub fn weekly_lineup_outlook(
+    rules: &RosterRules,
+    player_ids: &[String],
+    position_of: &impl Fn(&str) -> Option<String>,
+    team_of: &impl Fn(&str) -> Option<String>,
+    sidelined: &impl Fn(&str) -> bool,
+    weekly: &WeeklyPoints,
+    weeks: impl IntoIterator<Item = u32>,
+) -> Vec<WeekOutlook> {
+    // Week 0 scores nothing; every entry is overwritten below before it is read.
+    let mut candidates = candidates_for(player_ids, position_of, sidelined, weekly, 0);
+    // Whether each candidate is sidelined is settled once, alongside his
+    // position: the dictionary does not change between the weeks of one
+    // rebuild, and asking it again per (player, week) is the lookup storm the
+    // single candidate list exists to avoid.
+    let benched: Vec<bool> = candidates.iter().map(|c| sidelined(&c.player_id)).collect();
+    weeks
+        .into_iter()
+        .map(|week| {
+            for (candidate, out) in candidates.iter_mut().zip(&benched) {
+                candidate.points = if *out {
+                    0.0
+                } else {
+                    weekly.get_or_zero(&candidate.player_id, week)
+                };
+            }
+            let lineup = optimal_lineup(rules, &candidates);
+            let starters: Vec<Starter> = season_spread::starters_of(&lineup, position_of, team_of);
+            WeekOutlook {
+                week,
+                points: lineup.iter().map(|s| s.points).sum(),
+                sigma: season_spread::team_sigma(&starters),
+            }
+        })
+        .collect()
+}
+
+/// Just the totals from [`weekly_lineup_outlook`], for callers that do not
+/// price risk.
 pub fn weekly_lineup_totals(
     rules: &RosterRules,
     player_ids: &[String],
     position_of: &impl Fn(&str) -> Option<String>,
+    team_of: &impl Fn(&str) -> Option<String>,
+    sidelined: &impl Fn(&str) -> bool,
     weekly: &WeeklyPoints,
     weeks: impl IntoIterator<Item = u32>,
 ) -> Vec<(u32, f64)> {
-    // Week 0 scores nothing; every entry is overwritten below before it is read.
-    let mut candidates = candidates_for(player_ids, position_of, weekly, 0);
-    weeks
-        .into_iter()
-        .map(|week| {
-            for candidate in &mut candidates {
-                candidate.points = weekly.get_or_zero(&candidate.player_id, week);
-            }
-            let total = optimal_lineup(rules, &candidates)
-                .iter()
-                .map(|s| s.points)
-                .sum();
-            (week, total)
-        })
-        .collect()
+    weekly_lineup_outlook(
+        rules,
+        player_ids,
+        position_of,
+        team_of,
+        sidelined,
+        weekly,
+        weeks,
+    )
+    .into_iter()
+    .map(|w| (w.week, w.points))
+    .collect()
 }
 
 /// Build week-scored candidates for every player on a roster. Players with no
 /// projection this week (bye, or unprojected) are still candidates at zero, so
 /// a roster that is short at a position still reports the slot as filled-empty
 /// rather than silently dropping it.
+///
+/// A player `sidelined` says is Out or Doubtful is kept on the list and scored
+/// at zero rather than dropped. Sleeper leaves his weekly projection standing
+/// long after the injury report lands, and taking it at face value put a
+/// player who will not take the field into the optimal lineup — inflating both
+/// sides of the matchup, and the win probability with them.
 pub fn candidates_for(
     player_ids: &[String],
     position_of: &impl Fn(&str) -> Option<String>,
+    sidelined: &impl Fn(&str) -> bool,
     weekly: &WeeklyPoints,
     week: u32,
 ) -> Vec<Candidate> {
@@ -129,7 +186,11 @@ pub fn candidates_for(
             Some(Candidate {
                 player_id: id.clone(),
                 position,
-                points: weekly.get_or_zero(id, week),
+                points: if sidelined(id) {
+                    0.0
+                } else {
+                    weekly.get_or_zero(id, week)
+                },
             })
         })
         .collect()
@@ -254,225 +315,4 @@ pub fn calls_from_diff(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn rules(slots: &[&str]) -> RosterRules {
-        RosterRules::new(&slots.iter().map(|s| (*s).to_string()).collect::<Vec<_>>())
-    }
-
-    fn candidate(id: &str, position: &str, points: f64) -> Candidate {
-        Candidate {
-            player_id: id.into(),
-            position: position.into(),
-            points,
-        }
-    }
-
-    fn ids(lineup: &[LineupSlot]) -> Vec<&str> {
-        lineup
-            .iter()
-            .map(|s| s.player_id.as_deref().unwrap_or("-"))
-            .collect()
-    }
-
-    #[test]
-    fn flex_takes_the_leftover_rather_than_stealing_a_dedicated_slot() {
-        let rules = rules(&["RB", "WR", "FLEX", "BN"]);
-        let lineup = optimal_lineup(
-            &rules,
-            &[
-                candidate("rb1", "RB", 20.0),
-                candidate("rb2", "RB", 18.0),
-                candidate("wr1", "WR", 15.0),
-            ],
-        );
-        // The RB slot must not be left empty just because FLEX came first.
-        assert_eq!(ids(&lineup), vec!["rb1", "wr1", "rb2"]);
-    }
-
-    #[test]
-    fn superflex_is_filled_after_narrower_slots() {
-        let rules = rules(&["SUPER_FLEX", "QB", "RB"]);
-        let lineup = optimal_lineup(
-            &rules,
-            &[
-                candidate("qb1", "QB", 25.0),
-                candidate("qb2", "QB", 22.0),
-                candidate("rb1", "RB", 20.0),
-            ],
-        );
-        // Displayed in league order: SUPER_FLEX, QB, RB.
-        assert_eq!(ids(&lineup), vec!["qb2", "qb1", "rb1"]);
-    }
-
-    #[test]
-    fn short_rosters_report_an_empty_slot_instead_of_dropping_it() {
-        let rules = rules(&["QB", "TE"]);
-        let lineup = optimal_lineup(&rules, &[candidate("qb1", "QB", 25.0)]);
-        assert_eq!(ids(&lineup), vec!["qb1", "-"]);
-        assert_eq!(lineup.len(), 2);
-    }
-
-    fn describe(id: &str) -> (String, Option<String>) {
-        (id.to_uppercase(), Some("PIT".into()))
-    }
-
-    fn reason(_slot: &str, _a: &str, _b: &str) -> String {
-        "because".into()
-    }
-
-    fn any(_slot: &str, _id: &str) -> bool {
-        true
-    }
-
-    fn slot(slot: &str, id: Option<&str>, points: f64) -> LineupSlot {
-        LineupSlot {
-            slot: slot.into(),
-            player_id: id.map(str::to_string),
-            points,
-        }
-    }
-
-    #[test]
-    fn a_shuffled_lineup_still_reports_the_one_starter_who_should_sit() {
-        // Real week-1 case: WR and a FLEX are swapped relative to the optimal
-        // lineup (harmless), but Pollard is set at FLEX over Downs on the
-        // bench. Slot-by-slot pairing hid that call entirely.
-        let optimal = vec![
-            slot("WR", Some("watson"), 14.3),
-            slot("FLEX", Some("wilson"), 14.0),
-            slot("FLEX", Some("downs"), 12.8),
-        ];
-        let current = vec![
-            slot("WR", Some("wilson"), 14.0),
-            slot("FLEX", Some("pollard"), 9.1),
-            slot("FLEX", Some("watson"), 14.3),
-        ];
-        let eligible = |slot: &str, id: &str| slot == "FLEX" || id != "downs";
-        let calls = calls_from_diff(&optimal, &current, &eligible, &describe, &reason);
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].player_in, "DOWNS");
-        assert_eq!(calls[0].player_out, "POLLARD");
-        assert_eq!(calls[0].slot, "FLEX");
-        assert!((calls[0].gain - 3.7).abs() < 1e-9);
-    }
-
-    #[test]
-    fn incoming_players_prefer_a_slot_they_can_fill() {
-        // A TE coming in must displace the weak TE, not the even weaker RB
-        // sitting in a slot the TE cannot occupy.
-        let optimal = vec![
-            slot("RB", Some("rb"), 10.0),
-            slot("TE", Some("te_good"), 11.0),
-        ];
-        let current = vec![
-            slot("RB", Some("rb_weak"), 4.0),
-            slot("TE", Some("te_weak"), 6.0),
-        ];
-        let eligible = |slot: &str, id: &str| {
-            (slot == "TE" && id.starts_with("te")) || (slot == "RB" && id.starts_with("rb"))
-        };
-        let calls = calls_from_diff(&optimal, &current, &eligible, &describe, &reason);
-        let te = calls
-            .iter()
-            .find(|c| c.player_in == "TE_GOOD")
-            .expect("te call");
-        assert_eq!(te.player_out, "TE_WEAK");
-        assert_eq!(te.slot, "TE");
-    }
-
-    #[test]
-    fn moving_a_starter_between_eligible_slots_is_not_a_call() {
-        let optimal = vec![
-            LineupSlot {
-                slot: "RB".into(),
-                player_id: Some("a".into()),
-                points: 10.0,
-            },
-            LineupSlot {
-                slot: "FLEX".into(),
-                player_id: Some("b".into()),
-                points: 9.0,
-            },
-        ];
-        let current = vec![
-            LineupSlot {
-                slot: "RB".into(),
-                player_id: Some("b".into()),
-                points: 9.0,
-            },
-            LineupSlot {
-                slot: "FLEX".into(),
-                player_id: Some("a".into()),
-                points: 10.0,
-            },
-        ];
-        assert!(calls_from_diff(&optimal, &current, &any, &describe, &reason).is_empty());
-    }
-
-    #[test]
-    fn benching_a_starter_for_a_better_one_is_a_call_sorted_by_gain() {
-        let optimal = vec![
-            LineupSlot {
-                slot: "RB".into(),
-                player_id: Some("good".into()),
-                points: 18.0,
-            },
-            LineupSlot {
-                slot: "WR".into(),
-                player_id: Some("best".into()),
-                points: 20.0,
-            },
-        ];
-        let current = vec![
-            LineupSlot {
-                slot: "RB".into(),
-                player_id: Some("bad".into()),
-                points: 16.0,
-            },
-            LineupSlot {
-                slot: "WR".into(),
-                player_id: Some("worse".into()),
-                points: 12.0,
-            },
-        ];
-        let calls = calls_from_diff(&optimal, &current, &any, &describe, &reason);
-        assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].player_in, "BEST");
-        assert!((calls[0].gain - 8.0).abs() < 1e-9);
-        assert_eq!(calls[1].player_in, "GOOD");
-    }
-
-    #[test]
-    fn an_optimal_lineup_totals_a_positive_zero_gain() {
-        // f64's additive identity is -0.0, which would serialise as "-0.0" and
-        // read as a negative number of points left on the table.
-        let lineup = vec![LineupSlot {
-            slot: "QB".into(),
-            player_id: Some("a".into()),
-            points: 10.0,
-        }];
-        let calls = calls_from_diff(&lineup, &lineup, &any, &describe, &reason);
-        assert!(calls.is_empty());
-        let total: f64 = calls.iter().map(|c| c.gain).sum::<f64>() + 0.0;
-        assert!(total.is_sign_positive(), "expected +0.0, got {total}");
-    }
-
-    #[test]
-    fn an_empty_starting_slot_is_reported_as_a_call() {
-        let optimal = vec![LineupSlot {
-            slot: "TE".into(),
-            player_id: Some("te1".into()),
-            points: 11.0,
-        }];
-        let current = vec![LineupSlot {
-            slot: "TE".into(),
-            player_id: None,
-            points: 0.0,
-        }];
-        let calls = calls_from_diff(&optimal, &current, &any, &describe, &reason);
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].player_out, "an empty slot");
-    }
-}
+mod tests;

@@ -6,14 +6,18 @@
 //! roster lands inside it. Deterministically seeded so the same league state
 //! always yields the same percentages — a number that flickers on every
 //! refresh reads as broken even when it is technically correct.
+//!
+//! The noise is not a flat fraction of the projection: it is the spread the
+//! week's actual starters imply, stacks and all, from
+//! [`crate::season_spread`]. The same spread prices this week's win
+//! probability, so the header's odds and the playoff simulation are two
+//! readings of one model rather than two models that happen to disagree.
 
+use crate::season_spread::{self, Starter};
 use serde::Serialize;
 use std::collections::HashMap;
 
 const SIMULATIONS: usize = 4000;
-/// Week-to-week scoring noise as a fraction of a team's projected mean.
-/// Fantasy team scores land near 25-30% CV in practice.
-const TEAM_SCORE_CV: f64 = 0.27;
 
 /// Deterministic xorshift64*. Seeded from league state so odds are stable
 /// across refreshes but still decorrelated between leagues.
@@ -56,6 +60,9 @@ pub struct TeamSeason {
     /// Mean projected points per remaining week, from the best lineup they can
     /// field that week.
     pub weekly_projection: Vec<(u32, f64)>,
+    /// Standard deviation of that week's score, from the same starters. Weeks
+    /// missing here fall back to [`season_spread::fallback_sigma`].
+    pub weekly_sigma: Vec<(u32, f64)>,
 }
 
 impl TeamSeason {
@@ -87,6 +94,18 @@ pub struct StandingsRow {
     /// Probability of making the playoff bracket, 0.0..=1.0.
     pub playoff_odds: f64,
     pub is_mine: bool,
+}
+
+/// One scheduled game with both sides' distributions already resolved to
+/// team slots. The inner loop runs millions of times; nothing in here is
+/// looked up again once the schedule is fixed.
+struct Game {
+    home: usize,
+    away: usize,
+    home_mean: f64,
+    home_sigma: f64,
+    away_mean: f64,
+    away_sigma: f64,
 }
 
 /// Seed order: wins first, then total points — Sleeper's default tiebreak.
@@ -121,6 +140,10 @@ pub fn playoff_odds(
         .iter()
         .map(|t| (t.roster_id, t.weekly_projection.iter().copied().collect()))
         .collect();
+    let sigmas: HashMap<u32, HashMap<u32, f64>> = teams
+        .iter()
+        .map(|t| (t.roster_id, t.weekly_sigma.iter().copied().collect()))
+        .collect();
     // A team with no projection at all still has to score something, or it
     // would be mathematically eliminated by a data gap.
     let league_mean = {
@@ -146,7 +169,7 @@ pub fn playoff_odds(
         .collect();
     // Per-slot mean for each scheduled game, resolved once instead of per
     // simulation: the schedule does not change between runs.
-    let games: Vec<(usize, usize, f64, f64)> = schedule
+    let games: Vec<Game> = schedule
         .iter()
         .filter_map(|game| {
             let home = *slot_of.get(&game.home)?;
@@ -158,7 +181,26 @@ pub fn playoff_odds(
                     .filter(|m| *m > 0.0)
                     .unwrap_or(league_mean)
             };
-            Some((home, away, mean_for(game.home), mean_for(game.away)))
+            // A week with no starters resolved — a data gap, or a mean that
+            // fell back to the league average — still needs a spread, and it
+            // has to be the one an ordinary lineup would have produced.
+            let sigma_for = |roster_id: u32, mean: f64| {
+                sigmas
+                    .get(&roster_id)
+                    .and_then(|w| w.get(&game.week).copied())
+                    .filter(|s| *s > 0.0)
+                    .unwrap_or_else(|| season_spread::fallback_sigma(mean))
+            };
+            let home_mean = mean_for(game.home);
+            let away_mean = mean_for(game.away);
+            Some(Game {
+                home,
+                away,
+                home_mean,
+                home_sigma: sigma_for(game.home, home_mean),
+                away_mean,
+                away_sigma: sigma_for(game.away, away_mean),
+            })
         })
         .collect();
 
@@ -177,21 +219,21 @@ pub fn playoff_odds(
     for _ in 0..SIMULATIONS {
         wins.copy_from_slice(&start_wins);
         points.copy_from_slice(&start_points);
-        for &(home, away, home_mean, away_mean) in &games {
-            let mut score = |slot: usize, mean: f64, rng: &mut Rng| {
-                let value = (mean + rng.next_normal() * mean * TEAM_SCORE_CV).max(0.0);
+        for game in &games {
+            let mut score = |slot: usize, mean: f64, sigma: f64, rng: &mut Rng| {
+                let value = (mean + rng.next_normal() * sigma).max(0.0);
                 points[slot] += value;
                 value
             };
-            let home_score = score(home, home_mean, &mut rng);
-            let away_score = score(away, away_mean, &mut rng);
+            let home_score = score(game.home, game.home_mean, game.home_sigma, &mut rng);
+            let away_score = score(game.away, game.away_mean, game.away_sigma, &mut rng);
             if (home_score - away_score).abs() < 1e-9 {
-                wins[home] += 0.5;
-                wins[away] += 0.5;
+                wins[game.home] += 0.5;
+                wins[game.away] += 0.5;
             } else if home_score > away_score {
-                wins[home] += 1.0;
+                wins[game.home] += 1.0;
             } else {
-                wins[away] += 1.0;
+                wins[game.away] += 1.0;
             }
         }
         order.sort_by_key(|&slot| std::cmp::Reverse(rank_key(wins[slot], points[slot])));
@@ -213,14 +255,25 @@ pub fn playoff_odds(
         .collect()
 }
 
-/// Probability the home side outscores the away side in a single game.
-pub fn win_probability(my_mean: f64, opp_mean: f64) -> f64 {
+/// Probability my side outscores theirs in a single game, from the two
+/// lineups themselves.
+///
+/// The spread comes from the starters actually in each lineup — a defense
+/// swings further than a quarterback, and two starters sharing an NFL team
+/// swing together — which is the same spread the playoff simulation draws
+/// with. Passing means alone would have to guess a team-wide fraction, and
+/// that guess is what this replaces.
+pub fn win_probability(mine: &[Starter], theirs: &[Starter]) -> f64 {
+    let my_mean = season_spread::total_points(mine);
+    let opp_mean = season_spread::total_points(theirs);
     if my_mean <= 0.0 && opp_mean <= 0.0 {
         return 0.5;
     }
     // Difference of two independent normals is normal; combine the variances.
-    let my_sigma = (my_mean * TEAM_SCORE_CV).max(1.0);
-    let opp_sigma = (opp_mean * TEAM_SCORE_CV).max(1.0);
+    // A floor of one point keeps a lineup of a single certain starter from
+    // reading as a coin flip decided by floating-point dust.
+    let my_sigma = season_spread::team_sigma(mine).max(1.0);
+    let opp_sigma = season_spread::team_sigma(theirs).max(1.0);
     let sigma = (my_sigma * my_sigma + opp_sigma * opp_sigma).sqrt();
     crate::scoring::norm_cdf((my_mean - opp_mean) / sigma)
 }
@@ -268,101 +321,4 @@ pub fn standings(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn team(roster_id: u32, wins: u32, losses: u32, points: f64, weekly: f64) -> TeamSeason {
-        TeamSeason {
-            roster_id,
-            wins,
-            losses,
-            ties: 0,
-            points_for: points,
-            weekly_projection: (1..=4).map(|w| (w, weekly)).collect(),
-        }
-    }
-
-    fn round_robin(ids: &[u32], weeks: u32) -> Vec<ScheduledGame> {
-        let mut games = Vec::new();
-        for week in 1..=weeks {
-            for pair in ids.chunks(2) {
-                if let [home, away] = pair {
-                    games.push(ScheduledGame {
-                        week,
-                        home: *home,
-                        away: *away,
-                    });
-                }
-            }
-        }
-        games
-    }
-
-    #[test]
-    fn level_teams_are_ordered_by_projection_not_roster_id() {
-        let teams = vec![team(1, 0, 0, 0.0, 100.0), team(2, 0, 0, 0.0, 130.0)];
-        let rows = standings(
-            &teams,
-            &round_robin(&[1, 2], 2),
-            1,
-            &|id| id.to_string(),
-            None,
-            1,
-        );
-        assert_eq!(rows[0].roster_id, 2);
-        assert_eq!(rows[0].seed, 1);
-        assert_eq!(rows[1].roster_id, 1);
-    }
-
-    #[test]
-    fn odds_are_deterministic_for_the_same_state() {
-        let teams = vec![team(1, 2, 0, 250.0, 110.0), team(2, 0, 2, 200.0, 100.0)];
-        let schedule = round_robin(&[1, 2], 4);
-        let a = playoff_odds(&teams, &schedule, 1, 42);
-        let b = playoff_odds(&teams, &schedule, 1, 42);
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn a_better_team_with_a_better_record_makes_the_bracket_more_often() {
-        let teams = vec![team(1, 3, 0, 400.0, 130.0), team(2, 0, 3, 250.0, 90.0)];
-        let odds = playoff_odds(&teams, &round_robin(&[1, 2], 3), 1, 7);
-        assert!(odds[&1] > 0.85, "strong team odds {:?}", odds[&1]);
-        assert!(odds[&2] < 0.15, "weak team odds {:?}", odds[&2]);
-    }
-
-    #[test]
-    fn every_team_makes_it_when_the_bracket_is_as_wide_as_the_league() {
-        let teams = vec![team(1, 1, 1, 200.0, 100.0), team(2, 1, 1, 200.0, 100.0)];
-        let odds = playoff_odds(&teams, &round_robin(&[1, 2], 2), 2, 3);
-        assert!((odds[&1] - 1.0).abs() < 1e-9);
-        assert!((odds[&2] - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn with_no_games_left_the_standings_decide_outright() {
-        let teams = vec![team(1, 1, 2, 200.0, 100.0), team(2, 2, 1, 190.0, 100.0)];
-        let odds = playoff_odds(&teams, &[], 1, 11);
-        assert_eq!(odds[&2], 1.0);
-        assert_eq!(odds[&1], 0.0);
-    }
-
-    #[test]
-    fn win_probability_is_symmetric_and_ordered() {
-        assert!((win_probability(110.0, 110.0) - 0.5).abs() < 1e-6);
-        let favoured = win_probability(125.0, 100.0);
-        assert!(favoured > 0.5 && favoured < 1.0);
-        assert!((favoured + win_probability(100.0, 125.0) - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn seeding_breaks_ties_on_points_and_flags_my_team() {
-        let teams = vec![team(1, 2, 0, 210.0, 100.0), team(2, 2, 0, 260.0, 100.0)];
-        let rows = standings(&teams, &[], 1, &|id| format!("team{id}"), Some(1), 5);
-        assert_eq!(rows[0].roster_id, 2);
-        assert_eq!(rows[0].seed, 1);
-        assert_eq!(rows[1].record, "2\u{2013}0");
-        assert!(rows[1].is_mine);
-        assert!(!rows[0].is_mine);
-    }
-}
+mod tests;

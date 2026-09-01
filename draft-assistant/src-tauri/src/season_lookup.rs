@@ -68,6 +68,14 @@ impl Lookup<'_> {
             .and_then(|m| m.injury_status.clone())
             .filter(|s| !s.trim().is_empty())
     }
+
+    /// Listed Out or Doubtful: he probably will not take the field, whatever
+    /// the projection still says about him.
+    pub fn is_sidelined(&self, player_id: &str) -> bool {
+        crate::season_injury::is_sidelined(crate::season_injury::injury_code(
+            self.injury(player_id).as_deref(),
+        ))
+    }
 }
 
 impl PlayerFacts for Lookup<'_> {
