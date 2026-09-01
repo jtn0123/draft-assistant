@@ -31,6 +31,7 @@ use draft_assistant_lib::commands_chat as chat;
 use draft_assistant_lib::commands_draft as draft;
 use draft_assistant_lib::commands_season as season;
 use draft_assistant_lib::engine::Engine;
+use draft_assistant_lib::leagues;
 use draft_assistant_lib::state::AppState;
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
@@ -111,6 +112,7 @@ fn handler_list() -> BTreeSet<String> {
         "add_league",
         "set_my_username",
         "get_config",
+        "sleeper_leagues",
         "get_state",
         "refresh_picks",
         "refresh_data",
@@ -175,6 +177,7 @@ fn every_command_answers_over_the_ipc() {
             draft::add_league,
             draft::set_my_username,
             draft::get_config,
+            leagues::sleeper_leagues,
             draft::get_state,
             draft::refresh_picks,
             draft::refresh_data,

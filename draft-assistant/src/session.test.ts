@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("./api", () => ({ api: mocks }));
 
-import { reloadSeason, useSeasonSession } from "./session";
+import { reloadSeason, useSeasonSession, type SeasonSession } from "./session";
 
 const view = (week: number) => ({ schema_version: "1.0", week }) as unknown as SeasonView;
 
@@ -41,13 +41,15 @@ beforeEach(() => {
 
 describe("useSeasonSession", () => {
   it("fetches nothing until the screen is showing and a league is loaded", () => {
-    const { rerender } = renderHook(
-      ({ active, ready }) => useSeasonSession(active, ready, () => undefined),
-      { initialProps: { active: false, ready: true } },
+    const { rerender } = renderHook<SeasonSession, { active: boolean; leagueId: string | null }>(
+      ({ active, leagueId }) => useSeasonSession(active, leagueId, () => undefined),
+      {
+        initialProps: { active: false, leagueId: "1" },
+      },
     );
     expect(mocks.loadSeason).not.toHaveBeenCalled();
 
-    rerender({ active: true, ready: false });
+    rerender({ active: true, leagueId: null });
     expect(mocks.loadSeason).not.toHaveBeenCalled();
     expect(mocks.startSeasonPolling).not.toHaveBeenCalled();
   });
@@ -55,7 +57,7 @@ describe("useSeasonSession", () => {
   it("loads once and starts polling when the screen opens", async () => {
     mocks.loadSeason.mockResolvedValue(view(2));
     const { result, rerender } = renderHook(
-      ({ active }) => useSeasonSession(active, true, () => undefined),
+      ({ active }) => useSeasonSession(active, "1", () => undefined),
       { initialProps: { active: true } },
     );
 
@@ -71,7 +73,7 @@ describe("useSeasonSession", () => {
   it("stops polling when the screen is no longer showing", async () => {
     mocks.loadSeason.mockResolvedValue(view(2));
     const { result, rerender } = renderHook(
-      ({ active }) => useSeasonSession(active, true, () => undefined),
+      ({ active }) => useSeasonSession(active, "1", () => undefined),
       { initialProps: { active: true } },
     );
     await waitFor(() => expect(result.current.season).not.toBeNull());
@@ -82,7 +84,7 @@ describe("useSeasonSession", () => {
 
   it("applies pushed live updates", async () => {
     mocks.loadSeason.mockResolvedValue(view(2));
-    const { result } = renderHook(() => useSeasonSession(true, true, () => undefined));
+    const { result } = renderHook(() => useSeasonSession(true, "1", () => undefined));
     await waitFor(() => expect(result.current.season?.week).toBe(2));
 
     await waitFor(() => expect(pushUpdate).not.toBeNull());
@@ -95,7 +97,7 @@ describe("useSeasonSession", () => {
     const { result, rerender } = renderHook(
       // A fresh callback on every render, the way an inline arrow in a
       // component would be: neither it nor the update may restart the poller.
-      () => useSeasonSession(true, true, () => undefined),
+      () => useSeasonSession(true, "1", () => undefined),
     );
     await waitFor(() => expect(result.current.season?.week).toBe(2));
     expect(mocks.startSeasonPolling).toHaveBeenCalledTimes(1);
@@ -113,7 +115,7 @@ describe("useSeasonSession", () => {
   it("reports a failure once, to both the caller and the toast", async () => {
     mocks.loadSeason.mockRejectedValue(new Error("Sleeper timed out"));
     const onError = vi.fn();
-    const { result } = renderHook(() => useSeasonSession(true, true, onError));
+    const { result } = renderHook(() => useSeasonSession(true, "1", onError));
 
     await waitFor(() => expect(result.current.error).toMatch(/Sleeper timed out/));
     expect(result.current.season).toBeNull();
@@ -124,7 +126,7 @@ describe("useSeasonSession", () => {
     mocks.loadSeason.mockResolvedValue(view(2));
     mocks.startSeasonPolling.mockRejectedValue(new Error("no league loaded"));
     const onError = vi.fn();
-    renderHook(() => useSeasonSession(true, true, onError));
+    renderHook(() => useSeasonSession(true, "1", onError));
 
     await waitFor(() =>
       expect(onError).toHaveBeenCalledWith(expect.stringContaining("Live updates are not running")),
@@ -133,7 +135,7 @@ describe("useSeasonSession", () => {
 
   it("hands on how the live poll is going, good news and bad", async () => {
     mocks.loadSeason.mockResolvedValue(view(2));
-    const { result } = renderHook(() => useSeasonSession(true, true, () => undefined));
+    const { result } = renderHook(() => useSeasonSession(true, "1", () => undefined));
     await waitFor(() => expect(mocks.onSeasonPollHealth).toHaveBeenCalled());
     // Nothing is claimed before the first poll has reported.
     expect(result.current.pollHealth).toBeNull();
@@ -159,7 +161,7 @@ describe("useSeasonSession", () => {
     // A stable callback, so the load effect does not re-fire on every render
     // and race the retry with a second automatic fetch.
     const quiet = () => undefined;
-    const { result } = renderHook(() => useSeasonSession(true, true, quiet));
+    const { result } = renderHook(() => useSeasonSession(true, "1", quiet));
     await waitFor(() => expect(result.current.error).not.toBeNull());
 
     // Retry drives two state updates; let React flush both before reading them.
@@ -184,7 +186,7 @@ describe("useSeasonSession on the way out", () => {
     mocks.onSeasonUpdated.mockReturnValue(Promise.resolve(stopUpdates));
     mocks.onSeasonPollHealth.mockReturnValue(Promise.resolve(stopHealth));
 
-    const { unmount } = renderHook(() => useSeasonSession(true, true, () => undefined));
+    const { unmount } = renderHook(() => useSeasonSession(true, "1", () => undefined));
     await act(async () => {
       unmount();
       await Promise.resolve();
@@ -202,7 +204,7 @@ describe("useSeasonSession on the way out", () => {
     mocks.onSeasonUpdated.mockReturnValue(Promise.reject(new Error("no event bus")));
     mocks.stopSeasonPolling.mockRejectedValue(new Error("already stopped"));
 
-    const { unmount } = renderHook(() => useSeasonSession(true, true, () => undefined));
+    const { unmount } = renderHook(() => useSeasonSession(true, "1", () => undefined));
     await act(async () => {
       unmount();
       await Promise.resolve();
@@ -222,7 +224,7 @@ describe("useSeasonSession on the way out", () => {
       }),
     );
     const onError = vi.fn();
-    const { unmount } = renderHook(() => useSeasonSession(true, true, onError));
+    const { unmount } = renderHook(() => useSeasonSession(true, "1", onError));
     await waitFor(() => expect(reject).not.toBeNull());
 
     unmount();
@@ -242,7 +244,7 @@ describe("a retry that fails too", () => {
       .mockRejectedValueOnce(new Error("down"))
       .mockRejectedValueOnce(new Error("still down"));
     const quiet = () => undefined;
-    const { result } = renderHook(() => useSeasonSession(true, true, quiet));
+    const { result } = renderHook(() => useSeasonSession(true, "1", quiet));
     await waitFor(() => expect(result.current.error).toMatch(/down/));
 
     await settle(() => {
@@ -258,5 +260,27 @@ describe("reloadSeason", () => {
     mocks.loadSeason.mockResolvedValue(view(9));
     await expect(reloadSeason()).resolves.toEqual(view(9));
     expect(mocks.loadSeason).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("switching leagues", () => {
+  it("drops the old season, loads the new one, and restarts the poller", async () => {
+    mocks.loadSeason.mockResolvedValue(view(2));
+    const { result, rerender } = renderHook(
+      ({ leagueId }) => useSeasonSession(true, leagueId, () => undefined),
+      { initialProps: { leagueId: "1" } },
+    );
+    await waitFor(() => expect(result.current.season?.week).toBe(2));
+    expect(mocks.stopSeasonPolling).not.toHaveBeenCalled();
+
+    mocks.loadSeason.mockResolvedValue(view(9));
+    rerender({ leagueId: "2" });
+
+    // The other league's standings must never be on screen under the new
+    // league's name, not even for the length of one fetch.
+    await waitFor(() => expect(mocks.loadSeason).toHaveBeenCalledTimes(2));
+    expect(mocks.stopSeasonPolling).toHaveBeenCalled();
+    await waitFor(() => expect(result.current.season?.week).toBe(9));
+    expect(mocks.startSeasonPolling).toHaveBeenCalledTimes(2);
   });
 });

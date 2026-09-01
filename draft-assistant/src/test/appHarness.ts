@@ -16,6 +16,7 @@ const METHODS = [
   "addLeague",
   "setMyUsername",
   "getConfig",
+  "sleeperLeagues",
   "getState",
   "refreshPicks",
   "refreshData",
@@ -78,6 +79,7 @@ function build(): Harness {
     api.headshot.mockResolvedValue(null);
     api.avatar.mockResolvedValue(null);
     api.chatSuggestions.mockResolvedValue([]);
+    api.sleeperLeagues.mockResolvedValue([]);
     api.chatSettings.mockResolvedValue({
       cli_available: false,
       provider: "api",

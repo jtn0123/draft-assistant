@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { setAvatarMode, useAvatarMode } from "./avatars";
+import { playChime } from "./chime";
 import { setChime, setScreen, useChime, useScreen } from "./prefs";
 import { stableAvailable } from "./boardIdentity";
 import { useSeasonSession } from "./session";
@@ -9,9 +10,10 @@ import type { SeasonView } from "./season-types";
 import { Header, type SettingsRow } from "./components/Header";
 import { Chat, DraftScreen, ScreenFallback, SeasonScreen } from "./components/lazyScreens";
 import { LaunchScreen, Setup } from "./components/Panels";
+import { LeaguePicker } from "./components/LeaguePicker";
 import { ConfirmDialog, Toast } from "./components/Overlays";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { ordinal, pickLabel, age, scoringFormat } from "./format";
+import { ordinal, pickLabel, age, problem, scoringFormat } from "./format";
 import { cycleThemePreference, useAppliedTheme } from "./theme";
 // Only the sheets the shell itself paints with. The screen-specific ones are
 // imported by the screens, so Vite ships each alongside the chunk that needs
@@ -52,6 +54,10 @@ export default function App() {
   /// The saved league being restored, named on the launch screen.
   const [restoring, setRestoring] = useState<StoredLeague | null>(null);
   const [showSetup, setShowSetup] = useState(false);
+  // Every league the app has loaded before, so switching to a mock draft and
+  // back does not mean going to find an ID again.
+  const [leagues, setLeagues] = useState<StoredLeague[]>([]);
+  const [leaguePicker, setLeaguePicker] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   // Reads the stored choice, keeps the page painted in it, and follows the OS
@@ -82,7 +88,7 @@ export default function App() {
     error: seasonError,
     pollHealth: seasonPollHealth,
     retry: retrySeason,
-  } = useSeasonSession(screen === "season", view !== null, showToast);
+  } = useSeasonSession(screen === "season", view?.league.league_id ?? null, showToast);
   const chime = useChime();
 
   // ---------- data ----------
@@ -121,6 +127,7 @@ export default function App() {
       .getConfig()
       .then((config) => {
         if (cancelled) return null;
+        setLeagues(config.leagues);
         const leagueId = config.active_league_id;
         if (leagueId === null) {
           setShowSetup(true);
@@ -229,6 +236,32 @@ export default function App() {
     }
   };
 
+  // Switching leagues rebuilds everything: the board comes from the new
+  // league's own scoring, the season is dropped by the backend and reloaded by
+  // `useSeasonSession` when it sees a different league id, and the draft
+  // poller is stopped before the switch so it cannot write the old league's
+  // picks over the new view on its way out.
+  const doSwitchLeague = async (leagueId: string) => {
+    setLeaguePicker(false);
+    setBusy(true);
+    try {
+      if (polling) {
+        await api.stopPolling();
+        setPolling(false);
+      }
+      const next = await api.addLeague(leagueId);
+      applyView(next);
+      const config = await api.getConfig();
+      setLeagues(config.leagues);
+      await startLive();
+      showToast(`Switched to ${next.league.name} — the last league is still in the list`);
+    } catch (e) {
+      showToast(problem("Could not switch leagues", e), () => void doSwitchLeague(leagueId));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const doRefreshData = async () => {
     setSettingsOpen(false);
     setBusy(true);
@@ -306,6 +339,16 @@ export default function App() {
       value: polling ? "On" : "Off",
       on: polling,
       onSelect: () => void togglePolling(),
+    },
+    {
+      label: "League",
+      note: leagues.length > 1 ? `${leagues.length} leagues loaded` : "Switch or add a league",
+      value: "Switch",
+      on: false,
+      onSelect: () => {
+        setSettingsOpen(false);
+        setLeaguePicker(true);
+      },
     },
     {
       label: "Refresh data",
@@ -419,6 +462,17 @@ export default function App() {
         )}
       </div>
 
+      {leaguePicker && (
+        <LeaguePicker
+          leagues={leagues}
+          activeId={view.league.league_id}
+          season={view.league.season}
+          busy={busy}
+          onSwitch={(id) => void doSwitchLeague(id)}
+          onClose={() => setLeaguePicker(false)}
+        />
+      )}
+
       {confirm && (
         <ConfirmDialog
           pickLabel={`Pick ${pickLabel(d.current_pick, d.teams)} · slot ${d.on_clock_slot}`}
@@ -431,42 +485,8 @@ export default function App() {
   );
 }
 
-/** What went wrong, in the app's own words, with the backend's kept on the
- * end rather than thrown away. */
-function problem(what: string, e: unknown): string {
-  const detail = String(e)
-    .replace(/^Error:\s*/, "")
-    .trim();
-  return detail === "" ? what : `${what} — ${detail}`;
-}
-
 function myRecord(season: SeasonView): string {
   const mine = season.standings.find((s) => s.is_mine);
   if (mine === undefined) return `${season.standings.length} teams`;
   return `${mine.record} · ${ordinal(mine.seed)} of ${season.standings.length}`;
-}
-
-/** A short two-tone chime via WebAudio — no asset to ship or fail to load. */
-function playChime(): void {
-  try {
-    const Ctor = window.AudioContext ?? window.webkitAudioContext;
-    if (Ctor === undefined) return;
-    const ctx = new Ctor();
-    const now = ctx.currentTime;
-    for (const [i, freq] of [880, 1320].entries()) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.frequency.value = freq;
-      osc.type = "sine";
-      gain.gain.setValueAtTime(0.0001, now + i * 0.16);
-      gain.gain.exponentialRampToValueAtTime(0.18, now + i * 0.16 + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.16 + 0.15);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(now + i * 0.16);
-      osc.stop(now + i * 0.16 + 0.16);
-    }
-    window.setTimeout(() => void ctx.close(), 600);
-  } catch {
-    // An audio failure must never interrupt the draft.
-  }
 }

@@ -405,6 +405,58 @@
   line-height: 1.5;
 }
 
+/* ---------- league picker ---------- */
+
+.league-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 232px;
+  overflow-y: auto;
+  border: 1px solid var(--rule);
+}
+
+.league-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px;
+  border: none;
+  border-top: 1px solid var(--hair);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  min-width: 0;
+}
+
+.league-option:first-child {
+  border-top: none;
+}
+
+.league-option:hover:not(:disabled),
+.league-option.is-on {
+  background: var(--panel);
+}
+
+.league-option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.league-option-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.league-option-note {
+  font-size: 11px;
+}
+
+.league-find {
+  align-self: flex-start;
+}
+
 .dialog-actions {
   display: flex;
   gap: 10px;

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AppConfig, DraftView, PollHealth } from "./types";
+import type { AppConfig, DraftView, PollHealth, StoredLeague } from "./types";
 import type { SeasonView } from "./season-types";
 import type { ChatReply, ChatRequest, ChatSettings } from "./chat-types";
 
@@ -40,6 +40,8 @@ interface Api {
   addLeague(leagueId: string, force?: boolean): Promise<DraftView>;
   setMyUsername(username: string): Promise<string>;
   getConfig(): Promise<AppConfig>;
+  /** Every league the saved Sleeper account plays in that season. */
+  sleeperLeagues(season: string): Promise<StoredLeague[]>;
   getState(): Promise<DraftView>;
   refreshPicks(): Promise<DraftView>;
   refreshData(): Promise<DraftView>;
@@ -74,6 +76,7 @@ const tauriApi: Api = {
   addLeague: (leagueId, force = false) => invokeView("add_league", { leagueId, force }),
   setMyUsername: (username) => invoke<string>("set_my_username", { username }),
   getConfig: () => invoke<AppConfig>("get_config"),
+  sleeperLeagues: (season) => invoke<StoredLeague[]>("sleeper_leagues", { season }),
   getState: () => invokeView("get_state"),
   refreshPicks: () => invokeView("refresh_picks"),
   refreshData: () => invokeView("refresh_data"),
@@ -155,6 +158,10 @@ function browserApi(): Api {
           },
         ],
       };
+    },
+    sleeperLeagues: async () => {
+      const v = await fixture();
+      return [{ league_id: v.league.league_id, name: v.league.name, season: v.league.season }];
     },
     getState: fixture,
     refreshPicks: fixture,

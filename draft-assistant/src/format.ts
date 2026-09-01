@@ -166,3 +166,12 @@ export function ordinal(n: number): string {
   if (rest >= 11 && rest <= 13) return `${n}th`;
   return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 }
+
+/** What went wrong, in the app's own words, with the backend's kept on the
+ * end rather than thrown away. */
+export function problem(what: string, e: unknown): string {
+  const detail = String(e)
+    .replace(/^Error:\s*/, "")
+    .trim();
+  return detail === "" ? what : `${what} — ${detail}`;
+}

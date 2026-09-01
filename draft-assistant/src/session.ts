@@ -32,14 +32,17 @@ export interface SeasonSession {
 
 /**
  * @param active whether the season screen is showing
- * @param ready  whether a league is loaded — nothing can be fetched before it
+ * @param leagueId the loaded league, or null before there is one — nothing
+ *   can be fetched until there is, and a change of it means everything held
+ *   here belongs to a league the user has switched away from
  * @param onError called with the message when a load fails, for the toast
  */
 export function useSeasonSession(
   active: boolean,
-  ready: boolean,
+  leagueId: string | null,
   onError: (message: string) => void,
 ): SeasonSession {
+  const ready = leagueId !== null;
   const [season, setSeason] = useState<SeasonView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pollHealth, setPollHealth] = useState<PollHealth | null>(null);
@@ -56,6 +59,20 @@ export function useSeasonSession(
   // if that were an input to the effects below, each update would tear the
   // whole lifecycle down and build it again.
   const loadedRef = useRef(false);
+
+  // Switching leagues invalidates everything above: the standings, the week,
+  // and the poller's own idea of what it is polling. Declared before the load
+  // and poll effects so that when the league changes, this has already put
+  // them back to "nothing loaded yet" by the time they run.
+  const firstLeague = useRef(leagueId);
+  useEffect(() => {
+    if (firstLeague.current === leagueId) return;
+    firstLeague.current = leagueId;
+    loadedRef.current = false;
+    setSeason(null);
+    setPollHealth(null);
+    setError(null);
+  }, [leagueId]);
 
   // Live updates are pushed from the backend whenever the score moves.
   useEffect(() => {
@@ -96,7 +113,7 @@ export function useSeasonSession(
     return () => {
       live = false;
     };
-  }, [active, ready]);
+  }, [active, ready, leagueId]);
 
   // Polling runs for exactly as long as the screen is showing. Nothing else
   // is allowed to restart it, so the backend's own thirty-second timer gets to
@@ -115,7 +132,7 @@ export function useSeasonSession(
       // and the next time it opens it starts a fresh poller anyway.
       api.stopSeasonPolling().catch(() => undefined);
     };
-  }, [active, ready]);
+  }, [active, ready, leagueId]);
 
   const retry = useCallback(() => {
     setError(null);

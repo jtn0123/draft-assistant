@@ -9,6 +9,7 @@ pub mod commands_season;
 pub mod draft;
 pub mod engine;
 pub mod headshots;
+pub mod leagues;
 pub mod mock_league;
 pub mod poll;
 pub mod projections;
@@ -56,6 +57,7 @@ use commands_season::{
     stop_season_polling,
 };
 use engine::Engine;
+use leagues::sleeper_leagues;
 use state::AppState;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
@@ -118,6 +120,7 @@ pub fn run() {
             chat_settings,
             ask_claude,
             chat_suggestions,
+            sleeper_leagues,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

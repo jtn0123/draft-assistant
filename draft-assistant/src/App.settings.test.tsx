@@ -14,6 +14,7 @@ import { resetPrefs } from "./prefs";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
 import { draftFixture, fakeStorage, harness, restoringConfig } from "./test/appHarness";
+import type { DraftView } from "./types";
 
 const h = harness();
 
@@ -335,5 +336,75 @@ describe("the on-the-clock chime", () => {
     mine.draft.is_my_pick = true;
     await loaded(mine);
     expect(screen.getByText(mine.league.name)).toBeInTheDocument();
+  });
+});
+
+describe("the league row", () => {
+  /** The saved config, with a second league already loaded once. */
+  function twoLeagues(view: DraftView) {
+    return {
+      ...restoringConfig(view),
+      leagues: [
+        { league_id: view.league.league_id, name: view.league.name, season: "2026" },
+        { league_id: "2222222222222222222", name: "Mock draft", season: "2026" },
+      ],
+    };
+  }
+
+  it("opens the picker with every league the app has loaded", async () => {
+    const view = draftFixture();
+    h.api.getConfig.mockResolvedValue(twoLeagues(view));
+    h.api.addLeague.mockResolvedValue(view);
+    render(<App />);
+    await screen.findByText(view.league.name);
+
+    await chooseSetting(/League/);
+    expect(screen.getByRole("dialog", { name: "Switch league" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Mock draft/ })).toBeInTheDocument();
+  });
+
+  it("stops the old poller, loads the new league, and restarts live sync", async () => {
+    const view = draftFixture();
+    const other = draftFixture();
+    other.league = { ...other.league, league_id: "2222222222222222222", name: "Mock draft" };
+    h.api.getConfig.mockResolvedValue(twoLeagues(view));
+    h.api.addLeague.mockResolvedValue(view);
+    render(<App />);
+    await screen.findByText(view.league.name);
+    await waitFor(() => expect(h.api.startPolling).toHaveBeenCalledTimes(1));
+
+    h.api.addLeague.mockResolvedValue(other);
+    await chooseSetting(/League/);
+    await settle(() => {
+      screen.getByRole("button", { name: /Mock draft/ }).click();
+    });
+
+    await screen.findByText(/Switched to Mock draft/);
+    expect(h.api.addLeague).toHaveBeenLastCalledWith("2222222222222222222");
+    // The 3-second poller was told to stop before the switch, so it cannot
+    // write the old draft's picks over the new board on its way out.
+    expect(h.api.stopPolling).toHaveBeenCalledTimes(1);
+    expect(h.api.startPolling).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Mock draft")).toBeInTheDocument();
+  });
+
+  it("says so and offers a retry when the new league will not load", async () => {
+    const view = draftFixture();
+    h.api.getConfig.mockResolvedValue(twoLeagues(view));
+    h.api.addLeague.mockResolvedValue(view);
+    render(<App />);
+    await screen.findByText(view.league.name);
+
+    h.api.addLeague.mockRejectedValue(new Error("league 2222222222222222222 not found"));
+    await chooseSetting(/League/);
+    await settle(() => {
+      screen.getByRole("button", { name: /Mock draft/ }).click();
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not switch leagues");
+    expect(alert).toHaveTextContent("not found");
+    // The league that was on screen is still the one on screen.
+    expect(screen.getByText(view.league.name)).toBeInTheDocument();
   });
 });
