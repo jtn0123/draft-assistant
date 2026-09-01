@@ -68,6 +68,9 @@ interface Api {
   onSeasonPollHealth(handler: (health: PollHealth) => void): Promise<UnlistenFn>;
   setApiKey(key: string): Promise<boolean>;
   setChatProvider(provider: "api" | "claude_code"): Promise<"api" | "claude_code">;
+  /** Store the dollar cap a screen's chats run under; 0 turns it off. Returns
+   *  the cap the backend kept. */
+  setChatBudget(dollars: number): Promise<number>;
   chatSettings(): Promise<ChatSettings>;
   chatSuggestions(screen: string): Promise<string[]>;
   askClaude(args: ChatRequest): Promise<ChatReply>;
@@ -102,6 +105,7 @@ const tauriApi: Api = {
     listen<PollHealth>("season-poll-health", (event) => handler(event.payload)),
   setApiKey: (key) => invoke<boolean>("set_api_key", { key }),
   setChatProvider: (provider) => invoke<"api" | "claude_code">("set_chat_provider", { provider }),
+  setChatBudget: (dollars) => invoke<number>("set_chat_budget", { dollars }),
   chatSettings: () => invoke<ChatSettings>("chat_settings"),
   chatSuggestions: (screen) => invoke<string[]>("chat_suggestions", { screen }),
   askClaude: (args) => invoke<ChatReply>("ask_claude", args),
@@ -211,12 +215,16 @@ function browserApi(): Api {
     onSeasonPollHealth: (handler) => Promise.resolve(season.onHealth(handler)),
     setApiKey: () => Promise.resolve(false),
     setChatProvider: () => Promise.resolve("api"),
+    setChatBudget: (dollars) => Promise.resolve(dollars),
     chatSettings: () =>
       Promise.resolve({
         has_key: false,
         key_hint: null,
         cli_available: false,
         provider: "api",
+        key_store: "file",
+        budget_usd: 5,
+        spend_usd: {},
         models: ["Opus 5", "Fable 5"],
         efforts: {
           "Opus 5": ["Off", "Low", "Medium", "High", "xhigh", "Max"],

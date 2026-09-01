@@ -4,6 +4,11 @@ pub mod cache;
 pub mod chat;
 pub mod chat_cli;
 pub mod chat_context;
+pub mod chat_copy;
+/// Hand-built views for the chat context tests.
+#[cfg(test)]
+pub mod chat_fixtures;
+pub mod chat_rules;
 pub mod commands_chat;
 pub mod commands_draft;
 pub mod commands_season;
@@ -55,7 +60,9 @@ pub mod valuation;
 pub mod view;
 pub mod weekly;
 
-use commands_chat::{ask_claude, chat_settings, chat_suggestions, set_api_key, set_chat_provider};
+use commands_chat::{
+    ask_claude, chat_settings, chat_suggestions, set_api_key, set_chat_budget, set_chat_provider,
+};
 use commands_draft::{
     add_league, export_state, get_config, get_state, record_manual_pick, refresh_data,
     refresh_picks, set_my_username, start_polling, stop_polling, undo_manual_pick,
@@ -125,6 +132,7 @@ pub fn run() {
             avatar,
             set_api_key,
             set_chat_provider,
+            set_chat_budget,
             chat_settings,
             ask_claude,
             chat_suggestions,

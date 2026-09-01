@@ -10,6 +10,7 @@ export function ChatSessionBar({
   currentId,
   saved,
   spent,
+  screenSpent,
   budget,
   disabled,
   onOpen,
@@ -21,7 +22,10 @@ export function ChatSessionBar({
   /** True once this conversation has been written; false for a fresh one. */
   saved: boolean;
   spent: number;
-  /** Dollars this conversation may spend before the panel stops. 0 = no cap. */
+  /** What every conversation on this screen has cost together. The cap is
+   *  checked against this, not against `spent`. */
+  screenSpent: number;
+  /** Dollars this screen may spend before the backend refuses. 0 = no cap. */
   budget: number;
   disabled: boolean;
   onOpen: (id: string) => void;
@@ -65,10 +69,13 @@ export function ChatSessionBar({
         step={1}
         value={budget}
         aria-label="Spend cap in dollars"
-        title="Asking stops once this conversation has cost this much. 0 means no cap."
+        title="Asking stops once this screen's chats have cost this much, all conversations together. 0 means no cap."
         onChange={(e) => onBudget(Number(e.target.value))}
       />
-      <span className="muted small chat-spend">{formatUsd(spent)} spent</span>
+      <span className="muted small chat-spend">
+        {formatUsd(spent)} spent
+        {screenSpent > spent && ` · ${formatUsd(screenSpent)} on this screen`}
+      </span>
     </div>
   );
 }

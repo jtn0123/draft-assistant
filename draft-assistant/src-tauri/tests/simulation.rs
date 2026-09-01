@@ -117,6 +117,8 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         leagues: Vec::new(),
         anthropic_api_key: None,
         chat_provider: None,
+        chat_budget_usd: None,
+        chat_spend_usd: Default::default(),
     };
     let loaded = LoadedLeague {
         league,

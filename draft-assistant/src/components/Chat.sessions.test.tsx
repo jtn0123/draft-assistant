@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   chatSuggestions: vi.fn(),
   setChatProvider: vi.fn(),
   setApiKey: vi.fn(),
+  setChatBudget: vi.fn(),
   askClaude: vi.fn<(args: ChatRequest) => Promise<ChatReply>>(),
 }));
 
@@ -16,18 +17,22 @@ vi.mock("../api", () => ({ api: mocks }));
 
 import { Chat } from "./Chat";
 
-function settings(): ChatSettings {
+function settings(overrides: Partial<ChatSettings> = {}): ChatSettings {
   return {
     has_key: true,
     key_hint: "····abcd",
     cli_available: false,
     provider: "api",
+    key_store: "keychain",
+    budget_usd: 5,
+    spend_usd: {},
     models: ["Opus 5", "Fable 5"],
     efforts: {
       "Opus 5": ["Off", "Low", "Medium", "High", "xhigh", "Max"],
       "Fable 5": ["Low", "Medium", "High", "xhigh", "Max"],
     },
     notes: {},
+    ...overrides,
   };
 }
 
@@ -39,6 +44,9 @@ function reply(overrides: Partial<ChatReply>): ChatReply {
     refused: false,
     input_tokens: 0,
     output_tokens: 0,
+    provider: "api",
+    cost_usd: 0,
+    screen_spend_usd: 0,
     ...overrides,
   };
 }
@@ -58,6 +66,7 @@ beforeEach(() => {
   Element.prototype.scrollTo = vi.fn();
   mocks.chatSuggestions.mockResolvedValue([]);
   mocks.chatSettings.mockResolvedValue(settings());
+  mocks.setChatBudget.mockImplementation((dollars: number) => Promise.resolve(dollars));
 });
 
 describe("saved chats", () => {
@@ -129,11 +138,10 @@ describe("saved chats", () => {
 });
 
 describe("the spend cap", () => {
-  it("counts what a conversation has cost", async () => {
+  it("counts what the backend charged, not what the panel guesses", async () => {
     panel();
     mocks.askClaude.mockResolvedValue(
-      // 200k in, 40k out on Opus 5 — $1.00 + $1.00.
-      reply({ text: "An answer.", input_tokens: 200_000, output_tokens: 40_000 }),
+      reply({ text: "An answer.", input_tokens: 200_000, output_tokens: 40_000, cost_usd: 2 }),
     );
     const input = await screen.findByRole("textbox", { name: "Ask Claude" });
     await userEvent.type(input, "A question{Enter}");
@@ -141,36 +149,85 @@ describe("the spend cap", () => {
     expect(screen.getByText("$2.00 spent")).toBeInTheDocument();
   });
 
-  it("stops asking once the cap is reached, and starts again when it is raised", async () => {
+  it("charges nothing for an answer that came through Claude Code", async () => {
+    panel();
+    mocks.askClaude.mockResolvedValue(
+      // A subscription paid for these tokens; the panel must not bill them.
+      reply({
+        text: "An answer.",
+        provider: "claude_code",
+        input_tokens: 4_000_000,
+        output_tokens: 200_000,
+        cost_usd: 0,
+      }),
+    );
+    await userEvent.type(screen.getByRole("textbox", { name: "Ask Claude" }), "A question{Enter}");
+    await screen.findByText("An answer.");
+    expect(screen.getByText("$0.00 spent")).toBeInTheDocument();
+    expect(screen.queryByText(/budget/)).not.toBeInTheDocument();
+  });
+
+  it("shows what the whole screen has spent, not just this conversation", async () => {
+    // A conversation opened after earlier ones: the cap is checked against the
+    // screen's total, so the panel has to show that total too.
+    mocks.chatSettings.mockResolvedValue(settings({ spend_usd: { draft: 3.5 } }));
+    panel();
+    await screen.findByRole("textbox", { name: "Ask Claude" });
+    expect(screen.getByText(/\$3\.50 on this screen/)).toBeInTheDocument();
+
+    mocks.askClaude.mockResolvedValue(
+      reply({ text: "An answer.", cost_usd: 0.5, screen_spend_usd: 4 }),
+    );
+    await userEvent.type(screen.getByRole("textbox", { name: "Ask Claude" }), "A question{Enter}");
+    await screen.findByText("An answer.");
+    expect(screen.getByText(/\$0\.50 spent · \$4\.00 on this screen/)).toBeInTheDocument();
+  });
+
+  it("takes the cap from the backend, which is what enforces it", async () => {
+    mocks.chatSettings.mockResolvedValue(settings({ budget_usd: 12 }));
+    panel();
+    expect(await screen.findByLabelText("Spend cap in dollars")).toHaveValue(12);
+  });
+
+  it("warns at the cap without taking the composer away", async () => {
     panel();
     const cap = await screen.findByLabelText("Spend cap in dollars");
     await userEvent.clear(cap);
     await userEvent.type(cap, "1");
-    mocks.askClaude.mockResolvedValue(
-      reply({ text: "An answer.", input_tokens: 400_000, output_tokens: 0 }),
-    );
-    const input = screen.getByRole("textbox", { name: "Ask Claude" });
-    await userEvent.type(input, "A question{Enter}");
+    // The cap the backend enforces is kept in step with the one shown here.
+    expect(mocks.setChatBudget).toHaveBeenLastCalledWith(1);
+
+    mocks.askClaude.mockResolvedValue(reply({ text: "An answer.", cost_usd: 2 }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Ask Claude" }), "A question{Enter}");
     await screen.findByText("An answer.");
 
     expect(screen.getByText(/spent \$2\.00 of its \$1\.00 budget/)).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeDisabled();
+    // The backend is what refuses a turn; the panel only says it is coming.
+    expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled();
 
     await userEvent.clear(cap);
     await userEvent.type(cap, "9");
-    expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled();
+    expect(screen.queryByText(/of its \$1\.00 budget/)).not.toBeInTheDocument();
   });
 
-  it("never stops when the cap is zero", async () => {
+  it("shows the backend's refusal as the answer to the turn that was refused", async () => {
+    panel();
+    mocks.askClaude.mockRejectedValue(
+      new Error("Ask Claude has spent $5.00 of its $5.00 cap on the draft screen"),
+    );
+    await userEvent.type(screen.getByRole("textbox", { name: "Ask Claude" }), "A question{Enter}");
+    expect(await screen.findByText(/of its \$5\.00 cap on the draft screen/)).toBeInTheDocument();
+  });
+
+  it("never warns when the cap is zero", async () => {
     panel();
     const cap = await screen.findByLabelText("Spend cap in dollars");
     await userEvent.clear(cap);
     await userEvent.type(cap, "0");
-    mocks.askClaude.mockResolvedValue(
-      reply({ text: "An answer.", input_tokens: 4_000_000, output_tokens: 0 }),
-    );
+    mocks.askClaude.mockResolvedValue(reply({ text: "An answer.", cost_usd: 20 }));
     await userEvent.type(screen.getByRole("textbox", { name: "Ask Claude" }), "A question{Enter}");
     await screen.findByText("An answer.");
+    expect(screen.queryByText(/budget/)).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled();
   });
 });

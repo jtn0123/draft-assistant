@@ -8,6 +8,8 @@
 // refuses to store still runs the panel, it just forgets afterwards.
 
 import type { ChatMessage, ThreadEntry } from "./chat-types";
+import { formatUsd } from "./chatCost";
+import { dateLabel } from "./format";
 
 /** A whole conversation as the panel shows it, plus what it cost. */
 export interface SavedChat {
@@ -49,11 +51,14 @@ export function sessionTitle(entries: ThreadEntry[]): string {
   return oneLine.length > TITLE_CHARS ? `${oneLine.slice(0, TITLE_CHARS - 1)}…` : oneLine;
 }
 
-/** "12:41 · Who should I take? · 3 questions · $0.67" */
+/** "Sep 3, 12:41 PM · Who should I take? · 3 questions · $0.67"
+ *
+ * Eastern time and the shared dollar format, like every other timestamp and
+ * amount in the app — a conversation filed at 12:41 stays filed at 12:41 when
+ * the laptop crosses a time zone. */
 export function describeSession(s: ChatSessionSummary): string {
-  const at = new Date(s.startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const asked = `${s.questions} question${s.questions === 1 ? "" : "s"}`;
-  return [at, s.title, asked, `$${s.costUsd.toFixed(2)}`].join(" · ");
+  return [dateLabel(s.startedAt / 1000, true), s.title, asked, formatUsd(s.costUsd)].join(" · ");
 }
 
 function isEntry(value: unknown): value is ThreadEntry {
