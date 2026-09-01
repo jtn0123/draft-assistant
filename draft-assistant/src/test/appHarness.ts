@@ -9,41 +9,53 @@
 
 import { vi, type Mock } from "vitest";
 import draftFixtureJson from "../../public/dev-fixture.json";
+import type { Api } from "../api";
 import type { AppConfig, DraftView, PollHealth } from "../types";
 import type { SeasonView } from "../season-types";
 
-const METHODS = [
-  "addLeague",
-  "setMyUsername",
-  "getConfig",
-  "sleeperLeagues",
-  "getState",
-  "refreshPicks",
-  "refreshData",
-  "recordManualPick",
-  "undoManualPick",
-  "exportState",
-  "headshot",
-  "avatar",
-  "startPolling",
-  "stopPolling",
-  "onDraftUpdated",
-  "onPollHealth",
-  "loadSeason",
-  "getSeason",
-  "refreshSeason",
-  "startSeasonPolling",
-  "stopSeasonPolling",
-  "onSeasonUpdated",
-  "onSeasonPollHealth",
-  "setApiKey",
-  "setChatProvider",
-  "chatSettings",
-  "chatSuggestions",
-  "askClaude",
-] as const;
+/**
+ * One stub per backend call, keyed off the real `Api` type.
+ *
+ * `Record<keyof Api, true>` is what makes this honest: adding a method to
+ * `Api` without adding it here is a missing-property error, and leaving a
+ * renamed one behind is an excess-property error. The list used to be a bare
+ * array of strings, and had quietly fallen four methods behind.
+ */
+const METHODS: Record<keyof Api, true> = {
+  addLeague: true,
+  setMyUsername: true,
+  getConfig: true,
+  sleeperLeagues: true,
+  getState: true,
+  refreshPicks: true,
+  refreshData: true,
+  recordManualPick: true,
+  undoManualPick: true,
+  exportState: true,
+  headshot: true,
+  avatar: true,
+  startPolling: true,
+  stopPolling: true,
+  onDraftUpdated: true,
+  onPollHealth: true,
+  loadSeason: true,
+  getSeason: true,
+  refreshSeason: true,
+  startSeasonPolling: true,
+  stopSeasonPolling: true,
+  onSeasonUpdated: true,
+  onSeasonPollHealth: true,
+  setApiKey: true,
+  setChatProvider: true,
+  setChatBudget: true,
+  chatSettings: true,
+  chatSuggestions: true,
+  askClaude: true,
+};
 
-export type ApiMock = Record<(typeof METHODS)[number], Mock>;
+const METHOD_NAMES = Object.keys(METHODS) as (keyof Api)[];
+
+export type ApiMock = Record<keyof Api, Mock>;
 
 /** The handlers the app registered, so a test can push a backend event. */
 export interface PushHandlers {
@@ -61,11 +73,11 @@ export interface Harness {
 }
 
 function build(): Harness {
-  const api = Object.fromEntries(METHODS.map((name) => [name, vi.fn()])) as ApiMock;
+  const api = Object.fromEntries(METHOD_NAMES.map((name) => [name, vi.fn()])) as ApiMock;
   const push: PushHandlers = { draft: null, health: null, season: null, seasonHealth: null };
 
   const reset = () => {
-    for (const name of METHODS) api[name].mockReset();
+    for (const name of METHOD_NAMES) api[name].mockReset();
     push.draft = null;
     push.health = null;
     push.season = null;
@@ -149,6 +161,8 @@ export function fakeStorage(initial: Record<string, string> = {}): Map<string, s
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => void store.set(key, value),
+    removeItem: (key: string) => void store.delete(key),
+    clear: () => store.clear(),
   });
   return store;
 }

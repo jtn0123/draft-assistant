@@ -1,106 +1,43 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import fixtureJson from "../public/dev-fixture.json";
-import type { DraftView, PollHealth } from "./types";
-import type { SeasonView } from "./season-types";
+import type { DraftView } from "./types";
 
-const testState = vi.hoisted(() => ({
-  draftHandler: null as ((view: DraftView) => void) | null,
-  healthHandler: null as ((health: PollHealth) => void) | null,
-  seasonHandler: null as ((view: SeasonView) => void) | null,
-  api: {
-    addLeague: vi.fn(),
-    setMyUsername: vi.fn(),
-    getConfig: vi.fn(),
-    getState: vi.fn(),
-    refreshPicks: vi.fn(),
-    refreshData: vi.fn(),
-    recordManualPick: vi.fn(),
-    undoManualPick: vi.fn(),
-    exportState: vi.fn(),
-    headshot: vi.fn(),
-    startPolling: vi.fn(),
-    stopPolling: vi.fn(),
-    onDraftUpdated: vi.fn(),
-    onPollHealth: vi.fn(),
-    loadSeason: vi.fn(),
-    getSeason: vi.fn(),
-    refreshSeason: vi.fn(),
-    startSeasonPolling: vi.fn(),
-    stopSeasonPolling: vi.fn(),
-    onSeasonUpdated: vi.fn(),
-    onSeasonPollHealth: vi.fn(),
-    setApiKey: vi.fn(),
-    chatSettings: vi.fn(),
-    chatSuggestions: vi.fn(),
-    askClaude: vi.fn(),
-  },
-}));
-
-vi.mock("./api", () => ({ api: testState.api }));
+vi.mock("./api", async () => ({ api: (await import("./test/appHarness")).harness().api }));
 
 import App from "./App";
 import { resetPrefs } from "./prefs";
 import { settle } from "./test/settle";
+import {
+  draftFixture,
+  fakeStorage,
+  harness,
+  restoringConfig,
+  seasonFixture,
+} from "./test/appHarness";
 
+const h = harness();
+
+/**
+ * The dev fixture with a deliberately short board.
+ *
+ * These tests drive workflow — setup, errors, toasts, tabs — not board volume,
+ * and rendering the full 393-player board in every test is what pushed this
+ * file past the 5s budget under parallel worker load. Board rendering at scale
+ * is covered by App.screens.test.tsx.
+ */
 function fixture(): DraftView {
-  const view = structuredClone(fixtureJson) as unknown as DraftView;
-  // These tests drive workflow — setup, errors, toasts, tabs — not board
-  // volume, and rendering the full 393-player board in every test is what
-  // pushed this file past the 5s budget under parallel worker load. Board
-  // rendering at scale is covered by App.screens.test.tsx.
-  view.available = view.available.slice(0, 24);
-  return view;
+  return draftFixture(24);
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
   // The app opens on Season by default; these tests drive the draft board.
   // jsdom here has no storage, so give it a scratch one.
-  const store = new Map<string, string>([["da.screen", "draft"]]);
-  vi.stubGlobal("localStorage", {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => void store.set(k, v),
-    removeItem: (k: string) => void store.delete(k),
-  });
+  fakeStorage({ "da.screen": "draft" });
   // The preference stores hold this session's choices; each test starts from
   // what its own storage says.
   resetPrefs();
-  testState.draftHandler = null;
-  testState.healthHandler = null;
-  testState.seasonHandler = null;
-  testState.api.startPolling.mockResolvedValue(undefined);
-  testState.api.stopPolling.mockResolvedValue(undefined);
-  testState.api.startSeasonPolling.mockResolvedValue(undefined);
-  testState.api.stopSeasonPolling.mockResolvedValue(undefined);
-  testState.api.exportState.mockResolvedValue("/tmp/draft-state.json");
-  testState.api.headshot.mockResolvedValue(null);
-  testState.api.chatSuggestions.mockResolvedValue([]);
-  testState.api.chatSettings.mockResolvedValue({
-    cli_available: false,
-    provider: "api",
-    has_key: false,
-    key_hint: null,
-    models: ["Opus 5", "Fable 5"],
-    efforts: { "Opus 5": ["Off", "High"], "Fable 5": ["Low", "High"] },
-    notes: {},
-  });
-  // Typed parameters, not inferred `any`: these captured handlers are what the
-  // tests push fake pushes through, so a shape change must fail here.
-  testState.api.onDraftUpdated.mockImplementation((handler: (view: DraftView) => void) => {
-    testState.draftHandler = handler;
-    return Promise.resolve(() => undefined);
-  });
-  testState.api.onPollHealth.mockImplementation((handler: (health: PollHealth) => void) => {
-    testState.healthHandler = handler;
-    return Promise.resolve(() => undefined);
-  });
-  testState.api.onSeasonUpdated.mockImplementation((handler: (view: SeasonView) => void) => {
-    testState.seasonHandler = handler;
-    return Promise.resolve(() => undefined);
-  });
-  testState.api.onSeasonPollHealth.mockImplementation(() => Promise.resolve(() => undefined));
+  h.reset();
 });
 
 afterEach(() => {
@@ -109,7 +46,7 @@ afterEach(() => {
 
 describe("App live workflow", () => {
   it("shows setup only after confirming there is no saved league", async () => {
-    testState.api.getConfig.mockResolvedValue({
+    h.api.getConfig.mockResolvedValue({
       my_user_id: null,
       active_league_id: null,
       leagues: [],
@@ -127,14 +64,10 @@ describe("App live workflow", () => {
     const afterPick = fixture();
     afterPick.available = afterPick.available.slice(1);
     afterPick.draft.total_picks_made += 1;
-    testState.api.getConfig.mockResolvedValue({
-      my_user_id: "browser-preview",
-      active_league_id: initial.league.league_id,
-      leagues: [],
-    });
-    testState.api.addLeague.mockResolvedValue(initial);
-    testState.api.recordManualPick.mockResolvedValue(afterPick);
-    testState.api.undoManualPick.mockResolvedValue(initial);
+    h.api.getConfig.mockResolvedValue(restoringConfig(initial));
+    h.api.addLeague.mockResolvedValue(initial);
+    h.api.recordManualPick.mockResolvedValue(afterPick);
+    h.api.undoManualPick.mockResolvedValue(initial);
 
     render(<App />);
     expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
@@ -144,11 +77,11 @@ describe("App live workflow", () => {
 
     const liveUpdate = fixture();
     liveUpdate.league.name = "League updated by poll";
-    act(() => testState.draftHandler?.(liveUpdate));
+    act(() => h.push.draft?.(liveUpdate));
     expect(screen.getByText("League updated by poll")).toBeInTheDocument();
 
     act(() => {
-      testState.healthHandler?.({
+      h.push.health?.({
         last_success_at: initial.generated_at,
         consecutive_failures: 2,
         last_error: "network timeout",
@@ -169,20 +102,20 @@ describe("App live workflow", () => {
     // "Mark drafted" is also the rec-card action, so confirm inside the dialog.
     const dialog = screen.getByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Mark drafted" }));
-    expect(testState.api.recordManualPick).toHaveBeenCalledTimes(1);
+    expect(h.api.recordManualPick).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "Undo" }));
-    expect(testState.api.undoManualPick).toHaveBeenCalledTimes(1);
+    expect(h.api.undoManualPick).toHaveBeenCalledTimes(1);
   });
 
   it("shows a setup error when a league cannot be loaded", async () => {
     const user = userEvent.setup();
-    testState.api.getConfig.mockResolvedValue({
+    h.api.getConfig.mockResolvedValue({
       my_user_id: null,
       active_league_id: null,
       leagues: [],
     });
-    testState.api.addLeague.mockRejectedValue(new Error("league unavailable"));
+    h.api.addLeague.mockRejectedValue(new Error("league unavailable"));
 
     render(<App />);
     await user.type(await screen.findByLabelText("League ID"), "123456789012345");
@@ -192,12 +125,12 @@ describe("App live workflow", () => {
 
   it("offers to reconnect rather than dropping to setup when restore fails", async () => {
     const initial = fixture();
-    testState.api.getConfig.mockResolvedValue({
+    h.api.getConfig.mockResolvedValue({
       my_user_id: null,
       active_league_id: initial.league.league_id,
       leagues: [{ league_id: initial.league.league_id, name: "Dynasty Warriors", season: "2026" }],
     });
-    testState.api.addLeague.mockRejectedValue(new Error("request timed out"));
+    h.api.addLeague.mockRejectedValue(new Error("request timed out"));
 
     render(<App />);
     // A saved league that fails to load is a connection problem, not a reason
@@ -215,13 +148,9 @@ describe("App live workflow", () => {
     const initial = fixture();
     const refreshed = fixture();
     refreshed.data_health.board_size = 312;
-    testState.api.getConfig.mockResolvedValue({
-      my_user_id: "browser-preview",
-      active_league_id: initial.league.league_id,
-      leagues: [],
-    });
-    testState.api.addLeague.mockResolvedValue(initial);
-    testState.api.refreshData.mockResolvedValue(refreshed);
+    h.api.getConfig.mockResolvedValue(restoringConfig(initial));
+    h.api.addLeague.mockResolvedValue(initial);
+    h.api.refreshData.mockResolvedValue(refreshed);
 
     render(<App />);
     await screen.findByText(initial.league.name);
@@ -237,13 +166,9 @@ describe("App live workflow", () => {
   it("opens on the Season screen unless the draft board was the last choice", async () => {
     localStorage.removeItem("da.screen");
     const initial = fixture();
-    testState.api.getConfig.mockResolvedValue({
-      my_user_id: "browser-preview",
-      active_league_id: initial.league.league_id,
-      leagues: [],
-    });
-    testState.api.addLeague.mockResolvedValue(initial);
-    testState.api.loadSeason.mockResolvedValue(seasonFixture());
+    h.api.getConfig.mockResolvedValue(restoringConfig(initial));
+    h.api.addLeague.mockResolvedValue(initial);
+    h.api.loadSeason.mockResolvedValue(seasonFixture());
 
     render(<App />);
     expect(await screen.findByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
@@ -253,20 +178,16 @@ describe("App live workflow", () => {
   it("loads the season view when the Season tab is opened", async () => {
     const user = userEvent.setup();
     const initial = fixture();
-    testState.api.getConfig.mockResolvedValue({
-      my_user_id: "browser-preview",
-      active_league_id: initial.league.league_id,
-      leagues: [],
-    });
-    testState.api.addLeague.mockResolvedValue(initial);
-    testState.api.loadSeason.mockResolvedValue(seasonFixture());
+    h.api.getConfig.mockResolvedValue(restoringConfig(initial));
+    h.api.addLeague.mockResolvedValue(initial);
+    h.api.loadSeason.mockResolvedValue(seasonFixture());
 
     render(<App />);
     await screen.findByText(initial.league.name);
     await user.click(screen.getByRole("button", { name: "Season" }));
 
     expect(await screen.findByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
-    expect(testState.api.loadSeason).toHaveBeenCalledWith(false);
+    expect(h.api.loadSeason).toHaveBeenCalledWith(false);
     // Playoff odds come through as a percentage, not a raw fraction — once in
     // the header strip and once in the standings row.
     expect(screen.getAllByText("88%")).toHaveLength(2);
@@ -275,13 +196,9 @@ describe("App live workflow", () => {
   it("drives the league tabs from the keyboard, as the tablist role promises", async () => {
     const user = userEvent.setup();
     const initial = fixture();
-    testState.api.getConfig.mockResolvedValue({
-      my_user_id: "browser-preview",
-      active_league_id: initial.league.league_id,
-      leagues: [],
-    });
-    testState.api.addLeague.mockResolvedValue(initial);
-    testState.api.loadSeason.mockResolvedValue(seasonFixture());
+    h.api.getConfig.mockResolvedValue(restoringConfig(initial));
+    h.api.addLeague.mockResolvedValue(initial);
+    h.api.loadSeason.mockResolvedValue(seasonFixture());
 
     render(<App />);
     await screen.findByText(initial.league.name);
@@ -317,13 +234,9 @@ describe("App live workflow", () => {
   it("shows a season load failure as an error with a working retry", async () => {
     const user = userEvent.setup();
     const initial = fixture();
-    testState.api.getConfig.mockResolvedValue({
-      my_user_id: "browser-preview",
-      active_league_id: initial.league.league_id,
-      leagues: [],
-    });
-    testState.api.addLeague.mockResolvedValue(initial);
-    testState.api.loadSeason
+    h.api.getConfig.mockResolvedValue(restoringConfig(initial));
+    h.api.addLeague.mockResolvedValue(initial);
+    h.api.loadSeason
       .mockRejectedValueOnce(new Error("Sleeper timed out"))
       .mockResolvedValueOnce(seasonFixture());
 
@@ -337,19 +250,15 @@ describe("App live workflow", () => {
 
     await user.click(retry);
     expect(await screen.findByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
-    expect(testState.api.loadSeason).toHaveBeenLastCalledWith(true);
+    expect(h.api.loadSeason).toHaveBeenLastCalledWith(true);
   });
 });
 
 describe("when an action fails", () => {
   /** The app loaded on the draft board, ready to take a pick. */
   async function loadedOnTheBoard(initial: DraftView) {
-    testState.api.getConfig.mockResolvedValue({
-      my_user_id: "browser-preview",
-      active_league_id: initial.league.league_id,
-      leagues: [],
-    });
-    testState.api.addLeague.mockResolvedValue(initial);
+    h.api.getConfig.mockResolvedValue(restoringConfig(initial));
+    h.api.addLeague.mockResolvedValue(initial);
     render(<App />);
     await screen.findByText(initial.league.name);
     const rows = await waitFor(() => {
@@ -364,7 +273,7 @@ describe("when an action fails", () => {
     const initial = fixture();
     const afterPick = fixture();
     afterPick.available = afterPick.available.slice(1);
-    testState.api.recordManualPick
+    h.api.recordManualPick
       .mockRejectedValueOnce(new Error("Sleeper is not answering"))
       .mockResolvedValueOnce(afterPick);
 
@@ -392,7 +301,7 @@ describe("when an action fails", () => {
     await settle(() => {
       screen.getByRole("button", { name: "Try again" }).click();
     });
-    expect(testState.api.recordManualPick).toHaveBeenCalledTimes(2);
+    expect(h.api.recordManualPick).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -400,7 +309,7 @@ describe("when an action fails", () => {
     const initial = fixture();
     const refreshed = fixture();
     refreshed.data_health.board_size = 312;
-    testState.api.refreshData.mockResolvedValue(refreshed);
+    h.api.refreshData.mockResolvedValue(refreshed);
 
     await loadedOnTheBoard(initial);
     vi.useFakeTimers();
@@ -423,74 +332,3 @@ describe("when an action fails", () => {
     expect(screen.queryByText(note)).not.toBeInTheDocument();
   });
 });
-
-function seasonFixture(): SeasonView {
-  return {
-    schema_version: "1.1",
-    generated_at: 0,
-    team_avatars: {},
-    league: {
-      league_id: "1",
-      name: "Dynasty Warriors",
-      season: "2026",
-      total_rosters: 12,
-      roster_positions: ["QB", "RB", "BN"],
-      draftable_positions: ["QB", "RB"],
-      scoring_settings: {},
-    },
-    week: 3,
-    season: "2026",
-    my_roster_id: 1,
-    header: {
-      opponent_name: "punt_god",
-      my_projected: 122.4,
-      my_set_projected: 118.1,
-      opp_projected: 108.9,
-      win_odds_best: 0.62,
-      win_odds_set: 0.55,
-      playoff_odds: 0.88,
-      locks_in_ms: null,
-    },
-    matchup: null,
-    calls: [],
-    points_on_table: 0,
-    waivers: [],
-    waiver_budget_left: 38,
-    waiver_budget_total: 100,
-    standings: [
-      {
-        roster_id: 1,
-        seed: 1,
-        name: "You",
-        record: "2–0",
-        wins: 2,
-        losses: 0,
-        ties: 0,
-        points_for: 250,
-        projected_points: 1642,
-        playoff_odds: 0.88,
-        is_mine: true,
-      },
-    ],
-    live: {
-      games: [],
-      windows: [],
-      totals: {
-        my_playing: 0,
-        my_pre: 0,
-        my_done: 0,
-        my_live_points: 0,
-        opp_live_points: 0,
-      },
-      next_kickoff_ms: null,
-      bye_teams: [],
-    },
-    roster: [],
-    trades: [],
-    recent_trades: [],
-    activity: [],
-    last_season: [],
-    trends: { series: [], changes: [] },
-    data_health: { fetched_at: 0, warnings: [] },
-  };
-}

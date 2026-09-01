@@ -41,7 +41,9 @@ async function invokeSeason(command: string, args?: Record<string, unknown>): Pr
 /** True when running inside the Tauri shell (vs a plain browser tab). */
 const inTauri = "__TAURI_INTERNALS__" in window;
 
-interface Api {
+/** Every call the UI can make into the backend. Exported so the test harness
+ *  can key its mock off this type instead of a hand-kept list of names. */
+export interface Api {
   addLeague(leagueId: string, force?: boolean): Promise<DraftView>;
   setMyUsername(username: string): Promise<string>;
   getConfig(): Promise<AppConfig>;
