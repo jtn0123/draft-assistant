@@ -29,3 +29,7 @@ coverage
 # tsc --build scratch output for the node-side project
 node_modules/.tmp
 tsconfig.tsbuildinfo
+
+# Playwright browser-e2e output
+playwright-report
+e2e-browser/.results

@@ -7,7 +7,12 @@
     "allowSyntheticDefaultImports": true,
     "noEmit": false,
     "emitDeclarationOnly": true,
-    "outDir": "./node_modules/.tmp/tsnode"
+    "outDir": "./node_modules/.tmp/tsnode",
+    "strict": true,
+    "lib": ["ES2022", "DOM"]
   },
-  "include": ["vite.config.ts", "vitest.config.ts"]
+  // The build and test-harness configs, plus the browser end-to-end suite:
+  // node-side TypeScript that the app's own project does not include, and
+  // that nothing else was typechecking.
+  "include": ["vite.config.ts", "vitest.config.ts", "playwright.config.ts", "e2e-browser/**/*.ts"]
 }

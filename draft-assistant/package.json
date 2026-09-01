@@ -9,7 +9,7 @@
     "analyze": "vite build --mode analyze && open dist/stats.html",
     "check:loc": "node scripts/check-loc.mjs",
     "typecheck": "tsc --build",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.mjs\" \"e2e/**/*.ts\" \"*.{ts,js,json}\" && cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.mjs\" \"e2e/**/*.ts\" \"e2e-browser/**/*.ts\" \"*.{ts,js,json}\" && cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
     "test": "npm run test:frontend && npm run test:rust",
     "test:ci": "npm run test:coverage && npm run test:rust",
     "test:frontend": "vitest run",
@@ -22,12 +22,14 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "check:css": "node scripts/check-css.mjs",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.mjs\" \"e2e/**/*.ts\" \"*.{ts,js,json}\" && cargo fmt --manifest-path src-tauri/Cargo.toml --all",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.mjs\" \"e2e/**/*.ts\" \"e2e-browser/**/*.ts\" \"*.{ts,js,json}\" && cargo fmt --manifest-path src-tauri/Cargo.toml --all",
     "verify:fast": "npm run check:loc && npm run check:css && npm run format:check && npm run lint && npm run typecheck",
     "verify:mid": "npm run verify:fast && npm run test:frontend",
     "lint:rust:wdio": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --features wdio --target-dir src-tauri/target/wdio-lint -- -D warnings",
     "build:e2e": "CARGO_TARGET_DIR=\"$PWD/src-tauri/target/wdio\" tauri build --features wdio --no-bundle",
-    "test:e2e": "npm run build:e2e && npm --prefix e2e ci && npm --prefix e2e test"
+    "test:e2e": "npm run build:e2e && npm --prefix e2e ci && npm --prefix e2e test",
+    "test:e2e:browser": "playwright test",
+    "replay": "node scripts/replay-sleeper.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11",
@@ -36,10 +38,12 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "^2.11",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.6",
+    "@types/node": "^26.4.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",

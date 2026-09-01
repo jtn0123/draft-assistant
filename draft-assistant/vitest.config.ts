@@ -6,6 +6,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // The unit suite is the app's own; `e2e-browser/` belongs to Playwright,
+    // whose `test.beforeEach` throws if vitest tries to collect it.
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
     setupFiles: "./src/test/setup.ts",
     css: true,
     coverage: {

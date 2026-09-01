@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 /// The documented v1 API root. Declared once here; `season_api` imports it
-/// rather than repeating the host.
+/// rather than repeating the host. Both roots are rewritten on the way out by
+/// `sleeper_host::route`, which is how a debug build can be pointed at the
+/// replay server instead.
 pub(crate) const BASE: &str = "https://api.sleeper.app/v1";
 /// Root for the undocumented endpoints (projections, scores).
 pub(crate) const BASE_UNDOC: &str = "https://api.sleeper.app";
@@ -390,13 +392,15 @@ impl SleeperClient {
         &self,
         url: &str,
     ) -> Result<T, SleeperError> {
-        self.with_retries(|| self.get_json_once(url)).await
+        let url = crate::sleeper_host::route(url);
+        self.with_retries(|| self.get_json_once(&url)).await
     }
 
     /// A GET that hands back the raw body, for payloads too big to parse on
     /// the runtime thread. Same retry policy as `get_json`.
     pub(crate) async fn get_bytes(&self, url: &str) -> Result<Vec<u8>, SleeperError> {
-        self.with_retries(|| self.get_bytes_once(url)).await
+        let url = crate::sleeper_host::route(url);
+        self.with_retries(|| self.get_bytes_once(&url)).await
     }
 
     /// Resolve a Sleeper username to its user id.
