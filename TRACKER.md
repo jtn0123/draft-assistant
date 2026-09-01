@@ -162,6 +162,6 @@ parallel (chat / season / draft), then a cleanup+fixtures pass on main after mer
 | # | Fix | Status | Notes |
 |---|---|---|---|
 | A | Chat: real server-side spend cap, $0 CLI route, context knows keepers/trades/prices, key_store shown, single key entry, ET timestamps, chat wire tests | in flight | |
-| B | Season: best/set win-odds split, tiebreak unified (wins+0.5·ties), trade feed names picks, pregame zeros quieted, staleness vocab unified, lookup/label dedup | in flight | |
-| C | Draft: keeper-aware survival, pick market rendered, simulation via PickOwnership, tag-overflow CSS, name-lookup fallback, dead picks_for_slot removed | in flight | |
+| B | Season: best/set split, tiebreak, trade-pick names, pregame zeros, staleness vocab, dedup | done `8ff95aa`, merged `72f36c3` | Header + odds now priced off the lineup the screen shows (`win_odds` split into best/set, one state drives both); ties worth half a win everywhere; trades read "gets 2027 2nd"; pregame columns em-dash until real data; Trends threshold deliberately 2 snapshots (1 reading = everyone their own baseline). |
+| C | Draft: keeper-aware survival, pick market, ownership everywhere, tag CSS, lookup fallback | done `22176ef`, merged `e62f05c` | Survival judged against market picks (keepers excluded) — identity when no keepers, pinned by test; "Pick market" panel renders round prices; simulator + dump_state attribute picks to the owning manager; injury tag one letter (Q/D/O) with name-grade truncation. |
 | D | Cleanup: fixture regen + schema bumps + round-trip test, App.test.tsx onto appHarness + ApiMock keyed by Api, pub→private sweep, dead exports | queued (after A–C merge) | |
