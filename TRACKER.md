@@ -144,7 +144,7 @@ origin/main worktree.
 
 | # | Port | Status | Notes |
 |---|---|---|---|
-| 1 | Chat UX: saved sessions, suggested questions, budget cap, Markdown rendering (keep local's model/effort picker + styling) | todo | |
+| 1 | Chat UX: saved sessions, suggested questions, budget cap, Markdown rendering (keep local's model/effort picker + styling) | done `be66ffe` | Sessions saved per screen in local storage (no draft id to file under, so no Rust command); spend cap prices the tokens the backend already returns; Markdown answers minus clickable links (no opener plugin here). Suggested questions already existed via `chat_suggestions`. |
 | 2 | Keeper support + traded picks + pick deadline + third-round reversal (Rust domain + minimal UI in local's style) | todo | |
 | 3 | LeaguePicker (multi-league selection) | todo | |
 | 4 | Season replay mode (`?replay=` fixture loading) — evaluate if local's fixture mode already covers it | todo | |
