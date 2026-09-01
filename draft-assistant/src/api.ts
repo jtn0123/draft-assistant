@@ -5,8 +5,12 @@ import type { SeasonView } from "./season-types";
 import type { ChatReply, ChatRequest, ChatSettings } from "./chat-types";
 import { ReplayFeed, replaySource } from "./replay";
 
-const DRAFT_VIEW_SCHEMA_VERSION = "1.1";
-const SEASON_VIEW_SCHEMA_VERSION = "1.0";
+// Kept in step with DRAFT_SCHEMA_VERSION in src-tauri/src/view.rs and
+// SEASON_SCHEMA_VERSION in src-tauri/src/season.rs. Bump both sides together
+// with the fixtures in public/ — src-tauri/tests/fixture_shape.rs fails if the
+// fixtures and the structs disagree about a single field.
+const DRAFT_VIEW_SCHEMA_VERSION = "1.2";
+const SEASON_VIEW_SCHEMA_VERSION = "1.1";
 
 export function validateDraftView(value: DraftView): DraftView {
   if (value.schema_version !== DRAFT_VIEW_SCHEMA_VERSION) {

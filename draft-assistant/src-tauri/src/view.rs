@@ -17,6 +17,12 @@ use std::collections::HashMap;
 pub use crate::board::tier_alerts;
 pub use crate::picks::{keeper_pick_nos, merged_picks, next_open_pick};
 
+/// Bumped whenever `DraftView` gains, loses, or renames a serialized field.
+/// The frontend gate in `src/api.ts` refuses any other version outright, and
+/// `tests/fixture_shape.rs` refuses to let it move without the checked-in
+/// `public/dev-fixture.json` moving with it.
+pub const DRAFT_SCHEMA_VERSION: &str = "1.2";
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DraftStatus {
     pub draft_id: String,
@@ -116,21 +122,6 @@ pub struct DataHealth {
     pub poll_last_success_at: Option<u64>,
     pub poll_consecutive_failures: u32,
     pub poll_last_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct PollHealth {
-    pub last_success_at: Option<u64>,
-    pub consecutive_failures: u32,
-    pub last_error: Option<String>,
-}
-
-pub fn poll_health(loaded: &LoadedLeague) -> PollHealth {
-    PollHealth {
-        last_success_at: loaded.poll_last_success_at,
-        consecutive_failures: loaded.poll_consecutive_failures,
-        last_error: loaded.poll_last_error.clone(),
-    }
 }
 
 fn validated_slot(slot: Option<u32>, teams: u32) -> (Option<u32>, Option<String>) {
@@ -391,7 +382,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     keeper_picks.sort_unstable();
 
     DraftView {
-        schema_version: "1.1".into(),
+        schema_version: DRAFT_SCHEMA_VERSION.into(),
         generated_at: now_secs(),
         league: LeagueSummary {
             league_id: league.league_id.clone(),

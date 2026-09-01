@@ -11,10 +11,28 @@ use crate::engine::{now_secs, AppConfig, LoadedLeague};
 use crate::season::{build_season_view_cached, SeasonAnalysis, SeasonView};
 use crate::season_engine::{LoadedSeason, SeasonLoader};
 use crate::sleeper::Pick;
-use crate::view::PollHealth;
+use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use tokio::sync::Mutex;
+
+/// What the health badge listens for: the three facts about the last tick.
+#[derive(Debug, Clone, Serialize)]
+pub struct PollHealth {
+    pub last_success_at: Option<u64>,
+    pub consecutive_failures: u32,
+    pub last_error: Option<String>,
+}
+
+/// The draft poller keeps its record on the league it is watching, so its
+/// report is read straight back off there.
+pub fn poll_health(loaded: &LoadedLeague) -> PollHealth {
+    PollHealth {
+        last_success_at: loaded.poll_last_success_at,
+        consecutive_failures: loaded.poll_consecutive_failures,
+        last_error: loaded.poll_last_error.clone(),
+    }
+}
 
 /// A cheap stand-in for the whole pick list: how many there are, and a hash of
 /// which player sits at which pick number.

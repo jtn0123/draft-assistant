@@ -426,7 +426,7 @@ describe("when an action fails", () => {
 
 function seasonFixture(): SeasonView {
   return {
-    schema_version: "1.0",
+    schema_version: "1.1",
     generated_at: 0,
     team_avatars: {},
     league: {

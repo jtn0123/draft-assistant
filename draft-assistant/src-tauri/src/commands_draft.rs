@@ -4,7 +4,7 @@ use crate::draft;
 use crate::engine::{AppConfig, StoredLeague};
 use crate::keepers;
 use crate::picks::{self, ManualPickStore};
-use crate::poll::{record_poll_outcome, DraftPollMemory};
+use crate::poll::{self, record_poll_outcome, DraftPollMemory};
 use crate::sleeper::Pick;
 use crate::sleeper_error::to_message;
 use crate::state::{view_from, AppState};
@@ -298,7 +298,7 @@ pub async fn start_polling(
                             Err(error) => errors.push(error.to_string()),
                         }
                         record_poll_outcome(loaded, &errors);
-                        health = Some(view::poll_health(loaded));
+                        health = Some(poll::poll_health(loaded));
                     }
                 }
                 if let Some(health) = health {

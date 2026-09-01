@@ -1,6 +1,7 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "generated_at": 1788127760,
+  "analysis_as_of_secs": 1788127752,
   "league": {
     "league_id": "1389710366300200960",
     "name": "UMass Wrestling Fantasy Football League",
@@ -92,13 +93,15 @@
   "header": {
     "opponent_name": "Mitch's Cousin ",
     "my_projected": 135.72645803681408,
+    "my_set_projected": 132.95959632083887,
     "opp_projected": 105.86131054489263,
-    "win_odds": 0.7397615959880579,
+    "win_odds_best": 0.7397615959880579,
+    "win_odds_set": 0.7216708512204331,
     "playoff_odds": 0.76725,
     "locks_in_ms": 1789086900000
   },
   "matchup": {
-    "my_name": "Witzy’s Blitzys",
+    "my_name": "Witzy\u2019s Blitzys",
     "opp_name": "Mitch's Cousin ",
     "my_avatar": "93bf4ccf4ee12f405f5617b95b001ab4",
     "opp_avatar": "https://sleepercdn.com/uploads/234c700fab2da322a641ae1e28c5664c.jpg",
@@ -110,10 +113,12 @@
         "my_player_id": "11560",
         "my_name": "Caleb Williams",
         "my_team": "CHI",
+        "my_injury": null,
         "my_points": 23.389177999861722,
         "opp_player_id": "4984",
         "opp_name": "Josh Allen",
         "opp_team": "BUF",
+        "opp_injury": null,
         "opp_points": 24.185944238188178,
         "margin": -0.7967662383264553
       },
@@ -122,10 +127,12 @@
         "my_player_id": "8138",
         "my_name": "James Cook",
         "my_team": "BUF",
+        "my_injury": null,
         "my_points": 17.938619793700852,
         "opp_player_id": "8205",
         "opp_name": "Isiah Pacheco",
         "opp_team": "DET",
+        "opp_injury": null,
         "opp_points": 3.8870000351220373,
         "margin": 14.051619758578815
       },
@@ -134,10 +141,12 @@
         "my_player_id": "8167",
         "my_name": "Christian Watson",
         "my_team": "GB",
+        "my_injury": null,
         "my_points": 14.267753145204704,
         "opp_player_id": "6786",
         "opp_name": "CeeDee Lamb",
         "opp_team": "DAL",
+        "opp_injury": null,
         "opp_points": 18.218720539356184,
         "margin": -3.95096739415148
       },
@@ -146,10 +155,12 @@
         "my_player_id": "12517",
         "my_name": "Colston Loveland",
         "my_team": "CHI",
+        "my_injury": null,
         "my_points": 14.664785489872447,
         "opp_player_id": "5844",
         "opp_name": "T.J. Hockenson",
         "opp_team": "MIN",
+        "opp_injury": null,
         "opp_points": 8.447144415323987,
         "margin": 6.21764107454846
       },
@@ -158,10 +169,12 @@
         "my_player_id": "4866",
         "my_name": "Saquon Barkley",
         "my_team": "PHI",
+        "my_injury": null,
         "my_points": 15.580825166177572,
         "opp_player_id": "2216",
         "opp_name": "Mike Evans",
         "opp_team": "SF",
+        "opp_injury": null,
         "opp_points": 13.0785532496448,
         "margin": 2.502271916532772
       },
@@ -170,10 +183,12 @@
         "my_player_id": "7543",
         "my_name": "Travis Etienne",
         "my_team": "NO",
+        "my_injury": "Q",
         "my_points": 14.336559360302584,
         "opp_player_id": "5045",
         "opp_name": "Courtland Sutton",
         "opp_team": "DEN",
+        "opp_injury": null,
         "opp_points": 10.759420253337495,
         "margin": 3.577139106965088
       },
@@ -182,10 +197,12 @@
         "my_player_id": "8146",
         "my_name": "Garrett Wilson",
         "my_team": "NYJ",
+        "my_injury": null,
         "my_points": 13.966958831079841,
         "opp_player_id": "9754",
         "opp_name": "Quentin Johnston",
         "opp_team": "LAC",
+        "opp_injury": null,
         "opp_points": 11.248967508872065,
         "margin": 2.7179913222077765
       },
@@ -194,10 +211,12 @@
         "my_player_id": "9500",
         "my_name": "Josh Downs",
         "my_team": "IND",
+        "my_injury": null,
         "my_points": 12.791778250614378,
         "opp_player_id": "8210",
         "opp_name": "Chig Okonkwo",
         "opp_team": "WAS",
+        "opp_injury": null,
         "opp_points": 9.125560305047891,
         "margin": 3.666217945566487
       },
@@ -206,10 +225,12 @@
         "my_player_id": "DET",
         "my_name": "Detroit Lions",
         "my_team": "DET",
+        "my_injury": null,
         "my_points": 8.790000000000001,
         "opp_player_id": "CHI",
         "opp_name": "Chicago Bears",
         "opp_team": "CHI",
+        "opp_injury": null,
         "opp_points": 6.91,
         "margin": 1.8800000000000008
       }
@@ -220,10 +241,12 @@
         "my_player_id": "11560",
         "my_name": "Caleb Williams",
         "my_team": "CHI",
+        "my_injury": null,
         "my_points": 23.389177999861722,
         "opp_player_id": "4984",
         "opp_name": "Josh Allen",
         "opp_team": "BUF",
+        "opp_injury": null,
         "opp_points": 24.185944238188178,
         "margin": -0.7967662383264553
       },
@@ -232,10 +255,12 @@
         "my_player_id": "8138",
         "my_name": "James Cook",
         "my_team": "BUF",
+        "my_injury": null,
         "my_points": 17.938619793700852,
         "opp_player_id": "8205",
         "opp_name": "Isiah Pacheco",
         "opp_team": "DET",
+        "opp_injury": null,
         "opp_points": 3.8870000351220373,
         "margin": 14.051619758578815
       },
@@ -244,10 +269,12 @@
         "my_player_id": "8146",
         "my_name": "Garrett Wilson",
         "my_team": "NYJ",
+        "my_injury": null,
         "my_points": 13.966958831079841,
         "opp_player_id": "6786",
         "opp_name": "CeeDee Lamb",
         "opp_team": "DAL",
+        "opp_injury": null,
         "opp_points": 18.218720539356184,
         "margin": -4.251761708276343
       },
@@ -256,10 +283,12 @@
         "my_player_id": "12517",
         "my_name": "Colston Loveland",
         "my_team": "CHI",
+        "my_injury": null,
         "my_points": 14.664785489872447,
         "opp_player_id": "5844",
         "opp_name": "T.J. Hockenson",
         "opp_team": "MIN",
+        "opp_injury": null,
         "opp_points": 8.447144415323987,
         "margin": 6.21764107454846
       },
@@ -268,10 +297,12 @@
         "my_player_id": "4866",
         "my_name": "Saquon Barkley",
         "my_team": "PHI",
+        "my_injury": null,
         "my_points": 15.580825166177572,
         "opp_player_id": "2216",
         "opp_name": "Mike Evans",
         "opp_team": "SF",
+        "opp_injury": null,
         "opp_points": 13.0785532496448,
         "margin": 2.502271916532772
       },
@@ -280,10 +311,12 @@
         "my_player_id": "7543",
         "my_name": "Travis Etienne",
         "my_team": "NO",
+        "my_injury": "Q",
         "my_points": 14.336559360302584,
         "opp_player_id": "5045",
         "opp_name": "Courtland Sutton",
         "opp_team": "DEN",
+        "opp_injury": null,
         "opp_points": 10.759420253337495,
         "margin": 3.577139106965088
       },
@@ -292,10 +325,12 @@
         "my_player_id": "5967",
         "my_name": "Tony Pollard",
         "my_team": "TEN",
+        "my_injury": null,
         "my_points": 10.024916534639125,
         "opp_player_id": "9754",
         "opp_name": "Quentin Johnston",
         "opp_team": "LAC",
+        "opp_injury": null,
         "opp_points": 11.248967508872065,
         "margin": -1.2240509742329397
       },
@@ -304,10 +339,12 @@
         "my_player_id": "8167",
         "my_name": "Christian Watson",
         "my_team": "GB",
+        "my_injury": null,
         "my_points": 14.267753145204704,
         "opp_player_id": "8210",
         "opp_name": "Chig Okonkwo",
         "opp_team": "WAS",
+        "opp_injury": null,
         "opp_points": 9.125560305047891,
         "margin": 5.142192840156813
       },
@@ -316,10 +353,12 @@
         "my_player_id": "DET",
         "my_name": "Detroit Lions",
         "my_team": "DET",
+        "my_injury": null,
         "my_points": 8.790000000000001,
         "opp_player_id": "CHI",
         "opp_name": "Chicago Bears",
         "opp_team": "CHI",
+        "opp_injury": null,
         "opp_points": 6.91,
         "margin": 1.8800000000000008
       }
@@ -335,7 +374,9 @@
       "player_out": "Tony Pollard",
       "player_out_id": "5967",
       "gain": 2.766861715975253,
-      "why": "Josh Downs projects 12.8 against 10.0 for Tony Pollard — a +2.8 swing on this week's projection."
+      "why": "Josh Downs projects 12.8 against 10.0 for Tony Pollard \u2014 a +2.8 swing on this week's projection.",
+      "reason": null,
+      "locks_at_ms": 1789318800000
     }
   ],
   "points_on_table": 2.766861715975253,
@@ -358,7 +399,7 @@
       "roster_id": 3,
       "seed": 1,
       "name": "Northern CT Hedgehogs  ",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -371,7 +412,7 @@
       "roster_id": 12,
       "seed": 2,
       "name": "CrabRider",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -383,8 +424,8 @@
     {
       "roster_id": 2,
       "seed": 3,
-      "name": "Witzy’s Blitzys",
-      "record": "0–0",
+      "name": "Witzy\u2019s Blitzys",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -397,7 +438,7 @@
       "roster_id": 4,
       "seed": 4,
       "name": "fisher23",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -410,7 +451,7 @@
       "roster_id": 14,
       "seed": 5,
       "name": "197lbsleanmeandadbod",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -423,7 +464,7 @@
       "roster_id": 9,
       "seed": 6,
       "name": "Ruggs and Tuggs",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -436,7 +477,7 @@
       "roster_id": 13,
       "seed": 7,
       "name": "McSleeper26",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -449,7 +490,7 @@
       "roster_id": 8,
       "seed": 8,
       "name": "Meatball",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -462,7 +503,7 @@
       "roster_id": 10,
       "seed": 9,
       "name": "Team Iceland",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -475,7 +516,7 @@
       "roster_id": 1,
       "seed": 10,
       "name": "AllDay21",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -488,7 +529,7 @@
       "roster_id": 11,
       "seed": 11,
       "name": "Stompthatass",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -501,7 +542,7 @@
       "roster_id": 6,
       "seed": 12,
       "name": "ocrevo",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -514,7 +555,7 @@
       "roster_id": 5,
       "seed": 13,
       "name": "ClemDawg Millionaires",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -527,7 +568,7 @@
       "roster_id": 7,
       "seed": 14,
       "name": "Mitch's Cousin ",
-      "record": "0–0",
+      "record": "0\u20130",
       "wins": 0,
       "losses": 0,
       "ties": 0,
@@ -1362,7 +1403,7 @@
       "give_position": "RB",
       "my_edge": 3.882161179053611,
       "their_edge": 0.5480472040659521,
-      "note": "Mitch's Cousin  gains +0.5/wk too — both sides start a better lineup"
+      "note": "Mitch's Cousin  gains +0.5/wk too \u2014 both sides start a better lineup"
     },
     {
       "roster_id": 1,
@@ -1375,7 +1416,7 @@
       "give_position": "WR",
       "my_edge": 2.7600000000000193,
       "their_edge": 2.137131584813318,
-      "note": "AllDay21 gains +2.1/wk too — both sides start a better lineup"
+      "note": "AllDay21 gains +2.1/wk too \u2014 both sides start a better lineup"
     },
     {
       "roster_id": 5,
@@ -1388,7 +1429,7 @@
       "give_position": "WR",
       "my_edge": 1.277326438736111,
       "their_edge": 0.9202313233633816,
-      "note": "ClemDawg Millionaires gains +0.9/wk too — both sides start a better lineup"
+      "note": "ClemDawg Millionaires gains +0.9/wk too \u2014 both sides start a better lineup"
     },
     {
       "roster_id": 4,
@@ -1401,7 +1442,7 @@
       "give_position": "TE",
       "my_edge": 0.8000000000000114,
       "their_edge": 1.9017922612531208,
-      "note": "fisher23 gains +1.9/wk too — both sides start a better lineup"
+      "note": "fisher23 gains +1.9/wk too \u2014 both sides start a better lineup"
     }
   ],
   "recent_trades": [
@@ -1491,7 +1532,7 @@
       "sides": [
         {
           "roster_id": 2,
-          "team": "Witzy’s Blitzys",
+          "team": "Witzy\u2019s Blitzys",
           "gets": []
         },
         {
@@ -1637,7 +1678,7 @@
     {
       "place": 1,
       "name": "AllDay21",
-      "record": "22–6",
+      "record": "22\u20136",
       "points": 1926.0,
       "tag": "Most pts",
       "is_mine": false
@@ -1645,7 +1686,7 @@
     {
       "place": 1,
       "name": "CrabRider",
-      "record": "22–6",
+      "record": "22\u20136",
       "points": 1891.42,
       "tag": "Champ",
       "is_mine": false
@@ -1653,7 +1694,7 @@
     {
       "place": 3,
       "name": "Mitch's Cousin ",
-      "record": "21–7",
+      "record": "21\u20137",
       "points": 1864.86,
       "tag": null,
       "is_mine": false
@@ -1661,7 +1702,7 @@
     {
       "place": 4,
       "name": "Northern CT Hedgehogs  ",
-      "record": "21–7",
+      "record": "21\u20137",
       "points": 1822.76,
       "tag": null,
       "is_mine": false
@@ -1669,7 +1710,7 @@
     {
       "place": 5,
       "name": "Jets Bar no mah",
-      "record": "19–9",
+      "record": "19\u20139",
       "points": 1817.28,
       "tag": null,
       "is_mine": false
@@ -1677,7 +1718,7 @@
     {
       "place": 6,
       "name": "ClemDawg Millionaires",
-      "record": "17–11",
+      "record": "17\u201311",
       "points": 1729.52,
       "tag": null,
       "is_mine": false
@@ -1685,7 +1726,7 @@
     {
       "place": 7,
       "name": "197lbsleanmeandadbod",
-      "record": "14–14",
+      "record": "14\u201314",
       "points": 1671.02,
       "tag": null,
       "is_mine": false
@@ -1693,7 +1734,7 @@
     {
       "place": 8,
       "name": "ocrevo",
-      "record": "14–14",
+      "record": "14\u201314",
       "points": 1644.72,
       "tag": null,
       "is_mine": false
@@ -1701,7 +1742,7 @@
     {
       "place": 9,
       "name": "Team Iceland",
-      "record": "13–15",
+      "record": "13\u201315",
       "points": 1647.9,
       "tag": null,
       "is_mine": false
@@ -1709,15 +1750,15 @@
     {
       "place": 10,
       "name": "Ruggs and Tuggs",
-      "record": "10–18",
+      "record": "10\u201318",
       "points": 1571.1,
       "tag": null,
       "is_mine": false
     },
     {
       "place": 11,
-      "name": "Witzy’s Blitzys",
-      "record": "9–19",
+      "name": "Witzy\u2019s Blitzys",
+      "record": "9\u201319",
       "points": 1441.6,
       "tag": null,
       "is_mine": true
@@ -1725,7 +1766,7 @@
     {
       "place": 12,
       "name": "Meatball",
-      "record": "5–23",
+      "record": "5\u201323",
       "points": 1430.44,
       "tag": null,
       "is_mine": false
@@ -1733,7 +1774,7 @@
     {
       "place": 13,
       "name": "Da Little Bears",
-      "record": "5–23",
+      "record": "5\u201323",
       "points": 1387.92,
       "tag": null,
       "is_mine": false
@@ -1741,7 +1782,7 @@
     {
       "place": 14,
       "name": "fisher23",
-      "record": "4–24",
+      "record": "4\u201324",
       "points": 1303.52,
       "tag": null,
       "is_mine": false
@@ -1785,7 +1826,7 @@
       },
       {
         "roster_id": 2,
-        "name": "Witzy’s Blitzys",
+        "name": "Witzy\u2019s Blitzys",
         "is_mine": true,
         "points": [
           {
@@ -2021,6 +2062,20 @@
   },
   "data_health": {
     "fetched_at": 1788127759,
-    "warnings": []
+    "warnings": [],
+    "sources": {
+      "matchups": {
+        "last_success_secs": 1788127759,
+        "error": null
+      },
+      "scores": {
+        "last_success_secs": 1788127759,
+        "error": null
+      },
+      "rosters": {
+        "last_success_secs": 1788127759,
+        "error": null
+      }
+    }
   }
 }

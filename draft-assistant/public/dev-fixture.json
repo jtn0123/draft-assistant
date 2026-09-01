@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "generated_at": 1787882005,
   "league": {
     "league_id": "1389710366300200960",
@@ -7627,6 +7627,18 @@
     "DEF": 14,
     "QB": 14
   },
+  "pick_prices": [
+    {
+      "round": 1,
+      "points": 114.851201,
+      "example": "Jonathan Taylor"
+    },
+    {
+      "round": 2,
+      "points": 96.361743,
+      "example": "Derrick Henry"
+    }
+  ],
   "data_health": {
     "players_fetched_at": 1787879731,
     "projections_fetched_at": 1787879732,

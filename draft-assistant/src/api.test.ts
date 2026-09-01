@@ -15,10 +15,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 const draftView = {
-  schema_version: "1.1",
+  schema_version: "1.2",
   league: { league_id: "L1", name: "Test", season: "2026" },
 } as unknown as DraftView;
-const seasonView = { schema_version: "1.0" } as unknown as SeasonView;
+const seasonView = { schema_version: "1.1" } as unknown as SeasonView;
 
 async function load(shell: boolean, search = "") {
   vi.resetModules();
@@ -45,7 +45,7 @@ describe("schema validation", () => {
     expect(validateDraftView(draftView)).toBe(draftView);
     expect(validateSeasonView(seasonView)).toBe(seasonView);
     expect(() => validateDraftView({ schema_version: "0.9" } as DraftView)).toThrow(
-      /expected schema 1\.1, received 0\.9/,
+      /expected schema 1\.2, received 0\.9/,
     );
     expect(() => validateSeasonView({} as SeasonView)).toThrow(/received missing/);
   });

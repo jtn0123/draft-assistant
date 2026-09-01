@@ -18,7 +18,7 @@ vi.mock("./api", () => ({ api: mocks }));
 
 import { reloadSeason, useSeasonSession, type SeasonSession } from "./session";
 
-const view = (week: number) => ({ schema_version: "1.0", week }) as unknown as SeasonView;
+const view = (week: number) => ({ schema_version: "1.1", week }) as unknown as SeasonView;
 
 let pushUpdate: ((v: SeasonView) => void) | null = null;
 let pushHealth: ((h: PollHealth) => void) | null = null;
