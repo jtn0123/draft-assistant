@@ -16,14 +16,25 @@ export interface SettingsRow {
   onSelect: () => void;
 }
 
-function SyncPill({ polling, health }: { polling: boolean; health: PollHealth | null }) {
+function SyncPill({
+  polling,
+  health,
+  screen,
+}: {
+  polling: boolean;
+  health: PollHealth | null;
+  screen: Screen;
+}) {
   const failures = health?.consecutive_failures ?? 0;
   const detail = health?.last_error ?? null;
   if (!polling) {
+    // The season screen already has a DATA badge that says "Not updating" a
+    // few centimetres away. Two words for one state read as two states, so
+    // this pill borrows that one rather than introducing "sync" beside it.
     return (
       <span className="pill pill-off">
         <span className="dot" />
-        Live sync off
+        {screen === "season" ? "Not updating" : "Live sync off"}
       </span>
     );
   }
@@ -253,7 +264,7 @@ export function Header({
       </div>
 
       <div className="header-actions" ref={menuRef}>
-        <SyncPill polling={polling} health={pollHealth} />
+        <SyncPill polling={polling} health={pollHealth} screen={screen} />
 
         {screen === "draft" && (
           <>

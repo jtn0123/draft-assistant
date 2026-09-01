@@ -66,6 +66,14 @@ pub struct TeamSeason {
 }
 
 impl TeamSeason {
+    /// Wins in the standings' own currency: a tie counts half. The playoff
+    /// simulation has always scored them this way, so the seeding it is read
+    /// against has to agree — otherwise a tied team is ranked by one rule and
+    /// simulated by another.
+    pub fn win_credit(&self) -> f64 {
+        f64::from(self.wins) + f64::from(self.ties) * 0.5
+    }
+
     pub fn projected_total(&self) -> f64 {
         self.points_for + self.weekly_projection.iter().map(|(_, p)| p).sum::<f64>()
     }
@@ -108,7 +116,8 @@ struct Game {
     away_sigma: f64,
 }
 
-/// Seed order: wins first, then total points — Sleeper's default tiebreak.
+/// Seed order: wins first — a tie counting half a win — then total points.
+/// Sleeper's default tiebreak, and the one the simulation below counts with.
 fn rank_key(wins: f64, points: f64) -> (i64, i64) {
     ((wins * 1000.0) as i64, (points * 100.0) as i64)
 }
@@ -128,7 +137,7 @@ pub fn playoff_odds(
     // Nothing left to play: the standings as they stand are the answer.
     if schedule.is_empty() {
         let mut order: Vec<&TeamSeason> = teams.iter().collect();
-        order.sort_by_key(|t| std::cmp::Reverse(rank_key(t.wins as f64, t.points_for)));
+        order.sort_by_key(|t| std::cmp::Reverse(rank_key(t.win_credit(), t.points_for)));
         return order
             .iter()
             .enumerate()
@@ -204,10 +213,7 @@ pub fn playoff_odds(
         })
         .collect();
 
-    let start_wins: Vec<f64> = teams
-        .iter()
-        .map(|t| t.wins as f64 + t.ties as f64 * 0.5)
-        .collect();
+    let start_wins: Vec<f64> = teams.iter().map(TeamSeason::win_credit).collect();
     let start_points: Vec<f64> = teams.iter().map(|t| t.points_for).collect();
 
     let mut rng = Rng::new(seed);
@@ -289,12 +295,12 @@ pub fn standings(
 ) -> Vec<StandingsRow> {
     let odds = playoff_odds(teams, schedule, playoff_teams, seed);
     let mut order: Vec<&TeamSeason> = teams.iter().collect();
-    // Record, then points scored, then — before any games are played, when
-    // both are level — the stronger projected roster ranks higher rather than
-    // whoever happens to have the lower roster id.
+    // Record — ties counted as half a win, the currency the simulation uses —
+    // then points scored, then, before any games are played and with both
+    // level, the stronger projected roster rather than the lower roster id.
     order.sort_by(|a, b| {
-        rank_key(b.wins as f64, b.points_for)
-            .cmp(&rank_key(a.wins as f64, a.points_for))
+        rank_key(b.win_credit(), b.points_for)
+            .cmp(&rank_key(a.win_credit(), a.points_for))
             .then_with(|| b.projected_total().total_cmp(&a.projected_total()))
     });
     order

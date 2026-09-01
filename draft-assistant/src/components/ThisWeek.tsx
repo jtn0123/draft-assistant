@@ -2,7 +2,7 @@
 // (table or scoreboard), and waiver targets.
 
 import { useState } from "react";
-import type { LineupCall, MatchupView, WaiverTarget } from "../season-types";
+import type { LineupCall, LineupChoice, MatchupView, WaiverTarget } from "../season-types";
 import { fmt, ideasAgeNote, injuryWord, kickoffLabel, pct, signed } from "../format";
 import { Headshot, PlayerName, PanelHead, PosBadge, TeamAvatar, Empty, Segmented } from "./bits";
 import { setLineupView, useLineupView } from "../prefs";
@@ -105,16 +105,20 @@ function injuryProps(code: string | null | undefined) {
 
 export function LineupCompare({
   matchup,
+  which,
+  onWhich,
   winOdds,
 }: {
   matchup: MatchupView | null;
-  /** 0..1 chance of winning this week, shown beside the margin. */
+  /** Which lineup is on show. Owned by the screen, because the header quotes
+   *  the odds for whichever one this is — the two used to disagree. */
+  which: LineupChoice;
+  onWhich: (next: LineupChoice) => void;
+  /** 0..1 chance of winning this week with `which`, shown beside the margin. */
   winOdds: number;
 }) {
   // Remembered between sessions, in prefs.ts along with the rest of them.
   const view = useLineupView();
-
-  const [which, setWhich] = useState<"Best" | "Set">("Best");
 
   if (matchup === null) {
     return (
@@ -149,7 +153,7 @@ export function LineupCompare({
           <Segmented
             options={["Best", "Set"] as const}
             value={which}
-            onChange={setWhich}
+            onChange={onWhich}
             titles={{
               Best: "The lineup you should be starting",
               Set: "The lineup you actually have set on Sleeper",

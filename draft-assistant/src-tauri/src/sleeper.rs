@@ -215,7 +215,7 @@ impl ProjectionRow {
     }
 }
 
-pub use crate::sleeper_users::{LeagueUser, LeagueUserMeta};
+pub use crate::sleeper_users::{avatar_map, label_map, LeagueUser, LeagueUserMeta};
 
 /// The one thing that speaks HTTP to Sleeper.
 ///

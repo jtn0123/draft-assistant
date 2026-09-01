@@ -52,6 +52,7 @@ describe("LeagueTab", () => {
       />,
     );
     expect(screen.getByText("1 completed")).toBeInTheDocument();
+    // Nothing on the wire named the picks, so the vague line is all there is.
     expect(screen.getByText(/gets draft picks/)).toBeInTheDocument();
     expect(screen.getByText("Aug 25, 10:30 AM")).toBeInTheDocument();
     expect(screen.getByText("Aug 30, 1:57 PM")).toBeInTheDocument();
@@ -76,6 +77,29 @@ describe("LeagueTab", () => {
     );
     expect(container.querySelector(".activity-kind.is-trade")).not.toBeNull();
     expect(container.querySelectorAll(".activity-faces .avatar")).toHaveLength(2);
+  });
+
+  it("names the picks a side came away with", () => {
+    render(
+      <LeagueTab
+        trades={[]}
+        recentTrades={[
+          {
+            transaction_id: "t3",
+            at: Date.parse("2026-08-25T14:30:00Z"),
+            involves_me: false,
+            pending: false,
+            sides: [
+              { roster_id: 11, team: "Stompthatass", gets: ["Bijan Robinson"] },
+              { roster_id: 13, team: "Meatball", gets: ["2026 1st", "2027 3rd"] },
+            ],
+          },
+        ]}
+        activity={[]}
+      />,
+    );
+    expect(screen.getByText(/gets 2026 1st, 2027 3rd/)).toBeInTheDocument();
+    expect(screen.queryByText(/gets draft picks/)).not.toBeInTheDocument();
   });
 
   it("marks a trade the league has not processed yet", () => {
@@ -162,6 +186,44 @@ describe("TeamRoster", () => {
     expect(screen.getByText("41.5")).toBeInTheDocument();
     expect(screen.getByText("Wk")).toBeInTheDocument();
     expect(screen.getByText("Season")).toBeInTheDocument();
+  });
+
+  it("em-dashes a column that has nothing in it yet", () => {
+    // Week one, pre-kickoff: nobody has scored, so the Season column is a
+    // stack of "0.0" that reads as fifteen men measured at zero.
+    const { container } = render(
+      <TeamRoster
+        rows={[
+          row({ player_id: "1", role: "Start", projected: 23.4, points: 0 }),
+          row({ player_id: "2", name: "Tony Pollard", role: "Bench", projected: 9.1, points: 0 }),
+        ]}
+      />,
+    );
+    const seasons = [...container.querySelectorAll(".team-season")].map((c) => c.textContent);
+    expect(seasons).toEqual(["—", "—"]);
+    // The projections are real, so that column still prints.
+    expect(screen.getByText("23.4")).toBeInTheDocument();
+    expect(screen.getByText(/A dash means that column has nothing in it yet/)).toBeInTheDocument();
+  });
+
+  it("keeps a zero that sits beside a real number", () => {
+    const { container } = render(
+      <TeamRoster
+        rows={[
+          row({ player_id: "1", role: "Start", projected: 0, points: 0 }),
+          row({
+            player_id: "2",
+            name: "Tony Pollard",
+            role: "Bench",
+            projected: 9.1,
+            points: 41.5,
+          }),
+        ]}
+      />,
+    );
+    // One team-mate having scored makes every other zero a measurement.
+    const seasons = [...container.querySelectorAll(".team-season")].map((c) => c.textContent);
+    expect(seasons).toEqual(["0.0", "41.5"]);
   });
 
   it("writes Bye instead of a projection on a bye week", () => {

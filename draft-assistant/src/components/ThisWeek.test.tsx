@@ -1,9 +1,36 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { LineupCall, MatchupView, WaiverTarget } from "../season-types";
+import type { LineupCall, LineupChoice, MatchupView, WaiverTarget } from "../season-types";
 import { CallsToMake, LineupCompare, Waivers } from "./ThisWeek";
 import { resetPrefs } from "../prefs";
+
+/**
+ * LineupCompare no longer owns the Best/Set choice — the season screen does,
+ * because the header quotes the odds for whichever lineup is on show. This
+ * stands in for that owner, and takes the two odds the way the screen does so
+ * a test can check the panel is quoting the one it is showing.
+ */
+function Compare({
+  matchup,
+  oddsBest = 0.62,
+  oddsSet = 0.5,
+}: {
+  matchup: MatchupView | null;
+  oddsBest?: number;
+  oddsSet?: number;
+}) {
+  const [which, setWhich] = useState<LineupChoice>("Best");
+  return (
+    <LineupCompare
+      matchup={matchup}
+      which={which}
+      onWhich={setWhich}
+      winOdds={which === "Best" ? oddsBest : oddsSet}
+    />
+  );
+}
 
 // The table/scoreboard choice is remembered for the session now, so a test
 // that switches it must not decide the next one's starting point.
@@ -130,13 +157,13 @@ const matchup: MatchupView = {
 
 describe("LineupCompare", () => {
   it("explains a bye week instead of rendering an empty table", () => {
-    render(<LineupCompare matchup={null} winOdds={0.5} />);
+    render(<Compare matchup={null} />);
     expect(screen.getByText("No matchup this week — you're on a bye.")).toBeInTheDocument();
   });
 
   it("toggles between the lineup you should start and the one you have set", async () => {
     const user = userEvent.setup();
-    render(<LineupCompare matchup={matchup} winOdds={0.62} />);
+    render(<Compare matchup={matchup} />);
     expect(screen.getByText("5.0 sitting on your bench")).toBeInTheDocument();
     expect(screen.getByText("122.4")).toBeInTheDocument();
     expect(screen.getByText("Jalen Hurts")).toBeInTheDocument();
@@ -149,16 +176,27 @@ describe("LineupCompare", () => {
 
   it("says so when the set lineup is already the best one", () => {
     render(
-      <LineupCompare
+      <Compare
         matchup={{ ...matchup, set_projected: matchup.my_projected, set_rows: matchup.rows }}
-        winOdds={0.62}
       />,
     );
     expect(screen.getByText("your lineup is already your best")).toBeInTheDocument();
   });
 
+  it("quotes the odds for the lineup it is showing, not the other one", async () => {
+    const user = userEvent.setup();
+    render(<Compare matchup={matchup} oddsBest={0.74} oddsSet={0.61} />);
+    expect(screen.getByText("+13.5 · 74% to win")).toBeInTheDocument();
+
+    // Switching to the worse lineup has to move the percentage with it —
+    // "74% to win" beside "5.0 sitting on your bench" was the contradiction.
+    await user.click(screen.getByRole("button", { name: "Set" }));
+    expect(screen.getByText("+8.5 · 61% to win")).toBeInTheDocument();
+    expect(screen.queryByText(/74% to win/)).not.toBeInTheDocument();
+  });
+
   it("shows both sides, the margin and the win odds", () => {
-    render(<LineupCompare matchup={matchup} winOdds={0.62} />);
+    render(<Compare matchup={matchup} />);
     expect(screen.getByText("122.4")).toBeInTheDocument();
     expect(screen.getByText("108.9")).toBeInTheDocument();
     expect(screen.getByText("+13.5 · 62% to win")).toBeInTheDocument();
@@ -167,7 +205,7 @@ describe("LineupCompare", () => {
 
   it("switches between the table and scoreboard views", async () => {
     const user = userEvent.setup();
-    render(<LineupCompare matchup={matchup} winOdds={0.62} />);
+    render(<Compare matchup={matchup} />);
 
     expect(screen.getByText("Your player")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Scoreboard" }));
@@ -176,7 +214,7 @@ describe("LineupCompare", () => {
   });
 
   it("puts the gap between the two teams in the table too", () => {
-    render(<LineupCompare matchup={matchup} winOdds={0.62} />);
+    render(<Compare matchup={matchup} />);
     const row = document.querySelectorAll(".lineup-row")[1];
     const cells = [...row.children];
     // slot, my player, my proj, the gap, their proj, their player.
@@ -196,7 +234,7 @@ describe("LineupCompare", () => {
         { ...matchup.rows[0], slot: "TE", my_points: 9, opp_points: 9, margin: 0 },
       ],
     };
-    render(<LineupCompare matchup={both} winOdds={0.62} />);
+    render(<Compare matchup={both} />);
     await user.click(screen.getByRole("button", { name: "Scoreboard" }));
 
     const row = document.querySelector(".scoreboard-row");
@@ -217,7 +255,7 @@ describe("LineupCompare", () => {
       ...matchup,
       rows: [{ ...matchup.rows[0], my_injury: "O", opp_injury: "Q" }],
     };
-    render(<LineupCompare matchup={hurt} winOdds={0.62} />);
+    render(<Compare matchup={hurt} />);
 
     const mine = screen.getByText("O").closest(".tag");
     expect(mine).toHaveAttribute("title", "Out");
@@ -234,13 +272,13 @@ describe("LineupCompare", () => {
   });
 
   it("leaves healthy starters untagged", () => {
-    render(<LineupCompare matchup={matchup} winOdds={0.62} />);
+    render(<Compare matchup={matchup} />);
     expect(document.querySelector(".lineup-table .tag")).toBeNull();
   });
 
   it("shows a headshot on both sides of every scoreboard row", async () => {
     const user = userEvent.setup();
-    render(<LineupCompare matchup={matchup} winOdds={0.62} />);
+    render(<Compare matchup={matchup} />);
     await user.click(screen.getByRole("button", { name: "Scoreboard" }));
     const heads = document.querySelectorAll(".scoreboard .headshot, .scoreboard .team-logo");
     expect(heads).toHaveLength(2 * matchup.rows.length);

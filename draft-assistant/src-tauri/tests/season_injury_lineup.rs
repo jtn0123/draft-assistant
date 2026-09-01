@@ -44,10 +44,10 @@ fn an_opponents_out_starter_stops_inflating_their_score() {
     // in the odds is theirs.
     assert!((healthy.header.my_projected - injured.header.my_projected).abs() < 1e-9);
     assert!(
-        injured.header.win_odds > healthy.header.win_odds,
+        injured.header.win_odds_best > healthy.header.win_odds_best,
         "{} should beat {}",
-        injured.header.win_odds,
-        healthy.header.win_odds
+        injured.header.win_odds_best,
+        healthy.header.win_odds_best
     );
 
     // And the rest of their season is priced the same way: an Out player is
@@ -66,7 +66,7 @@ fn only_out_and_doubtful_are_zeroed() {
     // Most Questionable players play, so nothing about the week changes.
     let questionable = view_with_injury("r3", Some("Questionable"));
     assert!((questionable.header.opp_projected - healthy.header.opp_projected).abs() < 1e-9);
-    assert!((questionable.header.win_odds - healthy.header.win_odds).abs() < 1e-9);
+    assert!((questionable.header.win_odds_best - healthy.header.win_odds_best).abs() < 1e-9);
 
     // Doubtful is treated as Out.
     let doubtful = view_with_injury("r3", Some("Doubtful"));

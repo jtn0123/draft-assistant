@@ -388,6 +388,7 @@ mod tests {
             adds: None,
             drops: None,
             roster_ids: Vec::new(),
+            draft_picks: Vec::new(),
             settings: None,
         }
     }

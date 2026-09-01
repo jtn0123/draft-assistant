@@ -4,14 +4,22 @@ import type { LeagueSummary } from "./types";
 
 export interface SeasonHeader {
   opponent_name: string | null;
+  /** What my best lineup projects. */
   my_projected: number;
+  /** What the lineup I actually have set on Sleeper projects. */
+  my_set_projected: number;
   opp_projected: number;
-  /** 0..1 */
-  win_odds: number;
+  /** 0..1 with the best lineup available. */
+  win_odds_best: number;
+  /** 0..1 with the lineup as set — lower whenever points sit on the bench. */
+  win_odds_set: number;
   /** 0..1 */
   playoff_odds: number;
   locks_in_ms: number | null;
 }
+
+/** Which of my two lineups the screen is showing, and pricing. */
+export type LineupChoice = "Best" | "Set";
 
 export interface MatchupRow {
   slot: string;

@@ -8,10 +8,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize)]
 pub struct SeasonHeader {
     pub opponent_name: Option<String>,
+    /// What my best lineup projects, and what the one I have set on Sleeper
+    /// projects. The screen picks between them with the same toggle that
+    /// picks between the two win odds below, so the score it prints and the
+    /// percentage beside it are always readings of one lineup.
     pub my_projected: f64,
+    pub my_set_projected: f64,
     pub opp_projected: f64,
-    /// 0.0..=1.0 chance of winning this week.
-    pub win_odds: f64,
+    /// 0.0..=1.0 chance of winning this week with the best lineup available,
+    /// and with the one actually set. They differ exactly when the set lineup
+    /// is leaving points on the bench.
+    pub win_odds_best: f64,
+    pub win_odds_set: f64,
     /// 0.0..=1.0 chance of making the playoff bracket.
     pub playoff_odds: f64,
     /// Epoch milliseconds of the next kickoff involving one of my starters.

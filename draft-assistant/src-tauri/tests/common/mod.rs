@@ -5,7 +5,8 @@ use draft_assistant_lib::board::BoardPlayer;
 use draft_assistant_lib::engine::{AppConfig, LoadedLeague};
 use draft_assistant_lib::roster::RosterRules;
 use draft_assistant_lib::season_api::{
-    GameMeta, Matchup, Roster, RosterSettings, ScoreGame, Transaction, TransactionSettings,
+    GameMeta, Matchup, Roster, RosterSettings, ScoreGame, TradedPick, Transaction,
+    TransactionSettings,
 };
 use draft_assistant_lib::season_engine::LoadedSeason;
 use draft_assistant_lib::season_history::{History, PlayerSnap, Snapshot, TeamSnap};
@@ -340,6 +341,12 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
                     ("w1".to_string(), 1),
                 ])),
                 roster_ids: vec![1, 2],
+                // A wideout swap with a future second going the other way.
+                draft_picks: vec![TradedPick {
+                    season: "2027".into(),
+                    round: 2,
+                    owner_id: Some(2),
+                }],
                 settings: None,
             },
             Transaction {
@@ -350,6 +357,7 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
                 adds: Some(HashMap::from([("fa2".to_string(), 2)])),
                 drops: None,
                 roster_ids: vec![2],
+                draft_picks: Vec::new(),
                 settings: Some(TransactionSettings {
                     waiver_bid: Some(12),
                 }),

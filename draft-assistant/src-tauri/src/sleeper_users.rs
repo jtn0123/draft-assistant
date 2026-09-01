@@ -4,6 +4,7 @@
 //! callers keep importing from `crate::sleeper`.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LeagueUserMeta {
@@ -47,4 +48,24 @@ impl LeagueUser {
             .or_else(|| self.avatar.clone())
             .filter(|a| !a.trim().is_empty())
     }
+}
+
+/// user_id -> what to call their team, for every member who has a label.
+///
+/// Both the current league and the previous one need exactly this map, and
+/// building it twice is how the two came to disagree about which of a team
+/// name and a handle wins.
+pub fn label_map(users: &[LeagueUser]) -> HashMap<String, String> {
+    users
+        .iter()
+        .filter_map(|u| u.label().map(|n| (u.user_id.clone(), n)))
+        .collect()
+}
+
+/// user_id -> the picture to draw for their team, where they have one.
+pub fn avatar_map(users: &[LeagueUser]) -> HashMap<String, String> {
+    users
+        .iter()
+        .filter_map(|u| u.avatar_ref().map(|a| (u.user_id.clone(), a)))
+        .collect()
 }

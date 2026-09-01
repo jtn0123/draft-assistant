@@ -27,8 +27,12 @@ pub struct MatchupSection<'a> {
     pub matchup: Option<MatchupView>,
     pub calls: Vec<LineupCall>,
     pub points_on_table: f64,
-    /// My best possible lineup's projection, and the one my opponent has set.
+    /// My best possible lineup's projection, the one I actually have set, and
+    /// the one my opponent has set. The screen toggles between the first two,
+    /// so both travel together and neither can be shown beside the other's
+    /// odds.
     pub my_projected: f64,
+    pub my_set_projected: f64,
     pub opp_projected: f64,
     /// The lineups actually set, which the live scoreboard and the roster
     /// table read to label each player's slot.
@@ -37,10 +41,13 @@ pub struct MatchupSection<'a> {
     /// Every player on my roster, scored for this week — the starting point
     /// for the waiver and trade searches too.
     pub my_candidates: Vec<Candidate>,
-    /// The two sides the win probability is priced off: my best lineup and
-    /// their set one, each resolved to position and NFL team so the spread
-    /// can account for volatility and stacks.
+    /// The sides the win probability is priced off, each resolved to position
+    /// and NFL team so the spread can account for volatility and stacks.
+    /// My best lineup and the one I have set are both here: a screen that
+    /// offers to show either has to be able to price either, or it ends up
+    /// quoting best-lineup odds next to a set lineup that is worse.
     pub my_spread: Vec<Starter>,
+    pub my_set_spread: Vec<Starter>,
     pub opp_spread: Vec<Starter>,
 }
 
@@ -125,9 +132,10 @@ pub fn build_matchup<'a>(
         .map(|m| current_lineup(loaded, m.starter_ids(), &opp_projected_points))
         .unwrap_or_else(|| opp_optimal.clone());
 
-    // The comparison shows my best lineup against their set one: I can change
-    // mine, I cannot change theirs.
+    // Both of my lineups are priced against their set one: I can change mine,
+    // I cannot change theirs.
     let my_projected: f64 = my_optimal.iter().map(|s| s.points).sum::<f64>() + 0.0;
+    let my_set_projected: f64 = my_current.iter().map(|s| s.points).sum::<f64>() + 0.0;
     let opp_projected: f64 = opp_current.iter().map(|s| s.points).sum::<f64>() + 0.0;
 
     // Both halves of the comparison: my best lineup and the one I have set,
@@ -145,7 +153,7 @@ pub fn build_matchup<'a>(
         opp_projected,
         rows: rows_against_theirs(&my_optimal),
         set_rows: rows_against_theirs(&my_current),
-        set_projected: my_current.iter().map(|s| s.points).sum(),
+        set_projected: my_set_projected,
     });
 
     MatchupSection {
@@ -155,8 +163,10 @@ pub fn build_matchup<'a>(
         calls,
         points_on_table,
         my_projected,
+        my_set_projected,
         opp_projected,
         my_spread: season_spread::starters_of(&my_optimal, &position_of, &team_of),
+        my_set_spread: season_spread::starters_of(&my_current, &position_of, &team_of),
         opp_spread: season_spread::starters_of(&opp_current, &position_of, &team_of),
         my_current,
         opp_current,

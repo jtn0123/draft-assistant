@@ -7,7 +7,7 @@
 //! a gain of zero, which is correct.
 
 use crate::roster::RosterRules;
-use crate::season_lineup::{optimal_lineup, Candidate};
+use crate::season_lineup::{lineup_total, Candidate};
 use serde::Serialize;
 use std::collections::HashSet;
 
@@ -48,13 +48,6 @@ pub struct FreeAgent {
     pub position: String,
     pub team: Option<String>,
     pub weekly_points: f64,
-}
-
-fn lineup_total(rules: &RosterRules, candidates: &[Candidate]) -> f64 {
-    optimal_lineup(rules, candidates)
-        .iter()
-        .map(|s| s.points)
-        .sum()
 }
 
 /// A roster set up for repeated what-if tests: its candidates plus one spare

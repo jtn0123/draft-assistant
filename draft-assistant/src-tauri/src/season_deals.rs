@@ -6,7 +6,7 @@
 //! listed here as pending rather than dropped — everything else is a deal that
 //! went through this week or last.
 
-use crate::season_api::Transaction;
+use crate::season_api::{TradedPick, Transaction};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -28,7 +28,44 @@ pub struct TradeDone {
     pub pending: bool,
 }
 
+/// "1st", "2nd", "3rd", "4th" — a draft round said the way a manager says it.
+fn round_ordinal(round: u32) -> String {
+    let suffix = match (round % 10, round % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    format!("{round}{suffix}")
+}
+
+/// "2027 2nd" — the label for one traded pick, or `None` when the entry is too
+/// incomplete to name (a missing year or a round of zero).
+fn pick_label(pick: &TradedPick) -> Option<String> {
+    let season = pick.season.trim();
+    if season.is_empty() || pick.round == 0 {
+        return None;
+    }
+    Some(format!("{season} {}", round_ordinal(pick.round)))
+}
+
+/// The picks one roster came away with, soonest first: "2026 1st, 2027 3rd".
+fn picks_for(transaction: &Transaction, roster_id: u32) -> Vec<String> {
+    let mut mine: Vec<&TradedPick> = transaction
+        .draft_picks
+        .iter()
+        .filter(|p| p.owner_id == Some(roster_id))
+        .collect();
+    mine.sort_by(|a, b| a.season.cmp(&b.season).then(a.round.cmp(&b.round)));
+    mine.iter().filter_map(|p| pick_label(p)).collect()
+}
+
 /// What each roster in a trade received, in roster_ids order.
+///
+/// Players first, alphabetically, then the future picks in draft order — a
+/// pick is a thing you got, and "gets draft picks" with no year or round on it
+/// tells a reader nothing they could not already guess.
 pub fn sides_of(
     transaction: &Transaction,
     team_name: &impl Fn(u32) -> String,
@@ -49,6 +86,7 @@ pub fn sides_of(
                 })
                 .unwrap_or_default();
             gets.sort();
+            gets.extend(picks_for(transaction, *roster_id));
             TradeSide {
                 roster_id: *roster_id,
                 team: team_name(*roster_id),
@@ -110,7 +148,16 @@ mod tests {
             adds: Some(adds.iter().map(|(p, r)| ((*p).to_string(), *r)).collect()),
             drops: Some(HashMap::new()),
             roster_ids: vec![11, 13],
+            draft_picks: Vec::new(),
             settings: None,
+        }
+    }
+
+    fn pick(season: &str, round: u32, owner: u32) -> TradedPick {
+        TradedPick {
+            season: season.into(),
+            round,
+            owner_id: Some(owner),
         }
     }
 
@@ -156,5 +203,42 @@ mod tests {
     fn a_pick_only_side_says_so() {
         let sides = sides_of(&trade("a", 5, &[("cd", 11)]), &team, &player);
         assert_eq!(summary(&sides), "T11 gets CD · T13 gets draft picks");
+    }
+
+    #[test]
+    fn a_traded_pick_is_named_by_year_and_round() {
+        let mut deal = trade("a", 5, &[("cd", 11)]);
+        deal.draft_picks = vec![pick("2027", 2, 13)];
+        let sides = sides_of(&deal, &team, &player);
+        assert_eq!(summary(&sides), "T11 gets CD · T13 gets 2027 2nd");
+    }
+
+    #[test]
+    fn several_picks_are_listed_in_draft_order_after_the_players() {
+        let mut deal = trade("a", 5, &[("cd", 11)]);
+        deal.draft_picks = vec![pick("2027", 3, 11), pick("2026", 1, 11)];
+        let sides = sides_of(&deal, &team, &player);
+        assert_eq!(sides[0].gets, vec!["CD", "2026 1st", "2027 3rd"]);
+    }
+
+    #[test]
+    fn round_ordinals_read_the_way_a_manager_says_them() {
+        let said: Vec<String> = [1, 2, 3, 4, 11, 21]
+            .iter()
+            .map(|r| round_ordinal(*r))
+            .collect();
+        assert_eq!(said, ["1st", "2nd", "3rd", "4th", "11th", "21st"]);
+    }
+
+    #[test]
+    fn a_pick_missing_its_year_or_round_is_left_unnamed() {
+        let mut deal = trade("a", 5, &[]);
+        deal.draft_picks = vec![pick("", 2, 11), pick("2027", 0, 11)];
+        let sides = sides_of(&deal, &team, &player);
+        assert!(sides[0].gets.is_empty(), "half an entry names no pick");
+        assert_eq!(
+            summary(&sides),
+            "T11 gets draft picks · T13 gets draft picks"
+        );
     }
 }

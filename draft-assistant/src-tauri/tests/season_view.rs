@@ -140,17 +140,60 @@ fn header_reflects_the_projection_gap_and_the_next_kickoff() {
     let v = build_season_view(&loaded, &season, config.my_user_id.as_deref());
     assert_eq!(v.header.opponent_name.as_deref(), Some("User Two"));
     assert!((v.header.my_projected - 55.0).abs() < 1e-9);
+    assert!((v.header.my_set_projected - 53.0).abs() < 1e-9);
     assert!((v.header.opp_projected - 51.0).abs() < 1e-9);
     assert!(
-        v.header.win_odds > 0.5 && v.header.win_odds < 1.0,
+        v.header.win_odds_best > 0.5 && v.header.win_odds_best < 1.0,
         "projected ahead 55-51 means favoured but not certain: {}",
-        v.header.win_odds
+        v.header.win_odds_best
     );
     let upcoming = season.scores[1].start_time;
     assert_eq!(v.header.locks_in_ms, upcoming);
     assert_eq!(v.live.next_kickoff_ms, upcoming);
     assert_eq!(v.data_health.fetched_at, season.fetched_at);
     assert!(v.generated_at >= season.fetched_at);
+}
+
+#[test]
+fn a_suboptimal_set_lineup_is_given_worse_odds_than_the_best_one() {
+    // The fixture leaves a 10-point back on the bench behind an 8-point
+    // receiver, so best projects 55 and set projects 53 against the same
+    // opponent's 51. The screen offers to show either lineup; if both were
+    // quoted the one win probability, it would be telling the manager he is
+    // 74% to win while also telling him he is starting the wrong player.
+    let v = view();
+    assert!(v.header.my_set_projected < v.header.my_projected);
+    assert!(
+        v.header.win_odds_set < v.header.win_odds_best,
+        "points left on the bench have to cost win probability: set {} vs best {}",
+        v.header.win_odds_set,
+        v.header.win_odds_best
+    );
+    // Still the favourite at 53-51 — worse odds, not a different matchup.
+    assert!(v.header.win_odds_set > 0.5 && v.header.win_odds_set < 1.0);
+}
+
+#[test]
+fn an_already_optimal_lineup_is_priced_the_same_either_way() {
+    let (loaded, mut season, config) = common::fixture();
+    // Start the bench back in the flex: now the set lineup is the best one.
+    for matchup in &mut season.matchups {
+        if matchup.roster_id == 1 {
+            let starters = matchup.starters.as_mut().expect("fixture sets starters");
+            for id in starters.iter_mut() {
+                if id == "w2" {
+                    *id = "r2".to_string();
+                }
+            }
+        }
+    }
+    let v = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+    assert!((v.header.my_set_projected - v.header.my_projected).abs() < 1e-9);
+    assert!(
+        (v.header.win_odds_set - v.header.win_odds_best).abs() < 1e-9,
+        "one lineup, one number"
+    );
+    assert!(v.calls.is_empty(), "nothing left to change");
 }
 
 #[test]

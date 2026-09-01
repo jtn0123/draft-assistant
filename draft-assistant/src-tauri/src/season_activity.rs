@@ -210,6 +210,7 @@ mod tests {
             drops: Some(drops.iter().map(|(p, r)| ((*p).to_string(), *r)).collect())
                 .filter(|m: &HashMap<String, u32>| !m.is_empty()),
             roster_ids: vec![1],
+            draft_picks: Vec::new(),
             settings: Some(TransactionSettings {
                 waiver_bid: Some(16),
             }),

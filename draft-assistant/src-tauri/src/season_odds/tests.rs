@@ -60,6 +60,26 @@ fn level_teams_are_ordered_by_projection_not_roster_id() {
 }
 
 #[test]
+fn a_tie_is_worth_half_a_win_when_the_seeds_are_cut() {
+    // 1-0-1 against 1-1-0: level on wins, and the tie is the difference. The
+    // simulation has always scored it that way; the seeding used to ignore it
+    // and hand first seed to whoever had scored more points.
+    let mut tied = team(1, 1, 0, 200.0, 100.0);
+    tied.ties = 1;
+    let beaten = team(2, 1, 1, 260.0, 100.0);
+    let rows = standings(&[tied, beaten], &[], 1, &|id| format!("team{id}"), None, 5);
+    assert_eq!(
+        rows[0].roster_id, 1,
+        "1-0-1 outranks 1-1 despite fewer points"
+    );
+    assert_eq!(rows[0].record, "1\u{2013}0\u{2013}1");
+    assert_eq!(rows[0].seed, 1);
+    // And the odds agree with the seeding they are printed beside.
+    assert_eq!(rows[0].playoff_odds, 1.0);
+    assert_eq!(rows[1].playoff_odds, 0.0);
+}
+
+#[test]
 fn odds_are_deterministic_for_the_same_state() {
     let teams = vec![team(1, 2, 0, 250.0, 110.0), team(2, 0, 2, 200.0, 100.0)];
     let schedule = round_robin(&[1, 2], 4);

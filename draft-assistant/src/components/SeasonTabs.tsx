@@ -114,6 +114,12 @@ export function Standings({
 export function TeamRoster({ rows }: { rows: RosterRow[] }) {
   if (rows.length === 0) return <Empty>Set your Sleeper username to see your roster.</Empty>;
   const openSlots = rows.filter((r) => r.role === "Start").length;
+  // Before the projections land, and before anyone has played a snap, both of
+  // these are a column of "0.0" per player — which reads as fifteen men
+  // measured at zero rather than as nothing measured yet. Em-dash the whole
+  // column until one real number turns up in it.
+  const anyProjected = rows.some((r) => r.projected > 0);
+  const anyPoints = rows.some((r) => r.points !== 0);
   return (
     <div className="tab-body">
       <div className="tab-head">
@@ -135,14 +141,16 @@ export function TeamRoster({ rows }: { rows: RosterRow[] }) {
           <PlayerName name={row.name} team={row.team} playerId={row.player_id} />
           <span className="muted small right">{row.role}</span>
           <span className="right team-points">
-            {row.role === "Bye" ? "Bye" : fmt(row.projected, 1)}
+            {row.role === "Bye" ? "Bye" : anyProjected ? fmt(row.projected, 1) : "—"}
           </span>
-          <span className="right team-points team-season">{fmt(row.points, 1)}</span>
+          <span className="right team-points team-season">
+            {anyPoints ? fmt(row.points, 1) : "—"}
+          </span>
         </div>
       ))}
       <span className="muted small tab-foot">
         Wk is this week's projection; Season is points to date. Bench points are dimmed; bye weeks
-        show instead of a projection.
+        show instead of a projection. A dash means that column has nothing in it yet.
       </span>
     </div>
   );

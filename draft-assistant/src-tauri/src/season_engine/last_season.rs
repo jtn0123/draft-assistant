@@ -8,7 +8,6 @@ use crate::season::LastSeasonRow;
 use crate::season_api::{Roster, SeasonEndpoints};
 use crate::season_engine::LAST_SEASON_TTL_SECS;
 use crate::sleeper::League;
-use std::collections::HashMap;
 
 impl Engine {
     /// Last season's final table, from the previous league in the chain.
@@ -40,11 +39,7 @@ impl Engine {
         let Ok(rosters) = rosters else {
             return Vec::new();
         };
-        let names: HashMap<String, String> = users
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|u| u.label().map(|n| (u.user_id.clone(), n)))
-            .collect();
+        let names = crate::sleeper::label_map(&users.unwrap_or_default());
         // The game that decides first place names the champion.
         let champion =
             bracket.unwrap_or_default().iter().find_map(

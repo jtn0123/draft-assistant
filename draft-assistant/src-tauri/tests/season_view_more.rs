@@ -64,7 +64,7 @@ fn activity_leads_with_lineup_gaps_then_newest_transactions() {
     assert_eq!(v.activity[0].roster_id, Some(3));
     assert_eq!(
         v.activity[1].text,
-        "User One gets Rival Wideout \u{b7} User Two gets Alpha Wideout"
+        "User One gets Rival Wideout \u{b7} User Two gets Alpha Wideout, 2027 2nd"
     );
     assert_eq!(v.activity[2].text, "User Two claimed Roster Filler for $12");
     assert_eq!(v.activity[2].player_ids, vec!["fa2".to_string()]);
@@ -83,7 +83,11 @@ fn recent_trades_name_both_sides_and_flag_mine() {
     assert_eq!(deal.sides[0].team, "User One");
     assert_eq!(deal.sides[0].gets, vec!["Rival Wideout".to_string()]);
     assert_eq!(deal.sides[1].team, "User Two");
-    assert_eq!(deal.sides[1].gets, vec!["Alpha Wideout".to_string()]);
+    assert_eq!(
+        deal.sides[1].gets,
+        vec!["Alpha Wideout".to_string(), "2027 2nd".to_string()],
+        "a traded pick is named by year and round, not filed under \"draft picks\""
+    );
 }
 
 #[test]
@@ -168,9 +172,10 @@ fn a_bye_week_matchup_faces_an_empty_opponent() {
     assert!((m.my_projected - 55.0).abs() < 1e-9);
     assert_eq!(v.header.opponent_name, None);
     assert!(
-        v.header.win_odds > 0.9,
-        "55 projected against nothing: {}",
-        v.header.win_odds
+        v.header.win_odds_best > 0.9 && v.header.win_odds_set > 0.9,
+        "55 projected against nothing, either lineup: {} / {}",
+        v.header.win_odds_best,
+        v.header.win_odds_set
     );
 }
 

@@ -81,6 +81,15 @@ pub fn optimal_lineup(rules: &RosterRules, candidates: &[Candidate]) -> Vec<Line
     filled.into_iter().map(|(_, slot)| slot).collect()
 }
 
+/// What the best lineup out of `candidates` puts up — the single number the
+/// waiver and trade searches compare rosters by, before and after a swap.
+pub fn lineup_total(rules: &RosterRules, candidates: &[Candidate]) -> f64 {
+    optimal_lineup(rules, candidates)
+        .iter()
+        .map(|s| s.points)
+        .sum()
+}
+
 /// One remaining week of a roster's outlook: the best lineup it can field and
 /// how far that score is expected to wander from its own projection.
 #[derive(Debug, Clone, Copy)]

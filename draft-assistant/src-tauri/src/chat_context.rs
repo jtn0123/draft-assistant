@@ -116,7 +116,7 @@ pub fn season_context(view: &crate::season::SeasonView) -> String {
             matchup.my_projected,
             matchup.opp_name,
             matchup.opp_projected,
-            view.header.win_odds * 100.0,
+            view.header.win_odds_best * 100.0,
             view.header.playoff_odds * 100.0
         ));
         out.push_str("Lineup (slot, yours, proj, theirs, proj):\n");

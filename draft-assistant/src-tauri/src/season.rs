@@ -267,7 +267,13 @@ pub fn build_season_view_cached(
         None => season_view_feeds::trends(season, &lookup, my_roster_id, &team_name),
     };
 
-    let win_odds = season_odds::win_probability(&head_to_head.my_spread, &head_to_head.opp_spread);
+    // Priced twice off the same opponent: once for the lineup I should be
+    // starting, once for the one I have. The screen shows whichever it is
+    // showing the lineup for.
+    let win_odds_best =
+        season_odds::win_probability(&head_to_head.my_spread, &head_to_head.opp_spread);
+    let win_odds_set =
+        season_odds::win_probability(&head_to_head.my_set_spread, &head_to_head.opp_spread);
     let playoff_odds = my_roster_id
         .and_then(|id| standings.iter().find(|s| s.roster_id == id))
         .map(|s| s.playoff_odds)
@@ -291,8 +297,10 @@ pub fn build_season_view_cached(
         header: SeasonHeader {
             opponent_name: head_to_head.opp_matchup.map(|m| team_name(m.roster_id)),
             my_projected: head_to_head.my_projected,
+            my_set_projected: head_to_head.my_set_projected,
             opp_projected: head_to_head.opp_projected,
-            win_odds,
+            win_odds_best,
+            win_odds_set,
             playoff_odds,
             locks_in_ms: next_kickoff_ms,
         },
