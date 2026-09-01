@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Volumes/512Flash/Draft-app/draft-assistant && npm run dev"
+      ],
+      "port": 1420
+    }
+  ]
+}
