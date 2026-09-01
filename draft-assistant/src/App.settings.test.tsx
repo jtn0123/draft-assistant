@@ -231,18 +231,29 @@ describe("the on-the-clock chime", () => {
     created: number;
     closed: number;
     tones: number;
+    /** One entry per context, in creation order, each flipped by that
+     * context's own `close()`. `playChime` schedules its close on a 600ms
+     * timer, so a chime played before a test switches to fake timers keeps a
+     * real timeout that lands whenever the machine gets round to it — under
+     * parallel load, possibly mid-assertion. Anything asserting *which*
+     * context was let go reads these rather than the running count. */
+    contexts: { closed: boolean }[];
   }
 
   /** A WebAudio stack this test can count, installed as a real constructor —
    * `playChime` calls `new` on it, and a plain arrow would hand back an empty
    * object and be swallowed by the very catch this is meant to avoid. */
   function stubAudio(): AudioSpy {
-    const spy: AudioSpy = { created: 0, closed: 0, tones: 0 };
+    const spy: AudioSpy = { created: 0, closed: 0, tones: 0, contexts: [] };
     class FakeAudioContext {
       currentTime = 0;
       destination = {};
+      /** This context's own entry in `spy.contexts`. */
+      mine: { closed: boolean };
       constructor() {
         spy.created += 1;
+        this.mine = { closed: false };
+        spy.contexts.push(this.mine);
       }
       createOscillator() {
         spy.tones += 1;
@@ -265,6 +276,7 @@ describe("the on-the-clock chime", () => {
       }
       close() {
         spy.closed += 1;
+        this.mine.closed = true;
         return Promise.resolve();
       }
     }
@@ -293,12 +305,16 @@ describe("the on-the-clock chime", () => {
     expect(audio.created).toBe(2);
 
     // The context is short-lived: an app that leaves one open per pick would
-    // run a draft out of them.
-    expect(audio.closed).toBe(0);
+    // run a draft out of them. Asserted against the second chime's own
+    // context, whose 600ms close this test scheduled and owns — the first
+    // chime's was scheduled on real timers back in `loaded`, and a slow
+    // enough machine lands it anywhere in here.
+    const second = audio.contexts[1];
+    expect(second.closed).toBe(false);
     act(() => {
       vi.advanceTimersByTime(600);
     });
-    expect(audio.closed).toBe(1);
+    expect(second.closed).toBe(true);
   });
 
   it("stays silent when the chime has been muted", async () => {
