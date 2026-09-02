@@ -16,11 +16,9 @@
 //! `handler_list_matches_lib_rs` fails if the two ever drift -- so the
 //! duplicate is a second opinion rather than a second source of truth.
 //!
-//! Two commands take a bare `tauri::AppHandle`, which is `AppHandle<Wry>` and
-//! so cannot be handed to the mock runtime. They are named in
-//! `WRY_ONLY` and are covered by the two source-level tests
-//! but not by the IPC round trip. Making them generic over `R: Runtime` in
-//! `commands_draft.rs` and `commands_season.rs` would close that gap.
+//! The two polling commands take `AppHandle<R>` rather than a bare
+//! `tauri::AppHandle` precisely so they can be registered here too: every
+//! command in the list makes the round trip.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -102,10 +100,6 @@ fn declared_in_crate() -> BTreeSet<String> {
     found
 }
 
-/// Commands whose signature pins them to the Wry runtime, so they cannot be
-/// registered on the mock runtime the IPC round trip uses.
-const WRY_ONLY: [&str; 2] = ["start_polling", "start_season_polling"];
-
 /// The full command list, as `lib.rs` should have it.
 fn handler_list() -> BTreeSet<String> {
     [
@@ -185,10 +179,12 @@ fn every_command_answers_over_the_ipc() {
             draft::record_manual_pick,
             draft::undo_manual_pick,
             draft::export_state,
+            draft::start_polling,
             draft::stop_polling,
             season::load_season,
             season::get_season,
             season::refresh_season,
+            season::start_season_polling,
             season::stop_season_polling,
             season::headshot,
             season::avatar,
@@ -219,9 +215,6 @@ fn every_command_answers_over_the_ipc() {
         .expect("the main webview builds");
 
     for command in handler_list() {
-        if WRY_ONLY.contains(&command.as_str()) {
-            continue;
-        }
         let response = get_ipc_response(
             &webview,
             InvokeRequest {

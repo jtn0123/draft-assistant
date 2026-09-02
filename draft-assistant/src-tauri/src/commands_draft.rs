@@ -234,8 +234,8 @@ pub async fn export_state(state: State<'_, AppState>) -> Result<String, String> 
 /// Start polling Sleeper picks every `interval_secs` (default 3). Emits a
 /// "draft-updated" event with the fresh DraftView whenever anything changed.
 #[tauri::command]
-pub async fn start_polling(
-    app: tauri::AppHandle,
+pub async fn start_polling<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
     interval_secs: Option<u64>,
 ) -> Result<(), String> {
