@@ -91,7 +91,7 @@ describe("App live workflow", () => {
     h.api.undoManualPick.mockResolvedValue(initial);
 
     render(<App />);
-    expect(await screen.findByText(initial.league.name)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: initial.league.name })).toBeInTheDocument();
     expect(screen.getByText(/^Live · /)).toBeInTheDocument();
     // Scoring format comes from the league's reception value (1.0 here).
     expect(screen.getByText(/^14-team full-PPR · \d+ rounds/)).toBeInTheDocument();
@@ -167,7 +167,7 @@ describe("App live workflow", () => {
     h.api.refreshData.mockResolvedValue(refreshed);
 
     render(<App />);
-    await screen.findByText(initial.league.name);
+    await screen.findByRole("heading", { name: initial.league.name });
     await user.click(screen.getByRole("button", { name: "Settings" }));
     // The settings rows are menu items with their own on/off state, not plain
     // buttons — see Header.test.tsx.
@@ -197,7 +197,7 @@ describe("App live workflow", () => {
     h.api.loadSeason.mockResolvedValue(seasonFixture());
 
     render(<App />);
-    await screen.findByText(initial.league.name);
+    await screen.findByRole("heading", { name: initial.league.name });
     await user.click(screen.getByRole("button", { name: "Season" }));
 
     expect(await screen.findByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
@@ -215,7 +215,7 @@ describe("App live workflow", () => {
     h.api.loadSeason.mockResolvedValue(seasonFixture());
 
     render(<App />);
-    await screen.findByText(initial.league.name);
+    await screen.findByRole("heading", { name: initial.league.name });
     await user.click(screen.getByRole("button", { name: "Season" }));
     await screen.findByText("vs punt_god · 122.4 – 108.9");
 
@@ -255,7 +255,7 @@ describe("App live workflow", () => {
       .mockResolvedValueOnce(seasonFixture());
 
     render(<App />);
-    await screen.findByText(initial.league.name);
+    await screen.findByRole("heading", { name: initial.league.name });
     await user.click(screen.getByRole("button", { name: "Season" }));
 
     const retry = await screen.findByRole("button", { name: "Try again" });
@@ -274,7 +274,7 @@ describe("when an action fails", () => {
     h.api.getConfig.mockResolvedValue(restoringConfig(initial));
     h.api.addLeague.mockResolvedValue(initial);
     render(<App />);
-    await screen.findByText(initial.league.name);
+    await screen.findByRole("heading", { name: initial.league.name });
     const rows = await rowDraftButtons();
     return rows[rows.length - 1];
   }

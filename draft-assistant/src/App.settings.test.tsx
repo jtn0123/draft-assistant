@@ -19,12 +19,22 @@ import type { DraftView } from "./types";
 
 const h = harness();
 
-/** Load the app on the draft board with a league already saved. */
+/**
+ * Load the app on the draft board with a league already saved.
+ *
+ * Waits on the header's heading, not on the league name as text: the launch
+ * card names the league it is restoring too, in a <strong>, and under load a
+ * text wait can resolve on that card before the view — and the chime — lands.
+ * Then settles: the heading is in the DOM the moment React commits, but the
+ * effects that commit schedules (the chime among them) run in a later task,
+ * and a busy machine can let the wait's own timer fire ahead of it.
+ */
 async function loaded(view = draftFixture()) {
   h.api.getConfig.mockResolvedValue(restoringConfig(view));
   h.api.addLeague.mockResolvedValue(view);
   render(<App />);
-  await screen.findByText(view.league.name);
+  await screen.findByRole("heading", { name: view.league.name });
+  await settle(() => {});
 }
 
 /** Open the settings menu and click one of its rows. */
@@ -373,7 +383,7 @@ describe("the league row", () => {
     h.api.getConfig.mockResolvedValue(twoLeagues(view));
     h.api.addLeague.mockResolvedValue(view);
     render(<App />);
-    await screen.findByText(view.league.name);
+    await screen.findByRole("heading", { name: view.league.name });
 
     await chooseSetting(/League/);
     expect(screen.getByRole("dialog", { name: "Switch league" })).toBeInTheDocument();
@@ -387,7 +397,7 @@ describe("the league row", () => {
     h.api.getConfig.mockResolvedValue(twoLeagues(view));
     h.api.addLeague.mockResolvedValue(view);
     render(<App />);
-    await screen.findByText(view.league.name);
+    await screen.findByRole("heading", { name: view.league.name });
     await waitFor(() => expect(h.api.startPolling).toHaveBeenCalledTimes(1));
 
     h.api.addLeague.mockResolvedValue(other);
@@ -410,7 +420,7 @@ describe("the league row", () => {
     h.api.getConfig.mockResolvedValue(twoLeagues(view));
     h.api.addLeague.mockResolvedValue(view);
     render(<App />);
-    await screen.findByText(view.league.name);
+    await screen.findByRole("heading", { name: view.league.name });
 
     h.api.addLeague.mockRejectedValue(new Error("league 2222222222222222222 not found"));
     await chooseSetting(/League/);

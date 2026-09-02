@@ -27,7 +27,9 @@ async function loaded(view = draftFixture()) {
   h.api.getConfig.mockResolvedValue(restoringConfig(view));
   h.api.addLeague.mockResolvedValue(view);
   render(<App />);
-  await screen.findByText(view.league.name);
+  await screen.findByRole("heading", { name: view.league.name });
+  // Let the effects the load scheduled run before a test reads their results.
+  await settle(() => {});
 }
 
 beforeEach(() => {
@@ -179,7 +181,7 @@ describe("the launch card", () => {
       retry.click();
     });
 
-    expect(await screen.findByText(view.league.name)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: view.league.name })).toBeInTheDocument();
     expect(h.api.addLeague).toHaveBeenCalledTimes(2);
   });
 
@@ -223,7 +225,7 @@ describe("the launch card", () => {
       screen.getByRole("button", { name: "Load league" }).click();
     });
 
-    expect(await screen.findByText(view.league.name)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: view.league.name })).toBeInTheDocument();
     await waitFor(() => expect(h.api.startPolling).toHaveBeenCalledWith(3));
   });
 });
@@ -263,7 +265,7 @@ describe("closing the window", () => {
     h.api.getConfig.mockResolvedValue(restoringConfig(view));
     h.api.addLeague.mockResolvedValue(view);
     const { unmount } = render(<App />);
-    await screen.findByText(view.league.name);
+    await screen.findByRole("heading", { name: view.league.name });
 
     await act(async () => {
       unmount();
