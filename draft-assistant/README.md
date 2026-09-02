@@ -1,14 +1,14 @@
 # Draft Assistant
 
-Local-first fantasy football assistant for Sleeper leagues, with two screens:
-a **draft board** for draft night and a **season screen** for the rest of the
-year. You play in Sleeper as normal; this app is a read-only second screen that
-polls the public Sleeper API and answers under **your league's exact scoring
-rules**.
+[![CI](https://github.com/jtn0123/draft-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/jtn0123/draft-assistant/actions/workflows/ci.yml)
 
-Built with Tauri 2: Rust core engine + React/TypeScript-strict frontend.
-Desktop (macOS) now; the same core compiles into an Android build later — no
-server anywhere.
+Local-first fantasy football assistant for Sleeper leagues, with two screens: a
+**draft board** for draft night and a **season screen** for the rest of the year.
+You play in Sleeper as normal; this app is a read-only second screen that polls
+the public Sleeper API and answers under **your league's exact scoring rules**.
+
+Built with Tauri 2: Rust core engine + React/TypeScript-strict frontend. Desktop
+(macOS) now; the same core compiles into an Android build later — no server anywhere.
 
 ## What it does
 
