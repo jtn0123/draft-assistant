@@ -20,9 +20,22 @@ fn stub_server(status: u16, body: &'static str) -> String {
     );
     std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().expect("accept");
-        // Read whatever arrived and move on; the request is not inspected.
-        let mut scratch = [0u8; 8192];
-        let _ = socket.read(&mut scratch);
+        // Drain the whole request before answering. The request is not
+        // inspected, but it must all have arrived: closing a socket with
+        // unread bytes on it makes the kernel send a reset instead of a
+        // FIN, and a client still writing its body then sees "connection
+        // reset" in place of the status and body this stub meant to serve.
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            match socket.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => request.extend_from_slice(&chunk[..n]),
+            }
+            if request_is_complete(&request) {
+                break;
+            }
+        }
         let head = format!(
             "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
@@ -30,8 +43,29 @@ fn stub_server(status: u16, body: &'static str) -> String {
         let _ = socket.write_all(head.as_bytes());
         let _ = socket.write_all(body.as_bytes());
         let _ = socket.flush();
+        // Half-close: the client reads a clean end of stream, not a reset.
+        let _ = socket.shutdown(std::net::Shutdown::Write);
     });
     url
+}
+
+/// True once `bytes` holds the request head and as many body bytes as its
+/// `Content-Length` promised. A head with no length is complete on its own.
+fn request_is_complete(bytes: &[u8]) -> bool {
+    let Some(split) = bytes.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return false;
+    };
+    let head = String::from_utf8_lossy(&bytes[..split]);
+    let promised = head
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0);
+    bytes.len() - (split + 4) >= promised
 }
 
 fn ask_stub(status: u16, body: &'static str) -> Result<ChatReply, String> {
