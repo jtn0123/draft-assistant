@@ -3,6 +3,11 @@ node_modules/
 dist/
 dist-ssr/
 draft-assistant/src-tauri/target/
+# cargo-llvm-cov's own build tree and reports. It writes under the target dir
+# by default, but honours CARGO_TARGET_DIR, so name the reports too.
+draft-assistant/src-tauri/llvm-cov-target/
+draft-assistant/src-tauri/coverage/
+draft-assistant/src-tauri/lcov.info
 draft-assistant/src-tauri/gen/schemas/
 
 # ---- Third-party research clones ----

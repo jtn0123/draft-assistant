@@ -37,6 +37,10 @@ jobs:
         with:
           workspaces: draft-assistant/src-tauri
 
+      # The Rust tests run under cargo-llvm-cov, which enforces the coverage
+      # floor as well as running them.
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
       - name: Install dependencies
         working-directory: draft-assistant
         run: npm ci
@@ -49,9 +53,9 @@ jobs:
         working-directory: draft-assistant
         run: npm run test:frontend
 
-      - name: Rust tests
+      - name: Rust tests and coverage floor
         working-directory: draft-assistant
-        run: npm run test:rust
+        run: npm run test:rust:coverage
 
       - name: Install Playwright Chromium
         working-directory: draft-assistant
