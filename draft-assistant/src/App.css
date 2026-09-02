@@ -251,10 +251,3 @@
   gap: 12px;
   color: var(--ink);
 }
-
-.empty-note {
-  margin: 0;
-  font-size: 12px;
-  color: var(--faint);
-  line-height: 1.5;
-}

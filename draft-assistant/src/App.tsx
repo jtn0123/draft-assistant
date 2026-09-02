@@ -20,6 +20,7 @@ import { cycleThemePreference, useAppliedTheme } from "./theme";
 import "./theme.css";
 import "./App.css";
 import "./header.css";
+import "./bits.css";
 import "./components.css";
 import "./zoom.css";
 
