@@ -1,4 +1,5 @@
-/* Draft screen chrome: clock, pick queue, recommendations, left rail. */
+/* Draft screen chrome: clock, pick queue, recommendations, left rail. The
+   shared bits every screen draws with are in bits.css. */
 
 .draft-screen {
   padding: 18px 20px 24px;
@@ -247,82 +248,6 @@
   gap: 8px;
 }
 
-.panel-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.panel-head-note {
-  font-size: 11px;
-  color: var(--faint);
-}
-
-.player-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.pos-rank {
-  opacity: 0.75;
-  margin-left: 1px;
-}
-
-.tag {
-  flex: 0 0 auto;
-  font-size: 10px;
-  text-transform: uppercase;
-  padding: 1px 5px;
-  color: var(--faint);
-  border: 1px solid var(--rule2);
-}
-
-.tag-out {
-  color: var(--act);
-  border-color: var(--actrule);
-}
-
-/* A trade both sides accepted that the league has not processed yet. */
-.tag-review {
-  color: var(--act);
-  border-color: var(--actrule);
-  margin-right: 8px;
-}
-
-/* A manager's team picture: same round slot everywhere, with their initial
-   standing in until it loads (or forever, for a manager with no picture). */
-.team-avatar {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-  border-radius: 50%;
-  object-fit: cover;
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  box-sizing: border-box;
-}
-
-.team-avatar.is-blank {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--faint);
-  letter-spacing: 0;
-}
-
-/* A team name with its picture beside it. */
-.team-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
 /* ---------- rail panels ---------- */
 
 .roster-list {
@@ -423,62 +348,4 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* ---------- segmented control ---------- */
-
-.segmented {
-  display: flex;
-  border: 1px solid var(--rule2);
-  overflow: hidden;
-}
-
-.seg {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 4px 9px;
-  border: none;
-  cursor: pointer;
-  background: transparent;
-  color: var(--faint);
-}
-
-.seg:hover {
-  color: var(--ink);
-}
-
-.seg.is-on {
-  background: var(--ink);
-  color: var(--paper);
-}
-
-/* ---------- player avatars ---------- */
-
-/* One slot, three fillings: a photo, a team mark, or nothing. Sizing lives
-   here rather than on each variant so the Headshots/Team logos toggle in
-   Settings never reflows a row. */
-.avatar {
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
-  border-radius: 50%;
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  box-sizing: border-box;
-}
-
-.headshot {
-  object-fit: cover;
-  object-position: top;
-}
-
-.avatar-logo {
-  display: inline-block;
-  padding: 3px;
-  object-fit: contain;
-  vertical-align: baseline;
-}
-
-.avatar-blank {
-  display: inline-block;
 }
