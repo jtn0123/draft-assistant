@@ -2,176 +2,27 @@
 //! AI-readable state dump — no difference between what human and model see.
 
 use crate::board::AvailablePlayer;
-use crate::draft::{self, TeamRoster};
+use crate::draft::{self};
 use crate::engine::{now_secs, AppConfig, LoadedLeague};
-use crate::pick_value::{self, PickPrice};
-use crate::recommend::{recommend, Recommendation};
+use crate::pick_value;
+use crate::recommend::recommend;
 use crate::sleeper::Pick;
 use crate::traded_picks::PickOwnership;
-use serde::Serialize;
+use crate::view_signals::{clock_deadline_ms, validated_slot, RUN_MIN, RUN_WINDOW};
 use std::collections::HashMap;
 
 /// The pick list lives in `picks` and the tier scan in `board`; both are
 /// re-exported here because callers have always reached for them through the
-/// view, which is the one place the whole draft state comes together.
+/// view, which is the one place the whole draft state comes together. The
+/// view's own shapes and derived signals sit in `view_types` and
+/// `view_signals`, and are re-exported for the same reason.
 pub use crate::board::tier_alerts;
 pub use crate::picks::{keeper_pick_nos, merged_picks, next_open_pick};
-
-/// Bumped whenever `DraftView` gains, loses, or renames a serialized field.
-/// The frontend gate in `src/api.ts` refuses any other version outright, and
-/// `tests/fixture_shape.rs` refuses to let it move without the checked-in
-/// `public/dev-fixture.json` moving with it.
-pub const DRAFT_SCHEMA_VERSION: &str = "1.2";
-
-#[derive(Debug, Clone, Serialize)]
-pub struct DraftStatus {
-    pub draft_id: String,
-    pub status: String,
-    pub teams: u32,
-    pub rounds: u32,
-    pub pick_timer: Option<u32>,
-    pub current_pick: u32,
-    pub current_round: u32,
-    pub on_clock_slot: u32,
-    pub on_clock_name: Option<String>,
-    pub my_slot: Option<u32>,
-    pub is_my_pick: bool,
-    pub picks_until_mine: Option<u32>,
-    pub my_next_picks: Vec<u32>,
-    pub total_picks_made: usize,
-    pub manual_picks_active: bool,
-    /// Epoch milliseconds when the current pick's timer expires. Present only
-    /// while drafting with a pick timer and a recorded last pick.
-    pub clock_deadline_ms: Option<u64>,
-    /// Every pick the plain snake gets wrong — because it was traded, or
-    /// because the league uses third-round reversal: pick number -> the slot
-    /// whose manager makes it. Empty in an ordinary snake league. The
-    /// frontend's queue reads this so it never names the wrong manager.
-    pub pick_slot_overrides: HashMap<u32, u32>,
-    /// Pick numbers held by keepers: already in the book, nobody's turn.
-    pub keeper_picks: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TierAlert {
-    pub position: String,
-    pub tier: u32,
-    pub players_left: u32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RecentPick {
-    pub pick_no: u32,
-    pub round: u32,
-    pub slot: u32,
-    pub slot_name: Option<String>,
-    pub player_id: String,
-    pub name: String,
-    pub position: String,
-    pub team: Option<String>,
-}
-
-/// A position taken `count` times in the last `window` picks.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct PositionRun {
-    pub position: String,
-    pub count: u32,
-    pub window: u32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct DraftView {
-    pub schema_version: String,
-    pub generated_at: u64,
-    pub league: LeagueSummary,
-    pub draft: DraftStatus,
-    pub my_roster: Option<TeamRoster>,
-    pub rosters: Vec<TeamRoster>,
-    pub available: Vec<AvailablePlayer>,
-    pub tier_alerts: Vec<TierAlert>,
-    pub position_run: Option<PositionRun>,
-    pub recommendations: Vec<Recommendation>,
-    pub recent_picks: Vec<RecentPick>,
-    pub replacement_baselines: HashMap<String, f64>,
-    /// position -> number of league-wide startable players (incl. flex share)
-    pub replacement_demand: HashMap<String, usize>,
-    /// What a pick in each round of this draft has been worth, in points over
-    /// replacement — empty until the draft has picks to learn from.
-    pub pick_prices: Vec<PickPrice>,
-    pub data_health: DataHealth,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct LeagueSummary {
-    pub league_id: String,
-    pub name: String,
-    pub season: String,
-    pub total_rosters: u32,
-    pub roster_positions: Vec<String>,
-    pub draftable_positions: Vec<String>,
-    pub scoring_settings: HashMap<String, f64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct DataHealth {
-    pub players_fetched_at: u64,
-    pub projections_fetched_at: u64,
-    pub weekly_fetched_at: u64,
-    pub board_size: usize,
-    pub warnings: Vec<String>,
-    pub poll_last_success_at: Option<u64>,
-    pub poll_consecutive_failures: u32,
-    pub poll_last_error: Option<String>,
-}
-
-fn validated_slot(slot: Option<u32>, teams: u32) -> (Option<u32>, Option<String>) {
-    match slot {
-        Some(value) if !(1..=teams).contains(&value) => (
-            None,
-            Some(format!(
-                "your draft slot {value} is outside the valid range 1..={teams}"
-            )),
-        ),
-        _ => (slot, None),
-    }
-}
-
-/// When the current pick's timer runs out, from Sleeper's `last_picked`
-/// stamp and the draft's `pick_timer`. Only meaningful mid-draft.
-fn clock_deadline_ms(
-    status: &str,
-    last_picked: Option<u64>,
-    pick_timer: Option<u32>,
-) -> Option<u64> {
-    if status != "drafting" {
-        return None;
-    }
-    Some(last_picked? + u64::from(pick_timer.filter(|t| *t > 0)?) * 1000)
-}
-
-/// How many recent picks a positional run is judged over, and how many of them
-/// have to share a position for it to count as one.
-const RUN_WINDOW: u32 = 6;
-const RUN_MIN: u32 = 4;
-
-/// The position taken at least `min_count` times in the last `window` picks.
-pub fn position_run(positions: &[String], window: u32, min_count: u32) -> Option<PositionRun> {
-    let mut counts: HashMap<&str, u32> = HashMap::new();
-    for pos in positions.iter().rev().take(window as usize) {
-        if !pos.is_empty() {
-            *counts.entry(pos.as_str()).or_insert(0) += 1;
-        }
-    }
-    counts
-        .into_iter()
-        .filter(|(_, c)| *c >= min_count)
-        .max_by_key(|(_, c)| *c)
-        .map(|(pos, count)| PositionRun {
-            position: pos.to_string(),
-            count,
-            window,
-        })
-}
+pub use crate::view_signals::position_run;
+pub use crate::view_types::{
+    DataHealth, DraftStatus, DraftView, LeagueSummary, PositionRun, RecentPick, TierAlert,
+    DRAFT_SCHEMA_VERSION,
+};
 
 pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let league = &loaded.league;
@@ -443,47 +294,5 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             poll_consecutive_failures: loaded.poll_consecutive_failures,
             poll_last_error: loaded.poll_last_error.clone(),
         },
-    }
-}
-
-#[cfg(test)]
-mod reliability_tests {
-    use super::{clock_deadline_ms, position_run, validated_slot};
-
-    #[test]
-    fn invalid_user_slots_are_rejected_before_roster_indexing() {
-        assert_eq!(validated_slot(Some(0), 14).0, None);
-        assert_eq!(validated_slot(Some(15), 14).0, None);
-        assert_eq!(validated_slot(Some(2), 14).0, Some(2));
-    }
-
-    #[test]
-    fn clock_deadline_is_last_pick_plus_timer_only_while_drafting() {
-        assert_eq!(
-            clock_deadline_ms("drafting", Some(1_000), Some(90)),
-            Some(91_000)
-        );
-        assert_eq!(clock_deadline_ms("pre_draft", Some(1_000), Some(90)), None);
-        assert_eq!(clock_deadline_ms("complete", Some(1_000), Some(90)), None);
-        assert_eq!(clock_deadline_ms("drafting", None, Some(90)), None);
-        assert_eq!(clock_deadline_ms("drafting", Some(1_000), None), None);
-        assert_eq!(clock_deadline_ms("drafting", Some(1_000), Some(0)), None);
-    }
-
-    #[test]
-    fn position_run_carries_the_count_and_window() {
-        let picks: Vec<String> = ["WR", "RB", "RB", "QB", "RB", "RB", "TE"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        // Last six: RB RB QB RB RB TE -> four RBs.
-        let run = position_run(&picks, 6, 4).expect("run");
-        assert_eq!((run.position.as_str(), run.count, run.window), ("RB", 4, 6));
-        assert_eq!(position_run(&picks, 6, 5), None);
-        // Nothing before the window counts: only the first pick is a WR.
-        assert_eq!(
-            position_run(&picks, 4, 2).map(|r| r.position),
-            Some("RB".into())
-        );
     }
 }

@@ -58,6 +58,8 @@ pub mod state;
 pub mod traded_picks;
 pub mod valuation;
 pub mod view;
+pub mod view_signals;
+pub mod view_types;
 pub mod weekly;
 
 use commands_chat::{
