@@ -2,10 +2,9 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { setAvatarMode, useAvatarMode } from "./avatars";
 import { playChime } from "./chime";
+import { MAX_RECONNECT_ATTEMPTS, useDraftSession } from "./draftSession";
 import { setChime, setScreen, useChime, useScreen } from "./prefs";
-import { stableAvailable } from "./boardIdentity";
 import { useSeasonSession } from "./session";
-import type { DraftView, PollHealth, StoredLeague } from "./types";
 import type { SeasonView } from "./season-types";
 import { Header, type SettingsRow } from "./components/Header";
 import { Chat, DraftScreen, ScreenFallback, SeasonScreen } from "./components/lazyScreens";
@@ -23,8 +22,6 @@ import "./App.css";
 import "./components.css";
 import "./zoom.css";
 
-const MAX_RECONNECT_ATTEMPTS = 4;
-
 type Confirm = { playerId: string; name: string } | null;
 
 /** A line under the header. `retry` marks it as something gone wrong that the
@@ -32,31 +29,17 @@ type Confirm = { playerId: string; name: string } | null;
 type ToastMessage = { text: string; retry?: () => void };
 
 export default function App() {
-  const [view, setView] = useState<DraftView | null>(null);
   // Remembered between sessions, along with the rest of the preferences.
   const screen = useScreen();
-  const [polling, setPolling] = useState(false);
   const avatars = useAvatarMode();
-  const [pollHealth, setPollHealth] = useState<PollHealth | null>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
-  const [busy, setBusy] = useState(true);
   // Stable across renders so the memoised board rows are not invalidated by a
   // fresh closure on every 3-second poll.
   const askToDraft = useCallback(
     (playerId: string, name: string) => setConfirm({ playerId, name }),
     [],
   );
-  /// Bumped to re-run the restore effect after a failed connection.
-  const [reloadToken, setReloadToken] = useState(0);
-  const [launchError, setLaunchError] = useState<string | null>(null);
-  const [attempt, setAttempt] = useState(1);
-  /// The saved league being restored, named on the launch screen.
-  const [restoring, setRestoring] = useState<StoredLeague | null>(null);
-  const [showSetup, setShowSetup] = useState(false);
-  // Every league the app has loaded before, so switching to a mock draft and
-  // back does not mean going to find an ID again.
-  const [leagues, setLeagues] = useState<StoredLeague[]>([]);
   const [leaguePicker, setLeaguePicker] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -81,6 +64,30 @@ export default function App() {
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
+  // The draft's own data lifecycle: restores the last league on launch, keeps
+  // it live off the backend's poller, and owns every action that replaces the
+  // whole view.
+  const {
+    view,
+    applyView,
+    polling,
+    pollHealth,
+    busy,
+    leagues,
+    restoring,
+    launchError,
+    attempt,
+    showSetup,
+    setShowSetup,
+    retry,
+    startLive,
+    togglePolling,
+    undoLastPick,
+    exportState,
+    switchLeague,
+    refreshData,
+  } = useDraftSession(showToast);
+
   // The season screen's own data lifecycle: loads on first open, polls while
   // it is showing, and knows how to retry itself.
   const {
@@ -90,95 +97,6 @@ export default function App() {
     retry: retrySeason,
   } = useSeasonSession(screen === "season", view?.league.league_id ?? null, showToast);
   const chime = useChime();
-
-  // ---------- data ----------
-
-  const applyView = useCallback((next: DraftView) => {
-    // Hand the board back the array it has already sorted when the new view
-    // says exactly the same thing about the players (see boardIdentity.ts).
-    // Most updates move a clock or a status, not the several-hundred-row pool.
-    setView((prev) => stableAvailable(prev, next));
-    setPollHealth({
-      last_success_at: next.data_health.poll_last_success_at ?? next.generated_at,
-      // Both are always present: the backend types them u32 and Option<String>.
-      consecutive_failures: next.data_health.poll_consecutive_failures,
-      last_error: next.data_health.poll_last_error,
-    });
-  }, []);
-
-  // Named so the retry it offers can be itself.
-  const startLive = useCallback(
-    async function start(): Promise<void> {
-      try {
-        await api.startPolling(3);
-        setPolling(true);
-      } catch (e) {
-        showToast(problem("Could not turn live sync on", e), () => void start());
-      }
-    },
-    [showToast],
-  );
-
-  // Restore the last league on mount, and again whenever the user retries.
-  // State is set from the promise callbacks, never synchronously in the body.
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getConfig()
-      .then((config) => {
-        if (cancelled) return null;
-        setLeagues(config.leagues);
-        const leagueId = config.active_league_id;
-        if (leagueId === null) {
-          setShowSetup(true);
-          return null;
-        }
-        setRestoring(
-          config.leagues.find((l) => l.league_id === leagueId) ?? {
-            league_id: leagueId,
-            name: "",
-            season: "",
-          },
-        );
-        return api.addLeague(leagueId);
-      })
-      .then((restored) => {
-        if (cancelled || restored === null) return;
-        applyView(restored);
-        return startLive();
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setLaunchError(String(e));
-        setAttempt((n) => Math.min(n + 1, MAX_RECONNECT_ATTEMPTS));
-      })
-      .finally(() => {
-        if (!cancelled) setBusy(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [applyView, startLive, reloadToken]);
-
-  const retry = () => {
-    setBusy(true);
-    setLaunchError(null);
-    setReloadToken((n) => n + 1);
-  };
-
-  useEffect(() => {
-    const un = api.onDraftUpdated(applyView);
-    return () => {
-      un.then((f) => f()).catch(() => undefined);
-    };
-  }, [applyView]);
-
-  useEffect(() => {
-    const un = api.onPollHealth(setPollHealth);
-    return () => {
-      un.then((f) => f()).catch(() => undefined);
-    };
-  }, []);
 
   // Chime when the clock reaches you — the one moment worth interrupting for.
   useEffect(() => {
@@ -191,20 +109,6 @@ export default function App() {
 
   // ---------- actions ----------
 
-  const togglePolling = async () => {
-    try {
-      if (polling) {
-        await api.stopPolling();
-        setPolling(false);
-      } else {
-        await startLive();
-        showToast("Live sync on — polling Sleeper every 3s");
-      }
-    } catch (e) {
-      showToast(problem("Could not change live sync", e), () => void togglePolling());
-    }
-  };
-
   const doDraft = async (playerId: string, name: string) => {
     try {
       applyView(await api.recordManualPick(playerId));
@@ -215,69 +119,6 @@ export default function App() {
       );
     } finally {
       setConfirm(null);
-    }
-  };
-
-  const doUndo = async () => {
-    try {
-      applyView(await api.undoManualPick());
-      showToast("Last recorded pick undone");
-    } catch (e) {
-      showToast(problem("Could not undo the last recorded pick", e), () => void doUndo());
-    }
-  };
-
-  const doExport = async () => {
-    setSettingsOpen(false);
-    try {
-      showToast(`State exported: ${await api.exportState()}`);
-    } catch (e) {
-      showToast(problem("Could not export the state", e), () => void doExport());
-    }
-  };
-
-  // Switching leagues rebuilds everything: the board comes from the new
-  // league's own scoring, the season is dropped by the backend and reloaded by
-  // `useSeasonSession` when it sees a different league id, and the draft
-  // poller is stopped before the switch so it cannot write the old league's
-  // picks over the new view on its way out.
-  const doSwitchLeague = async (leagueId: string) => {
-    setLeaguePicker(false);
-    setBusy(true);
-    try {
-      if (polling) {
-        await api.stopPolling();
-        setPolling(false);
-      }
-      const next = await api.addLeague(leagueId);
-      applyView(next);
-      const config = await api.getConfig();
-      setLeagues(config.leagues);
-      await startLive();
-      showToast(`Switched to ${next.league.name} — the last league is still in the list`);
-    } catch (e) {
-      showToast(problem("Could not switch leagues", e), () => void doSwitchLeague(leagueId));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doRefreshData = async () => {
-    setSettingsOpen(false);
-    setBusy(true);
-    try {
-      const refreshed = await api.refreshData();
-      applyView(refreshed);
-      // The board was rebuilt from new projections, so the season view is
-      // built on stale numbers until it reloads too.
-      if (screen === "season") retrySeason();
-      showToast(
-        `Projections refreshed — board rebuilt from ${refreshed.data_health.board_size} players`,
-      );
-    } catch (e) {
-      showToast(problem("Could not refresh the projections", e), () => void doRefreshData());
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -355,14 +196,23 @@ export default function App() {
       note: "Re-fetch projections and rebuild the board",
       value: busy ? "…" : "Sync",
       on: false,
-      onSelect: () => void doRefreshData(),
+      onSelect: () => {
+        setSettingsOpen(false);
+        void refreshData(() => {
+          // The season view is built on the old projections until it reloads.
+          if (screen === "season") retrySeason();
+        });
+      },
     },
     {
       label: "Export state",
       note: "Full JSON dump of everything on screen",
       value: "JSON",
       on: false,
-      onSelect: () => void doExport(),
+      onSelect: () => {
+        setSettingsOpen(false);
+        void exportState();
+      },
     },
     {
       label: "Player pictures",
@@ -399,7 +249,7 @@ export default function App() {
             onScreen={setScreen}
             polling={polling}
             pollHealth={pollHealth}
-            onUndo={() => void doUndo()}
+            onUndo={() => void undoLastPick()}
             chatOpen={chatOpen}
             onToggleChat={() => setChatOpen((c) => !c)}
             settingsOpen={settingsOpen}
@@ -468,7 +318,10 @@ export default function App() {
           activeId={view.league.league_id}
           season={view.league.season}
           busy={busy}
-          onSwitch={(id) => void doSwitchLeague(id)}
+          onSwitch={(id) => {
+            setLeaguePicker(false);
+            void switchLeague(id);
+          }}
           onClose={() => setLeaguePicker(false)}
         />
       )}
