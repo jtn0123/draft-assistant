@@ -63,6 +63,33 @@
   align-items: center;
 }
 
+/* One more track, right after the position badge, for the imported second
+   opinion. The class is only set when a projections CSV has been imported —
+   the column is absent, not empty, when there is nothing to show. */
+.board-row.has-second {
+  grid-template-columns: 34px minmax(0, 1fr) 52px 46px 74px 36px 44px 44px 34px 44px 47px 60px;
+}
+
+/* A disagreement of eight positional spots or more. Tinted rather than
+   coloured type alone: the number itself still has to read as a rank. */
+.so-cell {
+  font-variant-numeric: tabular-nums;
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+
+/* The imported source is higher on him than this board is. */
+.so-higher {
+  background: color-mix(in srgb, var(--pos) 18%, transparent);
+  color: var(--pos);
+}
+
+/* The imported source is lower on him than this board is. */
+.so-lower {
+  background: color-mix(in srgb, var(--act) 18%, transparent);
+  color: var(--act);
+}
+
 .board-head {
   padding: 8px 12px;
   border-bottom: 1px solid var(--rule2);
