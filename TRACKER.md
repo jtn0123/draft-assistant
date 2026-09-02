@@ -97,13 +97,27 @@ What the app already has: Sleeper stat-line projections × **your exact league s
 
 | # | Option | Verdict |
 |---|---|---|
-| D1 | **Second-opinion column on the draft board** — import the CSV, match by normalised name+position, show Clay's positional rank next to the app's, highlight disagreements ≥ 8 spots, and add a rec-card reason ("Clay has him WR9 — market is 3 rounds late"). Ranks, not points, so the half-PPR vs full-PPR mismatch doesn't matter. | **Recommended.** Highest value per line of code; no new tab. |
+| D1 | **Second-opinion column on the draft board** — import the CSV, match by normalised name+position, show Clay's positional rank next to the app's, highlight disagreements ≥ 8 spots, and add a rec-card reason ("Clay has him WR9 — market is 3 rounds late"). Ranks, not points, so the half-PPR vs full-PPR mismatch doesn't matter. | **Recommended.** Highest value per line of code; no new tab. **done.** |
 | D2 | Dedicated "Projections" tab: per-player source comparison + the metadata manifest (published vs estimated, missing ADP/team). | Nice for auditing, low draft-night value. Do after D1 if wanted. |
 | D3 | Use FantasyPros ADP as a second ADP source for survival. | Skip — Sleeper ADP is the right signal for a Sleeper draft. |
 | D4 | Season use: "vs preseason expectation" pace on My team / trade ideas (buy-low, sell-high). | Good week-4+ feature; rank-based to dodge scoring mismatch. |
 | D5 | Port the script to Rust. | No — PDF + pandas scraping stays Python. Import the CSV via Settings ("Import projections CSV") into the app data dir. |
 
 Note: rerun the script with `--scoring ppr` before importing; it still won't reflect 6-pt TDs or bonuses, which is why D1 uses ranks.
+
+D1 as built: Settings → **Import projections CSV…** opens the native picker
+from Rust (the dialog plugin's commands are *not* granted to the webview), the
+file is copied to `<app data>/second_opinion.csv` and re-read on every league
+load. `second_opinion.rs` parses it with the `csv` crate, normalises names
+(punctuation dropped without a gap so "D.J." meets "DJ", Jr./III removed) and
+matches on name + position with a team-agnostic fallback; positional rank is
+computed inside the file. The board gains a **Clay** column right after its own
+positional rank, tinted with a title either way at ≥ 8 spots, absent when
+nothing is imported; the rec card gains "Clay has him WR9 — market is 3 rounds
+late" when the disagreement runs the player's way. Schema 1.2 → **1.3**.
+Measured against the real 482-row export and the captured 14-team board: 344
+rows matched (the 10 K rows cannot — this league rosters no kicker — and the
+export carries only 10 of the 32 team defences).
 
 ## E. Ask Claude via Claude subscription (requested 2026-08-30)
 

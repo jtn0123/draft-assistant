@@ -4,6 +4,7 @@ import { setAvatarMode, useAvatarMode } from "./avatars";
 import { playChime } from "./chime";
 import { MAX_RECONNECT_ATTEMPTS, useDraftSession } from "./draftSession";
 import { setChime, setScreen, useChime, useScreen } from "./prefs";
+import { importNote, importSecondOpinion } from "./secondOpinionImport";
 import { useSeasonSession } from "./session";
 import type { SeasonView } from "./season-types";
 import { Header, type SettingsRow } from "./components/Header";
@@ -214,6 +215,19 @@ export default function App() {
       onSelect: () => {
         setSettingsOpen(false);
         void exportState();
+      },
+    },
+    {
+      label: "Import projections CSV…",
+      note: importNote(
+        view.data_health.second_opinion_loaded_at,
+        view.available.find((p) => p.second_opinion !== null)?.second_opinion?.source ?? null,
+      ),
+      value: "Choose",
+      on: view.data_health.second_opinion_loaded_at !== null,
+      onSelect: () => {
+        setSettingsOpen(false);
+        void importSecondOpinion(applyView, showToast);
       },
     },
     {

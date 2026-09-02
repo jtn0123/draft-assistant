@@ -404,7 +404,8 @@ impl Engine {
                 let report = crate::second_opinion::apply(&table, &mut board);
                 if report.matched == 0 {
                     warnings.push(
-                        "imported projections matched nobody on this board —                          check it is the right season"
+                        "imported projections matched nobody on this board — \
+                         check it is the right season"
                             .into(),
                     );
                 }
