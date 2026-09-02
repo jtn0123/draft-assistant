@@ -22,9 +22,16 @@ jobs:
           cache: npm
           cache-dependency-path: draft-assistant/package-lock.json
 
-      # No version here: @master with no `toolchain` input reads the
-      # repo's rust-toolchain.toml, so CI runs the exact clippy the laptop does.
+      # The version comes from the repo's rust-toolchain.toml, so CI runs the
+      # exact clippy the laptop does; the action itself needs it spelled out.
+      - name: Read the pinned Rust version
+        id: rust
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
       - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -76,7 +83,13 @@ jobs:
           cache: npm
           cache-dependency-path: draft-assistant/package-lock.json
 
+      - name: Read the pinned Rust version
+        id: rust
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
       - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
 
       - uses: Swatinem/rust-cache@v2
         with:
