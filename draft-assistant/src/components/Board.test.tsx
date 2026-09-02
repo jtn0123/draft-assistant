@@ -26,6 +26,7 @@ function player(
     adp: 20,
     injury_status: null,
     sleeper_pts_ppr: null,
+    second_opinion: null,
     survival_next: 0.5,
     ...over,
   };

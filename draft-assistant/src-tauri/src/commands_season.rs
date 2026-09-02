@@ -250,6 +250,7 @@ mod tests {
             warnings: Vec::new(),
             player_meta: HashMap::new(),
             weekly_points: WeeklyPoints::default(),
+            second_opinion_loaded_at: None,
         }
     }
 

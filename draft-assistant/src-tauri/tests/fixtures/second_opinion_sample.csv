@@ -1,0 +1,41 @@
+rank,name,position,team,bye_week,projected_fantasy_points,tier,adp,projection_method,team_conflict,source,ranking_basis
+1,Jahmyr Gibbs,RB,DET,6,331.0,1,1.42,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+2,Bijan Robinson,RB,ATL,11,315.0,1,2.01,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+3,Ja'Marr Chase,WR,CIN,6,276.5,1,3.21,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+4,Puka Nacua,WR,LAR,11,295.5,1,4.7,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+5,Jonathan Taylor,RB,IND,13,291.5,1,5.89,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+6,Christian McCaffrey,RB,SF,8,303.5,1,5.92,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+7,Jaxon Smith-Njigba,WR,SEA,11,268.5,1,6.61,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+8,James Cook III,RB,BUF,7,261.0,1,8.91,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+9,Amon-Ra St. Brown,WR,DET,6,266.0,1,9.05,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+10,CeeDee Lamb,WR,DAL,14,242.0,1,11.76,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+11,Justin Jefferson,WR,MIN,6,238.5,1,12.41,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+12,Ashton Jeanty,RB,LV,13,248.5,1,12.46,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+13,Derrick Henry,RB,BAL,13,263.5,1,14.79,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+14,De'Von Achane,RB,MIA,6,260.5,1,16.04,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+15,Saquon Barkley,RB,PHI,10,252.5,1,16.38,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+16,Omarion Hampton,RB,LAC,7,251.0,1,17.48,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+17,Drake London,WR,ATL,11,219.0,1,18.05,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+18,Nico Collins,WR,HOU,8,206.0,1,18.37,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+19,Chase Brown,RB,CIN,6,240.0,1,19.34,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+20,A.J. Brown,WR,NE,11,205.0,1,19.94,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+21,George Pickens,WR,DAL,14,199.0,1,22.7,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+22,Kenneth Walker III,RB,KC,5,249.0,1,23.0,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+23,Brock Bowers,TE,LV,13,191.0,1,23.4,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+24,Josh Allen,QB,BUF,7,369.0,1,23.99,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+39,Travis Etienne Jr.,RB,NO,8,219.5,2,40.51,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+48,Luther Burden III,WR,CHI,10,168.5,2,51.68,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+50,D'Andre Swift,RB,CHI,10,197.0,2,52.8,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+79,Brian Thomas Jr.,WR,JAX,7,147.5,3,82.37,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+81,Harold Fannin Jr.,TE,CLE,11,145.5,3,84.89,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+107,Michael Pittman Jr.,WR,PIT,9,153.0,4,118.31,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+109,Wan'Dale Robinson,WR,TEN,9,134.5,4,120.85,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+80,Marvin Harrison Jr.,WR,ARI,14,159.5,3,83.96,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+98,Chris Godwin Jr.,WR,TB,10,128.0,3,104.31,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+32,Lamar Jackson,QB,BAL,13,322.0,2,33.88,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+41,Drake Maye,QB,NE,11,319.0,2,42.7,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+47,Joe Burrow,QB,CIN,6,304.0,2,49.59,published,False,https://g.espncdn.com/s/ffldraftkit/26/NFLDK2026_CS_ClayProjections2026.pdf,season_projection
+130,Brandon Aubrey,K,DAL,14,153.0,4,158.09,published,False,https://www.fantasypros.com/nfl/projections/k.php?week=draft,season_projection
+136,Cameron Dicker,K,LAC,7,144.1,4,168.35,published,False,https://www.fantasypros.com/nfl/projections/k.php?week=draft,season_projection
+168,Denver Broncos D/ST,DST,DEN,10,8.3,5,,published,False,https://www.fantasypros.com/nfl/projections/dst.php?week=1,week_1_matchup_projection
+171,Washington Commanders D/ST,DST,WAS,7,8.0,5,,published,False,https://www.fantasypros.com/nfl/projections/dst.php?week=1,week_1_matchup_projection

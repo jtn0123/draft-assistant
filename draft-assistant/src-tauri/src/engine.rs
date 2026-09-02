@@ -105,6 +105,9 @@ pub struct LoadedLeague {
     /// Per-week projected points under this league's scoring. Built once here
     /// so the season screen never re-scores raw stat lines.
     pub weekly_points: WeeklyPoints,
+    /// When the imported second-opinion CSV was read, epoch seconds. `None`
+    /// when there is none to read.
+    pub second_opinion_loaded_at: Option<u64>,
 }
 
 pub struct Engine {
@@ -392,7 +395,27 @@ impl Engine {
             &roster_rules,
             &mut warnings,
         );
-        let board = board_build.players;
+        let mut board = board_build.players;
+        // The imported second opinion, if the user has ever chosen one. A file
+        // that has stopped parsing becomes a warning rather than a failed
+        // load: it is a nice-to-have column, not the board.
+        let second_opinion_loaded_at = match crate::second_opinion::load(&self.data_dir) {
+            Ok(Some(table)) => {
+                let report = crate::second_opinion::apply(&table, &mut board);
+                if report.matched == 0 {
+                    warnings.push(
+                        "imported projections matched nobody on this board —                          check it is the right season"
+                            .into(),
+                    );
+                }
+                Some(table.loaded_at)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                warnings.push(format!("imported projections could not be read: {error}"));
+                None
+            }
+        };
         if board.len() < 200 {
             warnings.push(format!(
                 "board unusually small ({} players) — projections may be incomplete",
@@ -428,6 +451,7 @@ impl Engine {
             warnings,
             weekly_points: WeeklyPoints::build(&weekly_rows, &scoring_map),
             player_meta,
+            second_opinion_loaded_at,
         })
     }
 }

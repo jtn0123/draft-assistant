@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "generated_at": 1787882005,
   "league": {
     "league_id": "1389710366300200960",
@@ -778,7 +778,12 @@
       "adp": 30.8,
       "injury_status": null,
       "sleeper_pts_ppr": 235.9,
-      "survival_next": 0.5469916046623797
+      "survival_next": 0.5469916046623797,
+      "second_opinion": {
+        "positional_rank": 9,
+        "overall_rank": 17,
+        "source": "Clay"
+      }
     },
     {
       "player_id": "9997",
@@ -795,7 +800,12 @@
       "adp": 42.0,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 228.2,
-      "survival_next": 0.9029767232145834
+      "survival_next": 0.9029767232145834,
+      "second_opinion": {
+        "positional_rank": 23,
+        "overall_rank": 58,
+        "source": "Clay"
+      }
     },
     {
       "player_id": "11632",
@@ -812,7 +822,12 @@
       "adp": 28.2,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 236.7,
-      "survival_next": 0.38585628864225696
+      "survival_next": 0.38585628864225696,
+      "second_opinion": {
+        "positional_rank": 14,
+        "overall_rank": 29,
+        "source": "Clay"
+      }
     },
     {
       "player_id": "7525",
@@ -829,7 +844,8 @@
       "adp": 35.3,
       "injury_status": null,
       "sleeper_pts_ppr": 229.2,
-      "survival_next": 0.752526701847152
+      "survival_next": 0.752526701847152,
+      "second_opinion": null
     },
     {
       "player_id": "11635",
@@ -846,7 +862,8 @@
       "adp": 38.3,
       "injury_status": null,
       "sleeper_pts_ppr": 228.2,
-      "survival_next": 0.837699364870313
+      "survival_next": 0.837699364870313,
+      "second_opinion": null
     },
     {
       "player_id": "12526",
@@ -863,7 +880,8 @@
       "adp": 37.5,
       "injury_status": null,
       "sleeper_pts_ppr": 223.0,
-      "survival_next": 0.8183489976816013
+      "survival_next": 0.8183489976816013,
+      "second_opinion": null
     },
     {
       "player_id": "6801",
@@ -880,7 +898,8 @@
       "adp": 34.0,
       "injury_status": null,
       "sleeper_pts_ppr": 224.4,
-      "survival_next": 0.7035919615622073
+      "survival_next": 0.7035919615622073,
+      "second_opinion": null
     },
     {
       "player_id": "7526",
@@ -897,7 +916,8 @@
       "adp": 46.6,
       "injury_status": null,
       "sleeper_pts_ppr": 221.0,
-      "survival_next": 0.9472974944656329
+      "survival_next": 0.9472974944656329,
+      "second_opinion": null
     },
     {
       "player_id": "8146",
@@ -914,7 +934,8 @@
       "adp": 44.6,
       "injury_status": null,
       "sleeper_pts_ppr": 224.9,
-      "survival_next": 0.9316210932380664
+      "survival_next": 0.9316210932380664,
+      "second_opinion": null
     },
     {
       "player_id": "2216",
@@ -931,7 +952,8 @@
       "adp": 61.4,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 222.2,
-      "survival_next": 0.9899519649870342
+      "survival_next": 0.9899519649870342,
+      "second_opinion": null
     },
     {
       "player_id": "12514",
@@ -948,7 +970,8 @@
       "adp": 39.7,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 224.0,
-      "survival_next": 0.8666301839222486
+      "survival_next": 0.8666301839222486,
+      "second_opinion": null
     },
     {
       "player_id": "12517",
@@ -965,7 +988,12 @@
       "adp": 40.9,
       "injury_status": null,
       "sleeper_pts_ppr": 215.4,
-      "survival_next": 0.8871251163780679
+      "survival_next": 0.8871251163780679,
+      "second_opinion": {
+        "positional_rank": 1,
+        "overall_rank": 2,
+        "source": "Clay"
+      }
     },
     {
       "player_id": "8155",
@@ -982,7 +1010,12 @@
       "adp": 33.9,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 211.0,
-      "survival_next": 0.6994880512783379
+      "survival_next": 0.6994880512783379,
+      "second_opinion": {
+        "positional_rank": 16,
+        "overall_rank": 48,
+        "source": "Clay"
+      }
     },
     {
       "player_id": "5927",
@@ -999,7 +1032,8 @@
       "adp": 56.1,
       "injury_status": null,
       "sleeper_pts_ppr": 213.8,
-      "survival_next": 0.9827735887912683
+      "survival_next": 0.9827735887912683,
+      "second_opinion": null
     },
     {
       "player_id": "8150",
@@ -1016,7 +1050,12 @@
       "adp": 29.2,
       "injury_status": null,
       "sleeper_pts_ppr": 208.0,
-      "survival_next": 0.4504464665744119
+      "survival_next": 0.4504464665744119,
+      "second_opinion": {
+        "positional_rank": 5,
+        "overall_rank": 14,
+        "source": "Clay"
+      }
     },
     {
       "player_id": "7588",
@@ -1033,7 +1072,12 @@
       "adp": 35.5,
       "injury_status": null,
       "sleeper_pts_ppr": 207.3,
-      "survival_next": 0.7593539060204777
+      "survival_next": 0.7593539060204777,
+      "second_opinion": {
+        "positional_rank": 17,
+        "overall_rank": 48,
+        "source": "Clay"
+      }
     },
     {
       "player_id": "12519",
@@ -1050,7 +1094,8 @@
       "adp": 52.7,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 209.0,
-      "survival_next": 0.9748797430236645
+      "survival_next": 0.9748797430236645,
+      "second_opinion": null
     },
     {
       "player_id": "8167",
@@ -1067,7 +1112,8 @@
       "adp": 70.9,
       "injury_status": null,
       "sleeper_pts_ppr": 207.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8148",
@@ -1084,7 +1130,8 @@
       "adp": 58.5,
       "injury_status": null,
       "sleeper_pts_ppr": 206.2,
-      "survival_next": 0.9866012044805293
+      "survival_next": 0.9866012044805293,
+      "second_opinion": null
     },
     {
       "player_id": "9487",
@@ -1101,7 +1148,8 @@
       "adp": 76.0,
       "injury_status": null,
       "sleeper_pts_ppr": 212.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13287",
@@ -1118,7 +1166,8 @@
       "adp": 26.9,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 211.8,
-      "survival_next": 0.300199825073465
+      "survival_next": 0.300199825073465,
+      "second_opinion": null
     },
     {
       "player_id": "5892",
@@ -1135,7 +1184,8 @@
       "adp": 49.3,
       "injury_status": null,
       "sleeper_pts_ppr": 206.1,
-      "survival_next": 0.9624176916958003
+      "survival_next": 0.9624176916958003,
+      "second_opinion": null
     },
     {
       "player_id": "7543",
@@ -1152,7 +1202,8 @@
       "adp": 44.9,
       "injury_status": null,
       "sleeper_pts_ppr": 207.7,
-      "survival_next": 0.9342742152222139
+      "survival_next": 0.9342742152222139,
+      "second_opinion": null
     },
     {
       "player_id": "6790",
@@ -1169,7 +1220,8 @@
       "adp": 55.1,
       "injury_status": null,
       "sleeper_pts_ppr": 208.0,
-      "survival_next": 0.9808026931300059
+      "survival_next": 0.9808026931300059,
+      "second_opinion": null
     },
     {
       "player_id": "11620",
@@ -1186,7 +1238,8 @@
       "adp": 65.1,
       "injury_status": null,
       "sleeper_pts_ppr": 207.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5850",
@@ -1203,7 +1256,8 @@
       "adp": 31.4,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 202.6,
-      "survival_next": 0.58030109610327
+      "survival_next": 0.58030109610327,
+      "second_opinion": null
     },
     {
       "player_id": "12518",
@@ -1220,7 +1274,12 @@
       "adp": 47.2,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 201.1,
-      "survival_next": 0.9511790446488032
+      "survival_next": 0.9511790446488032,
+      "second_opinion": {
+        "positional_rank": 12,
+        "overall_rank": 77,
+        "source": "Clay"
+      }
     },
     {
       "player_id": "12512",
@@ -1237,7 +1296,8 @@
       "adp": 53.6,
       "injury_status": null,
       "sleeper_pts_ppr": 196.0,
-      "survival_next": 0.9773230994373963
+      "survival_next": 0.9773230994373963,
+      "second_opinion": null
     },
     {
       "player_id": "12481",
@@ -1254,7 +1314,8 @@
       "adp": 43.8,
       "injury_status": null,
       "sleeper_pts_ppr": 201.2,
-      "survival_next": 0.923946588131468
+      "survival_next": 0.923946588131468,
+      "second_opinion": null
     },
     {
       "player_id": "10222",
@@ -1271,7 +1332,8 @@
       "adp": 112.1,
       "injury_status": null,
       "sleeper_pts_ppr": 197.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "10859",
@@ -1288,7 +1350,12 @@
       "adp": 59.0,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 196.5,
-      "survival_next": 0.9872652984904763
+      "survival_next": 0.9872652984904763,
+      "second_opinion": {
+        "positional_rank": 4,
+        "overall_rank": 54,
+        "source": "Clay"
+      }
     },
     {
       "player_id": "11584",
@@ -1305,7 +1372,8 @@
       "adp": 41.6,
       "injury_status": null,
       "sleeper_pts_ppr": 197.3,
-      "survival_next": 0.8975085473424631
+      "survival_next": 0.8975085473424631,
+      "second_opinion": null
     },
     {
       "player_id": "11631",
@@ -1322,7 +1390,8 @@
       "adp": 73.9,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 195.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "2133",
@@ -1339,7 +1408,8 @@
       "adp": 50.5,
       "injury_status": null,
       "sleeper_pts_ppr": 192.5,
-      "survival_next": 0.9674947146853645
+      "survival_next": 0.9674947146853645,
+      "second_opinion": null
     },
     {
       "player_id": "11564",
@@ -1356,7 +1426,12 @@
       "adp": 48.3,
       "injury_status": null,
       "sleeper_pts_ppr": 320.76,
-      "survival_next": 0.9574825674121129
+      "survival_next": 0.9574825674121129,
+      "second_opinion": {
+        "positional_rank": 6,
+        "overall_rank": 73,
+        "source": "Clay"
+      }
     },
     {
       "player_id": "6770",
@@ -1373,7 +1448,8 @@
       "adp": 51.6,
       "injury_status": null,
       "sleeper_pts_ppr": 306.12,
-      "survival_next": 0.971463380552615
+      "survival_next": 0.971463380552615,
+      "second_opinion": null
     },
     {
       "player_id": "4881",
@@ -1390,7 +1466,8 @@
       "adp": 32.8,
       "injury_status": null,
       "sleeper_pts_ppr": 326.0,
-      "survival_next": 0.6510018686555057
+      "survival_next": 0.6510018686555057,
+      "second_opinion": null
     },
     {
       "player_id": "11628",
@@ -1407,7 +1484,8 @@
       "adp": 75.3,
       "injury_status": null,
       "sleeper_pts_ppr": 186.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "3294",
@@ -1424,7 +1502,8 @@
       "adp": 78.4,
       "injury_status": null,
       "sleeper_pts_ppr": 303.88,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5846",
@@ -1441,7 +1520,8 @@
       "adp": 74.9,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 183.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8142",
@@ -1458,7 +1538,8 @@
       "adp": 101.1,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 177.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8183",
@@ -1475,7 +1556,8 @@
       "adp": 121.2,
       "injury_status": null,
       "sleeper_pts_ppr": 303.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "LAR",
@@ -1492,7 +1574,8 @@
       "adp": 88.8,
       "injury_status": null,
       "sleeper_pts_ppr": 106.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12506",
@@ -1509,7 +1592,8 @@
       "adp": 68.7,
       "injury_status": null,
       "sleeper_pts_ppr": 180.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4983",
@@ -1526,7 +1610,8 @@
       "adp": 57.1,
       "injury_status": null,
       "sleeper_pts_ppr": 179.0,
-      "survival_next": 0.9845089010239793
+      "survival_next": 0.9845089010239793,
+      "second_opinion": null
     },
     {
       "player_id": "13279",
@@ -1543,7 +1628,8 @@
       "adp": 66.9,
       "injury_status": null,
       "sleeper_pts_ppr": 177.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9484",
@@ -1560,7 +1646,8 @@
       "adp": 62.8,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 174.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13286",
@@ -1577,7 +1664,8 @@
       "adp": 67.5,
       "injury_status": null,
       "sleeper_pts_ppr": 170.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "7553",
@@ -1594,7 +1682,8 @@
       "adp": 69.1,
       "injury_status": null,
       "sleeper_pts_ppr": 171.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5045",
@@ -1611,7 +1700,8 @@
       "adp": 80.0,
       "injury_status": null,
       "sleeper_pts_ppr": 174.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "1466",
@@ -1628,7 +1718,8 @@
       "adp": 92.2,
       "injury_status": null,
       "sleeper_pts_ppr": 171.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12490",
@@ -1645,7 +1736,8 @@
       "adp": 62.2,
       "injury_status": null,
       "sleeper_pts_ppr": 174.8,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4037",
@@ -1662,7 +1754,8 @@
       "adp": 95.4,
       "injury_status": null,
       "sleeper_pts_ppr": 173.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8228",
@@ -1679,7 +1772,8 @@
       "adp": 71.8,
       "injury_status": null,
       "sleeper_pts_ppr": 170.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "HOU",
@@ -1696,7 +1790,8 @@
       "adp": 97.7,
       "injury_status": null,
       "sleeper_pts_ppr": 104.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9500",
@@ -1713,7 +1808,8 @@
       "adp": 107.5,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 172.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11560",
@@ -1730,7 +1826,8 @@
       "adp": 71.9,
       "injury_status": null,
       "sleeper_pts_ppr": 299.34,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "SEA",
@@ -1747,7 +1844,8 @@
       "adp": 105.5,
       "injury_status": null,
       "sleeper_pts_ppr": 103.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9756",
@@ -1764,7 +1862,8 @@
       "adp": 104.5,
       "injury_status": null,
       "sleeper_pts_ppr": 171.7,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4217",
@@ -1781,7 +1880,8 @@
       "adp": 89.9,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 169.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12529",
@@ -1798,7 +1898,8 @@
       "adp": 53.2,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 171.0,
-      "survival_next": 0.9762732259483501
+      "survival_next": 0.9762732259483501,
+      "second_opinion": null
     },
     {
       "player_id": "8134",
@@ -1815,7 +1916,8 @@
       "adp": 141.9,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 170.7,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "6819",
@@ -1832,7 +1934,8 @@
       "adp": 102.3,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 170.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "7611",
@@ -1849,7 +1952,8 @@
       "adp": 80.6,
       "injury_status": null,
       "sleeper_pts_ppr": 169.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8126",
@@ -1866,7 +1970,8 @@
       "adp": 116.7,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 170.7,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5947",
@@ -1883,7 +1988,8 @@
       "adp": 113.4,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 169.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12501",
@@ -1900,7 +2006,8 @@
       "adp": 127.3,
       "injury_status": null,
       "sleeper_pts_ppr": 170.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11646",
@@ -1917,7 +2024,8 @@
       "adp": 145.7,
       "injury_status": null,
       "sleeper_pts_ppr": 165.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "10232",
@@ -1934,7 +2042,8 @@
       "adp": 83.6,
       "injury_status": null,
       "sleeper_pts_ppr": 166.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "PHI",
@@ -1951,7 +2060,8 @@
       "adp": 125.4,
       "injury_status": null,
       "sleeper_pts_ppr": 98.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "DET",
@@ -1968,7 +2078,8 @@
       "adp": 154.7,
       "injury_status": null,
       "sleeper_pts_ppr": 92.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "3163",
@@ -1985,7 +2096,8 @@
       "adp": 133.3,
       "injury_status": null,
       "sleeper_pts_ppr": 283.46,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13294",
@@ -2002,7 +2114,8 @@
       "adp": 86.5,
       "injury_status": null,
       "sleeper_pts_ppr": 168.5,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "DEN",
@@ -2019,7 +2132,8 @@
       "adp": 119.1,
       "injury_status": null,
       "sleeper_pts_ppr": 96.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "7523",
@@ -2036,7 +2150,8 @@
       "adp": 100.4,
       "injury_status": null,
       "sleeper_pts_ppr": 303.42,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "BAL",
@@ -2053,7 +2168,8 @@
       "adp": 134.8,
       "injury_status": null,
       "sleeper_pts_ppr": 95.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "10236",
@@ -2070,7 +2186,8 @@
       "adp": 87.7,
       "injury_status": null,
       "sleeper_pts_ppr": 163.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9754",
@@ -2087,7 +2204,8 @@
       "adp": 114.8,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 163.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4046",
@@ -2104,7 +2222,8 @@
       "adp": 107.1,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 286.68,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "6904",
@@ -2121,7 +2240,8 @@
       "adp": 60.6,
       "injury_status": null,
       "sleeper_pts_ppr": 310.54,
-      "survival_next": 0.9891400442432463
+      "survival_next": 0.9891400442432463,
+      "second_opinion": null
     },
     {
       "player_id": "11566",
@@ -2138,7 +2258,8 @@
       "adp": 64.9,
       "injury_status": null,
       "sleeper_pts_ppr": 308.72,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5012",
@@ -2155,7 +2276,8 @@
       "adp": 129.9,
       "injury_status": null,
       "sleeper_pts_ppr": 162.5,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "7021",
@@ -2172,7 +2294,8 @@
       "adp": 85.0,
       "injury_status": null,
       "sleeper_pts_ppr": 161.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "NE",
@@ -2189,7 +2312,8 @@
       "adp": 136.5,
       "injury_status": null,
       "sleeper_pts_ppr": 92.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "MIN",
@@ -2206,7 +2330,8 @@
       "adp": 151.7,
       "injury_status": null,
       "sleeper_pts_ppr": 92.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "DAL",
@@ -2223,7 +2348,8 @@
       "adp": 197.9,
       "injury_status": null,
       "sleeper_pts_ppr": 86.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9480",
@@ -2240,7 +2366,8 @@
       "adp": 152.6,
       "injury_status": null,
       "sleeper_pts_ppr": 161.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8121",
@@ -2257,7 +2384,8 @@
       "adp": 132.4,
       "injury_status": null,
       "sleeper_pts_ppr": 161.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "JAX",
@@ -2274,7 +2402,8 @@
       "adp": 169.0,
       "injury_status": null,
       "sleeper_pts_ppr": 91.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "6797",
@@ -2291,7 +2420,8 @@
       "adp": 82.8,
       "injury_status": null,
       "sleeper_pts_ppr": 295.48,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11624",
@@ -2308,7 +2438,8 @@
       "adp": 140.4,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 161.5,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5967",
@@ -2325,7 +2456,8 @@
       "adp": 84.3,
       "injury_status": null,
       "sleeper_pts_ppr": 160.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8110",
@@ -2342,7 +2474,8 @@
       "adp": 98.6,
       "injury_status": null,
       "sleeper_pts_ppr": 159.8,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "421",
@@ -2359,7 +2492,8 @@
       "adp": 96.2,
       "injury_status": null,
       "sleeper_pts_ppr": 280.22,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "6806",
@@ -2376,7 +2510,8 @@
       "adp": 94.6,
       "injury_status": null,
       "sleeper_pts_ppr": 160.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11563",
@@ -2393,7 +2528,8 @@
       "adp": 120.7,
       "injury_status": null,
       "sleeper_pts_ppr": 295.72,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8131",
@@ -2410,7 +2546,8 @@
       "adp": 109.0,
       "injury_status": null,
       "sleeper_pts_ppr": 157.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "PIT",
@@ -2427,7 +2564,8 @@
       "adp": 161.6,
       "injury_status": null,
       "sleeper_pts_ppr": 88.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "2449",
@@ -2444,7 +2582,8 @@
       "adp": 110.9,
       "injury_status": null,
       "sleeper_pts_ppr": 157.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "KC",
@@ -2461,7 +2600,8 @@
       "adp": 224.2,
       "injury_status": null,
       "sleeper_pts_ppr": 87.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "LAC",
@@ -2478,7 +2618,8 @@
       "adp": 177.5,
       "injury_status": null,
       "sleeper_pts_ppr": 86.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "GB",
@@ -2495,7 +2636,8 @@
       "adp": 201.0,
       "injury_status": null,
       "sleeper_pts_ppr": 86.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "NYG",
@@ -2512,7 +2654,8 @@
       "adp": 238.6,
       "injury_status": null,
       "sleeper_pts_ppr": 86.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5844",
@@ -2529,7 +2672,8 @@
       "adp": 164.7,
       "injury_status": null,
       "sleeper_pts_ppr": 155.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5872",
@@ -2546,7 +2690,8 @@
       "adp": 138.0,
       "injury_status": null,
       "sleeper_pts_ppr": 155.7,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "CHI",
@@ -2563,7 +2708,8 @@
       "adp": 222.7,
       "injury_status": null,
       "sleeper_pts_ppr": 85.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13298",
@@ -2580,7 +2726,8 @@
       "adp": 122.4,
       "injury_status": null,
       "sleeper_pts_ppr": 156.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8408",
@@ -2597,7 +2744,8 @@
       "adp": 116.9,
       "injury_status": null,
       "sleeper_pts_ppr": 153.7,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "3214",
@@ -2614,7 +2762,8 @@
       "adp": 139.8,
       "injury_status": null,
       "sleeper_pts_ppr": 153.5,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "BUF",
@@ -2631,7 +2780,8 @@
       "adp": 215.8,
       "injury_status": null,
       "sleeper_pts_ppr": 84.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "SF",
@@ -2648,7 +2798,8 @@
       "adp": 218.8,
       "injury_status": null,
       "sleeper_pts_ppr": 84.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "IND",
@@ -2665,7 +2816,8 @@
       "adp": 219.0,
       "injury_status": null,
       "sleeper_pts_ppr": 84.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11583",
@@ -2682,7 +2834,8 @@
       "adp": 106.9,
       "injury_status": null,
       "sleeper_pts_ppr": 154.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12534",
@@ -2699,7 +2852,8 @@
       "adp": 98.1,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 154.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "ATL",
@@ -2716,7 +2870,8 @@
       "adp": 228.4,
       "injury_status": null,
       "sleeper_pts_ppr": 83.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "NO",
@@ -2733,7 +2888,8 @@
       "adp": 244.6,
       "injury_status": null,
       "sleeper_pts_ppr": 77.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5001",
@@ -2750,7 +2906,8 @@
       "adp": 192.8,
       "injury_status": null,
       "sleeper_pts_ppr": 150.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "7567",
@@ -2767,7 +2924,8 @@
       "adp": 111.6,
       "injury_status": null,
       "sleeper_pts_ppr": 152.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "TB",
@@ -2784,7 +2942,8 @@
       "adp": 232.4,
       "injury_status": null,
       "sleeper_pts_ppr": 81.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "CAR",
@@ -2801,7 +2960,8 @@
       "adp": 238.4,
       "injury_status": null,
       "sleeper_pts_ppr": 81.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12508",
@@ -2818,7 +2978,8 @@
       "adp": 91.8,
       "injury_status": null,
       "sleeper_pts_ppr": 296.54,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "6804",
@@ -2835,7 +2996,8 @@
       "adp": 149.5,
       "injury_status": null,
       "sleeper_pts_ppr": 278.52,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "CIN",
@@ -2852,7 +3014,8 @@
       "adp": 241.2,
       "injury_status": null,
       "sleeper_pts_ppr": 79.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "7594",
@@ -2869,7 +3032,8 @@
       "adp": 77.6,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 147.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "WAS",
@@ -2886,7 +3050,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 75.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8210",
@@ -2903,7 +3068,8 @@
       "adp": 185.4,
       "injury_status": null,
       "sleeper_pts_ppr": 144.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "CLE",
@@ -2920,7 +3086,8 @@
       "adp": 266.6,
       "injury_status": null,
       "sleeper_pts_ppr": 74.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12489",
@@ -2937,7 +3104,8 @@
       "adp": 79.5,
       "injury_status": null,
       "sleeper_pts_ppr": 144.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11603",
@@ -2954,7 +3122,8 @@
       "adp": 182.2,
       "injury_status": null,
       "sleeper_pts_ppr": 142.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8676",
@@ -2971,7 +3140,8 @@
       "adp": 148.4,
       "injury_status": null,
       "sleeper_pts_ppr": 138.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12493",
@@ -2988,7 +3158,8 @@
       "adp": 128.1,
       "injury_status": null,
       "sleeper_pts_ppr": 141.8,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "7002",
@@ -3005,7 +3176,8 @@
       "adp": 186.4,
       "injury_status": null,
       "sleeper_pts_ppr": 140.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "TEN",
@@ -3022,7 +3194,8 @@
       "adp": 270.2,
       "injury_status": null,
       "sleeper_pts_ppr": 67.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4892",
@@ -3039,7 +3212,8 @@
       "adp": 143.7,
       "injury_status": null,
       "sleeper_pts_ppr": 274.88,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5849",
@@ -3056,7 +3230,8 @@
       "adp": 159.0,
       "injury_status": null,
       "sleeper_pts_ppr": 283.06,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11586",
@@ -3073,7 +3248,8 @@
       "adp": 103.6,
       "injury_status": null,
       "sleeper_pts_ppr": 135.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5022",
@@ -3090,7 +3266,8 @@
       "adp": 123.0,
       "injury_status": null,
       "sleeper_pts_ppr": 136.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4199",
@@ -3107,7 +3284,8 @@
       "adp": 124.2,
       "injury_status": null,
       "sleeper_pts_ppr": 137.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "ARI",
@@ -3124,7 +3302,8 @@
       "adp": 273.0,
       "injury_status": null,
       "sleeper_pts_ppr": 66.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "LV",
@@ -3141,7 +3320,8 @@
       "adp": 279.3,
       "injury_status": null,
       "sleeper_pts_ppr": 65.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "NYJ",
@@ -3158,7 +3338,8 @@
       "adp": 282.2,
       "injury_status": null,
       "sleeper_pts_ppr": 64.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13346",
@@ -3175,7 +3356,8 @@
       "adp": 165.0,
       "injury_status": null,
       "sleeper_pts_ppr": 134.7,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "10219",
@@ -3192,7 +3374,8 @@
       "adp": 142.1,
       "injury_status": null,
       "sleeper_pts_ppr": 132.5,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "MIA",
@@ -3209,7 +3392,8 @@
       "adp": 299.0,
       "injury_status": null,
       "sleeper_pts_ppr": 62.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12502",
@@ -3226,7 +3410,8 @@
       "adp": 233.1,
       "injury_status": null,
       "sleeper_pts_ppr": 130.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11610",
@@ -3243,7 +3428,8 @@
       "adp": 199.3,
       "injury_status": null,
       "sleeper_pts_ppr": 131.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4943",
@@ -3260,7 +3446,8 @@
       "adp": 175.0,
       "injury_status": null,
       "sleeper_pts_ppr": 262.74,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8180",
@@ -3277,7 +3464,8 @@
       "adp": 181.2,
       "injury_status": null,
       "sleeper_pts_ppr": 130.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "7600",
@@ -3294,7 +3482,8 @@
       "adp": 239.9,
       "injury_status": null,
       "sleeper_pts_ppr": 128.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12545",
@@ -3311,7 +3500,8 @@
       "adp": 183.4,
       "injury_status": null,
       "sleeper_pts_ppr": 270.94,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8136",
@@ -3328,7 +3518,8 @@
       "adp": 131.3,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 128.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12533",
@@ -3345,7 +3536,8 @@
       "adp": 115.1,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 127.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13417",
@@ -3362,7 +3554,8 @@
       "adp": 137.0,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 128.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11618",
@@ -3379,7 +3572,8 @@
       "adp": 209.4,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 127.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13276",
@@ -3396,7 +3590,8 @@
       "adp": 188.1,
       "injury_status": null,
       "sleeper_pts_ppr": 127.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "10213",
@@ -3413,7 +3608,8 @@
       "adp": 202.0,
       "injury_status": null,
       "sleeper_pts_ppr": 125.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9504",
@@ -3430,7 +3626,8 @@
       "adp": 227.9,
       "injury_status": null,
       "sleeper_pts_ppr": 125.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "2505",
@@ -3447,7 +3644,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 122.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8111",
@@ -3464,7 +3662,8 @@
       "adp": 235.0,
       "injury_status": null,
       "sleeper_pts_ppr": 122.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11783",
@@ -3481,7 +3680,8 @@
       "adp": 231.5,
       "injury_status": null,
       "sleeper_pts_ppr": 121.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "6783",
@@ -3498,7 +3698,8 @@
       "adp": 188.3,
       "injury_status": null,
       "sleeper_pts_ppr": 119.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9508",
@@ -3515,7 +3716,8 @@
       "adp": 166.2,
       "injury_status": null,
       "sleeper_pts_ppr": 114.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13281",
@@ -3532,7 +3734,8 @@
       "adp": 89.0,
       "injury_status": "Doubtful",
       "sleeper_pts_ppr": 111.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8172",
@@ -3549,7 +3752,8 @@
       "adp": 229.7,
       "injury_status": null,
       "sleeper_pts_ppr": 110.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12509",
@@ -3566,7 +3770,8 @@
       "adp": 232.0,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 112.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8161",
@@ -3583,7 +3788,8 @@
       "adp": 193.8,
       "injury_status": null,
       "sleeper_pts_ppr": 270.12,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11655",
@@ -3600,7 +3806,8 @@
       "adp": 163.5,
       "injury_status": null,
       "sleeper_pts_ppr": 111.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11834",
@@ -3617,7 +3824,8 @@
       "adp": 239.8,
       "injury_status": null,
       "sleeper_pts_ppr": 110.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9758",
@@ -3634,7 +3842,8 @@
       "adp": 204.0,
       "injury_status": null,
       "sleeper_pts_ppr": 247.82,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4993",
@@ -3651,7 +3860,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 104.9,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "1479",
@@ -3668,7 +3878,8 @@
       "adp": 196.6,
       "injury_status": null,
       "sleeper_pts_ppr": 106.8,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "7049",
@@ -3685,7 +3896,8 @@
       "adp": 195.8,
       "injury_status": null,
       "sleeper_pts_ppr": 105.7,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13285",
@@ -3702,7 +3914,8 @@
       "adp": 221.5,
       "injury_status": null,
       "sleeper_pts_ppr": 105.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13293",
@@ -3719,7 +3932,8 @@
       "adp": 157.5,
       "injury_status": null,
       "sleeper_pts_ppr": 104.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12487",
@@ -3736,7 +3950,8 @@
       "adp": 206.4,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 100.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13330",
@@ -3753,7 +3968,8 @@
       "adp": 152.3,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 100.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "7571",
@@ -3770,7 +3986,8 @@
       "adp": 232.7,
       "injury_status": null,
       "sleeper_pts_ppr": 102.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13274",
@@ -3787,7 +4004,8 @@
       "adp": 229.8,
       "injury_status": null,
       "sleeper_pts_ppr": 98.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12498",
@@ -3804,7 +4022,8 @@
       "adp": 224.3,
       "injury_status": null,
       "sleeper_pts_ppr": 96.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13305",
@@ -3821,7 +4040,8 @@
       "adp": 170.5,
       "injury_status": null,
       "sleeper_pts_ppr": 97.5,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11625",
@@ -3838,7 +4058,8 @@
       "adp": 234.0,
       "injury_status": null,
       "sleeper_pts_ppr": 98.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13317",
@@ -3855,7 +4076,8 @@
       "adp": 239.6,
       "injury_status": null,
       "sleeper_pts_ppr": 97.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9511",
@@ -3872,7 +4094,8 @@
       "adp": 179.4,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 96.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12530",
@@ -3889,7 +4112,8 @@
       "adp": 167.2,
       "injury_status": null,
       "sleeper_pts_ppr": 100.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12492",
@@ -3906,7 +4130,8 @@
       "adp": 227.2,
       "injury_status": null,
       "sleeper_pts_ppr": 96.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13296",
@@ -3923,7 +4148,8 @@
       "adp": 214.0,
       "injury_status": null,
       "sleeper_pts_ppr": 94.8,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13413",
@@ -3940,7 +4166,8 @@
       "adp": 172.9,
       "injury_status": null,
       "sleeper_pts_ppr": 94.5,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "3321",
@@ -3957,7 +4184,8 @@
       "adp": 211.5,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 93.7,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12497",
@@ -3974,7 +4202,8 @@
       "adp": 228.7,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 92.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "10226",
@@ -3991,7 +4220,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 91.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12469",
@@ -4008,7 +4238,8 @@
       "adp": 187.8,
       "injury_status": null,
       "sleeper_pts_ppr": 88.7,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12540",
@@ -4025,7 +4256,8 @@
       "adp": 229.4,
       "injury_status": null,
       "sleeper_pts_ppr": 89.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9479",
@@ -4042,7 +4274,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 85.1,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12535",
@@ -4059,7 +4292,8 @@
       "adp": 224.4,
       "injury_status": null,
       "sleeper_pts_ppr": 87.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4039",
@@ -4076,7 +4310,8 @@
       "adp": 219.6,
       "injury_status": null,
       "sleeper_pts_ppr": 86.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11637",
@@ -4093,7 +4328,8 @@
       "adp": 234.8,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 85.8,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12536",
@@ -4110,7 +4346,8 @@
       "adp": 213.7,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 85.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12474",
@@ -4127,7 +4364,8 @@
       "adp": 160.5,
       "injury_status": null,
       "sleeper_pts_ppr": 83.8,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13320",
@@ -4144,7 +4382,8 @@
       "adp": 191.3,
       "injury_status": null,
       "sleeper_pts_ppr": 78.5,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13349",
@@ -4161,7 +4400,8 @@
       "adp": 238.9,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 81.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9482",
@@ -4178,7 +4418,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 80.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "9228",
@@ -4195,7 +4436,8 @@
       "adp": 229.5,
       "injury_status": null,
       "sleeper_pts_ppr": 235.58,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "6826",
@@ -4212,7 +4454,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 79.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "9501",
@@ -4229,7 +4472,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 80.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11597",
@@ -4246,7 +4490,8 @@
       "adp": 232.2,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 77.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5906",
@@ -4263,7 +4508,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 76.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "6865",
@@ -4280,7 +4526,8 @@
       "adp": 251.4,
       "injury_status": null,
       "sleeper_pts_ppr": 76.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8132",
@@ -4297,7 +4544,8 @@
       "adp": 146.7,
       "injury_status": null,
       "sleeper_pts_ppr": 77.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12483",
@@ -4314,7 +4562,8 @@
       "adp": 238.2,
       "injury_status": null,
       "sleeper_pts_ppr": 77.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8917",
@@ -4331,7 +4580,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 71.5,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "4454",
@@ -4348,7 +4598,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 77.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "4981",
@@ -4365,7 +4616,8 @@
       "adp": 253.2,
       "injury_status": null,
       "sleeper_pts_ppr": 77.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5870",
@@ -4382,7 +4634,8 @@
       "adp": 203.3,
       "injury_status": null,
       "sleeper_pts_ppr": 223.54,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12522",
@@ -4399,7 +4652,8 @@
       "adp": 228.5,
       "injury_status": null,
       "sleeper_pts_ppr": 227.84,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "6149",
@@ -4416,7 +4670,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 76.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "6271",
@@ -4433,7 +4688,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 75.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13301",
@@ -4450,7 +4706,8 @@
       "adp": 236.7,
       "injury_status": null,
       "sleeper_pts_ppr": 75.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12521",
@@ -4467,7 +4724,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 72.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "7090",
@@ -4484,7 +4742,8 @@
       "adp": 249.2,
       "injury_status": null,
       "sleeper_pts_ppr": 73.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8698",
@@ -4501,7 +4760,8 @@
       "adp": 241.4,
       "injury_status": null,
       "sleeper_pts_ppr": 70.8,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4066",
@@ -4518,7 +4778,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 70.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "1373",
@@ -4535,7 +4796,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 222.48,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8119",
@@ -4552,7 +4814,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 71.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8154",
@@ -4569,7 +4832,8 @@
       "adp": 155.4,
       "injury_status": null,
       "sleeper_pts_ppr": 69.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4147",
@@ -4586,7 +4850,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 69.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "9486",
@@ -4603,7 +4868,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 70.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "9494",
@@ -4620,7 +4886,8 @@
       "adp": 219.5,
       "injury_status": null,
       "sleeper_pts_ppr": 69.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13533",
@@ -4637,7 +4904,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 63.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "5995",
@@ -4654,7 +4922,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 67.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "9753",
@@ -4671,7 +4940,8 @@
       "adp": 147.1,
       "injury_status": "PUP",
       "sleeper_pts_ppr": 67.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5848",
@@ -4688,7 +4958,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 67.5,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13311",
@@ -4705,7 +4976,8 @@
       "adp": 240.9,
       "injury_status": null,
       "sleeper_pts_ppr": 67.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9225",
@@ -4722,7 +4994,8 @@
       "adp": 176.5,
       "injury_status": null,
       "sleeper_pts_ppr": 65.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13337",
@@ -4739,7 +5012,8 @@
       "adp": 208.6,
       "injury_status": null,
       "sleeper_pts_ppr": 65.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11627",
@@ -4756,7 +5030,8 @@
       "adp": 241.8,
       "injury_status": null,
       "sleeper_pts_ppr": 66.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11575",
@@ -4773,7 +5048,8 @@
       "adp": 226.0,
       "injury_status": null,
       "sleeper_pts_ppr": 65.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11626",
@@ -4790,7 +5066,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 66.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13345",
@@ -4807,7 +5084,8 @@
       "adp": 168.6,
       "injury_status": null,
       "sleeper_pts_ppr": 63.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13288",
@@ -4824,7 +5102,8 @@
       "adp": 210.0,
       "injury_status": null,
       "sleeper_pts_ppr": 63.7,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13434",
@@ -4841,7 +5120,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 61.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "4035",
@@ -4858,7 +5138,8 @@
       "adp": 161.3,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 63.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13402",
@@ -4875,7 +5156,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 63.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12503",
@@ -4892,7 +5174,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 62.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8188",
@@ -4909,7 +5192,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 62.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "7828",
@@ -4926,7 +5210,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 59.1,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11571",
@@ -4943,7 +5228,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 60.5,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13268",
@@ -4960,7 +5246,8 @@
       "adp": 229.2,
       "injury_status": null,
       "sleeper_pts_ppr": 61.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11647",
@@ -4977,7 +5264,8 @@
       "adp": 237.8,
       "injury_status": null,
       "sleeper_pts_ppr": 60.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12467",
@@ -4994,7 +5282,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 59.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13329",
@@ -5011,7 +5300,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 60.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "4033",
@@ -5028,7 +5318,8 @@
       "adp": 206.9,
       "injury_status": null,
       "sleeper_pts_ppr": 58.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13400",
@@ -5045,7 +5336,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 58.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13435",
@@ -5062,7 +5354,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 57.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13394",
@@ -5079,7 +5372,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 59.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13278",
@@ -5096,7 +5390,8 @@
       "adp": 248.8,
       "injury_status": null,
       "sleeper_pts_ppr": 56.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4137",
@@ -5113,7 +5408,8 @@
       "adp": 212.4,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 57.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4177",
@@ -5130,7 +5426,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 57.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12457",
@@ -5147,7 +5444,8 @@
       "adp": 230.6,
       "injury_status": null,
       "sleeper_pts_ppr": 56.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11435",
@@ -5164,7 +5462,8 @@
       "adp": 250.3,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 56.5,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13269",
@@ -5181,7 +5480,8 @@
       "adp": 178.0,
       "injury_status": null,
       "sleeper_pts_ppr": 212.16,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11370",
@@ -5198,7 +5498,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 56.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13411",
@@ -5215,7 +5516,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 57.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12544",
@@ -5232,7 +5534,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 56.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "6039",
@@ -5249,7 +5552,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 55.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12499",
@@ -5266,7 +5570,8 @@
       "adp": 241.5,
       "injury_status": null,
       "sleeper_pts_ppr": 56.7,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13282",
@@ -5283,7 +5588,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 53.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8205",
@@ -5300,7 +5606,8 @@
       "adp": 184.1,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 53.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9506",
@@ -5317,7 +5624,8 @@
       "adp": 243.9,
       "injury_status": null,
       "sleeper_pts_ppr": 52.5,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11576",
@@ -5334,7 +5642,8 @@
       "adp": 205.9,
       "injury_status": null,
       "sleeper_pts_ppr": 52.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11581",
@@ -5351,7 +5660,8 @@
       "adp": 197.9,
       "injury_status": null,
       "sleeper_pts_ppr": 51.8,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9502",
@@ -5368,7 +5678,8 @@
       "adp": 174.5,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 51.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "6803",
@@ -5385,7 +5696,8 @@
       "adp": 251.4,
       "injury_status": "DNR",
       "sleeper_pts_ppr": 49.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "8147",
@@ -5402,7 +5714,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 48.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "5970",
@@ -5419,7 +5732,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 48.1,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13405",
@@ -5436,7 +5750,8 @@
       "adp": 239.1,
       "injury_status": null,
       "sleeper_pts_ppr": 45.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4950",
@@ -5453,7 +5768,8 @@
       "adp": 241.7,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 46.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11643",
@@ -5470,7 +5786,8 @@
       "adp": 247.9,
       "injury_status": null,
       "sleeper_pts_ppr": 44.1,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "10231",
@@ -5487,7 +5804,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 41.9,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13414",
@@ -5504,7 +5822,8 @@
       "adp": 220.8,
       "injury_status": null,
       "sleeper_pts_ppr": 42.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "9481",
@@ -5521,7 +5840,8 @@
       "adp": null,
       "injury_status": "PUP",
       "sleeper_pts_ppr": 40.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13342",
@@ -5538,7 +5858,8 @@
       "adp": null,
       "injury_status": "IR",
       "sleeper_pts_ppr": 40.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8225",
@@ -5555,7 +5876,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 40.1,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13319",
@@ -5572,7 +5894,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 39.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12718",
@@ -5589,7 +5912,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 41.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8127",
@@ -5606,7 +5930,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 38.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11570",
@@ -5623,7 +5948,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 38.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13270",
@@ -5640,7 +5966,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 39.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11199",
@@ -5657,7 +5984,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 38.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "1339",
@@ -5674,7 +6002,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 36.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13380",
@@ -5691,7 +6020,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 39.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "5857",
@@ -5708,7 +6038,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 36.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13420",
@@ -5725,7 +6056,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 38.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12485",
@@ -5742,7 +6074,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 38.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "4144",
@@ -5759,7 +6092,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 35.9,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "3286",
@@ -5776,7 +6110,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 38.1,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12641",
@@ -5793,7 +6128,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 37.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13424",
@@ -5810,7 +6146,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 36.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12531",
@@ -5827,7 +6164,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 36.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "10218",
@@ -5844,7 +6182,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 36.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13401",
@@ -5861,7 +6200,8 @@
       "adp": 249.7,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 33.8,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13322",
@@ -5878,7 +6218,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 33.5,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "3202",
@@ -5895,7 +6236,8 @@
       "adp": 430.0,
       "injury_status": null,
       "sleeper_pts_ppr": 33.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11599",
@@ -5912,7 +6254,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 33.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12670",
@@ -5929,7 +6272,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 35.5,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13421",
@@ -5946,7 +6290,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 33.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "3271",
@@ -5963,7 +6308,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 32.9,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13408",
@@ -5980,7 +6326,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 32.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8135",
@@ -5997,7 +6344,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 34.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11577",
@@ -6014,7 +6362,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 33.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8800",
@@ -6031,7 +6380,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 33.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12658",
@@ -6048,7 +6398,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 31.9,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8117",
@@ -6065,7 +6416,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 34.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "7716",
@@ -6082,7 +6434,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 31.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "7694",
@@ -6099,7 +6452,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 31.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13324",
@@ -6116,7 +6470,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 31.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13357",
@@ -6133,7 +6488,8 @@
       "adp": 452.2,
       "injury_status": null,
       "sleeper_pts_ppr": 31.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13422",
@@ -6150,7 +6506,8 @@
       "adp": null,
       "injury_status": "IR",
       "sleeper_pts_ppr": 31.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "6001",
@@ -6167,7 +6524,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 31.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13431",
@@ -6184,7 +6542,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 31.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12505",
@@ -6201,7 +6560,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 33.9,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "5973",
@@ -6218,7 +6578,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 31.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "10871",
@@ -6235,7 +6596,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 31.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12504",
@@ -6252,7 +6614,8 @@
       "adp": 217.5,
       "injury_status": null,
       "sleeper_pts_ppr": 32.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12476",
@@ -6269,7 +6632,8 @@
       "adp": 211.9,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 31.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "7670",
@@ -6286,7 +6650,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 32.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13338",
@@ -6303,7 +6668,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 32.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12482",
@@ -6320,7 +6686,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 32.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13307",
@@ -6337,7 +6704,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 29.5,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11593",
@@ -6354,7 +6722,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 29.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13348",
@@ -6371,7 +6740,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 30.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "6130",
@@ -6388,7 +6758,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 30.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11608",
@@ -6405,7 +6776,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 31.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12547",
@@ -6422,7 +6794,8 @@
       "adp": 222.1,
       "injury_status": null,
       "sleeper_pts_ppr": 31.2,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13302",
@@ -6439,7 +6812,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 30.1,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13477",
@@ -6456,7 +6830,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 31.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12471",
@@ -6473,7 +6848,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 30.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12523",
@@ -6490,7 +6866,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 30.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13309",
@@ -6507,7 +6884,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 30.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "6869",
@@ -6524,7 +6902,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 27.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13273",
@@ -6541,7 +6920,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 27.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13354",
@@ -6558,7 +6938,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 30.1,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11629",
@@ -6575,7 +6956,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 29.9,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11596",
@@ -6592,7 +6974,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 27.5,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13299",
@@ -6609,7 +6992,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 27.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "7891",
@@ -6626,7 +7010,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 27.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "7496",
@@ -6643,7 +7028,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 29.5,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13316",
@@ -6660,7 +7046,8 @@
       "adp": 467.0,
       "injury_status": null,
       "sleeper_pts_ppr": 29.4,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5010",
@@ -6677,7 +7064,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 27.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12496",
@@ -6694,7 +7082,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 29.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "2197",
@@ -6711,7 +7100,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 28.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "2374",
@@ -6728,7 +7118,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 28.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "2078",
@@ -6745,7 +7136,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 28.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "8177",
@@ -6762,7 +7154,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 25.6,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11588",
@@ -6779,7 +7172,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 27.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "3634",
@@ -6796,7 +7190,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 27.7,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11600",
@@ -6813,7 +7208,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 24.9,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "7528",
@@ -6830,7 +7226,8 @@
       "adp": 217.9,
       "injury_status": null,
       "sleeper_pts_ppr": 26.3,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "96",
@@ -6847,7 +7244,8 @@
       "adp": 228.8,
       "injury_status": null,
       "sleeper_pts_ppr": 177.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "5086",
@@ -6864,7 +7262,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 26.9,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "6154",
@@ -6881,7 +7280,8 @@
       "adp": 405.0,
       "injury_status": null,
       "sleeper_pts_ppr": 26.9,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11630",
@@ -6898,7 +7298,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 26.8,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13327",
@@ -6915,7 +7316,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 25.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12048",
@@ -6932,7 +7334,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 25.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13297",
@@ -6949,7 +7352,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 26.1,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11640",
@@ -6966,7 +7370,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 26.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13079",
@@ -6983,7 +7388,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 25.9,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13347",
@@ -7000,7 +7406,8 @@
       "adp": 242.0,
       "injury_status": null,
       "sleeper_pts_ppr": 24.8,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "12543",
@@ -7017,7 +7424,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 24.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "4098",
@@ -7034,7 +7442,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 24.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12495",
@@ -7051,7 +7460,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 23.2,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11168",
@@ -7068,7 +7478,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 24.1,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "5938",
@@ -7085,7 +7496,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 24.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11579",
@@ -7102,7 +7514,8 @@
       "adp": 237.4,
       "injury_status": null,
       "sleeper_pts_ppr": 22.6,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13333",
@@ -7119,7 +7532,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 23.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "11623",
@@ -7136,7 +7550,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 23.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13403",
@@ -7153,7 +7568,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 20.4,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "3257",
@@ -7170,7 +7586,8 @@
       "adp": 243.0,
       "injury_status": null,
       "sleeper_pts_ppr": 160.0,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "11559",
@@ -7187,7 +7604,8 @@
       "adp": 227.9,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 143.16,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "6768",
@@ -7204,7 +7622,8 @@
       "adp": 236.5,
       "injury_status": null,
       "sleeper_pts_ppr": 92.96,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "4017",
@@ -7221,7 +7640,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 102.06,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12524",
@@ -7238,7 +7658,8 @@
       "adp": 236.1,
       "injury_status": null,
       "sleeper_pts_ppr": 97.12,
-      "survival_next": 0.99
+      "survival_next": 0.99,
+      "second_opinion": null
     },
     {
       "player_id": "13272",
@@ -7255,7 +7676,8 @@
       "adp": null,
       "injury_status": "Questionable",
       "sleeper_pts_ppr": 54.92,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "1166",
@@ -7272,7 +7694,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 39.16,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "7591",
@@ -7289,7 +7712,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 34.72,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "19",
@@ -7306,7 +7730,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 28.72,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13306",
@@ -7323,7 +7748,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 30.3,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "6011",
@@ -7340,7 +7766,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 27.96,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "2028",
@@ -7357,7 +7784,8 @@
       "adp": null,
       "injury_status": "NA",
       "sleeper_pts_ppr": 27.18,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "7527",
@@ -7374,7 +7802,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 26.72,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13303",
@@ -7391,7 +7820,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 24.0,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "12511",
@@ -7408,7 +7838,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 22.5,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "13289",
@@ -7425,7 +7856,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 22.02,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     },
     {
       "player_id": "9229",
@@ -7442,7 +7874,8 @@
       "adp": null,
       "injury_status": null,
       "sleeper_pts_ppr": 21.32,
-      "survival_next": null
+      "survival_next": null,
+      "second_opinion": null
     }
   ],
   "tier_alerts": [
@@ -7647,6 +8080,7 @@
     "warnings": [],
     "poll_last_success_at": 1787879733,
     "poll_consecutive_failures": 0,
-    "poll_last_error": null
+    "poll_last_error": null,
+    "second_opinion_loaded_at": 1787860000
   }
 }

@@ -147,6 +147,7 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         // The simulation exercises the draft board only; no weekly projections
         // are needed and none are loaded.
         weekly_points: WeeklyPoints::default(),
+        second_opinion_loaded_at: None,
     };
     (loaded, config)
 }

@@ -11,6 +11,7 @@ use draft_assistant_lib::season_api::{
 use draft_assistant_lib::season_engine::LoadedSeason;
 use draft_assistant_lib::season_history::{History, PlayerSnap, Snapshot, TeamSnap};
 use draft_assistant_lib::season_types::LastSeasonRow;
+use draft_assistant_lib::second_opinion::SecondOpinion;
 use draft_assistant_lib::sleeper::{
     Draft, DraftSettings, League, LeagueSettings, PlayerMeta, ProjectionRow,
 };
@@ -26,6 +27,27 @@ const FUTURE_KICKOFF_MS: i64 = 4_000_000_000_000;
 const SNAP_AT: u64 = 1_700_000_000;
 /// Second trend snapshot, epoch seconds.
 const SNAP_AT_2: u64 = SNAP_AT + 21_600;
+
+/// A hand-set second opinion for two of the fixture players. Without a
+/// populated example here, `tests/fixture_shape.rs` would have nothing to
+/// compare the checked-in fixture's new column against.
+///
+/// Both disagreements are deliberately small: a big one in the player's
+/// favour adds a rec-card reason and its score bump, which would change which
+/// player the simulated picks take and quietly re-cast every other fixture
+/// test. `tests/second_opinion_view.rs` is where the big ones are exercised.
+fn second_opinion_for(id: &str) -> Option<SecondOpinion> {
+    let (positional_rank, overall_rank) = match id {
+        "w6" => (14, 40),
+        "r2" => (8, 20),
+        _ => return None,
+    };
+    Some(SecondOpinion {
+        positional_rank,
+        overall_rank,
+        source: "Clay".to_string(),
+    })
+}
 
 fn board_player(id: &str, name: &str, position: &str, team: &str, rank: u32) -> BoardPlayer {
     BoardPlayer {
@@ -43,6 +65,7 @@ fn board_player(id: &str, name: &str, position: &str, team: &str, rank: u32) -> 
         adp: if id == "w5" { None } else { Some(rank as f64) },
         injury_status: None,
         sleeper_pts_ppr: None,
+        second_opinion: second_opinion_for(id),
     }
 }
 
@@ -265,6 +288,7 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
         warnings: Vec::new(),
         player_meta,
         weekly_points: WeeklyPoints::build(&projections(), &scoring),
+        second_opinion_loaded_at: Some(1_756_000_000),
     };
 
     let season = LoadedSeason {

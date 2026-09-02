@@ -30,6 +30,7 @@ fn player(rank: u32, name: &str, position: &str, points: f64) -> AvailablePlayer
             adp: Some(f64::from(rank) + 0.4),
             injury_status: None,
             sleeper_pts_ppr: None,
+            second_opinion: None,
         },
         survival_next: Some(0.5 - f64::from(rank) / 100.0),
     }
@@ -117,6 +118,7 @@ pub fn draft_fixture() -> DraftView {
             poll_last_success_at: None,
             poll_consecutive_failures: 0,
             poll_last_error: None,
+            second_opinion_loaded_at: None,
         },
     }
 }

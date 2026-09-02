@@ -32,6 +32,7 @@ const METHODS: Record<keyof Api, true> = {
   recordManualPick: true,
   undoManualPick: true,
   exportState: true,
+  importSecondOpinion: true,
   headshot: true,
   avatar: true,
   startPolling: true,

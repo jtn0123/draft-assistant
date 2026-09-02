@@ -204,6 +204,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         current_round,
         rounds,
         current_pick,
+        teams,
     );
 
     let recent_picks: Vec<RecentPick> = happened
@@ -293,6 +294,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             poll_last_success_at: loaded.poll_last_success_at,
             poll_consecutive_failures: loaded.poll_consecutive_failures,
             poll_last_error: loaded.poll_last_error.clone(),
+            second_opinion_loaded_at: loaded.second_opinion_loaded_at,
         },
     }
 }

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 /// The frontend gate in `src/api.ts` refuses any other version outright, and
 /// `tests/fixture_shape.rs` refuses to let it move without the checked-in
 /// `public/dev-fixture.json` moving with it.
-pub const DRAFT_SCHEMA_VERSION: &str = "1.2";
+pub const DRAFT_SCHEMA_VERSION: &str = "1.3";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DraftStatus {
@@ -117,4 +117,8 @@ pub struct DataHealth {
     pub poll_last_success_at: Option<u64>,
     pub poll_consecutive_failures: u32,
     pub poll_last_error: Option<String>,
+    /// When the imported second-opinion CSV was last read, epoch seconds;
+    /// `None` when nothing has been imported. The board's extra column names
+    /// this date in its header tooltip.
+    pub second_opinion_loaded_at: Option<u64>,
 }

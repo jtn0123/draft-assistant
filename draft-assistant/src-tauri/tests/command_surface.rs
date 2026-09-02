@@ -104,7 +104,12 @@ fn declared_in_crate() -> BTreeSet<String> {
 
 /// Commands whose signature pins them to the Wry runtime, so they cannot be
 /// registered on the mock runtime the IPC round trip uses.
-const WRY_ONLY: [&str; 2] = ["start_polling", "start_season_polling"];
+const WRY_ONLY: [&str; 3] = [
+    "start_polling",
+    "start_season_polling",
+    // Takes an `AppHandle` so it can open the native file picker.
+    "import_second_opinion",
+];
 
 /// The full command list, as `lib.rs` should have it.
 fn handler_list() -> BTreeSet<String> {
@@ -134,6 +139,7 @@ fn handler_list() -> BTreeSet<String> {
         "chat_settings",
         "ask_claude",
         "chat_suggestions",
+        "import_second_opinion",
     ]
     .into_iter()
     .map(str::to_string)
