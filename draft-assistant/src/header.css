@@ -1,0 +1,241 @@
+/* The app header and the settings menu that drops out of it: identity,
+   screen switcher, sync pills, and the rows in the menu.
+
+   Its own sheet because the header is the one piece of chrome on screen at
+   all times, in front of every screen, while App.css is the frame those
+   screens sit in. */
+
+.app-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--rule);
+  flex-wrap: wrap;
+}
+
+.header-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.header-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.header-title h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.header-subtitle,
+.header-meta {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.header-modes {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mode-toggle {
+  display: flex;
+  border: 1px solid var(--rule2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.mode {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 14px;
+  border: none;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.mode.is-on {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  position: relative;
+}
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border: 1px solid var(--rule2);
+  color: var(--mid);
+  white-space: nowrap;
+}
+
+.pill .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pill-live {
+  color: var(--pos);
+  border-color: var(--posrule);
+}
+
+.pill-stale {
+  color: var(--act);
+  border-color: var(--actrule);
+}
+
+.pill-off {
+  color: var(--faint);
+}
+
+/* The sync pill with the reason it is failing written underneath it. */
+.sync-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sync-detail {
+  font-size: 11px;
+  line-height: 1.4;
+  max-width: 260px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.btn-ask {
+  font-size: 12px;
+  font-weight: 650;
+  padding: 6px 14px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-ask:hover {
+  opacity: 0.88;
+}
+
+.btn-ask.is-open {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.link-btn {
+  font-size: 12px;
+  background: none;
+  border: none;
+  color: var(--mid);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.link-btn:hover {
+  color: var(--ink);
+}
+
+/* ---------- settings menu ---------- */
+
+.settings-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 274px;
+  background: var(--paper);
+  border: 1px solid var(--rule2);
+  box-shadow: 0 10px 26px var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 13px;
+  border: none;
+  border-top: 1px solid var(--hair);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.settings-row:hover {
+  background: var(--panel);
+}
+
+.settings-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-row-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.settings-row-note {
+  font-size: 11px;
+}
+
+.settings-row-value {
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  color: var(--mid);
+}
+
+.settings-row-value.is-on {
+  color: var(--pos);
+}
+
+.settings-footer {
+  padding: 10px 13px;
+  font-size: 11px;
+  line-height: 1.5;
+  border-top: 1px solid var(--rule);
+}

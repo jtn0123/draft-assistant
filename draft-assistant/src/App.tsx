@@ -19,6 +19,7 @@ import { cycleThemePreference, useAppliedTheme } from "./theme";
 // it rather than making every window parse all ten before first paint.
 import "./theme.css";
 import "./App.css";
+import "./header.css";
 import "./components.css";
 import "./zoom.css";
 
