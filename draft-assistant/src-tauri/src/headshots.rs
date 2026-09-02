@@ -359,4 +359,106 @@ mod tests {
         assert_eq!(engine.headshot_count(), 0);
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    /// Age one file backwards so the freshness checks can be exercised
+    /// without a test that sleeps for a month.
+    fn age_file(path: &Path, seconds: u64) {
+        let file = std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("open to re-stamp");
+        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(seconds);
+        file.set_modified(when).expect("re-stamp");
+    }
+
+    #[test]
+    fn a_month_old_photo_is_re_fetched_rather_than_served_forever() {
+        let dir = image_dir("stale");
+        let heads = dir.join("headshots");
+        let image = heads.join("11560.img");
+        let miss = heads.join("11560.none");
+        std::fs::create_dir_all(&heads).unwrap();
+        std::fs::write(&image, [0x89, b'P', b'N', b'G', 0, 0, 0, 0]).unwrap();
+
+        // Inside the window it is served as it stands.
+        assert!(matches!(
+            look_on_disk(&heads, &image, &miss).unwrap(),
+            Cached::Image(_)
+        ));
+        // Past it, the photo may be out of date -- a trade, a new season -- so
+        // the cache stops answering and the CDN is asked again.
+        age_file(&image, FRESH_SECS + 60);
+        assert!(matches!(
+            look_on_disk(&heads, &image, &miss).unwrap(),
+            Cached::Nothing
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_remembered_miss_expires_sooner_than_a_photo_does() {
+        let dir = image_dir("miss-expiry");
+        let heads = dir.join("headshots");
+        let image = heads.join("11560.img");
+        let miss = heads.join("11560.none");
+        std::fs::create_dir_all(&heads).unwrap();
+        std::fs::write(&miss, b"").unwrap();
+
+        assert!(matches!(
+            look_on_disk(&heads, &image, &miss).unwrap(),
+            Cached::KnownMissing
+        ));
+        // A rookie's photo usually lands by week 1, so the miss is re-checked
+        // long before a real photo would be.
+        age_file(&miss, MISS_SECS + 60);
+        assert!(matches!(
+            look_on_disk(&heads, &image, &miss).unwrap(),
+            Cached::Nothing
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_file_that_is_not_an_image_is_ignored_rather_than_served() {
+        // The CDN answers a missing photo with an HTML error page. Serving
+        // that back as a data URL puts a broken image in every roster row.
+        let dir = image_dir("corrupt");
+        let heads = dir.join("headshots");
+        let image = heads.join("11560.img");
+        let miss = heads.join("11560.none");
+        std::fs::create_dir_all(&heads).unwrap();
+        std::fs::write(&image, b"<html>404</html>").unwrap();
+
+        assert!(matches!(
+            look_on_disk(&heads, &image, &miss).unwrap(),
+            Cached::Nothing
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_photo_that_arrives_replaces_the_miss_that_was_remembered() {
+        let dir = image_dir("store");
+        let heads = dir.join("headshots");
+        let image = heads.join("11560.img");
+        let miss = heads.join("11560.none");
+        std::fs::create_dir_all(&heads).unwrap();
+
+        // No photo: the miss is written down so the next render does not
+        // fetch it all over again.
+        store_on_disk(&image, &miss, b"<html>404</html>", false);
+        assert!(miss.exists());
+        assert!(!image.exists());
+
+        // The rookie's photo lands. The miss has to go with it, or he stays
+        // faceless until it expires.
+        let png = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        store_on_disk(&image, &miss, &png, true);
+        assert_eq!(std::fs::read(&image).unwrap(), png);
+        assert!(!miss.exists());
+        // Written through a temp file, so a crash mid-write cannot leave half
+        // an image behind for the next month.
+        assert!(!image.with_extension("img.tmp").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

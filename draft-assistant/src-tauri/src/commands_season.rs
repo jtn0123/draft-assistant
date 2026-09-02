@@ -137,8 +137,8 @@ const ANALYSIS_EVERY: u32 = 20;
 /// leaves a loop that picks one up as soon as there is one. So a rejection
 /// reaching the screen really does mean live updates are not running.
 #[tauri::command]
-pub async fn start_season_polling(
-    app: tauri::AppHandle,
+pub async fn start_season_polling<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
     interval_secs: Option<u64>,
 ) -> Result<(), String> {

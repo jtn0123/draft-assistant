@@ -294,6 +294,11 @@ pub fn season_context(view: &crate::season::SeasonView) -> String {
 #[path = "chat_context_tests.rs"]
 mod context_tests;
 
+/// The blocks that only appear when the draft has something to say.
+#[cfg(test)]
+#[path = "chat_context_extras_tests.rs"]
+mod extras_tests;
+
 /// Suggested prompts shown under the thread, tailored to the screen.
 pub fn suggestions(screen: &str) -> Vec<String> {
     let items: &[&str] = if screen == "season" {

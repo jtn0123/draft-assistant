@@ -222,6 +222,10 @@ pub async fn ask(
 }
 
 #[cfg(test)]
+#[path = "chat_cli_process_tests.rs"]
+mod process_tests;
+
+#[cfg(test)]
 mod tests {
     #[test]
     fn a_world_writable_directory_is_never_trusted_for_the_cli() {
