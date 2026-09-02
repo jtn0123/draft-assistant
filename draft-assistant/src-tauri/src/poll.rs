@@ -197,7 +197,7 @@ impl AnalysisCache {
             self.held = Some(SeasonAnalysis::of(view));
         }
         self.ticks = self.ticks.saturating_add(1);
-        if self.ticks % self.rebuild_every == 0 {
+        if self.ticks.is_multiple_of(self.rebuild_every) {
             self.held = None;
         }
     }

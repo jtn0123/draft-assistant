@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: draft-assistant/package-lock.json
+
+      # No version here: @master with no `toolchain` input reads the
+      # repo's rust-toolchain.toml, so CI runs the exact clippy the laptop does.
+      - uses: dtolnay/rust-toolchain@master
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: draft-assistant/src-tauri
+
+      - name: Install dependencies
+        working-directory: draft-assistant
+        run: npm ci
+
+      - name: Fast gate (loc, css, format, lint, typecheck)
+        working-directory: draft-assistant
+        run: npm run verify:fast
+
+      - name: Frontend unit tests
+        working-directory: draft-assistant
+        run: npm run test:frontend
+
+      - name: Rust tests
+        working-directory: draft-assistant
+        run: npm run test:rust
+
+      - name: Install Playwright Chromium
+        working-directory: draft-assistant
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser end-to-end tests
+        working-directory: draft-assistant
+        run: npm run test:e2e:browser
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: draft-assistant/playwright-report
+          retention-days: 14
+
+  bundle:
+    name: Bundle macOS app
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: draft-assistant/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@master
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: draft-assistant/src-tauri
+
+      - name: Install dependencies
+        working-directory: draft-assistant
+        run: npm ci
+
+      - name: Build the desktop bundle
+        working-directory: draft-assistant
+        run: npm run tauri build
+
+      - name: Upload the .app and .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: draft-assistant-macos
+          path: |
+            draft-assistant/src-tauri/target/release/bundle/macos/*.app
+            draft-assistant/src-tauri/target/release/bundle/dmg/*.dmg
+          retention-days: 14
+          if-no-files-found: error

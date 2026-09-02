@@ -153,7 +153,7 @@ impl Engine {
                 }
             }
         }
-        all.sort_by(|a, b| a.week.cmp(&b.week));
+        all.sort_by_key(|w| w.week);
         if failures.len() == WEEKS as usize {
             let error = "all weekly projection requests failed".to_string();
             return stale
