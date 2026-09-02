@@ -29,6 +29,9 @@ pub fn recommend(
     current_round: u32,
     total_rounds: u32,
     current_pick: u32,
+    // League size, so the imported second opinion can say how many rounds
+    // late the market is rather than how many picks.
+    teams: u32,
 ) -> Vec<Recommendation> {
     let open: HashMap<String, u32> = my_roster
         .map(|r| r.open_starters.iter().cloned().collect())
@@ -199,6 +202,15 @@ pub fn recommend(
                 }
             }
 
+            // An imported second opinion, but only when it runs the user's
+            // way: this player is further up someone else's board than he is
+            // up this one. Built next to the rest of the reasons, in
+            // `second_opinion.rs`.
+            if let Some(reason) = crate::second_opinion::rec_reason(p, teams) {
+                score += 4.0;
+                reasons.push(reason);
+            }
+
             if mode == "safe" {
                 // Safe mode: penalize injury flags and volatile bonus-heavy value.
                 if let Some(status) = &p.injury_status {
@@ -270,6 +282,7 @@ mod tests {
                 adp: Some(100.0),
                 injury_status: None,
                 sleeper_pts_ppr: None,
+                second_opinion: None,
             },
             survival_next: None,
         }
@@ -321,6 +334,7 @@ mod tests {
             14,
             15,
             180,
+            12,
         );
         assert!(recs.iter().all(|r| r.position != "DEF"), "{recs:?}");
     }
@@ -336,6 +350,7 @@ mod tests {
             10,
             15,
             130,
+            12,
         );
         assert!(recs.iter().all(|r| r.position != "QB"), "{recs:?}");
     }
@@ -353,6 +368,7 @@ mod tests {
             14,
             15,
             184,
+            12,
         );
         assert_eq!(recs[0].position, "DEF", "{recs:?}");
     }
@@ -369,6 +385,7 @@ mod tests {
             15,
             15,
             200,
+            12,
         );
         assert!(!recs.is_empty());
     }
@@ -390,6 +407,7 @@ mod tests {
             5,
             10,
             50,
+            12,
         );
 
         assert_eq!(recs[0].player_id, "qb2", "{recs:?}");
@@ -414,6 +432,7 @@ mod tests {
             9,
             10,
             90,
+            12,
         );
         assert!(recs
             .iter()

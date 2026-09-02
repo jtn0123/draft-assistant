@@ -2,6 +2,7 @@
 
 use crate::roster::RosterRules;
 use crate::scoring;
+use crate::second_opinion::SecondOpinion;
 use crate::sleeper::{Draft, League, PlayerMeta, ProjectionRow};
 use crate::valuation::{self, ReplacementModel, ScoredPlayer};
 use crate::view::TierAlert;
@@ -29,6 +30,9 @@ pub struct BoardPlayer {
     pub injury_status: Option<String>,
     /// Sleeper's own PPR total, kept as an auditable cross-check only.
     pub sleeper_pts_ppr: Option<f64>,
+    /// What an imported projections file says about him, when one is loaded.
+    /// Ranks only -- see `second_opinion.rs` for why the points are dropped.
+    pub second_opinion: Option<SecondOpinion>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,6 +169,7 @@ pub fn build_board(
                 .get(&row.player_id)
                 .and_then(|m| m.injury_status.clone()),
             sleeper_pts_ppr: row.stat("pts_ppr"),
+            second_opinion: None,
         });
     }
 

@@ -5,11 +5,19 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { AvailablePlayer, Position } from "../types";
 import { fmt, injuryTag, pct } from "../format";
 import { PlayerName, SortHead } from "./bits";
+import {
+  hasSecondOpinion,
+  secondOpinionRank,
+  secondOpinionSource,
+  secondOpinionTitle,
+} from "../secondOpinion";
+import { SecondOpinionCell } from "./SecondOpinion";
 
 const PAGE = 200;
 const SKELETON_WIDTHS = ["72%", "88%", "64%", "80%", "70%", "84%"];
 
-type SortKey = "rank" | "name" | "pos" | "team" | "bye" | "pts" | "vorp" | "tier" | "adp" | "surv";
+type SortKey =
+  "rank" | "name" | "pos" | "second" | "team" | "bye" | "pts" | "vorp" | "tier" | "adp" | "surv";
 
 type Direction = "asc" | "desc";
 
@@ -57,10 +65,29 @@ const COLUMNS: Column[] = [
   },
 ];
 
+/** The imported column, built only when there is something to put in it. It
+ *  sits immediately after this board's own positional rank, which is the
+ *  number it is there to be compared against. */
+function columnsFor(players: AvailablePlayer[], loadedAt: number | null): Column[] {
+  if (!hasSecondOpinion(players)) return COLUMNS;
+  const source = secondOpinionSource(players);
+  const at = COLUMNS.findIndex((c) => c.key === "pos") + 1;
+  const column: Column = {
+    key: "second",
+    label: source,
+    right: true,
+    initial: "asc",
+    title: secondOpinionTitle(source, loadedAt),
+    value: secondOpinionRank,
+  };
+  return [...COLUMNS.slice(0, at), column, ...COLUMNS.slice(at)];
+}
+
 const SORT_LABEL: Record<SortKey, string> = {
   rank: "rank",
   name: "name",
   pos: "position",
+  second: "the imported rank",
   team: "team",
   bye: "bye week",
   pts: "points",
@@ -99,13 +126,15 @@ function isTyping(target: EventTarget | null): boolean {
  */
 const BoardRow = memo(function BoardRow({
   player: p,
+  showSecondOpinion,
   onDraft,
 }: {
   player: AvailablePlayer;
+  showSecondOpinion: boolean;
   onDraft: (id: string, name: string) => void;
 }) {
   return (
-    <div className="board-row board-body">
+    <div className={`board-row board-body${showSecondOpinion ? " has-second" : ""}`}>
       <span className="muted right">{p.overall_rank}</span>
       <span className="board-player">
         <PlayerName
@@ -119,6 +148,7 @@ const BoardRow = memo(function BoardRow({
         <span>{p.position}</span>
         <span className="pos-rank">{p.position_rank}</span>
       </span>
+      {showSecondOpinion && <SecondOpinionCell player={p} />}
       <span className="mid board-team">
         <PlayerName name={p.team ?? "–"} team={p.team} />
       </span>
@@ -146,6 +176,7 @@ export function Board({
   positions,
   loading,
   boardSize,
+  secondOpinionLoadedAt = null,
   onDraft,
 }: {
   players: AvailablePlayer[];
@@ -153,6 +184,10 @@ export function Board({
   loading: boolean;
   /** How many players the projections cover — named in the loading note. */
   boardSize: number;
+  /** When the imported projections CSV was read; named in the column tooltip.
+   *  Omitted where the caller has no data health to hand — the column reads
+   *  "imported" without a date rather than not appearing. */
+  secondOpinionLoadedAt?: number | null;
   onDraft: (id: string, name: string) => void;
 }) {
   const [pos, setPos] = useState<Position>("ALL");
@@ -174,9 +209,15 @@ export function Board({
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
+  const columns = useMemo(
+    () => columnsFor(players, secondOpinionLoadedAt),
+    [players, secondOpinionLoadedAt],
+  );
+  const showSecondOpinion = columns.length > COLUMNS.length;
+
   const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const column = COLUMNS.find((c) => c.key === sortKey);
+    const column = columns.find((c) => c.key === sortKey);
     const sign = direction === "asc" ? 1 : -1;
     const filtered = players.filter(
       (p) => (pos === "ALL" || p.position === pos) && (!q || p.name.toLowerCase().includes(q)),
@@ -195,7 +236,7 @@ export function Board({
     // in App.tsx recycles this array whenever an incoming view says exactly
     // the same thing about the pool (boardIdentity.ts), so an update that only
     // moved the clock no longer re-filters and re-sorts the whole board.
-  }, [players, pos, query, sortKey, direction]);
+  }, [players, columns, pos, query, sortKey, direction]);
 
   // Paged rather than all-or-nothing. Every row carries two `PlayerName`s, a
   // headshot with its own state, effect and store subscription, and a logo —
@@ -211,7 +252,7 @@ export function Board({
       return;
     }
     setSortKey(key);
-    setDirection(COLUMNS.find((c) => c.key === key)?.initial ?? "asc");
+    setDirection(columns.find((c) => c.key === key)?.initial ?? "asc");
   };
 
   const clearFilters = () => {
@@ -250,8 +291,8 @@ export function Board({
         </span>
       </div>
 
-      <div className="board-row board-head">
-        {COLUMNS.map((column) => (
+      <div className={`board-row board-head${showSecondOpinion ? " has-second" : ""}`}>
+        {columns.map((column) => (
           <SortHead
             key={column.key}
             label={column.label}
@@ -305,7 +346,14 @@ export function Board({
           )}
         </div>
       ) : (
-        visible.map((p) => <BoardRow key={p.player_id} player={p} onDraft={onDraft} />)
+        visible.map((p) => (
+          <BoardRow
+            key={p.player_id}
+            player={p}
+            showSecondOpinion={showSecondOpinion}
+            onDraft={onDraft}
+          />
+        ))
       )}
 
       <div className="board-foot">

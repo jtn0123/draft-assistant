@@ -94,6 +94,7 @@ fn loaded_league() -> LoadedLeague {
         warnings: Vec::new(),
         player_meta: player_meta(),
         weekly_points: WeeklyPoints::build(&weekly_rows(), &scoring),
+        second_opinion_loaded_at: None,
     }
 }
 
@@ -236,6 +237,7 @@ fn league_with_a_disputed_position() -> LoadedLeague {
         adp: None,
         injury_status: None,
         sleeper_pts_ppr: None,
+        second_opinion: None,
     }];
     loaded.board_index = HashMap::from([("swap1".to_string(), 0)]);
     loaded.player_meta =

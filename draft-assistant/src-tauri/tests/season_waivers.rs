@@ -64,6 +64,7 @@ fn board_player(id: &str, rank: u32) -> BoardPlayer {
         adp: Some(rank as f64),
         injury_status: None,
         sleeper_pts_ppr: None,
+        second_opinion: None,
     }
 }
 
@@ -127,6 +128,7 @@ fn loaded_league() -> LoadedLeague {
         warnings: Vec::new(),
         player_meta: HashMap::new(),
         weekly_points: WeeklyPoints::build(&rows, &scoring),
+        second_opinion_loaded_at: None,
     }
 }
 

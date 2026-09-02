@@ -15,7 +15,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 const draftView = {
-  schema_version: "1.2",
+  schema_version: "1.3",
   league: { league_id: "L1", name: "Test", season: "2026" },
 } as unknown as DraftView;
 const seasonView = { schema_version: "1.2" } as unknown as SeasonView;
@@ -45,7 +45,7 @@ describe("schema validation", () => {
     expect(validateDraftView(draftView)).toBe(draftView);
     expect(validateSeasonView(seasonView)).toBe(seasonView);
     expect(() => validateDraftView({ schema_version: "0.9" } as DraftView)).toThrow(
-      /expected schema 1\.2, received 0\.9/,
+      /expected schema 1\.3, received 0\.9/,
     );
     expect(() => validateSeasonView({} as SeasonView)).toThrow(/received missing/);
   });

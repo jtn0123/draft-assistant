@@ -12,6 +12,7 @@ pub mod chat_rules;
 pub mod commands_chat;
 pub mod commands_draft;
 pub mod commands_season;
+pub mod commands_second_opinion;
 pub mod draft;
 pub mod engine;
 pub mod headshots;
@@ -48,6 +49,7 @@ pub mod season_view_live;
 pub mod season_view_market;
 pub mod season_view_matchup;
 pub mod season_view_standings;
+pub mod second_opinion;
 pub mod secrets;
 pub mod simulation;
 pub mod sleeper;
@@ -73,6 +75,7 @@ use commands_season::{
     avatar, get_season, headshot, load_season, refresh_season, start_season_polling,
     stop_season_polling,
 };
+use commands_second_opinion::import_second_opinion;
 use engine::Engine;
 use leagues::sleeper_leagues;
 use state::AppState;
@@ -83,23 +86,28 @@ use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().setup(|app| {
-        let data_dir = app.path().app_data_dir().expect("no app data dir");
-        let engine = Engine::new(data_dir);
-        let config = engine.load_config();
-        app.manage(AppState {
-            engine: Arc::new(engine),
-            loaded: Arc::new(Mutex::new(None)),
-            season: Arc::new(Mutex::new(None)),
-            config: Arc::new(Mutex::new(config)),
-            polling: Arc::new(AtomicBool::new(false)),
-            poll_generation: Arc::new(AtomicU64::new(0)),
-            season_polling: Arc::new(AtomicBool::new(false)),
-            season_generation: Arc::new(AtomicU64::new(0)),
-            last_season_view: Arc::new(Mutex::new(None)),
+    let builder = tauri::Builder::default()
+        // Opens the native file picker for Settings -> "Import projections
+        // CSV...". Its commands are not in capabilities/default.json, so the
+        // webview cannot open a picker of its own.
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let data_dir = app.path().app_data_dir().expect("no app data dir");
+            let engine = Engine::new(data_dir);
+            let config = engine.load_config();
+            app.manage(AppState {
+                engine: Arc::new(engine),
+                loaded: Arc::new(Mutex::new(None)),
+                season: Arc::new(Mutex::new(None)),
+                config: Arc::new(Mutex::new(config)),
+                polling: Arc::new(AtomicBool::new(false)),
+                poll_generation: Arc::new(AtomicU64::new(0)),
+                season_polling: Arc::new(AtomicBool::new(false)),
+                season_generation: Arc::new(AtomicU64::new(0)),
+                last_season_view: Arc::new(Mutex::new(None)),
+            });
+            Ok(())
         });
-        Ok(())
-    });
 
     // The only thing that puts a WebDriver server -- a full remote-control
     // surface -- inside this app, and it is compiled out unless the `wdio`
@@ -139,6 +147,7 @@ pub fn run() {
             ask_claude,
             chat_suggestions,
             sleeper_leagues,
+            import_second_opinion,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

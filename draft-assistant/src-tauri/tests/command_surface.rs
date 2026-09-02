@@ -28,6 +28,7 @@ use std::sync::Arc;
 use draft_assistant_lib::commands_chat as chat;
 use draft_assistant_lib::commands_draft as draft;
 use draft_assistant_lib::commands_season as season;
+use draft_assistant_lib::commands_second_opinion as second_opinion;
 use draft_assistant_lib::engine::Engine;
 use draft_assistant_lib::leagues;
 use draft_assistant_lib::state::AppState;
@@ -100,6 +101,12 @@ fn declared_in_crate() -> BTreeSet<String> {
     found
 }
 
+/// Commands that open native UI when invoked. They are registered on the
+/// mock runtime like everything else, so the wiring is checked, but calling
+/// one here would either pop a real file picker or panic for want of the
+/// dialog plugin's state, which the mock app has no window to host.
+const OPENS_NATIVE_UI: [&str; 1] = ["import_second_opinion"];
+
 /// The full command list, as `lib.rs` should have it.
 fn handler_list() -> BTreeSet<String> {
     [
@@ -128,6 +135,7 @@ fn handler_list() -> BTreeSet<String> {
         "chat_settings",
         "ask_claude",
         "chat_suggestions",
+        "import_second_opinion",
     ]
     .into_iter()
     .map(str::to_string)
@@ -194,6 +202,7 @@ fn every_command_answers_over_the_ipc() {
             chat::chat_settings,
             chat::ask_claude,
             chat::chat_suggestions,
+            second_opinion::import_second_opinion,
         ])
         .build(mock_context(noop_assets()))
         .expect("the app builds on the mock runtime");
@@ -215,6 +224,9 @@ fn every_command_answers_over_the_ipc() {
         .expect("the main webview builds");
 
     for command in handler_list() {
+        if OPENS_NATIVE_UI.contains(&command.as_str()) {
+            continue;
+        }
         let response = get_ipc_response(
             &webview,
             InvokeRequest {

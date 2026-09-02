@@ -19,7 +19,7 @@
 // the old one, and reusing it is then indistinguishable from using the new
 // one — there is no observable difference between them.
 
-import type { AvailablePlayer, DraftView } from "./types";
+import type { AvailablePlayer, DraftView, SecondOpinion } from "./types";
 
 // Spelled out as an object literal so `satisfies` makes this exhaustive: add a
 // field to `AvailablePlayer` and this stops compiling until it is compared
@@ -41,15 +41,30 @@ const COMPARED = {
   injury_status: true,
   sleeper_pts_ppr: true,
   survival_next: true,
+  second_opinion: true,
 } satisfies Record<keyof AvailablePlayer, true>;
 
-const FIELDS = Object.keys(COMPARED) as (keyof AvailablePlayer)[];
+// Every field above except the one that is an object: `!==` on a fresh parse
+// of the same numbers is always true, so comparing it by identity would turn
+// the cache off entirely for anyone who has imported a CSV.
+const FIELDS = (Object.keys(COMPARED) as (keyof AvailablePlayer)[]).filter(
+  (field) => field !== "second_opinion",
+);
+
+function sameOpinion(a: SecondOpinion | null, b: SecondOpinion | null): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    a.positional_rank === b.positional_rank &&
+    a.overall_rank === b.overall_rank &&
+    a.source === b.source
+  );
+}
 
 function samePlayer(a: AvailablePlayer, b: AvailablePlayer): boolean {
   for (const field of FIELDS) {
     if (a[field] !== b[field]) return false;
   }
-  return true;
+  return sameOpinion(a.second_opinion, b.second_opinion);
 }
 
 /**

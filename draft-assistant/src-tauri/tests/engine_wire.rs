@@ -9,11 +9,6 @@
 mod stub;
 
 use draft_assistant_lib::engine::Engine;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-/// How many times the players dictionary has been served. The second load in
-/// `a_repeat_load_is_served_from_disk` asserts against this.
-static PLAYER_FETCHES: AtomicUsize = AtomicUsize::new(0);
 
 const LEAGUE: &str = r#"{
     "league_id": "league-1", "name": "Wire League", "season": "2026",
@@ -106,7 +101,6 @@ fn route(path: &str) -> Option<stub::Reply> {
     let path = path.split('?').next().unwrap_or(path);
     let ok = |body: String| Some((200u16, body));
     if path == "/v1/players/nfl" {
-        PLAYER_FETCHES.fetch_add(1, Ordering::SeqCst);
         return ok(PLAYERS.to_string());
     }
     if let Some(rest) = path.strip_prefix("/projections/nfl/2026") {
@@ -291,14 +285,23 @@ async fn an_id_that_is_not_a_league_is_tried_as_a_draft() {
 async fn a_repeat_load_is_served_from_disk_rather_than_the_wire() {
     let engine = engine("cached");
     engine.load_league("league-1", true).await.expect("loaded");
-    let after_first = PLAYER_FETCHES.load(Ordering::SeqCst);
+    // The dictionary is cached in this engine's own data dir, so the proof is
+    // that file: a fetch rewrites it, a cache hit leaves it alone. (One stub
+    // serves every test in this binary, so a count of what it served could
+    // not tell this engine's fetches from a neighbour's.)
+    let cached = engine.data_dir.join("players.json");
+    let written = std::fs::metadata(&cached)
+        .and_then(|m| m.modified())
+        .expect("the first load cached the players dictionary");
     engine
         .load_league("league-1", false)
         .await
         .expect("second load");
+    let after = std::fs::metadata(&cached)
+        .and_then(|m| m.modified())
+        .expect("the cache is still there");
     assert_eq!(
-        PLAYER_FETCHES.load(Ordering::SeqCst),
-        after_first,
+        after, written,
         "the 15 MB players dictionary must not be re-fetched inside its TTL"
     );
     cleanup(engine);

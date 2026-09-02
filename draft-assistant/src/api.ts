@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AppConfig, DraftView, PollHealth, StoredLeague } from "./types";
+import type { AppConfig, DraftView, PollHealth, SecondOpinionImport, StoredLeague } from "./types";
 import type { SeasonView } from "./season-types";
 import type { ChatReply, ChatRequest, ChatSettings } from "./chat-types";
 import { ReplayFeed, replaySource } from "./replay";
@@ -9,7 +9,7 @@ import { ReplayFeed, replaySource } from "./replay";
 // SEASON_SCHEMA_VERSION in src-tauri/src/season.rs. Bump both sides together
 // with the fixtures in public/ — src-tauri/tests/fixture_shape.rs fails if the
 // fixtures and the structs disagree about a single field.
-const DRAFT_VIEW_SCHEMA_VERSION = "1.2";
+const DRAFT_VIEW_SCHEMA_VERSION = "1.3";
 const SEASON_VIEW_SCHEMA_VERSION = "1.2";
 
 export function validateDraftView(value: DraftView): DraftView {
@@ -55,6 +55,9 @@ export interface Api {
   recordManualPick(playerId: string): Promise<DraftView>;
   undoManualPick(): Promise<DraftView>;
   exportState(): Promise<string>;
+  /** Open the native file picker, import the chosen projections CSV, and
+   *  return the counts plus the rebuilt view. `null` if the user cancelled. */
+  importSecondOpinion(): Promise<SecondOpinionImport | null>;
   /** Player photo as a data URL, cached on disk by the backend; null if none. */
   headshot(playerId: string): Promise<string | null>;
   /** Manager's team picture as a data URL, cached on disk; null if none. */
@@ -93,6 +96,11 @@ const tauriApi: Api = {
   recordManualPick: (playerId) => invokeView("record_manual_pick", { playerId }),
   undoManualPick: () => invokeView("undo_manual_pick"),
   exportState: () => invoke<string>("export_state"),
+  importSecondOpinion: async () => {
+    const result = await invoke<SecondOpinionImport | null>("import_second_opinion");
+    if (result === null) return null;
+    return { ...result, view: validateDraftView(result.view) };
+  },
   headshot: (playerId) => invoke<string | null>("headshot", { playerId }),
   avatar: (reference, full) => invoke<string | null>("avatar", { reference, full }),
   startPolling: (intervalSecs = 3) => invoke<void>("start_polling", { intervalSecs }),
@@ -188,6 +196,7 @@ function browserApi(): Api {
     recordManualPick: () => readOnly("run the desktop app to draft"),
     undoManualPick: () => readOnly("run the desktop app to draft"),
     exportState: () => Promise.resolve("browser preview — no export"),
+    importSecondOpinion: () => readOnly("importing a CSV requires the desktop app"),
     headshot: (playerId) =>
       Promise.resolve(
         /^\d+$/.test(playerId)

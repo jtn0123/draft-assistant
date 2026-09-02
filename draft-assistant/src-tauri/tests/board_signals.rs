@@ -27,6 +27,7 @@ fn player(position: &str, tier: u32) -> AvailablePlayer {
             adp: None,
             injury_status: None,
             sleeper_pts_ppr: None,
+            second_opinion: None,
         },
     }
 }

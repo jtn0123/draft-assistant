@@ -18,6 +18,7 @@ function player(over: Partial<AvailablePlayer> = {}): AvailablePlayer {
     adp: 3.5,
     injury_status: null,
     sleeper_pts_ppr: 208,
+    second_opinion: null,
     survival_next: 0.42,
     ...over,
   };

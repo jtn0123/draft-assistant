@@ -1,5 +1,14 @@
 // Mirrors the Rust DraftView structs (serde snake_case).
 
+/** What an imported projections file says about one player. Ranks only: the
+ *  export is half-PPR and this league is not, so its points do not compare. */
+export interface SecondOpinion {
+  positional_rank: number;
+  overall_rank: number;
+  /** Short label for whoever published it — "Clay", "FantasyPros". */
+  source: string;
+}
+
 export interface BoardPlayer {
   player_id: string;
   name: string;
@@ -15,6 +24,8 @@ export interface BoardPlayer {
   adp: number | null;
   injury_status: string | null;
   sleeper_pts_ppr: number | null;
+  /** null unless a projections CSV has been imported and matched this player. */
+  second_opinion: SecondOpinion | null;
 }
 
 // AvailablePlayer flattens BoardPlayer + survival_next.
@@ -126,6 +137,8 @@ export interface DataHealth {
   poll_last_success_at: number | null;
   poll_consecutive_failures: number;
   poll_last_error: string | null;
+  /** When the imported second-opinion CSV was last read, epoch seconds. */
+  second_opinion_loaded_at: number | null;
 }
 
 export interface PollHealth {
@@ -159,6 +172,15 @@ export interface DraftView {
   /** Optional: a fixture captured before pick pricing existed has none. */
   pick_prices?: PickPrice[];
   data_health: DataHealth;
+}
+
+/** What "Import projections CSV…" reports back. */
+export interface SecondOpinionImport {
+  matched: number;
+  total: number;
+  /** The sentence for the toast, written by the backend. */
+  message: string;
+  view: DraftView;
 }
 
 export interface StoredLeague {
