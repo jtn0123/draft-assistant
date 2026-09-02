@@ -22,9 +22,9 @@ jobs:
           cache: npm
           cache-dependency-path: draft-assistant/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      # No version here: @master with no `toolchain` input reads the
+      # repo's rust-toolchain.toml, so CI runs the exact clippy the laptop does.
+      - uses: dtolnay/rust-toolchain@master
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -76,7 +76,7 @@ jobs:
           cache: npm
           cache-dependency-path: draft-assistant/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
 
       - uses: Swatinem/rust-cache@v2
         with:

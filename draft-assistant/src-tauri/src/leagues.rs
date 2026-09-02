@@ -93,7 +93,7 @@ fn sorted_stored(leagues: Vec<League>) -> Vec<StoredLeague> {
             season: l.season,
         })
         .collect();
-    stored.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    stored.sort_by_key(|l| l.name.to_lowercase());
     stored
 }
 

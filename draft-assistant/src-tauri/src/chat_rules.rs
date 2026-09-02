@@ -38,7 +38,7 @@ impl LeagueRules {
 fn snake_slot(pick_no: u32, teams: u32) -> u32 {
     let round = (pick_no - 1) / teams;
     let index = (pick_no - 1) % teams;
-    if round % 2 == 0 {
+    if round.is_multiple_of(2) {
         index + 1
     } else {
         teams - index

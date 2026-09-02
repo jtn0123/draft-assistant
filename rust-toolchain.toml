@@ -1,0 +1,7 @@
+# One toolchain for the laptop and CI, so clippy -D warnings means the same
+# thing in both places. The first CI run failed on seven lints that a stale
+# local `stable` (1.88) had never heard of; bump this deliberately, then fix
+# what the new clippy finds, rather than discovering it on a push.
+[toolchain]
+channel = "1.98.0"
+components = ["clippy", "rustfmt"]

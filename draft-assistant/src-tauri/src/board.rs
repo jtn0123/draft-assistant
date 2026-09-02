@@ -220,7 +220,7 @@ pub fn build_board(
     for (rank, &i) in order.iter().enumerate() {
         scored[i].overall_rank = rank as u32 + 1;
     }
-    scored.sort_by(|a, b| a.overall_rank.cmp(&b.overall_rank));
+    scored.sort_by_key(|p| p.overall_rank);
     BoardBuild {
         players: scored,
         replacement: model,
