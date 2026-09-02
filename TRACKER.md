@@ -193,9 +193,9 @@ Grade after wave 1 + debug wave: Draft A−, Season A−, Chat B, Backend A−, 
 
 | # | Fix | Status | Notes |
 |---|---|---|---|
-| 1 | Real desktop build: version 0.2.0, `tauri build` `.app` + `.dmg`, confirmed to launch | in progress | agent `release-ci` |
-| 2 | CI: GitHub Actions on macOS — verify:fast + both test suites on push/PR; bundle job on main uploads the dmg | in progress | agent `release-ci` |
-| 3 | Draft-night rehearsal: run the Playwright browser e2e and the wdio Tauri e2e end to end; fix any product bug they surface | in progress | agent `release-ci` |
+| 1 | Real desktop build: version 0.2.0, `tauri build` `.app` + `.dmg`, confirmed to launch | done `7095ae3` | Version bumped in package.json / tauri.conf.json / Cargo.toml + locks. `bundle.targets: all` resolves to `.app` (16 MB) + `.dmg` (6.5 MB, `Draft Assistant_0.2.0_aarch64.dmg`) on macOS; the `.app` launched and quit cleanly. Unsigned — no identity configured, no warning printed. Built under `CARGO_TARGET_DIR=/Volumes/512Flash/cargo-targets/release-ci/release/bundle/`. |
+| 2 | CI: GitHub Actions on macOS — verify:fast + both test suites on push/PR; bundle job on main uploads the dmg | done `e4588ac` | `.github/workflows/ci.yml`: `verify` (node 22 + stable Rust + caches; verify:fast, vitest, cargo test, Playwright browser e2e — 15 specs, fixtures only, no network) and `bundle` (main pushes only, `needs: verify`, uploads `.app` + `.dmg` for 14 days). wdio Tauri suite left out on purpose: it talks to live Sleeper. Badge in README. Caveat: upload-artifact zips the `.app` and drops the exec bit; use the `.dmg` from CI. |
+| 3 | Draft-night rehearsal: run the Playwright browser e2e and the wdio Tauri e2e end to end; fix any product bug they surface | done | Playwright 15/15 (16s); wdio Tauri 1/1 (56s) with the embedded driver — no tauri-driver or safaridriver needed. Real IPC under the production CSP resolved the live league header. No product bug surfaced; no commit. |
 | 4 | Pre-emptive splits of the five files at 481–497 lines (`season_live.rs`, `App.css`, `App.tsx`, `view.rs`, `TrendsTab.tsx`) | in progress | agent `splits` |
 | 5 | D1: second-opinion projections column on the draft board (Clay rank next to the app's, flag ≥8-spot disagreements, rec-card reason) | queued | phase 2, after the splits land |
 | 6 | Rust coverage to 80% with a threshold enforced the way `vitest.config.ts` enforces the frontend's | queued | phase 2 |
