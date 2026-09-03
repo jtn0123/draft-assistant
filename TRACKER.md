@@ -201,6 +201,15 @@ parallel (chat / season / draft), then a cleanup+fixtures pass on main after mer
 | D | Cleanup: fixture regen + schema bumps + round-trip test, App.test.tsx onto appHarness + ApiMock keyed by Api, pub→private sweep, dead exports | done `01b1e4a`…`f47cc33` | Schemas are named constants (draft 1.2, season 1.1) matched in `api.ts`, both fixtures carry every serialized field, and `tests/fixture_shape.rs` diffs the checked-in JSON against freshly built views in both directions so the next added field cannot land silently; the App mock is now `Record<keyof Api, Mock>` (which immediately caught the unstubbed `setChatBudget`); 26 `pub` items with no outside consumer are private, 2 test-only ones `#[cfg(test)]`; `reloadSeason`, `chimeOn` and the `Screen` re-export are gone. |
 
 ---
+## Batches after debug pass 2 (2026-09-03)
+
+| # | Batch | Status | Notes |
+|---|---|---|---|
+| A | Second-opinion data quality | done `08ff341` | Projection script tracked at `draft-assistant/scripts/projections/` (modules ≤500 lines, 8 offline tests); every row stamped `projection_method` / `ranking_basis`; import drops `adp_estimate` and week-1 D/ST rows before ranking and the toast counts them; rows without ADP never get one. Data regenerated post-cuts (462 rows, 412 published / 50 estimated / 10 week-1 DST) into the gitignored research dir. |
+| B | Flex-allocation tilt | done `fe8d53c` | Flex slots go to the position with the best next-player level plus a scarcity premium (`flex_bias` 0.25; 0 = old allocator, pinned). Sharks league: RB 32 / WR 40 → RB 35 / WR 37. Board footer shows "Replacement level: QB12 · RB35 · WR37 · TE12". No schema bump: `replacement_demand` was already on the wire. Tunable is a function argument; there is no per-league settings store to hang it on. |
+| C | Hygiene leftovers | done `19b855d` | Mock-draft scoring warning on `LoadedLeague.warnings`; `SleeperClient::with_host` + `Engine::with_client`, offline engine built for `127.0.0.1:1` with no env vars; capability `core:default` → `core:app:default` + `core:event:default`, proven by the wdio launch. |
+| D | Yahoo Fantasy as a second platform | in progress | Lane 1: client, OAuth (oob + loopback), Keychain-backed tokens, tolerant JSON parser, stub wire tests, mapping onto Sleeper shapes. Lane 2: platform on `StoredLeague`, `add_league` dispatch, Connect Yahoo settings flow, player crosswalk, picker rows. The user must still register a Yahoo app and paste its client id/secret — that cannot be done for them. |
+
 ## Debug pass 2 (2026-09-03) — six read-only investigators, four fix lanes
 
 Six agents read the tree without editing (engine/board, commands/pollers, draft screen, season+chat, styling/build/CI, and a drafting-quality audit); every finding was re-verified by reading the code path or reproducing it before a fix lane touched it. Fix lanes owned disjoint files and worked in the main tree; each fix carries a test that failed before it.
