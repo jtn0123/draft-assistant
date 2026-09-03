@@ -180,6 +180,11 @@ export interface SecondOpinionImport {
   total: number;
   /** The sentence for the toast, written by the backend. */
   message: string;
+  /** Rows the backend would not rank: points invented from an ADP curve, or
+   *  defences ranked off a week-one matchup page. Zero for an older file. */
+  excluded_rows: number;
+  /** Which of them, in words — "57 estimated from ADP". Null when none. */
+  excluded_reason: string | null;
   view: DraftView;
 }
 

@@ -1,8 +1,7 @@
 //! A second opinion on the board: an imported projections CSV, matched to the
 //! league's own players by name and position.
 //!
-//! The CSV is whatever `research/ai-nfl-fantasy-draft/scripts/
-//! fetch_2026_projections.py` writes — ESPN's Mike Clay season projections
+//! The CSV is whatever `scripts/projections/fetch_2026_projections.py` writes — ESPN's Mike Clay season projections
 //! with FantasyPros ADP bolted on. Its points are half-PPR and this league is
 //! full PPR with six-point passing touchdowns and yardage bonuses, so the
 //! **points do not compare and are deliberately not imported**. Ranks do:
@@ -12,11 +11,38 @@
 //! Positional rank is recomputed here rather than read from the file, because
 //! the file has no positional rank column — only an overall `rank` that
 //! already mixes every position together.
+//!
+//! Not every row in the file is worth ranking against. The script labels each
+//! one with how it came to exist, in two optional columns:
+//!
+//! * `projection_method` — `published` for a number a provider published,
+//!   `adp_estimate` for one the script *invented* from a hand-tuned linear
+//!   curve because no provider had the player.
+//! * `ranking_basis` — `season_projection`, or `week_1_matchup_projection`
+//!   for the team-defence table, which is a week-one matchup page standing in
+//!   for a season ranking nobody publishes free.
+//!
+//! Both of those kinds are dropped at parse time rather than ranked: the
+//! positional ranks this module computes come from the file's overall rank,
+//! so one invented row shifts every real row behind it. The count and the
+//! reason travel back to the toast so the user knows what was left out.
+//! A file written before those columns existed has no labels, nothing to
+//! drop, and imports exactly as it always did.
+//!
+//! A row with no ADP is *not* dropped and *not* given a made-up ADP: the ADP
+//! column is not read here at all. The board's own ADP is what the rec card
+//! counts market lag against, and a source row with no market price simply
+//! contributes its ranks like any other.
 
 use crate::board::BoardPlayer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+#[path = "second_opinion_provenance.rs"]
+mod provenance;
+pub use provenance::Excluded;
+use provenance::{unrankable, Cause};
 
 /// The imported file, copied into the app data dir so it survives a restart.
 pub const SECOND_OPINION_FILE: &str = "second_opinion.csv";
@@ -64,15 +90,19 @@ pub struct SecondOpinionTable {
     /// The same, with the spaces taken out, so "Amon-Ra" and "Amon Ra" — or
     /// "D.J." and "DJ" — land on each other.
     by_squash: HashMap<(String, String), usize>,
+    /// What the file offered and this table would not rank.
+    excluded: Excluded,
 }
 
-/// How an import went, in the two numbers the toast reports.
+/// How an import went, in the numbers the toast reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct MatchReport {
     /// Rows in the file that found a player on this league's board.
     pub matched: usize,
-    /// Rows in the file, full stop.
+    /// Rows the file offered, after the unrankable ones were dropped.
     pub total: usize,
+    /// What was dropped before any of that, and why.
+    pub excluded: Excluded,
 }
 
 impl MatchReport {
@@ -175,8 +205,13 @@ pub fn parse(text: &str, loaded_at: u64) -> Result<SecondOpinionTable, String> {
     let points_at = required(&headers, "projected_fantasy_points")?;
     let team_at = column(&headers, "team");
     let source_at = column(&headers, "source");
+    // Both optional: a file written before the script labelled its rows has
+    // neither, and every row of it counts.
+    let method_at = column(&headers, "projection_method");
+    let basis_at = column(&headers, "ranking_basis");
 
     let mut rows: Vec<Row> = Vec::new();
+    let mut excluded = Excluded::default();
     let mut source = String::new();
     for record in reader.records() {
         let record = match record {
@@ -188,6 +223,23 @@ pub fn parse(text: &str, loaded_at: u64) -> Result<SecondOpinionTable, String> {
         let position = normalize_position(record.get(position_at).unwrap_or_default());
         if name.is_empty() || position.is_empty() {
             continue;
+        }
+        // Dropped before the rank is even read: a row whose points were
+        // invented, or whose ranking is a week-one matchup, would otherwise
+        // push every real row at its position one place down.
+        match unrankable(
+            method_at.and_then(|at| record.get(at)),
+            basis_at.and_then(|at| record.get(at)),
+        ) {
+            Some(Cause::AdpEstimate) => {
+                excluded.adp_estimate += 1;
+                continue;
+            }
+            Some(Cause::Week1Ranking) => {
+                excluded.week_1_ranking += 1;
+                continue;
+            }
+            None => {}
         }
         let Ok(overall_rank) = record
             .get(rank_at)
@@ -224,6 +276,12 @@ pub fn parse(text: &str, loaded_at: u64) -> Result<SecondOpinionTable, String> {
         });
     }
     if rows.is_empty() {
+        if let Some(reason) = excluded.reason() {
+            return Err(format!(
+                "every row in that file is one the app cannot rank ({reason}) — \
+                 re-run the projections script against live sources"
+            ));
+        }
         return Err(
             "that file has a header but no player rows in it — nothing to import".to_string(),
         );
@@ -232,7 +290,7 @@ pub fn parse(text: &str, loaded_at: u64) -> Result<SecondOpinionTable, String> {
         source = "Imported".to_string();
     }
     rank_within_positions(&mut rows);
-    Ok(index(rows, source, loaded_at))
+    Ok(index(rows, source, loaded_at, excluded))
 }
 
 /// Number each position 1..n by the file's own overall rank, best first, with
@@ -261,7 +319,7 @@ fn rank_within_positions(rows: &mut [Row]) {
     }
 }
 
-fn index(rows: Vec<Row>, source: String, loaded_at: u64) -> SecondOpinionTable {
+fn index(rows: Vec<Row>, source: String, loaded_at: u64, excluded: Excluded) -> SecondOpinionTable {
     let mut by_team = HashMap::new();
     let mut by_name = HashMap::new();
     let mut by_squash = HashMap::new();
@@ -287,6 +345,7 @@ fn index(rows: Vec<Row>, source: String, loaded_at: u64) -> SecondOpinionTable {
         by_team,
         by_name,
         by_squash,
+        excluded,
     }
 }
 
@@ -297,6 +356,11 @@ impl SecondOpinionTable {
 
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty()
+    }
+
+    /// What the file carried that this table would not rank.
+    pub fn excluded(&self) -> Excluded {
+        self.excluded
     }
 
     /// The row for one player, strictest key first: name + position + team,
@@ -346,6 +410,7 @@ pub fn apply(table: &SecondOpinionTable, board: &mut [BoardPlayer]) -> MatchRepo
     MatchReport {
         matched: used.iter().filter(|&&hit| hit).count(),
         total: table.len(),
+        excluded: table.excluded,
     }
 }
 

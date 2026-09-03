@@ -22,6 +22,13 @@ pub struct SecondOpinionImport {
     pub total: usize,
     /// The sentence the toast shows, written once, in Rust.
     pub message: String,
+    /// Rows the file carried that the parser would not rank — points it
+    /// invented from an ADP curve, defences ranked off a week-one matchup.
+    /// Zero for a file written before the script labelled its rows.
+    pub excluded_rows: usize,
+    /// Which of them, in words: "57 estimated from ADP, 10 week-1 defence
+    /// rankings". `None` when nothing was left out.
+    pub excluded_reason: Option<String>,
     pub view: DraftView,
 }
 
@@ -76,6 +83,8 @@ pub async fn import_second_opinion<R: tauri::Runtime>(
         matched: report.matched,
         total: report.total,
         message: report.message(),
+        excluded_rows: report.excluded.total(),
+        excluded_reason: report.excluded.reason(),
         view,
     }))
 }

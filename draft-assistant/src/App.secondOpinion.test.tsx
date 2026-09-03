@@ -82,8 +82,10 @@ describe("the import projections row", () => {
     await loaded(withoutImport());
     h.api.importSecondOpinion.mockResolvedValue({
       matched: 418,
-      total: 482,
-      message: "Second opinion loaded: 418 of 482 players matched",
+      total: 422,
+      message: "Second opinion loaded: 418 of 422 players matched",
+      excluded_rows: 60,
+      excluded_reason: "50 estimated from ADP, 10 week-1 defence rankings",
       view: imported,
     });
 
@@ -91,7 +93,10 @@ describe("the import projections row", () => {
 
     expect(h.api.importSecondOpinion).toHaveBeenCalledTimes(1);
     expect(
-      await screen.findByText("Second opinion loaded: 418 of 482 players matched"),
+      await screen.findByText(
+        "Second opinion loaded: 418 of 422 players matched; 60 rows skipped " +
+          "(50 estimated from ADP, 10 week-1 defence rankings)",
+      ),
     ).toBeInTheDocument();
   });
 

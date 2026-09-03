@@ -144,8 +144,16 @@ fn importing_the_real_export_stamps_the_board_it_recognises() {
     // able to report without anything breaking.
     let table = second_opinion::parse(&fixture_csv(), 1_700_000_000).expect("the export parses");
     let report = second_opinion::apply(&table, &mut loaded.board);
-    assert_eq!(report.total, 40);
+    assert_eq!(report.total, 38);
     assert_eq!(report.matched, 0);
+    // The rows the parser would not rank are reported, not hidden: three
+    // whose points came off the script's ADP curve, two defences ranked off
+    // a week-one matchup page.
+    assert_eq!(report.excluded.total(), 5);
+    assert_eq!(
+        report.excluded.reason().as_deref(),
+        Some("3 estimated from ADP, 2 week-1 defence rankings")
+    );
 
     // Rename one fixture player to a name the export does carry, suffix and
     // all, and he matches on the next pass.

@@ -39,3 +39,6 @@ rank,name,position,team,bye_week,projected_fantasy_points,tier,adp,projection_me
 136,Cameron Dicker,K,LAC,7,144.1,4,168.35,published,False,https://www.fantasypros.com/nfl/projections/k.php?week=draft,season_projection
 168,Denver Broncos D/ST,DST,DEN,10,8.3,5,,published,False,https://www.fantasypros.com/nfl/projections/dst.php?week=1,week_1_matchup_projection
 171,Washington Commanders D/ST,DST,WAS,7,8.0,5,,published,False,https://www.fantasypros.com/nfl/projections/dst.php?week=1,week_1_matchup_projection
+154,Stefon Diggs,WR,,N/A,98.0,4,190.95,adp_estimate,False,Local ADP estimate,season_projection
+159,James Conner,RB,ARI,14,55.0,4,201.18,adp_estimate,False,Local ADP estimate,season_projection
+195,Tyreek Hill,WR,,N/A,64.4,5,264.42,adp_estimate,False,Local ADP estimate,season_projection

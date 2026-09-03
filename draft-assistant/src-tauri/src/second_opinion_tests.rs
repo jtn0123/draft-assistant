@@ -3,9 +3,11 @@
 //!
 //! The good-file cases run against a trimmed copy of what the real projections
 //! script wrote on 2026-08-28 (`tests/fixtures/second_opinion_sample.csv`) —
-//! forty rows of the actual file, chosen to include the suffixes, the
-//! apostrophes and the two team defences that the hand-written cases below
-//! then pin one at a time.
+//! forty-three rows of the actual file, chosen to include the suffixes, the
+//! apostrophes, the two team defences ranked off a week-one matchup page and
+//! three rows whose points the script invented from its ADP curve. Thirty-
+//! eight of those rows are rankable and five are not, which is what the
+//! exclusion cases below pin.
 
 use super::*;
 
@@ -43,7 +45,11 @@ fn board_player(name: &str, position: &str, team: Option<&str>, rank: u32) -> Bo
 #[test]
 fn the_real_export_parses_and_names_its_source() {
     let table = parse(&sample(), 1_700_000_000).expect("sample parses");
-    assert_eq!(table.len(), 40, "the trimmed sample has forty rows");
+    assert_eq!(
+        table.len(),
+        38,
+        "thirty-eight of the sample's rows are rankable"
+    );
     assert_eq!(table.source, "Clay");
     assert_eq!(table.loaded_at, 1_700_000_000);
 }
@@ -59,8 +65,9 @@ fn positional_rank_is_computed_within_each_position() {
     let chase = table.find("Ja'Marr Chase", "WR", Some("CIN")).unwrap();
     assert_eq!(table.opinion(chase).positional_rank, 1);
     assert_eq!(table.opinion(chase).overall_rank, 3);
-    // Every position starts at 1 and runs without a gap.
-    for position in ["QB", "RB", "WR", "TE", "K", "DEF"] {
+    // Every position starts at 1 and runs without a gap. No DEF: the
+    // sample's only defences are the week-one rows, which are dropped.
+    for position in ["QB", "RB", "WR", "TE", "K"] {
         let mut ranks: Vec<u32> = table
             .rows
             .iter()
@@ -120,6 +127,112 @@ fn rows_that_cannot_be_read_are_skipped_not_fatal() {
                 3,,RB,ATL,180.0,clayprojections\n";
     let table = parse(text, 0).expect("the one good row is enough");
     assert_eq!(table.len(), 1);
+}
+
+// ---------- the provenance columns ----------
+
+#[test]
+fn invented_points_and_week_one_rankings_are_dropped_and_counted() {
+    let table = parse(&sample(), 0).unwrap();
+    let excluded = table.excluded();
+    assert_eq!(
+        excluded.adp_estimate, 3,
+        "three rows came off the ADP curve"
+    );
+    assert_eq!(excluded.week_1_ranking, 2, "two defences are week-one rows");
+    assert_eq!(excluded.total(), 5);
+    assert_eq!(
+        excluded.reason().as_deref(),
+        Some("3 estimated from ADP, 2 week-1 defence rankings")
+    );
+    // And they really are gone, not merely counted.
+    assert!(table.find("Stefon Diggs", "WR", None).is_none());
+    assert!(table.find("Denver Broncos", "DEF", Some("DEN")).is_none());
+}
+
+#[test]
+fn a_dropped_row_does_not_push_the_real_rows_down_a_place() {
+    // Two RBs either side of an invented one. Without the drop the second
+    // real back would be RB3.
+    let text = "rank,name,position,team,projected_fantasy_points,source,projection_method\n\
+                1,Real One,RB,ATL,200.0,clayprojections,published\n\
+                2,Invented,RB,ATL,190.0,Local ADP estimate,adp_estimate\n\
+                3,Real Two,RB,ATL,180.0,clayprojections,published\n";
+    let table = parse(text, 0).unwrap();
+    assert_eq!(table.len(), 2);
+    let second = table.find("Real Two", "RB", Some("ATL")).unwrap();
+    assert_eq!(table.opinion(second).positional_rank, 2);
+    // The overall rank stays the file's own, gaps and all.
+    assert_eq!(table.opinion(second).overall_rank, 3);
+}
+
+#[test]
+fn a_file_from_before_the_labels_existed_imports_exactly_as_it_did() {
+    let text = "rank,name,position,team,projected_fantasy_points,source\n\
+                1,Real One,RB,ATL,200.0,clayprojections\n\
+                2,Real Two,RB,ATL,190.0,clayprojections\n";
+    let table = parse(text, 0).unwrap();
+    assert_eq!(table.len(), 2);
+    assert_eq!(table.excluded(), Excluded::default());
+    assert_eq!(table.excluded().reason(), None);
+}
+
+#[test]
+fn the_labels_are_read_whatever_case_and_spacing_they_arrive_in() {
+    let text = "rank,name,position,team,projected_fantasy_points,source,\
+                Projection_Method,Ranking_Basis\n\
+                1,Kept,RB,ATL,200.0,clayprojections,Published,Season_Projection\n\
+                2,Curved,RB,ATL,190.0,x, ADP_Estimate ,season_projection\n\
+                3,Matchup,DST,DEN,8.0,x,published, Week_1_Matchup_Projection \n\
+                4,Shorter,DST,SEA,7.0,x,published,week_1_matchup\n";
+    let table = parse(text, 0).unwrap();
+    assert_eq!(table.len(), 1);
+    assert_eq!(table.excluded().adp_estimate, 1);
+    assert_eq!(table.excluded().week_1_ranking, 2, "both spellings count");
+}
+
+#[test]
+fn a_method_the_app_has_never_heard_of_is_kept_rather_than_guessed_about() {
+    // Only the labels that name a *fabrication* drop a row. A future
+    // `projection_method` value is a published number until it says it isn't.
+    let text = "rank,name,position,team,projected_fantasy_points,source,projection_method\n\
+                1,Novel,RB,ATL,200.0,clayprojections,consensus_median\n";
+    let table = parse(text, 0).unwrap();
+    assert_eq!(table.len(), 1);
+    assert_eq!(table.excluded().total(), 0);
+}
+
+#[test]
+fn a_file_with_nothing_but_dropped_rows_says_so_in_plain_words() {
+    let text = "rank,name,position,team,projected_fantasy_points,source,projection_method\n\
+                1,Curved,RB,ATL,200.0,Local ADP estimate,adp_estimate\n";
+    let error = parse(text, 0).expect_err("a file of invented rows imports nothing");
+    assert!(error.contains("1 estimated from ADP"), "unhelpful: {error}");
+    assert!(
+        !error.contains("no player rows"),
+        "wrong complaint: {error}"
+    );
+}
+
+#[test]
+fn one_dropped_row_of_each_kind_reads_as_one() {
+    let excluded = Excluded {
+        adp_estimate: 1,
+        week_1_ranking: 1,
+    };
+    assert_eq!(
+        excluded.reason().as_deref(),
+        Some("1 estimated from ADP, 1 week-1 defence ranking")
+    );
+    assert_eq!(
+        Excluded {
+            adp_estimate: 0,
+            week_1_ranking: 4,
+        }
+        .reason()
+        .as_deref(),
+        Some("4 week-1 defence rankings")
+    );
 }
 
 // ---------- the normaliser ----------
@@ -190,11 +303,16 @@ fn matching_reports_the_hits_and_the_misses() {
         board_player("Nobody At All", "WR", Some("SEA"), 40),
     ];
     let report = apply(&table, &mut board);
-    assert_eq!(report.total, 40);
-    assert_eq!(report.matched, 2, "two of the forty rows found a player");
+    assert_eq!(report.total, 38, "the five unrankable rows are not offered");
+    assert_eq!(report.matched, 2, "two of the rows found a player");
     assert_eq!(
         report.message(),
-        "Second opinion loaded: 2 of 40 players matched"
+        "Second opinion loaded: 2 of 38 players matched"
+    );
+    assert_eq!(
+        report.excluded.total(),
+        5,
+        "the drops travel with the report"
     );
     assert_eq!(board[0].second_opinion.as_ref().unwrap().positional_rank, 1);
     assert_eq!(board[1].second_opinion.as_ref().unwrap().source, "Clay");
@@ -220,7 +338,12 @@ fn the_position_has_to_agree_even_when_the_name_does() {
 
 #[test]
 fn a_team_defence_matches_the_sleeper_spelling() {
-    let table = parse(&sample(), 0).unwrap();
+    // A defence ranked on the season is kept and matches, spelling and all.
+    // The sample's own defences are week-one rows and never get this far,
+    // which is what the exclusion cases above pin.
+    let text = "rank,name,position,team,projected_fantasy_points,source,ranking_basis\n\
+                1,Denver Broncos D/ST,DST,DEN,120.0,clayprojections,season_projection\n";
+    let table = parse(text, 0).unwrap();
     let mut board = vec![board_player("Denver Broncos", "DEF", Some("DEN"), 5)];
     assert_eq!(apply(&table, &mut board).matched, 1);
 }
@@ -323,7 +446,8 @@ fn a_stored_copy_of_the_real_export_round_trips() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(stored_path(&dir), sample()).unwrap();
     let table = load(&dir).unwrap().expect("a stored table");
-    assert_eq!(table.len(), 40);
+    assert_eq!(table.len(), 38);
+    assert_eq!(table.excluded().total(), 5);
     assert_eq!(table.source, "Clay");
     std::fs::remove_dir_all(&dir).ok();
 }
