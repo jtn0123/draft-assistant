@@ -75,6 +75,7 @@ export function DraftScreen({
           positions={view.league.draftable_positions}
           loading={busy && view.available.length === 0}
           boardSize={view.data_health.board_size}
+          replacementDemand={view.replacement_demand}
           secondOpinionLoadedAt={view.data_health.second_opinion_loaded_at}
           onDraft={onDraft}
         />

@@ -285,7 +285,11 @@ pub fn build_board(
             points: p.points,
         })
         .collect();
-    let model = valuation::compute_replacement(&as_scored, rules, league.total_rosters as usize);
+    // `None` takes `valuation::DEFAULT_FLEX_BIAS`. Nothing reads a per-league
+    // override yet — there is no league-rules or house-rules store to put one
+    // in — so the knob is the argument, not a setting.
+    let model =
+        valuation::compute_replacement(&as_scored, rules, league.total_rosters as usize, None);
     for p in &mut scored {
         p.vorp = p.points - model.baseline.get(&p.position).copied().unwrap_or(0.0);
     }

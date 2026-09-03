@@ -171,11 +171,17 @@ const BoardRow = memo(function BoardRow({
   );
 });
 
+/** Why the footer names a rank per position, in one hover. */
+const REPLACEMENT_TITLE =
+  "The last startable player at each position across the whole league, counting " +
+  "the flex slots this league's pools actually earn. VORP is points over this player.";
+
 export function Board({
   players,
   positions,
   loading,
   boardSize,
+  replacementDemand,
   secondOpinionLoadedAt = null,
   onDraft,
 }: {
@@ -184,6 +190,10 @@ export function Board({
   loading: boolean;
   /** How many players the projections cover — named in the loading note. */
   boardSize: number;
+  /** position -> league-wide startable count, flex share included. Drawn in
+   *  the footer so the flex split VORP rests on is visible rather than
+   *  implied. Omitted where the caller has none; the line then stays away. */
+  replacementDemand?: Record<string, number>;
   /** When the imported projections CSV was read; named in the column tooltip.
    *  Omitted where the caller has no data health to hand — the column reads
    *  "imported" without a date rather than not appearing. */
@@ -214,6 +224,17 @@ export function Board({
     [players, secondOpinionLoadedAt],
   );
   const showSecondOpinion = columns.length > COLUMNS.length;
+
+  // "RB35 · WR37 · QB12 · TE12" — in league roster order, skipping any
+  // position the model had no pool for.
+  const replacementLine = useMemo(
+    () =>
+      positions
+        .filter((p) => replacementDemand?.[p])
+        .map((p) => `${p}${replacementDemand?.[p]}`)
+        .join(" · "),
+    [positions, replacementDemand],
+  );
 
   // The imported column comes and goes with the projections behind it, and it
   // can be the one the board is sorted by. Falling back keeps the board sorted
@@ -370,6 +391,11 @@ export function Board({
           Sorted by {SORT_LABEL[activeKey]},{" "}
           {activeDirection === "asc" ? "low to high" : "high to low"} · click any column
         </span>
+        {replacementLine && (
+          <span className="muted board-foot-replacement" title={REPLACEMENT_TITLE}>
+            Replacement level: {replacementLine}
+          </span>
+        )}
         {matching.length > limit && (
           <button
             type="button"

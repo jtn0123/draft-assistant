@@ -271,6 +271,12 @@
   font-size: 12px;
 }
 
+/* Rides along with the sorting note instead of being flung to the far edge by
+   the footer's space-between — only the paging buttons belong on the right. */
+.board-foot-replacement {
+  margin-right: auto;
+}
+
 /* Board rows are tighter than season rows, so the shared avatar slot shrinks
    here. Lives beside .board-row on purpose: a rule for this row belongs in
    this file, not in the shared one. */

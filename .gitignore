@@ -45,3 +45,4 @@ draft-state.json
 players.json
 projections_*.json
 weekly_*.json
+__pycache__/

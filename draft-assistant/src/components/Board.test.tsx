@@ -77,6 +77,37 @@ describe("Board", () => {
     expect(screen.getByText("0 players")).toBeInTheDocument();
   });
 
+  it("names the replacement level the board's VORP is measured against", () => {
+    // The flex split is the thing the audit found wrong, so it has to be
+    // readable off the screen rather than inferred from the VORP column.
+    render(
+      <Board
+        players={[player("rb", "A Back", "RB")]}
+        positions={["QB", "RB", "WR", "TE"]}
+        loading={false}
+        boardSize={1}
+        replacementDemand={{ QB: 12, RB: 35, WR: 37, TE: 12, K: 12 }}
+        onDraft={vi.fn()}
+      />,
+    );
+    // League roster order, and K is left out because the league does not
+    // roster one however much demand the model computed for it.
+    expect(screen.getByText("Replacement level: QB12 · RB35 · WR37 · TE12")).toBeInTheDocument();
+  });
+
+  it("says nothing about replacement level when there is none to report", () => {
+    render(
+      <Board
+        players={[player("rb", "A Back", "RB")]}
+        positions={["RB"]}
+        loading={false}
+        boardSize={1}
+        onDraft={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/Replacement level/)).not.toBeInTheDocument();
+  });
+
   it("jumps to search on '/' unless already typing somewhere", async () => {
     const user = userEvent.setup();
     render(
