@@ -1,0 +1,44 @@
+{
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/league/449.l.12345/players;start=2;count=2",
+    "league": [
+      {
+        "league_key": "449.l.12345",
+        "league_id": "12345",
+        "name": "Wire Wednesday",
+        "draft_status": "predraft",
+        "num_teams": 12,
+        "scoring_type": "head",
+        "season": "2026"
+      },
+      {
+        "players": {
+          "0": {
+            "player": [
+              [
+                { "player_key": "449.p.100001" },
+                { "player_id": "100001" },
+                {
+                  "name": {
+                    "full": "Baltimore",
+                    "first": "Baltimore",
+                    "last": "",
+                    "ascii_first": "Baltimore",
+                    "ascii_last": ""
+                  }
+                },
+                { "editorial_team_abbr": "Bal" },
+                { "display_position": "DEF" },
+                { "position_type": "DT" },
+                { "eligible_positions": [{ "position": "DEF" }] }
+              ],
+              []
+            ]
+          },
+          "count": 1
+        }
+      }
+    ]
+  }
+}

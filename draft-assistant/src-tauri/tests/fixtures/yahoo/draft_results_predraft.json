@@ -1,0 +1,22 @@
+{
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/league/449.l.12345/draftresults",
+    "league": [
+      {
+        "league_key": "449.l.12345",
+        "league_id": "12345",
+        "name": "Wire Wednesday",
+        "draft_status": "predraft",
+        "num_teams": 3,
+        "scoring_type": "head",
+        "season": "2026"
+      },
+      {
+        "draftresults": {
+          "count": 0
+        }
+      }
+    ]
+  }
+}

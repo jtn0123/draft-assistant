@@ -1,0 +1,92 @@
+{
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/team/449.l.12345.t.1/roster",
+    "team": [
+      [
+        { "team_key": "449.l.12345.t.1" },
+        { "team_id": "1" },
+        { "name": "Ada's Autos" },
+        { "is_owned_by_current_login": 1 },
+        { "url": "https://football.fantasysports.yahoo.com/f1/12345/1" },
+        { "waiver_priority": 3 },
+        { "league_scoring_type": "head" },
+        { "draft_position": 1 },
+        {
+          "managers": [
+            {
+              "manager": {
+                "manager_id": "1",
+                "nickname": "Ada",
+                "guid": "WIREGUID000000000000000000",
+                "is_current_login": "1"
+              }
+            }
+          ]
+        }
+      ],
+      {
+        "roster": {
+          "coverage_type": "week",
+          "week": "1",
+          "is_editable": 1,
+          "players": {
+            "0": {
+              "player": [
+                [
+                  { "player_key": "449.p.30977" },
+                  { "player_id": "30977" },
+                  {
+                    "name": {
+                      "full": "Ja'Marr Chase",
+                      "first": "Ja'Marr",
+                      "last": "Chase"
+                    }
+                  },
+                  { "editorial_team_abbr": "Cin" },
+                  { "bye_weeks": { "week": "10" } },
+                  { "uniform_number": "1" },
+                  { "display_position": "WR" },
+                  { "eligible_positions": [{ "position": "WR" }, { "position": "W/R/T" }] }
+                ],
+                {
+                  "selected_position": [
+                    { "coverage_type": "week", "week": "1" },
+                    { "position": "WR" },
+                    { "is_flex": 0 }
+                  ]
+                }
+              ]
+            },
+            "1": {
+              "player": [
+                [
+                  { "player_key": "449.p.100005" },
+                  { "player_id": "100005" },
+                  {
+                    "name": {
+                      "full": "Wire Kicker",
+                      "first": "Wire",
+                      "last": "Kicker"
+                    }
+                  },
+                  { "editorial_team_abbr": "Den" },
+                  { "bye_weeks": { "week": "14" } },
+                  { "display_position": "K" },
+                  { "eligible_positions": [{ "position": "K" }] }
+                ],
+                {
+                  "selected_position": [
+                    { "coverage_type": "week", "week": "1" },
+                    { "position": "K" }
+                  ]
+                }
+              ]
+            },
+            "count": 2
+          }
+        }
+      }
+    ]
+  }
+}

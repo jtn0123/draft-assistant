@@ -63,6 +63,12 @@ pub mod view;
 pub mod view_signals;
 pub mod view_types;
 pub mod weekly;
+pub mod yahoo;
+pub mod yahoo_map;
+pub mod yahoo_oauth;
+pub mod yahoo_parse;
+pub mod yahoo_secrets;
+pub mod yahoo_types;
 
 use commands_chat::{
     ask_claude, chat_settings, chat_suggestions, set_api_key, set_chat_budget, set_chat_provider,

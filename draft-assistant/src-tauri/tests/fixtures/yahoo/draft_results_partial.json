@@ -1,0 +1,54 @@
+{
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/league/449.l.12345/draftresults",
+    "league": [
+      {
+        "league_key": "449.l.12345",
+        "league_id": "12345",
+        "name": "Wire Wednesday",
+        "draft_status": "draft",
+        "num_teams": 3,
+        "scoring_type": "head",
+        "season": "2026"
+      },
+      {
+        "draftresults": {
+          "0": {
+            "draft_result": {
+              "pick": 1,
+              "round": 1,
+              "team_key": "449.l.12345.t.1",
+              "player_key": "449.p.30977"
+            }
+          },
+          "1": {
+            "draft_result": {
+              "pick": 2,
+              "round": 1,
+              "team_key": "449.l.12345.t.2",
+              "player_key": "449.p.31883"
+            }
+          },
+          "2": {
+            "draft_result": {
+              "pick": 3,
+              "round": 1,
+              "team_key": "449.l.12345.t.3",
+              "player_key": "449.p.100002"
+            }
+          },
+          "3": {
+            "draft_result": {
+              "pick": 4,
+              "round": 2,
+              "team_key": "449.l.12345.t.3",
+              "player_key": ""
+            }
+          },
+          "count": 4
+        }
+      }
+    ]
+  }
+}

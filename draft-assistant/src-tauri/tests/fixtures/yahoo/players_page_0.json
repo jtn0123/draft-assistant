@@ -1,0 +1,88 @@
+{
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/league/449.l.12345/players;start=0;count=2",
+    "league": [
+      {
+        "league_key": "449.l.12345",
+        "league_id": "12345",
+        "name": "Wire Wednesday",
+        "draft_status": "predraft",
+        "num_teams": 12,
+        "scoring_type": "head",
+        "season": "2026"
+      },
+      {
+        "players": {
+          "0": {
+            "player": [
+              [
+                { "player_key": "449.p.30977" },
+                { "player_id": "30977" },
+                {
+                  "name": {
+                    "full": "Ja'Marr Chase",
+                    "first": "Ja'Marr",
+                    "last": "Chase",
+                    "ascii_first": "Ja'Marr",
+                    "ascii_last": "Chase"
+                  }
+                },
+                { "url": "https://sports.yahoo.com/nfl/players/30977" },
+                { "editorial_player_key": "nfl.p.30977" },
+                { "editorial_team_key": "nfl.t.4" },
+                { "editorial_team_full_name": "Cincinnati Bengals" },
+                { "editorial_team_abbr": "Cin" },
+                { "bye_weeks": { "week": "10" } },
+                { "uniform_number": "1" },
+                { "display_position": "WR" },
+                {
+                  "headshot": {
+                    "url": "https://example.invalid/30977.png",
+                    "size": "small"
+                  }
+                },
+                { "is_undroppable": "0" },
+                { "position_type": "O" },
+                {
+                  "eligible_positions": [{ "position": "WR" }, { "position": "W/R/T" }]
+                }
+              ],
+              []
+            ]
+          },
+          "1": {
+            "player": [
+              [
+                { "player_key": "449.p.31883" },
+                { "player_id": "31883" },
+                {
+                  "name": {
+                    "full": "Bijan Robinson",
+                    "first": "Bijan",
+                    "last": "Robinson",
+                    "ascii_first": "Bijan",
+                    "ascii_last": "Robinson"
+                  }
+                },
+                { "editorial_team_abbr": "Atl" },
+                { "bye_weeks": { "week": "5" } },
+                { "uniform_number": "7" },
+                { "display_position": "RB" },
+                { "status": "Q" },
+                { "status_full": "Questionable" },
+                { "injury_note": "Ankle" },
+                { "position_type": "O" },
+                {
+                  "eligible_positions": [{ "position": "RB" }, { "position": "W/R/T" }]
+                }
+              ],
+              []
+            ]
+          },
+          "count": 2
+        }
+      }
+    ]
+  }
+}

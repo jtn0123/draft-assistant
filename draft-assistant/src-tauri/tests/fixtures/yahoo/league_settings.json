@@ -1,0 +1,146 @@
+{
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/league/449.l.12345/settings",
+    "league": [
+      {
+        "league_key": "449.l.12345",
+        "league_id": "12345",
+        "name": "Wire Wednesday",
+        "url": "https://football.fantasysports.yahoo.com/f1/12345",
+        "draft_status": "predraft",
+        "num_teams": 12,
+        "edit_key": "1",
+        "weekly_deadline": "",
+        "league_update_timestamp": null,
+        "scoring_type": "head",
+        "league_type": "private",
+        "current_week": 1,
+        "start_week": "1",
+        "end_week": "17",
+        "game_code": "nfl",
+        "season": "2026"
+      },
+      {
+        "settings": [
+          {
+            "draft_type": "live",
+            "is_auction_draft": "0",
+            "scoring_type": "head",
+            "persistent_url": "",
+            "uses_playoff": "1",
+            "has_playoff_consolation_games": true,
+            "playoff_start_week": "15",
+            "num_playoff_teams": "6",
+            "draft_time": "1789000000",
+            "draft_pick_time": "90",
+            "post_draft_players": "W",
+            "max_teams": "12",
+            "waiver_time": "2",
+            "trade_end_date": "2026-11-27",
+            "roster_positions": [
+              { "roster_position": { "position": "QB", "position_type": "O", "count": 1 } },
+              { "roster_position": { "position": "WR", "position_type": "O", "count": 2 } },
+              { "roster_position": { "position": "RB", "position_type": "O", "count": 2 } },
+              { "roster_position": { "position": "TE", "position_type": "O", "count": 1 } },
+              { "roster_position": { "position": "W/R/T", "position_type": "O", "count": 1 } },
+              { "roster_position": { "position": "Q/W/R/T", "position_type": "O", "count": 1 } },
+              { "roster_position": { "position": "K", "position_type": "K", "count": 1 } },
+              { "roster_position": { "position": "DEF", "position_type": "DT", "count": 1 } },
+              { "roster_position": { "position": "BN", "count": 6 } },
+              { "roster_position": { "position": "IR", "count": 2 } }
+            ],
+            "stat_categories": {
+              "stats": [
+                {
+                  "stat": {
+                    "stat_id": 4,
+                    "enabled": "1",
+                    "name": "Passing Yards",
+                    "display_name": "Pass Yds",
+                    "sort_order": "1",
+                    "position_type": "O"
+                  }
+                },
+                {
+                  "stat": {
+                    "stat_id": 5,
+                    "enabled": "1",
+                    "name": "Passing Touchdowns",
+                    "display_name": "Pass TD",
+                    "sort_order": "1",
+                    "position_type": "O"
+                  }
+                },
+                {
+                  "stat": {
+                    "stat_id": 6,
+                    "enabled": "1",
+                    "name": "Interceptions",
+                    "display_name": "Int",
+                    "sort_order": "0",
+                    "position_type": "O"
+                  }
+                },
+                {
+                  "stat": {
+                    "stat_id": 11,
+                    "enabled": "1",
+                    "name": "Receptions",
+                    "display_name": "Rec",
+                    "sort_order": "1",
+                    "position_type": "O"
+                  }
+                },
+                {
+                  "stat": {
+                    "stat_id": 50,
+                    "enabled": "1",
+                    "name": "Points Allowed 0 points",
+                    "display_name": "PA 0",
+                    "sort_order": "1",
+                    "position_type": "DT"
+                  }
+                }
+              ]
+            },
+            "stat_modifiers": {
+              "stats": [
+                { "stat": { "stat_id": 4, "value": "0.04" } },
+                { "stat": { "stat_id": 5, "value": "4" } },
+                { "stat": { "stat_id": 6, "value": "-1" } },
+                { "stat": { "stat_id": 9, "value": "0.1" } },
+                { "stat": { "stat_id": 10, "value": "6" } },
+                { "stat": { "stat_id": 11, "value": "0.5" } },
+                { "stat": { "stat_id": 12, "value": "0.1" } },
+                { "stat": { "stat_id": 13, "value": "6" } },
+                { "stat": { "stat_id": 15, "value": "6" } },
+                { "stat": { "stat_id": 16, "value": "2" } },
+                { "stat": { "stat_id": 18, "value": "-2" } },
+                { "stat": { "stat_id": 19, "value": "3" } },
+                { "stat": { "stat_id": 20, "value": "3" } },
+                { "stat": { "stat_id": 21, "value": "3" } },
+                { "stat": { "stat_id": 22, "value": "4" } },
+                { "stat": { "stat_id": 23, "value": "5" } },
+                { "stat": { "stat_id": 29, "value": "1" } },
+                { "stat": { "stat_id": 32, "value": "1" } },
+                { "stat": { "stat_id": 33, "value": "2" } },
+                { "stat": { "stat_id": 34, "value": "2" } },
+                { "stat": { "stat_id": 35, "value": "6" } },
+                { "stat": { "stat_id": 36, "value": "2" } },
+                { "stat": { "stat_id": 37, "value": "2" } },
+                { "stat": { "stat_id": 50, "value": "10" } },
+                { "stat": { "stat_id": 51, "value": "7" } },
+                { "stat": { "stat_id": 52, "value": "4" } },
+                { "stat": { "stat_id": 53, "value": "1" } },
+                { "stat": { "stat_id": 54, "value": "0" } },
+                { "stat": { "stat_id": 55, "value": "-1" } },
+                { "stat": { "stat_id": 56, "value": "-4" } }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

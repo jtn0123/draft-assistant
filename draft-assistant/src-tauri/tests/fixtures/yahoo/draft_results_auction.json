@@ -1,0 +1,49 @@
+{
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/league/449.l.67890/draftresults",
+    "league": [
+      {
+        "league_key": "449.l.67890",
+        "league_id": "67890",
+        "name": "Auction Alley",
+        "draft_status": "postdraft",
+        "num_teams": 2,
+        "scoring_type": "head",
+        "season": "2026"
+      },
+      {
+        "draftresults": {
+          "0": {
+            "draft_result": {
+              "pick": 1,
+              "round": 1,
+              "cost": "55",
+              "team_key": "449.l.67890.t.1",
+              "player_key": "449.p.30977"
+            }
+          },
+          "1": {
+            "draft_result": {
+              "pick": 2,
+              "round": 1,
+              "cost": "41",
+              "team_key": "449.l.67890.t.2",
+              "player_key": "449.p.31883"
+            }
+          },
+          "2": {
+            "draft_result": {
+              "pick": 3,
+              "round": 1,
+              "cost": "1",
+              "team_key": "449.l.67890.t.2",
+              "player_key": "449.p.100002"
+            }
+          },
+          "count": 3
+        }
+      }
+    ]
+  }
+}
