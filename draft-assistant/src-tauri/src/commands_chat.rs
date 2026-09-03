@@ -7,6 +7,7 @@ use crate::chat_copy;
 use crate::engine::AppConfig;
 use crate::state::{season_view_for_chat, view_from, AppState};
 use tauri::State;
+use tokio::sync::Mutex;
 
 const PROVIDER_API: &str = "api";
 const PROVIDER_CLI: &str = "claude_code";
@@ -45,18 +46,41 @@ fn resolve_provider(config: &AppConfig, has_key: bool, cli_available: bool) -> &
     }
 }
 
+/// Hand `store` a copy of the config and commit the key it comes back with.
+///
+/// The mutex is deliberately not held while `store` runs: storing the key
+/// means the `security` command in a subprocess, which can take a moment and
+/// can put a prompt in front of the user. Held across that, every command that
+/// reads the config — and both poll ticks — waited on the Keychain.
+async fn store_key_unlocked<F, Fut>(config: &Mutex<AppConfig>, store: F) -> Result<(), String>
+where
+    F: FnOnce(AppConfig) -> Fut,
+    Fut: std::future::Future<Output = Result<AppConfig, String>>,
+{
+    let copy = config.lock().await.clone();
+    let stored = store(copy).await?;
+    // Only the key can have changed, so only the key is committed: anything
+    // else written while the Keychain was busy stays where it is.
+    config.lock().await.anthropic_api_key = stored.anthropic_api_key;
+    Ok(())
+}
+
 /// Store (or clear, with an empty string) the Anthropic API key.
 #[tauri::command]
 pub async fn set_api_key(state: State<'_, AppState>, key: String) -> Result<bool, String> {
     let trimmed = key.trim().to_string();
-    let mut config = state.config.lock().await;
     let next = if trimmed.is_empty() {
         None
     } else {
         Some(trimmed)
     };
     let stored = next.is_some();
-    state.engine.store_api_key(&mut config, next).await?;
+    let engine = state.engine.clone();
+    store_key_unlocked(&state.config, |mut copy| async move {
+        engine.store_api_key(&mut copy, next).await?;
+        Ok(copy)
+    })
+    .await?;
     Ok(stored)
 }
 
@@ -180,6 +204,19 @@ pub async fn set_chat_budget(state: State<'_, AppState>, dollars: f64) -> Result
     Ok(dollars)
 }
 
+/// The two screens that can ask a question.
+///
+/// `screen` picks the context, and further down it keys the running spend the
+/// budget is checked against. Anything else would open a fresh, uncapped tally
+/// under whatever name arrived over the IPC — and the config would grow a new
+/// entry for every one of them.
+fn check_screen(screen: &str) -> Result<(), String> {
+    match screen {
+        "draft" | "season" => Ok(()),
+        other => Err(format!("'{other}' is not a screen Ask Claude answers for")),
+    }
+}
+
 /// Ask Claude about the board or the week. `screen` selects which view is
 /// summarised into the system prompt.
 #[tauri::command]
@@ -194,6 +231,7 @@ pub async fn ask_claude(
     // stdin, so it is bounded here rather than discovered as a bill or a
     // rejected request.
     check_thread_size(&messages)?;
+    check_screen(&screen)?;
     let cli = chat_cli::find_cli();
     let config = state.config.lock().await.clone();
     let api_key = state.engine.api_key(&config).await;
@@ -246,7 +284,7 @@ pub async fn ask_claude(
     reply.cost_usd = if provider == PROVIDER_CLI {
         0.0
     } else {
-        chat::turn_cost(model, reply.input_tokens, reply.output_tokens)
+        chat::turn_cost_of(model, &reply)
     };
     reply.provider = provider.to_string();
     let mut config = state.config.lock().await;
@@ -275,6 +313,38 @@ mod tests {
         AppConfig {
             chat_provider: provider.map(str::to_string),
             ..AppConfig::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn the_config_is_not_held_while_the_key_goes_to_the_keychain() {
+        let config = Mutex::new(AppConfig::default());
+        let free = std::cell::Cell::new(false);
+        store_key_unlocked(&config, |mut copy| async {
+            // Standing in for the `security` subprocess: whatever runs here
+            // must not be running behind the config mutex.
+            free.set(config.try_lock().is_ok());
+            copy.anthropic_api_key = Some("sk-test".to_string());
+            Ok(copy)
+        })
+        .await
+        .expect("the key was stored");
+
+        assert!(free.get(), "the Keychain ran with the config mutex held");
+        assert_eq!(
+            config.lock().await.anthropic_api_key.as_deref(),
+            Some("sk-test"),
+            "the key was not committed once it was safely stored"
+        );
+    }
+
+    #[test]
+    fn only_the_two_real_screens_can_ask_a_question() {
+        assert!(check_screen("draft").is_ok());
+        assert!(check_screen("season").is_ok());
+        // Anything else used to open its own uncapped spending tally.
+        for junk in ["", "Draft", "../etc", "settings"] {
+            assert!(check_screen(junk).is_err(), "{junk:?} was accepted");
         }
     }
 

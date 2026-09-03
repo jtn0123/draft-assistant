@@ -51,8 +51,15 @@ function reply(overrides: Partial<ChatReply>): ChatReply {
   };
 }
 
-const panel = (screenName: "draft" | "season" = "draft") =>
-  render(<Chat screen={screenName} contextNote="Sees this draft" onClose={() => undefined} />);
+const panel = (screenName: "draft" | "season" = "draft", leagueId = "1") =>
+  render(
+    <Chat
+      screen={screenName}
+      leagueId={leagueId}
+      contextNote="Sees this draft"
+      onClose={() => undefined}
+    />,
+  );
 
 async function ask(question: string, answer: string) {
   mocks.askClaude.mockResolvedValue(reply({ text: answer }));
@@ -73,8 +80,8 @@ describe("saved chats", () => {
   it("files a conversation once the first answer lands", async () => {
     panel();
     await ask("Who should I take?", "The running back.");
-    await waitFor(() => expect(listSessions("draft")).toHaveLength(1));
-    const [saved] = listSessions("draft");
+    await waitFor(() => expect(listSessions("draft.1")).toHaveLength(1));
+    const [saved] = listSessions("draft.1");
     expect(saved.title).toBe("Who should I take?");
     expect(saved.questions).toBe(1);
     expect(screen.getByRole("combobox", { name: "Saved chats" })).toHaveDisplayValue(
@@ -85,7 +92,7 @@ describe("saved chats", () => {
   it("reopens the newest conversation when the panel comes back", async () => {
     const first = panel();
     await ask("Who should I take?", "The running back.");
-    await waitFor(() => expect(listSessions("draft")).toHaveLength(1));
+    await waitFor(() => expect(listSessions("draft.1")).toHaveLength(1));
     first.unmount();
 
     panel();
@@ -98,14 +105,14 @@ describe("saved chats", () => {
   it("switches between two saved conversations", async () => {
     panel();
     await ask("First question", "First answer.");
-    await waitFor(() => expect(listSessions("draft")).toHaveLength(1));
+    await waitFor(() => expect(listSessions("draft.1")).toHaveLength(1));
 
     await userEvent.click(screen.getByRole("button", { name: "New" }));
     await userEvent.click(screen.getByRole("button", { name: "Fresh start" }));
     await ask("Second question", "Second answer.");
-    await waitFor(() => expect(listSessions("draft")).toHaveLength(2));
+    await waitFor(() => expect(listSessions("draft.1")).toHaveLength(2));
 
-    const older = listSessions("draft").find((s) => s.title === "First question");
+    const older = listSessions("draft.1").find((s) => s.title === "First question");
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Saved chats" }),
       older?.id ?? "",
@@ -117,23 +124,40 @@ describe("saved chats", () => {
   it("deleting the open conversation forgets it and empties the thread", async () => {
     panel();
     await ask("Who should I take?", "The running back.");
-    await waitFor(() => expect(listSessions("draft")).toHaveLength(1));
+    await waitFor(() => expect(listSessions("draft.1")).toHaveLength(1));
 
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
-    expect(listSessions("draft")).toEqual([]);
+    expect(listSessions("draft.1")).toEqual([]);
     expect(screen.queryByText("The running back.")).not.toBeInTheDocument();
     expect(screen.getByText(/who to take/)).toBeInTheDocument();
+  });
+
+  it("keeps one league's chats out of another's", async () => {
+    // The board a question was asked about is gone the moment the user
+    // switches leagues; carrying the thread across would answer about players
+    // who are not in this draft.
+    const first = panel("draft", "1");
+    await ask("Who should I take?", "The running back.");
+    await waitFor(() => expect(listSessions("draft.1")).toHaveLength(1));
+    first.unmount();
+
+    panel("draft", "2");
+    expect(await screen.findByText(/who to take/)).toBeInTheDocument();
+    expect(screen.queryByText("The running back.")).not.toBeInTheDocument();
+    expect(listSessions("draft.2")).toEqual([]);
+    // …and the first league still has its own, waiting where it was left.
+    expect(listSessions("draft.1")).toHaveLength(1);
   });
 
   it("keeps the draft's chats out of the season's", async () => {
     const draft = panel("draft");
     await ask("Who should I take?", "The running back.");
-    await waitFor(() => expect(listSessions("draft")).toHaveLength(1));
+    await waitFor(() => expect(listSessions("draft.1")).toHaveLength(1));
     draft.unmount();
 
     panel("season");
     expect(await screen.findByText(/who to start/)).toBeInTheDocument();
-    expect(listSessions("season")).toEqual([]);
+    expect(listSessions("season.1")).toEqual([]);
   });
 });
 
@@ -201,13 +225,41 @@ describe("the spend cap", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "Ask Claude" }), "A question{Enter}");
     await screen.findByText("An answer.");
 
-    expect(screen.getByText(/spent \$2\.00 of its \$1\.00 budget/)).toBeInTheDocument();
+    expect(screen.getByText(/spent \$2\.00 of their \$1\.00 budget/)).toBeInTheDocument();
     // The backend is what refuses a turn; the panel only says it is coming.
     expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled();
 
     await userEvent.clear(cap);
     await userEvent.type(cap, "9");
-    expect(screen.queryByText(/of its \$1\.00 budget/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/of their \$1\.00 budget/)).not.toBeInTheDocument();
+  });
+
+  it("warns on what the screen has spent, not only on this conversation", async () => {
+    // This chat has asked nothing; the cap the backend enforces has already
+    // been reached by the conversations before it, and the next question here
+    // is the one that gets refused.
+    mocks.chatSettings.mockResolvedValue(settings({ budget_usd: 5, spend_usd: { draft: 6 } }));
+    panel();
+    expect(
+      await screen.findByText(/screen.s chats have spent \$6\.00 of their \$5\.00 budget/),
+    ).toBeInTheDocument();
+    // A warning, not a lock: the backend is the side that refuses.
+    expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled();
+  });
+
+  it("does not read an emptied cap field as a cap of nothing", async () => {
+    // 0 means "no cap at all", so a half-typed number must not be written as
+    // one — the box being empty for a keystroke used to turn the cap off.
+    mocks.chatSettings.mockResolvedValue(settings({ budget_usd: 5 }));
+    panel();
+    const cap = await screen.findByLabelText("Spend cap in dollars");
+    mocks.setChatBudget.mockClear();
+
+    await userEvent.clear(cap);
+    expect(mocks.setChatBudget).not.toHaveBeenCalled();
+
+    await userEvent.type(cap, "7");
+    expect(mocks.setChatBudget.mock.calls.flat()).toEqual([7]);
   });
 
   it("shows the backend's refusal as the answer to the turn that was refused", async () => {

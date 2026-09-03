@@ -8,9 +8,11 @@
 //! without a running app.
 
 use crate::engine::{now_secs, AppConfig, LoadedLeague};
-use crate::season::{build_season_view_cached, SeasonAnalysis, SeasonView};
+use crate::season::{SeasonAnalysis, SeasonView};
 use crate::season_engine::{LoadedSeason, SeasonLoader};
+use crate::season_live::LiveGame;
 use crate::sleeper::Pick;
+use crate::state::{build_season_cached_off_thread, season_inputs};
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -140,25 +142,51 @@ pub fn record_poll_outcome(loaded: &mut LoadedLeague, errors: &[String]) {
     loaded.poll_last_error = health.last_error;
 }
 
-/// Suppresses season-updated events whose scores are identical to the last
-/// one. The view is large and the whole panel re-renders on every event, so
-/// emitting an unchanged one is pure cost.
+/// A cheap stand-in for the scoreboard behind the totals: every game's state,
+/// clock and score, and who is on the field for each of them.
+///
+/// The totals alone were not enough. Sunday morning they are 0 - 0 and stay
+/// 0 - 0 through every kickoff, so the screen froze exactly when it had the
+/// most to say: games going live, the clock running, a starter swapped in.
+/// Hashing the games costs one pass over a couple of dozen rows per tick.
+fn games_signature(games: &[LiveGame]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for game in games {
+        game.game_id.hash(&mut hasher);
+        (game.state as u8).hash(&mut hasher);
+        game.status.hash(&mut hasher);
+        game.away_score.hash(&mut hasher);
+        game.home_score.hash(&mut hasher);
+        for chip in &game.chips {
+            chip.player_id.hash(&mut hasher);
+            chip.slot.hash(&mut hasher);
+            (chip.state as u8).hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+/// Suppresses season-updated events identical to the last one. The view is
+/// large and the whole panel re-renders on every event, so emitting an
+/// unchanged one is pure cost.
 #[derive(Debug, Default)]
 pub struct LiveEmitGate {
-    /// Points as hundredths, because floats are not worth comparing exactly.
-    last_totals: Option<(u64, u64)>,
+    /// Points as hundredths (floats are not worth comparing exactly),
+    /// alongside the scoreboard they were counted off.
+    last: Option<(u64, u64, u64)>,
 }
 
 impl LiveEmitGate {
-    fn should_emit(&mut self, my_points: f64, opp_points: f64) -> bool {
-        let totals = (
+    fn should_emit(&mut self, my_points: f64, opp_points: f64, games: &[LiveGame]) -> bool {
+        let signature = (
             (my_points * 100.0).round() as u64,
             (opp_points * 100.0).round() as u64,
+            games_signature(games),
         );
-        if self.last_totals == Some(totals) {
+        if self.last == Some(signature) {
             return false;
         }
-        self.last_totals = Some(totals);
+        self.last = Some(signature);
         true
     }
 }
@@ -268,6 +296,15 @@ pub async fn season_tick<E: SeasonLoader>(
     let fetched = engine.fetch_live(&league_id, watching.0, watching.1).await;
     let mut errors = Vec::new();
     {
+        // Locks in the usual order, loaded then season. The league is checked
+        // again because the requests ran unlocked: after a switch this is the
+        // old league's scoring, and folding it in would show one league's
+        // live points on another league's screen. Nothing was applied, so
+        // nothing is reported either.
+        let loaded = loaded_ref.lock().await;
+        if loaded.as_ref().map(|l| l.league.league_id.as_str()) != Some(league_id.as_str()) {
+            return SeasonTick::default();
+        }
         let mut season = season_ref.lock().await;
         let Some(season) = season.as_mut() else {
             return SeasonTick::default();
@@ -282,24 +319,23 @@ pub async fn season_tick<E: SeasonLoader>(
         return SeasonTick { view: None, health };
     }
 
-    // Locks are taken loaded -> season -> config here, the same order as
-    // everywhere else that needs more than one of them.
-    let loaded = loaded_ref.lock().await;
-    let season = season_ref.lock().await;
-    let config = config_ref.lock().await;
-    let (Some(loaded), Some(season)) = (loaded.as_ref(), season.as_ref()) else {
+    // The inputs are copied under the three mutexes — taken loaded -> season
+    // -> config, the same order as everywhere else — and the build itself runs
+    // on the blocking pool with none of them held. It is seconds of lineup
+    // solving and playoff simulation, and doing it on a runtime thread stopped
+    // the draft poller and every command for the length of every tick.
+    let Ok(inputs) = season_inputs(loaded_ref, season_ref, config_ref).await else {
         return SeasonTick { view: None, health };
     };
-    let view = build_season_view_cached(
-        loaded,
-        season,
-        config.my_user_id.as_deref(),
-        memory.analysis.get(),
-    );
+    let cached = memory.analysis.get().cloned();
+    let Ok(view) = build_season_cached_off_thread(inputs, cached).await else {
+        return SeasonTick { view: None, health };
+    };
     memory.analysis.observe(&view);
     let moved = memory.gate.should_emit(
         view.live.totals.my_live_points,
         view.live.totals.opp_live_points,
+        &view.live.games,
     );
     SeasonTick {
         view: moved.then_some(view),
@@ -308,85 +344,5 @@ pub async fn season_tick<E: SeasonLoader>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `n` picks, each of player `id{i}` unless `swap` renames one of them.
-    fn picks(n: u32, swap: Option<(u32, &str)>) -> Vec<Pick> {
-        (1..=n)
-            .map(|pick_no| Pick {
-                round: 1,
-                pick_no,
-                draft_slot: pick_no,
-                player_id: match swap {
-                    Some((at, id)) if at == pick_no => id.to_string(),
-                    _ => format!("id{pick_no}"),
-                },
-                picked_by: None,
-                metadata: None,
-                is_keeper: None,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn the_first_tick_always_counts_as_a_change() {
-        let mut memory = DraftPollMemory::default();
-        assert!(
-            memory.picks_changed(&picks(0, None)),
-            "the initial state must reach the UI"
-        );
-        assert!(memory.status_changed("pre_draft"));
-    }
-
-    #[test]
-    fn an_identical_response_is_not_a_change() {
-        let mut memory = DraftPollMemory::default();
-        memory.picks_changed(&picks(26, None));
-        assert!(!memory.picks_changed(&picks(26, None)));
-        assert!(
-            memory.picks_changed(&picks(27, None)),
-            "a new pick is a change"
-        );
-        assert!(!memory.picks_changed(&picks(27, None)));
-    }
-
-    #[test]
-    fn a_commissioner_swapping_a_pick_is_a_change_at_the_same_count() {
-        // The bug this guards: pick 14 is edited to a different player, the
-        // count never moves, and the board silently keeps the old name.
-        let mut memory = DraftPollMemory::default();
-        assert!(memory.picks_changed(&picks(26, None)));
-        assert!(
-            memory.picks_changed(&picks(26, Some((14, "someone-else")))),
-            "an edited pick must reach the UI even at an unchanged count"
-        );
-        assert!(!memory.picks_changed(&picks(26, Some((14, "someone-else")))));
-        assert!(
-            memory.picks_changed(&picks(26, None)),
-            "and undoing the edit is a change too"
-        );
-    }
-
-    #[test]
-    fn a_status_move_is_a_change_even_with_no_new_pick() {
-        let mut memory = DraftPollMemory::default();
-        memory.status_changed("drafting");
-        assert!(!memory.status_changed("drafting"));
-        assert!(memory.status_changed("complete"));
-    }
-
-    #[test]
-    fn scores_that_have_not_moved_do_not_emit() {
-        let mut gate = LiveEmitGate::default();
-        assert!(gate.should_emit(101.4, 98.2), "the first view must be sent");
-        assert!(!gate.should_emit(101.4, 98.2));
-        // Below a hundredth of a point is not a score change.
-        assert!(!gate.should_emit(101.4001, 98.2001));
-        assert!(gate.should_emit(101.5, 98.2));
-        assert!(
-            gate.should_emit(101.5, 98.3),
-            "the opponent moving counts too"
-        );
-    }
-}
+#[path = "poll_decision_tests.rs"]
+mod tests;

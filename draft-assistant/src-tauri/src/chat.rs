@@ -52,10 +52,31 @@ impl ChatModel {
     }
 }
 
-/// What one answer cost at list price, in dollars.
+/// Writing a token into the prompt cache costs a quarter more than sending it
+/// plainly; reading one back costs a tenth. Anthropic's published multipliers.
+const CACHE_WRITE_MULTIPLIER: f64 = 1.25;
+const CACHE_READ_MULTIPLIER: f64 = 0.1;
+
+/// What one answer cost at list price, in dollars, counting only the tokens
+/// billed at the plain input and output rates.
 pub fn turn_cost(model: ChatModel, input_tokens: u32, output_tokens: u32) -> f64 {
     let (input, output) = model.price_per_mtok();
     (f64::from(input_tokens) * input + f64::from(output_tokens) * output) / 1_000_000.0
+}
+
+/// What a whole reply cost, cache tiers included.
+///
+/// The guidance block is sent with `cache_control: ephemeral`, so on every
+/// turn after the first most of the prompt is billed as a cache read and none
+/// of it appears in `input_tokens`. Pricing a turn from `input_tokens` alone
+/// therefore undercounts it — badly on the turn that writes the cache, which
+/// is charged at a premium — and the panel's running spend drifts under the
+/// cap it is supposed to enforce.
+pub fn turn_cost_of(model: ChatModel, reply: &ChatReply) -> f64 {
+    let (input, _) = model.price_per_mtok();
+    let cached = f64::from(reply.cache_creation_input_tokens) * input * CACHE_WRITE_MULTIPLIER
+        + f64::from(reply.cache_read_input_tokens) * input * CACHE_READ_MULTIPLIER;
+    turn_cost(model, reply.input_tokens, reply.output_tokens) + cached / 1_000_000.0
 }
 
 /// How hard Claude should think. "Off" maps to disabled thinking, the rest to
@@ -122,6 +143,11 @@ pub struct ChatReply {
     pub refused: bool,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Prompt tokens written into the cache this turn, billed at 1.25x input.
+    /// Zero on the CLI route, which reports no cache tiers.
+    pub cache_creation_input_tokens: u32,
+    /// Prompt tokens served from the cache, billed at 0.1x input.
+    pub cache_read_input_tokens: u32,
     /// Which route answered: "api" or "claude_code". The transports below do
     /// not know which one they are, so the command layer fills this in.
     pub provider: String,
@@ -196,6 +222,11 @@ struct Usage {
     input_tokens: u32,
     #[serde(default)]
     output_tokens: u32,
+    /// Absent on a response that used no cache at all, hence the defaults.
+    #[serde(default)]
+    cache_creation_input_tokens: u32,
+    #[serde(default)]
+    cache_read_input_tokens: u32,
 }
 
 #[derive(Deserialize)]
@@ -309,12 +340,23 @@ async fn ask_at(
     if !status.is_success() {
         let detail = serde_json::from_str::<ApiErrorBody>(&body)
             .ok()
-            .and_then(|b| b.error.and_then(|e| e.message))
-            .unwrap_or_else(|| body.chars().take(300).collect());
-        return Err(match status.as_u16() {
-            401 => format!("Anthropic rejected the API key: {detail}"),
-            429 => format!("Rate limited by Anthropic: {detail}"),
-            _ => format!("Anthropic API error {status}: {detail}"),
+            .and_then(|b| b.error.and_then(|e| e.message));
+        if detail.is_none() {
+            // Anything between here and Anthropic can answer with its own
+            // error page. Pasting a gateway's HTML into the chat panel tells
+            // the user nothing and looks like the model said it, so the body
+            // goes to the log and the status speaks for itself.
+            let logged: String = body.chars().take(300).collect();
+            eprintln!("Anthropic API {status} with a body that is not an error object: {logged}");
+        }
+        let sentence = match status.as_u16() {
+            401 => "Anthropic rejected the API key".to_string(),
+            429 => "Rate limited by Anthropic".to_string(),
+            _ => format!("Anthropic API error {status}"),
+        };
+        return Err(match detail {
+            Some(detail) => format!("{sentence}: {detail}"),
+            None => sentence,
         });
     }
 
@@ -353,6 +395,8 @@ async fn ask_at(
         refused,
         input_tokens: parsed.usage.input_tokens,
         output_tokens: parsed.usage.output_tokens,
+        cache_creation_input_tokens: parsed.usage.cache_creation_input_tokens,
+        cache_read_input_tokens: parsed.usage.cache_read_input_tokens,
         provider: String::new(),
         cost_usd: 0.0,
         screen_spend_usd: 0.0,

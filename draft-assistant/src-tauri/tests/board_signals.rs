@@ -28,6 +28,7 @@ fn player(position: &str, tier: u32) -> AvailablePlayer {
             injury_status: None,
             sleeper_pts_ppr: None,
             second_opinion: None,
+            weekly_cv: None,
         },
     }
 }
@@ -68,6 +69,24 @@ fn only_the_best_tier_left_is_counted_wherever_its_players_sit() {
     assert_eq!(alerts.len(), 1);
     assert_eq!(alerts[0].tier, 1);
     assert_eq!(alerts[0].players_left, 2);
+}
+
+#[test]
+fn the_best_tier_wins_even_when_a_worse_one_is_seen_first() {
+    // The case the ranked board actually produces after a run: the first
+    // receiver left is a tier-2 one, with tier-1 bodies still below him
+    // (higher tier, lower points — a target hog on a bad offence, say).
+    // Reporting the first tier seen said "WR T2, 2 left" and buried the two
+    // tier-1 receivers the alert exists to warn about.
+    let board = [
+        player("WR", 2),
+        player("WR", 1),
+        player("WR", 2),
+        player("WR", 1),
+        player("WR", 3),
+    ];
+    let alerts = tier_alerts(&board, positions(&["WR"]));
+    assert_eq!((alerts[0].tier, alerts[0].players_left), (1, 2));
 }
 
 #[test]

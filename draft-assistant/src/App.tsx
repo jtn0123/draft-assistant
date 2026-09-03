@@ -317,10 +317,12 @@ export default function App() {
           <ErrorBoundary>
             <Suspense fallback={null}>
               <Chat
-                // Keyed by screen: each screen keeps its own saved chats, and
-                // the panel reads which one to reopen as it mounts.
-                key={screen}
+                // Keyed by screen and league: each keeps its own saved chats,
+                // and the panel reads which one to reopen as it mounts. A
+                // question about one board is not context for another.
+                key={`${screen}.${view.league.league_id}`}
                 screen={screen}
+                leagueId={view.league.league_id}
                 contextNote={
                   screen === "season" && season !== null
                     ? `Sees week ${season.week} · your lineup and the league`

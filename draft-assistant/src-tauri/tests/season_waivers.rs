@@ -65,6 +65,7 @@ fn board_player(id: &str, rank: u32) -> BoardPlayer {
         injury_status: None,
         sleeper_pts_ppr: None,
         second_opinion: None,
+        weekly_cv: None,
     }
 }
 

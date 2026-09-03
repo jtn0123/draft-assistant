@@ -73,6 +73,27 @@ test("clicking a column header re-sorts the board", async ({ page }) => {
   await expect(page.locator(".board-body").first()).not.toHaveText(highest);
 });
 
+test("the board still has a player column at the 1000px minimum width", async ({ page }) => {
+  // The window's own minimum. The player's name was the only track that could
+  // give, so between roughly 950 and 1160px it gave everything and collapsed
+  // to nothing: a row of numbers with nobody's name on it, and a board wider
+  // than the window it was in.
+  await page.setViewportSize({ width: 1000, height: 900 });
+  const name = page.locator(".board-body .board-player").first();
+  await expect(name).toBeVisible();
+
+  const box = await name.boundingBox();
+  if (box === null) throw new Error("the name cell is on screen");
+  expect(box.width).toBeGreaterThan(80);
+
+  // Whatever does not fit is the board's own problem to scroll, never the
+  // window's.
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
 test("a replay source keeps the board moving without a reload", async ({ page }) => {
   const state = dump("dev-fixture.json");
   const server = await serveReplay(page, "/live-state.json", state);

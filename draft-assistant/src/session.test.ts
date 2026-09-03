@@ -275,4 +275,65 @@ describe("switching leagues", () => {
     await waitFor(() => expect(result.current.season?.week).toBe(9));
     expect(mocks.startSeasonPolling).toHaveBeenCalledTimes(2);
   });
+
+  it("ignores the old league's load when it lands after the new one's", async () => {
+    // The switch happens mid-fetch, and the slow league answers last. Whoever
+    // replies second used to win, which put the old standings on screen under
+    // the new league's name.
+    let finishOld: ((v: SeasonView) => void) | null = null;
+    mocks.loadSeason.mockImplementationOnce(
+      () =>
+        new Promise<SeasonView>((resolve) => {
+          finishOld = resolve;
+        }),
+    );
+    const { result, rerender } = renderHook(
+      ({ leagueId }) => useSeasonSession(true, leagueId, () => undefined),
+      { initialProps: { leagueId: "1" } },
+    );
+    await waitFor(() => expect(finishOld).not.toBeNull());
+
+    mocks.loadSeason.mockResolvedValue(view(9));
+    rerender({ leagueId: "2" });
+    await waitFor(() => expect(result.current.season?.week).toBe(9));
+
+    await act(async () => {
+      finishOld?.(view(2));
+      await Promise.resolve();
+    });
+    expect(result.current.season?.week).toBe(9);
+  });
+
+  it("ignores a retry started under the league the user has left", async () => {
+    mocks.loadSeason.mockRejectedValueOnce(new Error("down")).mockResolvedValue(view(9));
+    const quiet = () => undefined;
+    const { result, rerender } = renderHook(
+      ({ leagueId }) => useSeasonSession(true, leagueId, quiet),
+      { initialProps: { leagueId: "1" } },
+    );
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+
+    // The retry is asked for the old league and answers slowly; the switch
+    // happens first, so what it carries belongs to nobody on screen.
+    let finishRetry: ((v: SeasonView) => void) | null = null;
+    mocks.loadSeason.mockImplementationOnce(
+      () =>
+        new Promise<SeasonView>((resolve) => {
+          finishRetry = resolve;
+        }),
+    );
+    await settle(() => {
+      result.current.retry();
+    });
+    await waitFor(() => expect(finishRetry).not.toBeNull());
+
+    rerender({ leagueId: "2" });
+    await waitFor(() => expect(result.current.season?.week).toBe(9));
+
+    await act(async () => {
+      finishRetry?.(view(2));
+      await Promise.resolve();
+    });
+    expect(result.current.season?.week).toBe(9);
+  });
 });

@@ -2,6 +2,7 @@
 // spend. Both are about the thread as a whole rather than the next question,
 // so they sit together on one line above it.
 
+import { useState } from "react";
 import { describeSession, type ChatSessionSummary } from "../chatSessions";
 import { formatUsd } from "../chatCost";
 
@@ -33,6 +34,11 @@ export function ChatSessionBar({
   onBudget: (next: number) => void;
 }) {
   const listed = sessions.some((s) => s.id === currentId);
+  // What is in the box while it is being edited, or null when it is just
+  // showing the cap. Emptying a number field is halfway through typing one,
+  // and a controlled input that answered that with 0 would have quietly turned
+  // the cap off — 0 is the one value that means "spend whatever you like".
+  const [typed, setTyped] = useState<string | null>(null);
   return (
     <div className="chat-sessions">
       <span className="label">Chats</span>
@@ -67,10 +73,15 @@ export function ChatSessionBar({
         type="number"
         min={0}
         step={1}
-        value={budget}
+        value={typed ?? String(budget)}
         aria-label="Spend cap in dollars"
         title="Asking stops once this screen's chats have cost this much, all conversations together. 0 means no cap."
-        onChange={(e) => onBudget(Number(e.target.value))}
+        onChange={(e) => {
+          const next = e.target.value;
+          setTyped(next);
+          if (next.trim() !== "" && Number.isFinite(Number(next))) onBudget(Number(next));
+        }}
+        onBlur={() => setTyped(null)}
       />
       <span className="muted small chat-spend">
         {formatUsd(spent)} spent

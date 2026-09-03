@@ -160,6 +160,88 @@ async fn a_cli_that_prints_nonsense_says_so_rather_than_answering() {
     remove(&cli);
 }
 
+/// True once the process is gone — reaped, or sitting as a zombie waiting to
+/// be. Polled, because a kill and its reaping are not instantaneous.
+#[cfg(unix)]
+fn process_is_gone(pid: &str) -> bool {
+    for _ in 0..40 {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "state=", "-p", pid])
+            .output()
+            .expect("ps");
+        let state = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if state.is_empty() || state.starts_with('Z') {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    false
+}
+
+/// A run that outruns its deadline used to be abandoned: the timeout returned
+/// an error to the panel and the CLI kept going, holding a model session open
+/// with the app's privileges, one process per impatient question.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_run_that_outlives_its_timeout_is_killed_rather_than_left_running() {
+    let cli = fake_cli(
+        "timeout",
+        r#"cat > /dev/null
+echo $$ > "$(dirname "$0")/pid.txt"
+exec sleep 30"#,
+    );
+    let err = ask_within(
+        &cli,
+        ChatModel::Opus5,
+        Effort::High,
+        "the board",
+        &question(),
+        Duration::from_millis(800),
+    )
+    .await
+    .expect_err("the script never answers");
+    assert!(err.contains("took too long"), "{err}");
+
+    let pid = std::fs::read_to_string(cli.parent().expect("scratch dir").join("pid.txt"))
+        .expect("the script recorded its pid");
+    let pid = pid.trim();
+    assert!(
+        process_is_gone(pid),
+        "the timed-out CLI (pid {pid}) is still running"
+    );
+    remove(&cli);
+}
+
+/// The prompt goes over a pipe, and a CLI that never reads it fills that pipe
+/// and blocks the write. That write sat outside the timeout, so a long
+/// question against a wedged CLI hung the panel with no deadline at all.
+#[tokio::test]
+async fn a_child_that_never_reads_its_stdin_times_out_instead_of_hanging() {
+    let cli = fake_cli("deaf", "exec sleep 30");
+    let question = vec![ChatMessage {
+        role: "user".into(),
+        // Comfortably past any pipe buffer, so write_all cannot finish.
+        content: "x".repeat(2_000_000),
+    }];
+    let started = std::time::Instant::now();
+    let err = ask_within(
+        &cli,
+        ChatModel::Opus5,
+        Effort::High,
+        "the board",
+        &question,
+        Duration::from_millis(500),
+    )
+    .await
+    .expect_err("nothing is reading the prompt");
+    assert!(err.contains("took too long"), "{err}");
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "the write must be inside the deadline, not outside it"
+    );
+    remove(&cli);
+}
+
 #[tokio::test]
 async fn a_missing_cli_names_the_path_it_looked_at() {
     let missing = Path::new("/nonexistent/bin/claude");

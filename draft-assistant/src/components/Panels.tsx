@@ -4,7 +4,7 @@
 import { useMemo, useState } from "react";
 import { api } from "../api";
 import type { DraftView, PickPrice, Recommendation } from "../types";
-import { fmt, pct, pickLabel, posRank } from "../format";
+import { fmt, pct, pickLabel, posRank, signed } from "../format";
 import { PlayerName, PosBadge, PanelHead, Empty } from "./bits";
 
 // ---------- setup ----------
@@ -258,7 +258,11 @@ export function SidePanel({ view }: { view: DraftView }) {
                 <PosBadge position={p.position} />
                 <PlayerName name={p.name} team={p.team} playerId={p.player_id} />
                 <span className={riskClass(p.survival_next)}>{pct(p.survival_next)}</span>
-                <span className="mid num">−{fmt(p.vorp)}</span>
+                {/* What his going costs you, so it is always a loss. Written
+                    with the shared signed helper rather than a minus sign glued
+                    to the number: a player whose VORP is already negative used
+                    to read "−-4". */}
+                <span className="mid num">{signed(-Math.abs(p.vorp), 0)}</span>
               </div>
             ))}
           </div>

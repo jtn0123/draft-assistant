@@ -11,6 +11,21 @@ use crate::season_lineup::weekly_lineup_outlook;
 use crate::season_lookup::Lookup;
 use crate::season_odds::{self, ScheduledGame, StandingsRow, TeamSeason};
 
+/// True when every NFL game the scoreboard knows of this week has finished.
+///
+/// A scoreboard that says nothing about the week is not evidence that it is
+/// decided, so it counts as unfinished — simulating a week that is already in
+/// the books costs a little accuracy, whereas skipping one that is not hands
+/// back false certainty.
+fn current_week_is_over(season: &LoadedSeason) -> bool {
+    let mut games = season
+        .scores
+        .iter()
+        .filter(|game| game.week == Some(season.week))
+        .peekable();
+    games.peek().is_some() && games.all(|game| game.meta().is_some_and(|meta| meta.is_over))
+}
+
 /// Project every roster's rest of season, then simulate the remaining schedule.
 pub fn standings_rows(
     loaded: &LoadedLeague,
@@ -26,6 +41,16 @@ pub fn standings_rows(
     let team_of = |id: &str| lookup.team(id);
     let sidelined = |id: &str| lookup.is_sidelined(id);
     let last_regular = loaded.league.last_regular_week();
+    // Where the rest of the season starts. This week counts as still to play
+    // until its games are actually over: dropping it left the last regular
+    // week with nothing scheduled, and a simulation with no games left reads
+    // the standings off as certainty — every roster a flat 100% or 0% while
+    // the games deciding them were still being played.
+    let first_open = if current_week_is_over(season) {
+        week + 1
+    } else {
+        week
+    };
 
     let teams: Vec<TeamSeason> = season
         .rosters
@@ -40,7 +65,7 @@ pub fn standings_rows(
                 &team_of,
                 &sidelined,
                 weekly,
-                (week + 1)..=last_regular,
+                first_open..=last_regular,
             );
             TeamSeason {
                 roster_id: r.roster_id,
@@ -57,7 +82,7 @@ pub fn standings_rows(
     let schedule: Vec<ScheduledGame> = season
         .schedule
         .iter()
-        .filter(|(w, _)| *w > week)
+        .filter(|(w, _)| *w >= first_open)
         .flat_map(|(w, pairs)| {
             pairs.iter().map(move |(home, away)| ScheduledGame {
                 week: *w,

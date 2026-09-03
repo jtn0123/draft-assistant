@@ -34,6 +34,7 @@ fn board_player(name: &str, position: &str, team: Option<&str>, rank: u32) -> Bo
         injury_status: None,
         sleeper_pts_ppr: None,
         second_opinion: None,
+        weekly_cv: None,
     }
 }
 
@@ -254,33 +255,47 @@ fn with_opinion(board_rank: u32, csv_rank: u32, adp: Option<f64>) -> BoardPlayer
 }
 
 #[test]
-fn a_reason_appears_only_when_the_source_likes_him_more_than_the_board() {
-    // Board WR21, Clay WR9: twelve spots the user's way.
-    let reason = rec_reason(&with_opinion(21, 9, None), 12).expect("a reason");
+fn the_adjustment_runs_both_ways_and_scales_with_the_gap() {
+    // Board WR21, Clay WR9: twelve spots the user's way, so a bump up.
+    let (delta, reason) = rec_adjustment(&with_opinion(21, 9, None), 12).expect("an adjustment");
     assert!(reason.starts_with("Clay has him WR9"), "{reason}");
     assert!(reason.contains("this board has him WR21"), "{reason}");
-    // The other direction is the board liking him more — no reason to add.
-    assert_eq!(rec_reason(&with_opinion(9, 21, None), 12), None);
-    // And a small disagreement is noise.
-    assert_eq!(rec_reason(&with_opinion(14, 9, None), 12), None);
+    assert!((delta - 3.0).abs() < 1e-9, "{delta}");
+
+    // The other direction is a warning, not silence: Clay has him thirty-odd
+    // places behind where this board does.
+    let (delta, reason) = rec_adjustment(&with_opinion(9, 41, None), 12).expect("an adjustment");
+    assert!((delta + 8.0).abs() < 1e-9, "capped at -8: {delta}");
+    assert!(reason.contains("behind this board's WR9"), "{reason}");
+
+    // Bigger disagreement, bigger adjustment — up to the cap.
+    let small = rec_adjustment(&with_opinion(21, 9, None), 12).expect("a").0;
+    let large = rec_adjustment(&with_opinion(45, 9, None), 12).expect("a").0;
+    assert!(large > small, "{large} vs {small}");
+    assert!(large <= 8.0, "capped at +8: {large}");
+
+    // A small disagreement is noise, whichever way it points.
+    assert!(rec_adjustment(&with_opinion(14, 9, None), 12).is_none());
+    assert!(rec_adjustment(&with_opinion(9, 14, None), 12).is_none());
     // A player with nothing imported says nothing.
-    assert_eq!(
-        rec_reason(&board_player("Someone", "WR", None, 21), 12),
-        None
-    );
+    assert!(rec_adjustment(&board_player("Someone", "WR", None, 21), 12).is_none());
 }
 
 #[test]
 fn the_reason_counts_the_market_lag_in_rounds_when_there_is_an_adp() {
     // Clay's overall rank 22, ADP 58, twelve-team league: three rounds late.
-    let reason = rec_reason(&with_opinion(21, 9, Some(58.0)), 12).expect("a reason");
+    let (_, reason) = rec_adjustment(&with_opinion(21, 9, Some(58.0)), 12).expect("a reason");
     assert_eq!(reason, "Clay has him WR9 — market is 3 rounds late");
     // One round reads as one round, not "1 rounds".
-    let reason = rec_reason(&with_opinion(21, 9, Some(36.0)), 12).expect("a reason");
+    let (_, reason) = rec_adjustment(&with_opinion(21, 9, Some(36.0)), 12).expect("a reason");
     assert_eq!(reason, "Clay has him WR9 — market is 1 round late");
     // An ADP that is ahead of the source falls back to the plain comparison.
-    let reason = rec_reason(&with_opinion(21, 9, Some(10.0)), 12).expect("a reason");
+    let (_, reason) = rec_adjustment(&with_opinion(21, 9, Some(10.0)), 12).expect("a reason");
     assert!(reason.contains("this board has him WR21"), "{reason}");
+    // The market-lag line belongs to the direction that earns it: a source
+    // that is *down* on the player never reads as the market being late.
+    let (_, reason) = rec_adjustment(&with_opinion(9, 41, Some(58.0)), 12).expect("a reason");
+    assert!(!reason.contains("late"), "{reason}");
 }
 
 // ---------- the stored copy ----------

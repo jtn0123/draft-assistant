@@ -66,6 +66,7 @@ fn board_player(id: &str, name: &str, position: &str, team: &str, rank: u32) -> 
         injury_status: None,
         sleeper_pts_ppr: None,
         second_opinion: second_opinion_for(id),
+        weekly_cv: None,
     }
 }
 

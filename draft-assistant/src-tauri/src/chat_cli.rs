@@ -131,6 +131,10 @@ fn parse_result(stdout: &str, requested: ChatModel) -> Result<ChatReply, String>
         refused,
         input_tokens: parsed.usage.input_tokens,
         output_tokens: parsed.usage.output_tokens,
+        // The CLI route reports no cache tiers, and is not billed by the
+        // token anyway.
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
         // Filled in by `commands_chat`, which is the layer that knows which
         // route ran and what it is allowed to cost.
         provider: String::new(),
@@ -170,6 +174,19 @@ pub async fn ask(
     context: &str,
     messages: &[ChatMessage],
 ) -> Result<ChatReply, String> {
+    ask_within(cli, model, effort, context, messages, TIMEOUT).await
+}
+
+/// The same, with the deadline passed in. Only [`ask`] and the process tests,
+/// which cannot wait four minutes to watch one time out, call this.
+async fn ask_within(
+    cli: &Path,
+    model: ChatModel,
+    effort: Effort,
+    context: &str,
+    messages: &[ChatMessage],
+    timeout: Duration,
+) -> Result<ChatReply, String> {
     if messages.is_empty() {
         return Err("nothing to ask".into());
     }
@@ -190,21 +207,32 @@ pub async fn ask(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        // A child that outlives the wait below — one that timed out, or whose
+        // stdin could not be written — would otherwise keep running with the
+        // app's privileges until the machine was rebooted, one per question.
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("could not start Claude Code at {}: {e}", cli.display()))?;
 
-    // The prompt goes over stdin so a long transcript never hits ARG_MAX.
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(render_prompt(messages).as_bytes())
+    let prompt = render_prompt(messages);
+    // Writing and waiting share one deadline. A CLI that never reads its
+    // stdin blocks the write forever once the pipe buffer is full, and that
+    // write used to sit outside the timeout entirely.
+    let output = tokio::time::timeout(timeout, async move {
+        // The prompt goes over stdin so a long transcript never hits ARG_MAX.
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(prompt.as_bytes())
+                .await
+                .map_err(|e| format!("could not send the prompt to Claude Code: {e}"))?;
+        }
+        child
+            .wait_with_output()
             .await
-            .map_err(|e| format!("could not send the prompt to Claude Code: {e}"))?;
-    }
-
-    let output = tokio::time::timeout(TIMEOUT, child.wait_with_output())
-        .await
-        .map_err(|_| "Claude Code took too long to answer — try a lower effort".to_string())?
-        .map_err(|e| format!("Claude Code failed: {e}"))?;
+            .map_err(|e| format!("Claude Code failed: {e}"))
+    })
+    .await
+    .map_err(|_| "Claude Code took too long to answer — try a lower effort".to_string())??;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     if !output.status.success() {

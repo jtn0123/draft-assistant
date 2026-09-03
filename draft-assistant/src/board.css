@@ -7,6 +7,10 @@
   flex: 3 1 560px;
   border: 1px solid var(--rule2);
   min-width: 0;
+  /* The rows are a grid of mostly fixed tracks, so below a certain width they
+     are simply wider than the column they sit in. When that happens the board
+     scrolls inside itself — the window never does. */
+  overflow-x: auto;
 }
 
 .board-controls {
@@ -56,9 +60,13 @@
   white-space: nowrap;
 }
 
+/* The player's name gets a real floor rather than `minmax(0, 1fr)`. As a
+   pure `1fr` it was the only track that could give, so between about 950 and
+   1160px — inside the window's own 1000px minimum — it gave everything and
+   collapsed to nothing, leaving a row of numbers with no player on it. */
 .board-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 52px 74px 36px 44px 44px 34px 44px 47px 60px;
+  grid-template-columns: 34px minmax(9rem, 1fr) 52px 74px 36px 44px 44px 34px 44px 47px 60px;
   gap: 8px;
   align-items: center;
 }
@@ -67,7 +75,29 @@
    opinion. The class is only set when a projections CSV has been imported —
    the column is absent, not empty, when there is nothing to show. */
 .board-row.has-second {
-  grid-template-columns: 34px minmax(0, 1fr) 52px 46px 74px 36px 44px 44px 34px 44px 47px 60px;
+  grid-template-columns: 34px minmax(9rem, 1fr) 52px 46px 74px 36px 44px 44px 34px 44px 47px 60px;
+}
+
+/* Narrow enough that the name and the numbers cannot both have their way.
+   Tier, ADP and survival go: the three the eye consults least often, and the
+   three whose absence the recommendation cards and the rail already cover.
+   Counted from the end so the same rule fits the row with the imported column
+   in it and the row without — the Draft button is last either way. */
+@media (max-width: 1200px) {
+  .board-row > *:nth-last-child(-n + 4):not(:last-child) {
+    display: none;
+  }
+
+  .board-row {
+    grid-template-columns: 34px minmax(9rem, 1fr) 52px 62px 36px 44px 44px 60px;
+  }
+
+  /* With the imported column in as well, the team track gives up the room its
+     logo and three letters were never using, and the whole row fits the
+     window's 1000px minimum without the board having to scroll at all. */
+  .board-row.has-second {
+    grid-template-columns: 34px minmax(9rem, 1fr) 52px 46px 62px 36px 44px 44px 60px;
+  }
 }
 
 /* A disagreement of eight positional spots or more. Tinted rather than
@@ -78,16 +108,18 @@
   padding: 1px 3px;
 }
 
-/* The imported source is higher on him than this board is. */
+/* The imported source is higher on him than this board is. The tint is the
+   hue at 18%; the type is the darker `ink` of the pair, because the hue that
+   makes a good tint does not read as text sitting on it. */
 .so-higher {
   background: color-mix(in srgb, var(--pos) 18%, transparent);
-  color: var(--pos);
+  color: var(--posink);
 }
 
 /* The imported source is lower on him than this board is. */
 .so-lower {
   background: color-mix(in srgb, var(--act) 18%, transparent);
-  color: var(--act);
+  color: var(--actink);
 }
 
 .board-head {

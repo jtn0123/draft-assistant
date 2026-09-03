@@ -49,6 +49,24 @@ describe("SidePanel", () => {
     expect(screen.getAllByTitle("Kept from last season")).toHaveLength(1);
   });
 
+  it("writes the VORP a player takes with him as one loss, however it is signed", () => {
+    const view = fixture();
+    view.draft.teams = 14;
+    view.draft.is_my_pick = true;
+    view.draft.my_next_picks = [27, 30, 55];
+    // Below replacement, which the board does say about the back of the pool.
+    // The row shows what his going costs, so the two minus signs the old
+    // markup produced — "−-4" — were never a number.
+    const risky = view.available.find((p) => (p.survival_next ?? 1) < 0.5);
+    if (risky === undefined) throw new Error("the fixture has an at-risk player");
+    risky.vorp = -4;
+
+    const { container } = render(<SidePanel view={view} />);
+    const written = [...container.querySelectorAll(".risk-row .num")].map((n) => n.textContent);
+    expect(written).toContain("−4");
+    expect(written.some((t) => t?.includes("-"))).toBe(false);
+  });
+
   it("falls back to a bare heading once I have no picks left", () => {
     const view = fixture();
     view.draft.is_my_pick = false;

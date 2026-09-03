@@ -9,7 +9,9 @@
 mod common;
 
 use draft_assistant_lib::season::build_season_view;
-use draft_assistant_lib::state::{build_season_off_thread, season_inputs, season_view_for_chat};
+use draft_assistant_lib::state::{
+    build_season_off_thread, season_inputs, season_view_for_chat, CachedSeasonView,
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -83,7 +85,7 @@ async fn a_cached_view_from_another_league_is_not_reused() {
         other_config.my_user_id.as_deref(),
     );
     stale.league.league_id = "some-other-league".to_string();
-    let last = Arc::new(Mutex::new(Some(Arc::new(stale))));
+    let last = Arc::new(Mutex::new(Some(CachedSeasonView::new(Arc::new(stale)))));
 
     let view = season_view_for_chat(&loaded, &season, &config, &last)
         .await

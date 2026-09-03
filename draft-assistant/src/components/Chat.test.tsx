@@ -63,7 +63,12 @@ describe("Chat copy", () => {
   it("names the model and effort in the context line and tips each model", async () => {
     mocks.chatSettings.mockResolvedValue(settings({}));
     render(
-      <Chat screen="draft" contextNote="Sees this draft · pick 3.04" onClose={() => undefined} />,
+      <Chat
+        screen="draft"
+        leagueId="1"
+        contextNote="Sees this draft · pick 3.04"
+        onClose={() => undefined}
+      />,
     );
     await waitFor(() => expect(screen.getByLabelText("Anthropic API key")).toBeInTheDocument());
     expect(
@@ -75,7 +80,9 @@ describe("Chat copy", () => {
 
   it("changes the empty-thread copy for the season screen", async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true, key_hint: "····abcd" }));
-    render(<Chat screen="season" contextNote="Sees week 1" onClose={() => undefined} />);
+    render(
+      <Chat screen="season" leagueId="1" contextNote="Sees week 1" onClose={() => undefined} />,
+    );
     await waitFor(() => expect(screen.getByText(/who to start/)).toBeInTheDocument());
   });
 });
@@ -85,7 +92,9 @@ describe("Chat routing", () => {
     mocks.chatSettings.mockResolvedValue(
       settings({ cli_available: true, provider: "claude_code" }),
     );
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     await waitFor(() => expect(screen.getByRole("group", { name: "Route" })).toBeInTheDocument());
     expect(screen.queryByLabelText("Anthropic API key")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled();
@@ -94,7 +103,9 @@ describe("Chat routing", () => {
 
   it("hides the route picker when the CLI is not installed", async () => {
     mocks.chatSettings.mockResolvedValue(settings({}));
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     await waitFor(() => expect(screen.getByLabelText("Anthropic API key")).toBeInTheDocument());
     expect(screen.queryByRole("group", { name: "Route" })).not.toBeInTheDocument();
   });
@@ -104,7 +115,9 @@ describe("Chat routing", () => {
       .mockResolvedValueOnce(settings({ cli_available: true, provider: "claude_code" }))
       .mockResolvedValueOnce(settings({ cli_available: true, provider: "api" }));
     mocks.setChatProvider.mockResolvedValue("api");
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     await waitFor(() => expect(screen.getByRole("group", { name: "Route" })).toBeInTheDocument());
 
     await userEvent.click(screen.getByRole("button", { name: "API key" }));
@@ -118,7 +131,9 @@ describe("Chat conversation", () => {
   it("sends a question, shows the answer, and keeps the thread as history", async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true, key_hint: "····abcd" }));
     mocks.askClaude.mockResolvedValue(reply({ text: "Take the RB.\n\nHe scores more." }));
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     const input = await screen.findByRole("textbox", { name: "Ask Claude" });
 
     await userEvent.type(input, "Who should I take?{Enter}");
@@ -141,7 +156,9 @@ describe("Chat conversation", () => {
   it("labels a refusal", async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true }));
     mocks.askClaude.mockResolvedValue(reply({ refused: true, text: "I can't help with that." }));
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     const input = await screen.findByRole("textbox", { name: "Ask Claude" });
     await userEvent.type(input, "collude with me{Enter}");
     expect(await screen.findByText("Declined")).toBeInTheDocument();
@@ -152,7 +169,9 @@ describe("Chat conversation", () => {
     mocks.askClaude
       .mockRejectedValueOnce(new Error("network down"))
       .mockResolvedValue(reply({ text: "Back online." }));
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     const input = await screen.findByRole("textbox", { name: "Ask Claude" });
 
     await userEvent.type(input, "First try{Enter}");
@@ -170,7 +189,9 @@ describe("Chat conversation", () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true }));
     mocks.chatSuggestions.mockResolvedValue(["Who do I start this week?"]);
     mocks.askClaude.mockResolvedValue(reply({ text: "Start Downs." }));
-    render(<Chat screen="season" contextNote="Sees week 1" onClose={() => undefined} />);
+    render(
+      <Chat screen="season" leagueId="1" contextNote="Sees week 1" onClose={() => undefined} />,
+    );
     await userEvent.click(await screen.findByRole("button", { name: "Who do I start this week?" }));
     expect(await screen.findByText("Start Downs.")).toBeInTheDocument();
     expect(mocks.chatSuggestions).toHaveBeenCalledWith("season");
@@ -180,7 +201,9 @@ describe("Chat conversation", () => {
 describe("Chat model and effort", () => {
   it("falls back to a legal effort when the picked model cannot turn thinking off", async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true }));
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     await screen.findByRole("textbox", { name: "Ask Claude" });
 
     await userEvent.click(screen.getByRole("button", { name: "Off" }));
@@ -197,7 +220,9 @@ describe("Chat thread controls", () => {
   const startThread = async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true }));
     mocks.askClaude.mockResolvedValue(reply({ text: "An answer." }));
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     const input = await screen.findByRole("textbox", { name: "Ask Claude" });
     await userEvent.type(input, "A question{Enter}");
     await screen.findByText("An answer.");
@@ -229,7 +254,7 @@ describe("Chat thread controls", () => {
   it("toggles compact spacing", async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true }));
     const { container } = render(
-      <Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />,
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
     await screen.findByRole("textbox", { name: "Ask Claude" });
     await userEvent.click(screen.getByRole("button", { name: "Compact" }));
@@ -245,7 +270,9 @@ describe("API key form", () => {
       .mockResolvedValueOnce(settings({}))
       .mockResolvedValueOnce(settings({ has_key: true, key_hint: "····wxyz" }));
     mocks.setApiKey.mockResolvedValue(true);
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     const field = await screen.findByLabelText("Anthropic API key");
     expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeDisabled();
 
@@ -256,7 +283,9 @@ describe("API key form", () => {
 
   it("asks for the key once, and points the composer at the form", async () => {
     mocks.chatSettings.mockResolvedValue(settings({}));
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     await screen.findByLabelText("Anthropic API key");
     // One call to action, not two: the form asks, the composer waits.
     expect(screen.getByText("Add an Anthropic API key")).toBeInTheDocument();
@@ -269,7 +298,7 @@ describe("API key form", () => {
   it("says where the key is actually kept", async () => {
     mocks.chatSettings.mockResolvedValue(settings({ key_store: "keychain" }));
     const { unmount } = render(
-      <Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />,
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
     expect(await screen.findByText(/macOS Keychain/)).toBeInTheDocument();
     unmount();
@@ -277,14 +306,18 @@ describe("API key form", () => {
     // No Keychain: the promise is weaker, and the form says so rather than
     // leaving "stored locally" to cover both.
     mocks.chatSettings.mockResolvedValue(settings({ key_store: "file" }));
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     expect(await screen.findByText(/kept in a file in this app's data directory/)).toBeVisible();
   });
 
   it("surfaces a save failure without losing the form", async () => {
     mocks.chatSettings.mockResolvedValue(settings({}));
     mocks.setApiKey.mockRejectedValue(new Error("keychain denied"));
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     const field = await screen.findByLabelText("Anthropic API key");
     await userEvent.type(field, "sk-ant-test");
     await userEvent.click(screen.getByRole("button", { name: "Save key" }));
@@ -294,7 +327,9 @@ describe("API key form", () => {
 
   it("offers to change a stored key and shows the hint", async () => {
     mocks.chatSettings.mockResolvedValue(settings({ has_key: true, key_hint: "····abcd" }));
-    render(<Chat screen="draft" contextNote="Sees this draft" onClose={() => undefined} />);
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
     await screen.findByRole("textbox", { name: "Ask Claude" });
     await userEvent.click(screen.getByRole("button", { name: "change key" }));
     expect(screen.getByText("Replace the stored key")).toBeInTheDocument();

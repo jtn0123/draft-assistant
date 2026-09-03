@@ -5,7 +5,7 @@ use crate::board::AvailablePlayer;
 use crate::draft::{self};
 use crate::engine::{now_secs, AppConfig, LoadedLeague};
 use crate::pick_value;
-use crate::recommend::recommend;
+use crate::recommend::{recommend, RecommendInputs};
 use crate::sleeper::Pick;
 use crate::traded_picks::PickOwnership;
 use crate::view_signals::{clock_deadline_ms, validated_slot, RUN_MIN, RUN_WINDOW};
@@ -105,11 +105,8 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         .map(|&mine| crate::picks::picks_until(current_pick, mine, &picks));
     // Survival is judged at my next pick AFTER the one I'm making now (or the
     // upcoming one if I'm not on the clock).
-    let survival_pick = if is_my_pick {
-        my_next_picks.get(1).copied()
-    } else {
-        my_next_picks.first().copied()
-    };
+    let survival_pick =
+        crate::view_signals::survival_target(&my_next_picks, current_pick, is_my_pick);
     // …and judged against the market, not the board. A keeper sitting between
     // here and that pick is already in the book: nobody selects at its number,
     // so it must not age the ADP the survival is read off. With 27 keepers the
@@ -197,15 +194,35 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         position_run(&positions, RUN_WINDOW, RUN_MIN)
     };
 
-    let recommendations = recommend(
-        &available,
-        my_roster.as_ref(),
-        &loaded.roster_rules,
+    // Byes already stacked on my starters: which week, and how many of them.
+    // Only the recommender can price this, and only the view can look a
+    // rostered player's bye week up on the board.
+    let mut my_byes: HashMap<u32, u32> = HashMap::new();
+    for player in my_roster.iter().flat_map(|roster| roster.players.iter()) {
+        if crate::board::is_late_only(&player.position) {
+            continue; // a kicker's bye is not a lineup problem
+        }
+        let bye = loaded
+            .board_index
+            .get(&player.player_id)
+            .and_then(|i| loaded.board.get(*i))
+            .and_then(|p| p.bye_week);
+        if let Some(bye) = bye {
+            *my_byes.entry(bye).or_insert(0) += 1;
+        }
+    }
+    let recommendations = recommend(&RecommendInputs {
+        available: &available,
+        my_roster: my_roster.as_ref(),
+        rules: &loaded.roster_rules,
         current_round,
-        rounds,
+        total_rounds: rounds,
         current_pick,
         teams,
-    );
+        position_run: position_run.as_ref(),
+        my_byes: &my_byes,
+        pre_draft: draft.status == "pre_draft",
+    });
 
     let recent_picks: Vec<RecentPick> = happened
         .iter()

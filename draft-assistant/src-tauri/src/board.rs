@@ -33,6 +33,16 @@ pub struct BoardPlayer {
     /// What an imported projections file says about him, when one is loaded.
     /// Ranks only -- see `second_opinion.rs` for why the points are dropped.
     pub second_opinion: Option<SecondOpinion>,
+    /// Week-to-week spread of his own weekly projections, as a coefficient of
+    /// variation. The upside mode's only real dispersion signal; `None` for a
+    /// player with too few scoring weeks to measure.
+    ///
+    /// Deliberately not on the wire. Every other field here is something the
+    /// screen shows or the model reads, and this one is an input to a score
+    /// neither of them recomputes -- putting it in `DraftView` would move the
+    /// schema for a number nobody downstream reads.
+    #[serde(skip)]
+    pub weekly_cv: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +58,70 @@ pub struct BoardBuild {
     pub replacement: ReplacementModel,
 }
 
+/// How much VORP a kicker or a defence is docked before the overall board is
+/// ranked. See `build_board`.
+pub const ONESIE_RANK_DISCOUNT: f64 = 12.0;
+
+/// Spread of a player's weekly projections around their own mean, as a
+/// coefficient of variation. Bye weeks and any other blank week are left out;
+/// under four scoring weeks is too little to measure and reads as no signal.
+fn weekly_cv(weeks: &[&HashMap<String, f64>], scoring: &HashMap<String, f64>) -> Option<f64> {
+    let points: Vec<f64> = weeks
+        .iter()
+        .map(|week| scoring::base_points(week, scoring))
+        .filter(|p| *p > 0.0)
+        .collect();
+    if points.len() < 4 {
+        return None;
+    }
+    let mean = points.iter().sum::<f64>() / points.len() as f64;
+    if mean <= 0.0 {
+        return None;
+    }
+    let variance = points.iter().map(|p| (p - mean).powi(2)).sum::<f64>() / points.len() as f64;
+    Some(variance.sqrt() / mean)
+}
+
+/// True for the two positions that are always there in the last two rounds.
+pub fn is_late_only(position: &str) -> bool {
+    position == "K" || position == "DEF"
+}
+
+/// What a player sorts on for overall rank — VORP, discounted for K and DEF.
+fn board_rank_value(player: &BoardPlayer) -> f64 {
+    if is_late_only(&player.position) {
+        player.vorp - ONESIE_RANK_DISCOUNT
+    } else {
+        player.vorp
+    }
+}
+
+/// Which ADP column of a Sleeper projection row this league actually drafts
+/// on. Sleeper publishes four; the board used to read PPR whatever the league
+/// scored, which in a half-PPR league moved receivers a round or more away
+/// from where they really go, and in a superflex league was off by a whole
+/// position.
+pub fn adp_key(league: &League) -> &'static str {
+    let two_qb = league
+        .roster_positions
+        .iter()
+        .any(|slot| slot == "SUPER_FLEX")
+        || league
+            .roster_positions
+            .iter()
+            .filter(|s| *s == "QB")
+            .count()
+            >= 2;
+    if two_qb {
+        return "adp_2qb";
+    }
+    match league.scoring_settings.get("rec").copied().unwrap_or(0.0) {
+        rec if rec >= 0.75 => "adp_ppr",
+        rec if rec >= 0.25 => "adp_half_ppr",
+        _ => "adp_std",
+    }
+}
+
 pub fn build_board(
     league: &League,
     _draft: &Draft,
@@ -58,6 +132,7 @@ pub fn build_board(
     warnings: &mut Vec<String>,
 ) -> BoardBuild {
     let scoring_map = &league.scoring_settings;
+    let adp_key = adp_key(league);
 
     // Positions this league actually rosters (K excluded automatically for
     // this league because there is no K slot).
@@ -88,6 +163,17 @@ pub fn build_board(
             }
         }
     }
+    // A week with no rows for ANY team is a week that did not download, not a
+    // week the whole league had off. One failed weekly fetch used to make that
+    // week look like the emptiest one for all 32 teams, so every player on the
+    // board came back with the same bye — and `min_by_key` handed out the
+    // first such week even when a real bye tied with it.
+    let mut league_week_counts = [0u32; WEEKS as usize];
+    for counts in team_week_counts.values() {
+        for (week_idx, count) in counts.iter().enumerate() {
+            league_week_counts[week_idx] += count;
+        }
+    }
     let bye_of = |team: &Option<String>| -> Option<u32> {
         let team = team.as_ref()?;
         let counts = team_week_counts.get(team)?;
@@ -96,7 +182,11 @@ pub fn build_board(
             return None;
         }
         // The bye week has at most a stray row or two vs a full slate.
-        let (week_idx, &min) = counts.iter().enumerate().min_by_key(|(_, &c)| c)?;
+        let (week_idx, &min) = counts
+            .iter()
+            .enumerate()
+            .filter(|(week_idx, _)| league_week_counts[*week_idx] > 0)
+            .min_by_key(|(_, &c)| c)?;
         if min * 4 <= max {
             Some(week_idx as u32 + 1)
         } else {
@@ -119,27 +209,27 @@ pub fn build_board(
         if !wanted.contains(&position) {
             continue;
         }
-        let name = match position.as_str() {
-            "DEF" => {
-                let first = meta.and_then(|m| m.first_name.clone()).unwrap_or_default();
-                let last = meta.and_then(|m| m.last_name.clone()).unwrap_or_default();
-                format!("{first} {last}").trim().to_string()
+        // Names: whatever the row embeds, then Sleeper's player dictionary,
+        // then first/last, then the raw id so a row is never nameless. A
+        // defence used to get only the embedded half of that chain, so a DEF
+        // row that arrived without player meta rendered as a blank name on the
+        // board, in the rosters and in every chat context built off them.
+        let joined_name = || {
+            let first = meta.and_then(|m| m.first_name.clone()).unwrap_or_default();
+            let last = meta.and_then(|m| m.last_name.clone()).unwrap_or_default();
+            let joined = format!("{first} {last}").trim().to_string();
+            if joined.is_empty() {
+                None
+            } else {
+                Some(joined)
             }
-            _ => player_meta
-                .get(&row.player_id)
-                .and_then(|m| m.full_name.clone())
-                .or_else(|| {
-                    let first = meta.and_then(|m| m.first_name.clone()).unwrap_or_default();
-                    let last = meta.and_then(|m| m.last_name.clone()).unwrap_or_default();
-                    let joined = format!("{first} {last}").trim().to_string();
-                    if joined.is_empty() {
-                        None
-                    } else {
-                        Some(joined)
-                    }
-                })
-                .unwrap_or_else(|| row.player_id.clone()),
         };
+        let name = player_meta
+            .get(&row.player_id)
+            .and_then(|m| m.full_name.clone())
+            .filter(|full| !full.trim().is_empty())
+            .or_else(joined_name)
+            .unwrap_or_else(|| row.player_id.clone());
         let base = scoring::base_points(stats, scoring_map);
         let bonus = weekly_by_player
             .get(row.player_id.as_str())
@@ -164,12 +254,18 @@ pub fn build_board(
             tier: 0,
             position_rank: 0,
             overall_rank: 0,
-            adp: row.stat("adp_ppr").filter(|&a| a > 0.0 && a < 500.0),
+            adp: row
+                .stat(adp_key)
+                .or_else(|| row.stat("adp_ppr"))
+                .filter(|&a| a > 0.0 && a < 500.0),
             injury_status: player_meta
                 .get(&row.player_id)
                 .and_then(|m| m.injury_status.clone()),
             sleeper_pts_ppr: row.stat("pts_ppr"),
             second_opinion: None,
+            weekly_cv: weekly_by_player
+                .get(row.player_id.as_str())
+                .and_then(|weeks| weekly_cv(weeks, scoring_map)),
         });
     }
 
@@ -214,12 +310,17 @@ pub fn build_board(
         }
     }
 
-    // Overall rank by VORP.
+    // Overall rank by VORP, less a flat discount for the two positions whose
+    // VORP lies about them. A kicker or a defence really is worth ~20 points
+    // over replacement, but that value is available to anybody in the last two
+    // rounds, so ranking on raw VORP put the best defence at #64 — three
+    // rounds ahead of its own ADP, and above sixty players who cannot be had
+    // late. The discount is one round's worth of VORP at the depth these come
+    // off the board, which lands them back in their ADP band.
     let mut order: Vec<usize> = (0..scored.len()).collect();
     order.sort_by(|&a, &b| {
-        scored[b]
-            .vorp
-            .partial_cmp(&scored[a].vorp)
+        board_rank_value(&scored[b])
+            .partial_cmp(&board_rank_value(&scored[a]))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     for (rank, &i) in order.iter().enumerate() {
@@ -236,18 +337,23 @@ pub fn build_board(
 /// left in it — one alert per draftable position that has anyone left, in the
 /// order the league rosters them.
 ///
-/// `available` is in board order, so the first player seen at a position sets
-/// that position's tier and everyone later in the same tier adds to the count.
-/// One pass fills every position: scanning the whole board once per position
-/// gave the same answer for several times the work.
+/// `available` is in board order, which is ranked and not tier-sorted: a
+/// tier-1 running back can sit below a tier-2 one, and after a run on a
+/// position the first player left at it is often not from the best tier still
+/// there. So the best tier is the smallest one seen, and the count is of that
+/// tier — taking the first player's tier as the answer reported "RB T2 has 3
+/// left" while three tier-1 backs were still on the board. Still one pass:
+/// a better tier resets the count, a worse one is ignored.
 pub fn tier_alerts(available: &[AvailablePlayer], positions: Vec<String>) -> Vec<TierAlert> {
     let mut top: HashMap<&str, (u32, u32)> = HashMap::new();
     for a in available {
-        let (tier, left) = top
+        let entry = top
             .entry(a.player.position.as_str())
             .or_insert((a.player.tier, 0));
-        if *tier == a.player.tier {
-            *left += 1;
+        match a.player.tier.cmp(&entry.0) {
+            std::cmp::Ordering::Less => *entry = (a.player.tier, 1),
+            std::cmp::Ordering::Equal => entry.1 += 1,
+            std::cmp::Ordering::Greater => {}
         }
     }
     positions

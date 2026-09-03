@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import fixtureJson from "../../public/dev-fixture.json";
 import type { DraftView } from "../types";
@@ -65,5 +66,35 @@ describe("DraftScreen", () => {
     rerender(screenFor(moved));
     expect(screen.getByText("WR4")).toBeInTheDocument();
     expect(screen.queryByText("WR11")).not.toBeInTheDocument();
+  });
+
+  it("gives the new league a board with none of the old league's filters on it", async () => {
+    const view = fixture();
+    const { rerender } = render(screenFor(view));
+    const filters = screen.getByRole("group", { name: "Filter players by position" });
+    await userEvent.click(within(filters).getByRole("button", { name: "DEF" }));
+    expect(within(filters).getByRole("button", { name: "DEF" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    // A league with no defences at all. The DEF tab is gone with it, so the
+    // filter it left behind was a board filtered to nothing, by nothing the
+    // user could see or clear.
+    const other = fixture();
+    other.league = {
+      ...other.league,
+      league_id: "another-league",
+      draftable_positions: ["QB", "RB", "WR", "TE"],
+    };
+    rerender(screenFor(other));
+
+    const after = screen.getByRole("group", { name: "Filter players by position" });
+    expect(within(after).getByRole("button", { name: "ALL" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(after).queryByRole("button", { name: "DEF" })).toBeNull();
+    expect(screen.getByText(`${other.available.length} players`)).toBeInTheDocument();
   });
 });

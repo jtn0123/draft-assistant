@@ -67,6 +67,10 @@ export function DraftScreen({
       <div className="draft-body">
         <SidePanel view={view} />
         <Board
+          // Keyed by the league, so a switch gets a board with no filters on
+          // it. A `DEF` tab pressed in one league is not a filter in a league
+          // that has no defences — it is an empty board with no tab lit.
+          key={view.league.league_id}
           players={view.available}
           positions={view.league.draftable_positions}
           loading={busy && view.available.length === 0}

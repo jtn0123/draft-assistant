@@ -8,7 +8,7 @@
 // exercising on its own rather than only through the whole rendered app, and
 // App is left holding the screen rather than the connection.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { stableAvailable } from "./boardIdentity";
 import { problem } from "./format";
@@ -43,8 +43,9 @@ export interface DraftSession {
   setShowSetup: (show: boolean) => void;
   /** Try the restore again after a failure. */
   retry: () => void;
-  /** Turn the backend's Sleeper poller on. */
-  startLive: () => Promise<void>;
+  /** Turn the backend's Sleeper poller on. False when it would not start —
+   *  the toast has already said so, and nothing else should claim success. */
+  startLive: () => Promise<boolean>;
   togglePolling: () => Promise<void>;
   /** Take back the last manually recorded pick. */
   undoLastPick: () => Promise<void>;
@@ -87,6 +88,14 @@ export function useDraftSession(
   const [leagues, setLeagues] = useState<StoredLeague[]>([]);
   const [hasAccount, setHasAccount] = useState(false);
 
+  // Held in a ref so a caller that hands us a fresh closure on every render
+  // cannot, by itself, re-run the restore below — `startLive` is one of its
+  // dependencies, and a new one every render would reconnect on every render.
+  const showToastRef = useRef(showToast);
+  useEffect(() => {
+    showToastRef.current = showToast;
+  }, [showToast]);
+
   const applyView = useCallback((next: DraftView) => {
     // Hand the board back the array it has already sorted when the new view
     // says exactly the same thing about the players (see boardIdentity.ts).
@@ -100,18 +109,19 @@ export function useDraftSession(
     });
   }, []);
 
-  // Named so the retry it offers can be itself.
-  const startLive = useCallback(
-    async function start(): Promise<void> {
-      try {
-        await api.startPolling(3);
-        setPolling(true);
-      } catch (e) {
-        showToast(problem("Could not turn live sync on", e), () => void start());
-      }
-    },
-    [showToast],
-  );
+  // Named so the retry it offers can be itself. It answers whether polling is
+  // actually running, because a caller that goes on to say "live sync on" over
+  // the failure toast is telling the user the opposite of what happened.
+  const startLive = useCallback(async function start(): Promise<boolean> {
+    try {
+      await api.startPolling(3);
+      setPolling(true);
+      return true;
+    } catch (e) {
+      showToastRef.current(problem("Could not turn live sync on", e), () => void start());
+      return false;
+    }
+  }, []);
 
   // Restore the last league on mount, and again whenever the user retries.
   // State is set from the promise callbacks, never synchronously in the body.
@@ -181,8 +191,7 @@ export function useDraftSession(
       if (polling) {
         await api.stopPolling();
         setPolling(false);
-      } else {
-        await startLive();
+      } else if (await startLive()) {
         showToast("Live sync on — polling Sleeper every 3s");
       }
     } catch (e) {
@@ -224,8 +233,11 @@ export function useDraftSession(
       const config = await api.getConfig();
       setLeagues(config.leagues);
       setHasAccount(config.my_user_id !== null);
-      await startLive();
-      showToast(`Switched to ${next.league.name} — the last league is still in the list`);
+      // The league did switch either way; only the live-sync half may have
+      // failed, and that failure has already had its own toast with a retry.
+      if (await startLive()) {
+        showToast(`Switched to ${next.league.name} — the last league is still in the list`);
+      }
     } catch (e) {
       showToast(problem("Could not switch leagues", e), () => void switchLeague(leagueId));
     } finally {

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { ChatMessage, ChatSettings, ThreadEntry } from "../chat-types";
 import { formatUsd, overBudget, setChatBudget, useChatBudget } from "../chatCost";
+import { chatScope } from "../chatSessions";
 import type { Screen } from "../prefs";
 import { ChatControls } from "./ChatControls";
 import { ChatKeyForm } from "./ChatKeyForm";
@@ -45,21 +46,27 @@ const THINKING_NOTE: Record<string, string> = {
 
 export function Chat({
   screen,
+  leagueId,
   contextNote,
   onClose,
 }: {
   screen: Screen;
+  /** Which league the questions are about. Conversations are filed under it,
+   *  so switching leagues opens a thread about the board now on screen. */
+  leagueId: string;
   contextNote: string;
   onClose: () => void;
 }) {
+  const scope = chatScope(screen, leagueId);
   const [settings, setSettings] = useState<ChatSettings | null>(null);
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [effort, setEffort] = useState(DEFAULT_EFFORT);
   const [compact, setCompact] = useState(false);
   // The conversation this panel opens with: the newest one stored for this
-  // screen, or a fresh one. Read while the state below is initialised, so a
-  // reopened thread paints once rather than appearing after an empty one.
-  const [opening] = useState(() => beginChat(screen));
+  // screen and league, or a fresh one. Read while the state below is
+  // initialised, so a reopened thread paints once rather than appearing after
+  // an empty one.
+  const [opening] = useState(() => beginChat(scope));
   const [entries, setEntries] = useState<ThreadEntry[]>(() => opening.reopened?.entries ?? []);
   const [history, setHistory] = useState<ChatMessage[]>(() => opening.reopened?.history ?? []);
   const [draft, setDraft] = useState("");
@@ -88,7 +95,7 @@ export function Chat({
   };
 
   const sessions = useChatSessions({
-    screen,
+    scope,
     opening,
     onOpen: (chat) => {
       // Ids come back with the conversation, so a new turn cannot collide
@@ -154,11 +161,15 @@ export function Chat({
     [settings, model],
   );
   const activeEffort = allowedEfforts.includes(effort) ? effort : DEFAULT_EFFORT;
-  // A warning, not a lock: the backend holds the real cap, counted across
-  // every conversation on this screen and charging the Claude Code route
-  // nothing. Disabling the composer here would stop questions over money that
-  // was never spent.
-  const nearingCap = overBudget(spend.costUsd, budget);
+  // What the cap is actually measured against: everything this screen's chats
+  // have cost together. This conversation's own total is the floor, because
+  // the screen figure is only as fresh as the last answer — a turn charged
+  // here before the backend reported back is still money spent.
+  const spentOnScreen = Math.max(spend.costUsd, screenSpend);
+  // A warning, not a lock: the backend holds the real cap and charges the
+  // Claude Code route nothing. Disabling the composer here would stop
+  // questions over money that was never spent.
+  const nearingCap = overBudget(spentOnScreen, budget);
 
   /** Keep the cap the panel warns on and the cap the backend enforces the
    *  same number. A backend that refuses the write still warns correctly. */
@@ -366,8 +377,8 @@ export function Chat({
         )}
         {nearingCap && (
           <div className="chat-stopped" role="status">
-            This chat has spent {formatUsd(spend.costUsd)} of its {formatUsd(budget)} budget — the
-            next question may be refused. Raise the budget above, or start a new chat.
+            This screen&rsquo;s chats have spent {formatUsd(spentOnScreen)} of their{" "}
+            {formatUsd(budget)} budget — the next question may be refused. Raise the budget above.
           </div>
         )}
         {!showKeyForm && entries.length === 0 && suggestions.length > 0 && (

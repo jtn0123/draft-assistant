@@ -60,6 +60,12 @@ export function useSeasonSession(
   // whole lifecycle down and build it again.
   const loadedRef = useRef(false);
 
+  // Bumped every time the league changes, so an answer can be checked against
+  // the question that is still worth answering. A fetch in flight when the
+  // user switches comes back carrying another league's standings, and the
+  // only thing that tells the two apart is which generation asked for it.
+  const generation = useRef(0);
+
   // Switching leagues invalidates everything above: the standings, the week,
   // and the poller's own idea of what it is polling. Declared before the load
   // and poll effects so that when the league changes, this has already put
@@ -68,6 +74,7 @@ export function useSeasonSession(
   useEffect(() => {
     if (firstLeague.current === leagueId) return;
     firstLeague.current = leagueId;
+    generation.current += 1;
     loadedRef.current = false;
     setSeason(null);
     setPollHealth(null);
@@ -101,7 +108,13 @@ export function useSeasonSession(
     let live = true;
     api
       .loadSeason(false)
-      .then(setSeason)
+      .then((next) => {
+        // The success path needs the same guard the failure path has: a load
+        // that belongs to the league we have switched away from would put the
+        // old standings on screen under the new league's name.
+        if (!live) return;
+        setSeason(next);
+      })
       .catch((e) => {
         // A failed first load must not lock the screen out of ever loading;
         // opening it again is allowed to try once more.
@@ -135,14 +148,22 @@ export function useSeasonSession(
   }, [active, ready, leagueId]);
 
   const retry = useCallback(() => {
+    // The retry has no effect cleanup to hang a flag on, so it carries the
+    // generation it was asked under and drops the answer if the league moved
+    // on while it was in flight.
+    const asked = generation.current;
     setError(null);
     api
       .loadSeason(true)
       .then((next) => {
+        if (asked !== generation.current) return;
         loadedRef.current = true;
         setSeason(next);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => {
+        if (asked !== generation.current) return;
+        setError(String(e));
+      });
   }, []);
 
   return { season, error, pollHealth, retry };

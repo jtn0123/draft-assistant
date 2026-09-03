@@ -5,7 +5,7 @@ use crate::engine::{AppConfig, StoredLeague};
 use crate::keepers;
 use crate::picks::{self, ManualPickStore};
 use crate::poll::{self, record_poll_outcome, DraftPollMemory};
-use crate::sleeper::Pick;
+use crate::sleeper::{Draft, Pick};
 use crate::sleeper_error::to_message;
 use crate::state::{view_from, AppState};
 use crate::view::{self, DraftView};
@@ -31,6 +31,33 @@ fn extract_id(input: &str) -> Result<String, String> {
         })
 }
 
+/// What a tick says when Sleeper hands back an empty pick list for a draft
+/// that already has picks on it. `/picks` answers `null` now and then, which
+/// parses as "no picks"; mid-draft that is a lost response rather than every
+/// pick being taken back, so the board is kept and the tick counts as failed.
+const EMPTY_PICKS: &str = "the pick list came back empty — keeping the picks already on the board";
+
+/// The message for a refreshed draft that cannot be laid out, or `None` when
+/// it can be.
+///
+/// Sleeper serves zero teams and zero rounds for a draft that is still being
+/// set up. Every board calculation divides by them, so such a draft is not
+/// adopted over one that already works.
+fn unusable(draft: &Draft) -> Option<String> {
+    let settings = &draft.settings;
+    (settings.teams == 0 || settings.rounds == 0).then(|| {
+        format!(
+            "the draft came back with {} teams and {} rounds — keeping the ones already on screen",
+            settings.teams, settings.rounds
+        )
+    })
+}
+
+/// What every command and tick says when the league moved on under it. The
+/// same sentence `same_league` uses on the season side, so the screen shows
+/// one wording for one situation.
+const LEAGUE_CHANGED: &str = "the league changed while this was loading — try again";
+
 /// Add (or re-sync) a league by ID, make it active, and build its board.
 /// Also accepts a bare draft ID (mock drafts) or a pasted sleeper.com URL.
 #[tauri::command]
@@ -43,21 +70,26 @@ pub async fn add_league(
     let league_id = extract_id(&league_id)?;
     let new_loaded = state.engine.load_any(&league_id, force).await?;
     let mut config = state.config.lock().await;
-    if !config.leagues.iter().any(|l| l.league_id == league_id) {
-        config.leagues.push(StoredLeague {
+    // Edited on a copy and only committed once it is safely on disk: a failed
+    // save used to leave the picker showing a league the next launch would
+    // not reopen.
+    let mut next = config.clone();
+    if !next.leagues.iter().any(|l| l.league_id == league_id) {
+        next.leagues.push(StoredLeague {
             league_id: league_id.clone(),
             name: new_loaded.league.name.clone(),
             season: new_loaded.league.season.clone(),
             status: Some(new_loaded.league.status.clone()),
         });
-    } else if let Some(stored) = config.leagues.iter_mut().find(|l| l.league_id == league_id) {
+    } else if let Some(stored) = next.leagues.iter_mut().find(|l| l.league_id == league_id) {
         // A league loaded again has moved on since: it was drafting, now it
         // is in season. The picker should say so.
         stored.name = new_loaded.league.name.clone();
         stored.status = Some(new_loaded.league.status.clone());
     }
-    config.active_league_id = Some(league_id);
-    state.engine.save_config(&config)?;
+    next.active_league_id = Some(league_id);
+    state.engine.save_config(&next)?;
+    *config = next;
     let view = view_from(&new_loaded, &config);
     // Never hold config while waiting for loaded: the live path reads loaded first.
     drop(config);
@@ -122,25 +154,38 @@ pub async fn refresh_picks(state: State<'_, AppState>) -> Result<DraftView, Stri
 
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
-    loaded.api_picks = picks;
-    if picks::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
-        state
-            .engine
-            .save_manual_picks(&draft_id, &loaded.manual_picks)?;
+    // Both requests ran with nothing locked. If the user switched leagues in
+    // that window this answer belongs to the old draft, and writing it would
+    // put its picks, its manual-pick file and its keepers under the new one.
+    if loaded.draft.draft_id != draft_id {
+        return Err(LEAGUE_CHANGED.to_string());
     }
-    // A keeper is only recognisable while it sits ahead of the clock, so the
-    // judgement is made and written down on every refresh. A keeper set that
-    // fails to save is reported here exactly as the background poller reports
-    // it — the same tick, collected and recorded, rather than dropped on the
-    // floor because this path happens to be the manual one.
-    let errors: Vec<String> = keepers::note_keepers(state.engine.as_ref(), loaded)
-        .into_iter()
-        .collect();
-    record_poll_outcome(loaded, &errors);
+    let mut errors = Vec::new();
+    if picks.is_empty() && !loaded.api_picks.is_empty() {
+        errors.push(EMPTY_PICKS.to_string());
+    } else {
+        loaded.api_picks = picks;
+        if picks::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
+            state
+                .engine
+                .save_manual_picks(&draft_id, &loaded.manual_picks)?;
+        }
+        // A keeper is only recognisable while it sits ahead of the clock, so
+        // the judgement is made and written down on every refresh. A keeper
+        // set that fails to save is reported here exactly as the background
+        // poller reports it — the same tick, collected and recorded, rather
+        // than dropped on the floor because this path happens to be the
+        // manual one.
+        errors.extend(keepers::note_keepers(state.engine.as_ref(), loaded));
+    }
     // Also refresh draft status/order — it flips to "drafting" at start time.
     if let Ok(draft) = draft {
-        loaded.draft = draft;
+        match unusable(&draft) {
+            Some(error) => errors.push(error),
+            None => loaded.draft = draft,
+        }
     }
+    record_poll_outcome(loaded, &errors);
     let config = state.config.lock().await;
     Ok(view_from(loaded, &config))
 }
@@ -153,9 +198,17 @@ pub async fn refresh_data(state: State<'_, AppState>) -> Result<DraftView, Strin
         config.active_league_id.clone().ok_or("no active league")?
     };
     let new_loaded = state.engine.load_any(&league_id, true).await?;
-    let config = state.config.lock().await.clone();
+    // The rebuild goes back to the wire for everything, which takes long
+    // enough for the user to have picked a different league meanwhile. Both
+    // locks are taken here, in the order the rest of the app takes them, so
+    // the check and the assignment cannot be separated by a switch.
+    let mut loaded = state.loaded.lock().await;
+    let config = state.config.lock().await;
+    if config.active_league_id.as_deref() != Some(league_id.as_str()) {
+        return Err(LEAGUE_CHANGED.to_string());
+    }
     let view = view_from(&new_loaded, &config);
-    *state.loaded.lock().await = Some(new_loaded);
+    *loaded = Some(new_loaded);
     Ok(view)
 }
 
@@ -277,30 +330,46 @@ pub async fn start_polling<R: tauri::Runtime>(
                 let mut health = None;
                 {
                     let mut loaded = loaded_ref.lock().await;
-                    if let Some(loaded) = loaded.as_mut() {
+                    // The requests ran unlocked, so the league on screen may
+                    // no longer be the one they were made for. This answer is
+                    // then the old league's: applied here it would write the
+                    // wrong picks, save the wrong manual-pick file and add the
+                    // wrong keepers to the new league's set, on disk. A tick
+                    // that arrives too late did not happen at all — nothing is
+                    // applied and nothing is recorded.
+                    if let Some(loaded) = loaded.as_mut().filter(|l| l.draft.draft_id == draft_id) {
                         match picks {
                             Ok(picks) => {
-                                changed |= memory.picks_changed(&picks);
-                                loaded.api_picks = picks;
-                                if picks::reconcile_manual_picks(
-                                    &loaded.api_picks,
-                                    &mut loaded.manual_picks,
-                                ) {
-                                    if let Err(error) =
-                                        engine.save_manual_picks(&draft_id, &loaded.manual_picks)
-                                    {
-                                        errors.push(error);
+                                // An empty list mid-draft is a lost response,
+                                // not a cleared board.
+                                if picks.is_empty() && !loaded.api_picks.is_empty() {
+                                    errors.push(EMPTY_PICKS.to_string());
+                                } else {
+                                    changed |= memory.picks_changed(&picks);
+                                    loaded.api_picks = picks;
+                                    if picks::reconcile_manual_picks(
+                                        &loaded.api_picks,
+                                        &mut loaded.manual_picks,
+                                    ) {
+                                        if let Err(error) = engine
+                                            .save_manual_picks(&draft_id, &loaded.manual_picks)
+                                        {
+                                            errors.push(error);
+                                        }
                                     }
+                                    errors.extend(keepers::note_keepers(engine.as_ref(), loaded));
                                 }
-                                errors.extend(keepers::note_keepers(engine.as_ref(), loaded));
                             }
                             Err(error) => errors.push(error.to_string()),
                         }
                         match draft {
-                            Ok(draft) => {
-                                changed |= memory.status_changed(&draft.status);
-                                loaded.draft = draft;
-                            }
+                            Ok(draft) => match unusable(&draft) {
+                                Some(error) => errors.push(error),
+                                None => {
+                                    changed |= memory.status_changed(&draft.status);
+                                    loaded.draft = draft;
+                                }
+                            },
                             Err(error) => errors.push(error.to_string()),
                         }
                         record_poll_outcome(loaded, &errors);

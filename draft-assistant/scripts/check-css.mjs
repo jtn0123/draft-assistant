@@ -15,11 +15,14 @@ const owners = new Map();
 
 for (const file of files) {
   const css = (await readFile(new URL(file, dir), "utf8")).replace(/\/\*[\s\S]*?\*\//g, "");
-  for (const match of css.matchAll(/(?:^|[};])\s*([^{};]+?)\s*\{/g)) {
-    // A selector list can hold several rules; each one is owned by the class
-    // it starts with.
+  // `{` is allowed before a selector so the first rule inside an at-rule
+  // block (`@media (...) {`) is seen like every other one.
+  for (const match of css.matchAll(/(?:^|[{};])\s*([^{};]+?)\s*\{/g)) {
+    // A selector list can hold several rules; each one is owned by the first
+    // class in it, so a theme override like `[data-theme="dark"] .pill` is
+    // charged to `.pill` rather than slipping past the check.
     for (const selector of match[1].split(",")) {
-      const owner = selector.trim().match(/^\.(-?[_a-zA-Z][\w-]*)/);
+      const owner = selector.trim().match(/\.(-?[_a-zA-Z][\w-]*)/);
       if (owner === null) continue;
       if (!owners.has(owner[1])) owners.set(owner[1], new Set());
       owners.get(owner[1]).add(file);

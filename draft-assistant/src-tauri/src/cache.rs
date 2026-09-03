@@ -25,9 +25,19 @@ pub(crate) fn read_cached<T: serde::de::DeserializeOwned>(path: PathBuf) -> Opti
 }
 
 /// Drop a cache hit that has aged past its TTL.
+///
+/// A timestamp in the future is a miss too. It means the clock was wrong when
+/// the file was written, or has since been set back, and `saturating_sub`
+/// floors the age of such a file at zero — so without this it would read as
+/// freshly fetched for as long as it sat on disk, and no refresh would ever
+/// happen.
 pub(crate) fn fresh_enough<T>(hit: Option<(u64, T)>, ttl: u64) -> Option<(u64, T)> {
     let (fetched_at, data) = hit?;
-    (now_secs().saturating_sub(fetched_at) <= ttl).then_some((fetched_at, data))
+    let now = now_secs();
+    if fetched_at > now {
+        return None;
+    }
+    (now - fetched_at <= ttl).then_some((fetched_at, data))
 }
 
 /// Strip anything that could steer a path out of the cache directory. Sleeper
@@ -183,5 +193,16 @@ mod tests {
         assert!(fresh_enough(Some((now - 30, 1)), 60).is_some());
         assert!(fresh_enough(Some((now - 600, 1)), 60).is_none());
         assert!(fresh_enough::<u32>(None, 60).is_none());
+    }
+
+    /// A file stamped in the future never ages: its age floors at zero, so it
+    /// stayed "fresh" forever and the payload behind it was never refetched.
+    #[test]
+    fn a_hit_stamped_in_the_future_is_a_miss_rather_than_fresh_forever() {
+        let now = now_secs();
+        assert!(fresh_enough(Some((now + 1, 1)), 60).is_none());
+        assert!(fresh_enough(Some((now + 86_400, 1)), 60).is_none());
+        // The boundary itself is still a hit: `now` is not in the future.
+        assert!(fresh_enough(Some((now, 1)), 60).is_some());
     }
 }

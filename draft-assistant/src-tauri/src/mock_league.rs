@@ -3,6 +3,27 @@
 use crate::sleeper::{Draft, League};
 use std::collections::HashMap;
 
+/// Receptions under a Sleeper `scoring_type`, or `None` when the value is not
+/// one this understands.
+///
+/// Sleeper spells the mode with the format in front of it — `dynasty_half_ppr`,
+/// `rookie_ppr`, `idp_ppr` — so an exact match recognised only the three plain
+/// values and quietly scored every other league as standard, which is a full
+/// point per catch out on a PPR board. `half_ppr` is tested first because it
+/// contains `ppr`.
+pub(crate) fn points_per_reception(scoring_type: &str) -> Option<f64> {
+    let lowered = scoring_type.to_ascii_lowercase();
+    if lowered.contains("half_ppr") {
+        Some(0.5)
+    } else if lowered.contains("ppr") {
+        Some(1.0)
+    } else if lowered.contains("std") {
+        Some(0.0)
+    } else {
+        None
+    }
+}
+
 pub fn synthesize_league(draft: &Draft) -> League {
     let settings = &draft.settings;
     let mut roster_positions = Vec::new();
@@ -29,11 +50,10 @@ pub fn synthesize_league(draft: &Draft) -> League {
         .as_ref()
         .and_then(|metadata| metadata.scoring_type.clone())
         .unwrap_or_else(|| "ppr".into());
-    let points_per_reception = match scoring_type.as_str() {
-        "ppr" => 1.0,
-        "half_ppr" => 0.5,
-        _ => 0.0,
-    };
+    let points_per_reception = points_per_reception(&scoring_type).unwrap_or_else(|| {
+        eprintln!("mock draft: unrecognised scoring type {scoring_type:?}; scoring it as standard");
+        0.0
+    });
     let scoring_settings: HashMap<String, f64> = [
         ("pass_yd", 0.04),
         ("pass_td", 4.0),
@@ -85,5 +105,30 @@ pub fn synthesize_league(draft: &Draft) -> League {
         // and none of the in-season settings apply.
         previous_league_id: None,
         settings: crate::sleeper::LeagueSettings::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::points_per_reception;
+
+    #[test]
+    fn the_format_in_front_of_the_mode_does_not_hide_the_mode() {
+        assert_eq!(points_per_reception("ppr"), Some(1.0));
+        assert_eq!(points_per_reception("half_ppr"), Some(0.5));
+        assert_eq!(points_per_reception("std"), Some(0.0));
+        // The prefixed spellings Sleeper actually serves. half_ppr wins over
+        // ppr, which it contains — a half-PPR mock scored as full PPR moves
+        // every pass catcher up the board.
+        assert_eq!(points_per_reception("dynasty_half_ppr"), Some(0.5));
+        assert_eq!(points_per_reception("dynasty_ppr"), Some(1.0));
+        assert_eq!(points_per_reception("rookie_ppr"), Some(1.0));
+        assert_eq!(points_per_reception("2qb_std"), Some(0.0));
+    }
+
+    #[test]
+    fn a_scoring_type_this_does_not_know_is_said_so_rather_than_assumed() {
+        assert_eq!(points_per_reception("tiered_reception"), None);
+        assert_eq!(points_per_reception(""), None);
     }
 }

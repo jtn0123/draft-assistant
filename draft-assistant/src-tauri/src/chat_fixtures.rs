@@ -31,6 +31,7 @@ fn player(rank: u32, name: &str, position: &str, points: f64) -> AvailablePlayer
             injury_status: None,
             sleeper_pts_ppr: None,
             second_opinion: None,
+            weekly_cv: None,
         },
         survival_next: Some(0.5 - f64::from(rank) / 100.0),
     }
@@ -47,9 +48,21 @@ pub fn draft_fixture() -> DraftView {
             name: "The League".into(),
             season: "2026".into(),
             total_rosters: TEAMS,
-            roster_positions: vec!["QB".into(), "RB".into(), "RB".into(), "FLEX".into()],
+            roster_positions: vec![
+                "QB".into(),
+                "RB".into(),
+                "RB".into(),
+                "FLEX".into(),
+                "BN".into(),
+                "BN".into(),
+            ],
             draftable_positions: vec!["QB".into(), "RB".into(), "WR".into(), "TE".into()],
-            scoring_settings: HashMap::new(),
+            // Half PPR with a passing-TD value, so the scoring line has
+            // something real to report.
+            scoring_settings: HashMap::from([
+                ("rec".to_string(), 0.5),
+                ("pass_td".to_string(), 4.0),
+            ]),
         },
         draft: DraftStatus {
             draft_id: "D1".into(),

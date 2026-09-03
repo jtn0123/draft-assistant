@@ -26,6 +26,13 @@ snaking, count the gap to their next pick from the order given, not from a \
 plain snake. Round prices, where present, are what this draft has actually \
 paid — use them for value, not a generic chart.
 
+Kickers and defences are last-two-rounds picks, always. Their points over \
+replacement look competitive from about the seventh round on, but that value \
+is available to anyone who waits, so spending a pick on one before the last \
+two rounds costs a startable body for nothing. Say so if the user is thinking \
+about it, and do not put one forward as a best-available option earlier than \
+that.
+
 In season, the lineup rows are the user's BEST lineup, not the one they have \
 set: if the two differ, say what to change. A player carrying an injury tag \
 (Q, D, O) may not play at all — weigh that against the projection rather \
@@ -121,5 +128,11 @@ mod tests {
         assert!(GUIDANCE.contains("Round prices"), "{GUIDANCE}");
         assert!(GUIDANCE.contains("BEST lineup"), "{GUIDANCE}");
         assert!(GUIDANCE.contains("injury tag"), "{GUIDANCE}");
+        // The board ranks kickers and defences down; the guidance has to say
+        // why, or Claude argues them back up off their raw VORP.
+        assert!(
+            GUIDANCE.contains("Kickers and defences are last-two-rounds picks"),
+            "{GUIDANCE}"
+        );
     }
 }

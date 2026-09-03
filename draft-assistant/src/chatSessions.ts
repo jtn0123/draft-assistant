@@ -1,7 +1,9 @@
 // Saved conversations for the Ask Claude panel.
 //
-// One storage key per screen holds every chat for that screen, so the draft's
-// conversations and the season's never mix. Storage is the same place the
+// One storage key per screen and league holds every chat filed under it, so
+// the draft's conversations and the season's never mix — and neither do two
+// leagues', since a question about one board means nothing about another.
+// Storage is the same place the
 // app's other remembered choices live (see `persisted.ts`); the panel is
 // frontend-only and has no draft id to file a conversation under, so nothing
 // here needs the backend. Every read and write is guarded: a browser that
@@ -33,7 +35,13 @@ export type ChatSessionSummary = Omit<SavedChat, "entries" | "history">;
 const MAX_SESSIONS = 20;
 const TITLE_CHARS = 52;
 
-const keyFor = (screen: string) => `da.chat.sessions.${screen}`;
+/** Where one screen's conversations for one league are filed. Nothing
+ *  migrates an older key: a league that has not been asked anything under this
+ *  scheme simply opens on an empty thread, which is what a fresh league should
+ *  do anyway. */
+export const chatScope = (screen: string, leagueId: string): string => `${screen}.${leagueId}`;
+
+const keyFor = (scope: string) => `da.chat.sessions.${scope}`;
 
 /** Unique enough within a screen, and readable in the stored JSON. */
 export function newSessionId(): string {
@@ -97,9 +105,9 @@ function isSavedChat(value: unknown): value is SavedChat {
   );
 }
 
-function readAll(screen: string): SavedChat[] {
+function readAll(scope: string): SavedChat[] {
   try {
-    const raw = localStorage.getItem(keyFor(screen));
+    const raw = localStorage.getItem(keyFor(scope));
     if (raw === null) return [];
     const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter(isSavedChat) : [];
@@ -108,18 +116,18 @@ function readAll(screen: string): SavedChat[] {
   }
 }
 
-function writeAll(screen: string, chats: SavedChat[]): void {
+function writeAll(scope: string, chats: SavedChat[]): void {
   const newest = [...chats].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_SESSIONS);
   try {
-    localStorage.setItem(keyFor(screen), JSON.stringify(newest));
+    localStorage.setItem(keyFor(scope), JSON.stringify(newest));
   } catch {
     // Not remembered for next time; the panel still shows the conversation.
   }
 }
 
 /** Newest activity first, like the picker lists them. */
-export function listSessions(screen: string): ChatSessionSummary[] {
-  return readAll(screen)
+export function listSessions(scope: string): ChatSessionSummary[] {
+  return readAll(scope)
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .map(({ id, title, startedAt, updatedAt, questions, costUsd }) => ({
       id,
@@ -131,18 +139,18 @@ export function listSessions(screen: string): ChatSessionSummary[] {
     }));
 }
 
-export function loadSession(screen: string, id: string): SavedChat | null {
-  return readAll(screen).find((chat) => chat.id === id) ?? null;
+export function loadSession(scope: string, id: string): SavedChat | null {
+  return readAll(scope).find((chat) => chat.id === id) ?? null;
 }
 
 /** Write the conversation whole; it replaces whatever was stored under its id. */
-export function saveSession(screen: string, chat: SavedChat): void {
-  writeAll(screen, [chat, ...readAll(screen).filter((stored) => stored.id !== chat.id)]);
+export function saveSession(scope: string, chat: SavedChat): void {
+  writeAll(scope, [chat, ...readAll(scope).filter((stored) => stored.id !== chat.id)]);
 }
 
-export function deleteSession(screen: string, id: string): void {
+export function deleteSession(scope: string, id: string): void {
   writeAll(
-    screen,
-    readAll(screen).filter((chat) => chat.id !== id),
+    scope,
+    readAll(scope).filter((chat) => chat.id !== id),
   );
 }

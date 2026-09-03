@@ -254,5 +254,25 @@ fn every_command_answers_over_the_ipc() {
         }
     }
 
+    // Two of those commands started a poll loop against the real Sleeper host
+    // — the stub is not installed here — and nothing stopped them. Left
+    // running they outlive the test, retrying on the network every few
+    // seconds for as long as the binary is alive.
+    for command in ["stop_polling", "stop_season_polling"] {
+        get_ipc_response(
+            &webview,
+            InvokeRequest {
+                cmd: command.to_string(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                url: "tauri://localhost".parse().expect("valid url"),
+                body: InvokeBody::default(),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+        )
+        .unwrap_or_else(|error| panic!("{command} failed: {error}"));
+    }
+
     std::fs::remove_dir_all(&data_dir).ok();
 }

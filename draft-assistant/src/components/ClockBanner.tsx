@@ -9,6 +9,10 @@ import { clockLabel, pickLabel, spanLabel } from "../format";
 /** How many upcoming picks to show before the "+n" expander. */
 const COLLAPSED = 4;
 
+/** How far ahead the queue is built. Past this it is truncated, and the strip
+ *  has to say so rather than passing the cap off as the whole story. */
+const QUEUE_MAX = 24;
+
 /**
  * The pick clock as "0:41", re-rendered every second while a deadline is set.
  * Null when nothing is on the clock, so callers can leave the cell out.
@@ -158,7 +162,7 @@ function buildQueue(
   const total = teams * rounds;
   const entries: QueueEntry[] = [];
   const names = new Map(rosters.map((r) => [r.slot, r.display_name]));
-  for (let pick = currentPick; pick <= total && entries.length < 24; pick += 1) {
+  for (let pick = currentPick; pick <= total && entries.length < QUEUE_MAX; pick += 1) {
     if (keepers.has(pick)) continue;
     const slot = d.pick_slot_overrides[String(pick)] ?? slotForPick(pick, teams);
     entries.push({
@@ -202,7 +206,10 @@ export function SnakeStrip({ view }: { view: DraftView }) {
   if (queue.length === 0) return null;
 
   const shown = expanded ? queue : queue.slice(0, COLLAPSED);
-  const tail = expanded ? [] : queue.slice(-1);
+  // The last pick in the queue is drawn past the "+n" as a signpost — but only
+  // when it is one of the hidden ones. With four or fewer picks left it is
+  // already on screen, and drawing it again put the same chip up twice.
+  const tail = expanded || queue.length <= COLLAPSED ? [] : queue.slice(-1);
   const hidden = queue.length - shown.length - tail.length;
   const untilMine = view.draft.picks_until_mine;
 
@@ -214,8 +221,12 @@ export function SnakeStrip({ view }: { view: DraftView }) {
           {expanded
             ? "through your next picks"
             : untilMine === null
-              ? `${queue.length} picks ahead`
-              : `${untilMine} ahead of you`}
+              ? // The queue stops at QUEUE_MAX, so a full one is a floor
+                // rather than the count of everything still to come.
+                `${queue.length}${queue.length === QUEUE_MAX ? "+" : ""} picks ahead`
+              : untilMine === 0
+                ? "you are on the clock"
+                : `${untilMine} ahead of you`}
         </span>
       </div>
       <div className="snake-chips">

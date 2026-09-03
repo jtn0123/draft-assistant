@@ -12,6 +12,8 @@
 #[path = "command_flows/routes.rs"]
 mod routes;
 mod stub;
+#[path = "command_flows/switch_tests.rs"]
+mod switch_tests;
 
 use draft_assistant_lib::commands_chat as chat;
 use draft_assistant_lib::commands_draft as draft;

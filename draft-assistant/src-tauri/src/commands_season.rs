@@ -9,6 +9,7 @@ use crate::season_history::HistoryStore;
 use crate::state::{season_view_from, AppState};
 use std::sync::atomic::Ordering;
 use tauri::{Emitter, State};
+use tokio::sync::Mutex;
 
 /// Fetch the in-season picture for the active league. Idempotent: a second
 /// call reuses cached data unless `force` is set.
@@ -27,15 +28,32 @@ pub async fn load_season(
         .engine
         .load_season(&league, my_user_id.as_deref(), force)
         .await?;
-    {
-        let guard = state.loaded.lock().await;
-        // The load above took a few seconds with no lock held. If the user
-        // switched leagues in that window, this data belongs to the old one:
-        // writing it would file league A's roster snapshot under league B.
-        adopt_load(&state.engine, guard.as_ref(), &league.league_id, &mut fresh).await?;
-    }
+    // The load above took a few seconds with no lock held. If the user
+    // switched leagues in that window, this data belongs to the old one:
+    // writing it would file league A's roster snapshot under league B.
+    //
+    // The league is copied out and the guard dropped before the snapshot is
+    // taken: recording it reads the Trends file, diffs it and writes it back,
+    // and every command that needs the loaded league used to queue behind
+    // that disk work.
+    let mine = league_snapshot(&state.loaded, &league.league_id).await?;
+    adopt_load(&state.engine, Some(&mine), &league.league_id, &mut fresh).await?;
     *state.season.lock().await = Some(fresh);
     season_view_from(&state).await
+}
+
+/// Copy the still-loaded league out from behind its mutex, if it is the one
+/// the slow load was started for.
+///
+/// Copied rather than borrowed: recording the snapshot reads the Trends file,
+/// diffs it and writes it back, and holding the loaded league across that disk
+/// work stalled every command and both pollers.
+async fn league_snapshot(
+    loaded: &Mutex<Option<LoadedLeague>>,
+    loaded_for: &str,
+) -> Result<LoadedLeague, String> {
+    let guard = loaded.lock().await;
+    Ok(same_league(guard.as_ref(), loaded_for)?.clone())
 }
 
 /// Take the Trends snapshot for a finished season load, but only if the league
@@ -117,6 +135,12 @@ pub async fn refresh_season(state: State<'_, AppState>) -> Result<SeasonView, St
         .fetch_live(&league_id, watching.0, watching.1)
         .await;
     {
+        // Locks in the usual order, loaded then season. The league is checked
+        // again here because the fetch ran unlocked: folding this week's
+        // scoring into whatever season happens to be loaded now would show
+        // one league's live points on another league's screen.
+        let loaded = state.loaded.lock().await;
+        same_league(loaded.as_ref(), &league_id)?;
         let mut season = state.season.lock().await;
         let season = season.as_mut().ok_or("season data not loaded")?;
         fetched.apply(season, crate::engine::now_secs())?;
@@ -303,6 +327,35 @@ mod tests {
             .unwrap();
         assert_eq!(fresh.history.snapshots.len(), 1);
         assert!(dir.join("history_league-b.json").exists());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_league_is_copied_out_before_the_snapshot_is_taken() {
+        let dir = test_dir("copied-out");
+        let engine = Engine::new(dir.clone());
+        let loaded = Mutex::new(Some(loaded_league("league-a")));
+        let mut fresh = season();
+
+        let mine = league_snapshot(&loaded, "league-a").await.unwrap();
+        adopt_load(&engine, Some(&mine), "league-a", &mut fresh)
+            .await
+            .unwrap();
+        assert!(
+            loaded.try_lock().is_ok(),
+            "the loaded league was held across the Trends read and write"
+        );
+        assert_eq!(fresh.history.snapshots.len(), 1);
+
+        // And a switch in the meantime is still refused before anything is
+        // read or written.
+        let switched = Mutex::new(Some(loaded_league("league-b")));
+        let error = match league_snapshot(&switched, "league-a").await {
+            Ok(_) => panic!("a league that changed under the load was adopted"),
+            Err(error) => error,
+        };
+        assert!(error.contains("changed"), "unexpected message: {error}");
 
         std::fs::remove_dir_all(dir).unwrap();
     }

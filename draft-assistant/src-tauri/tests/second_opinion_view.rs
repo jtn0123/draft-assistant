@@ -97,15 +97,13 @@ fn a_big_disagreement_in_the_players_favour_reaches_the_rec_card() {
 }
 
 #[test]
-fn the_reason_stays_off_the_card_when_the_board_already_likes_him_more() {
+fn a_disagreement_against_the_player_costs_him_the_card() {
     let (mut loaded, _, config) = common::fixture();
-    let best = build_view(&loaded, &config).recommendations[0]
-        .player_id
-        .clone();
+    let before = build_view(&loaded, &config).recommendations[0].clone();
     let player = loaded
         .board
         .iter_mut()
-        .find(|p| p.player_id == best)
+        .find(|p| p.player_id == before.player_id)
         .expect("the recommended player is on the board");
     player.position_rank = 1;
     player.second_opinion = Some(SecondOpinion {
@@ -114,12 +112,27 @@ fn the_reason_stays_off_the_card_when_the_board_already_likes_him_more() {
         source: "Clay".to_string(),
     });
     let view = build_view(&loaded, &config);
-    if let Some(rec) = view.recommendations.iter().find(|r| r.player_id == best) {
-        assert!(
-            !rec.reasons.iter().any(|r| r.starts_with("Clay has him")),
-            "a disagreement against the player became an argument for him: {:?}",
-            rec.reasons
-        );
+    // The imported source has him twenty-nine places behind where this board
+    // does. That used to be worth nothing at all — the bump only ever ran one
+    // way — and now it is enough to take the best player off the card.
+    assert_ne!(
+        view.recommendations[0].player_id, before.player_id,
+        "a source that is down on him left him top of the card: {:?}",
+        view.recommendations[0]
+    );
+    // Wherever he does still appear, the line reads as the warning it is.
+    for rec in view
+        .recommendations
+        .iter()
+        .filter(|r| r.player_id == before.player_id)
+    {
+        let line = rec
+            .reasons
+            .iter()
+            .find(|r| r.starts_with("Clay has him"))
+            .expect("the disagreement is reported");
+        assert!(line.contains("behind this board's"), "{line}");
+        assert!(!line.contains("late"), "{line}");
     }
 }
 

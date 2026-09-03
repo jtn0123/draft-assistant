@@ -7,12 +7,18 @@
   --panel: #f4f1ec;
   --ink: #191c1f;
   --mid: #565e67;
-  --faint: #8b939c;
+  /* Dimmer than --mid and still legible: 4.6:1 on --panel, which is where
+     most of the faint type in the app sits. The old #8b939c was 2.8:1. */
+  --faint: #666e79;
   --rule: #dedad2;
   --rule2: #c9c3b8;
   --hair: #ebe7e0;
   --pos: #2c6a4a;
   --posrule: #b9cbbe;
+  /* The same two hues, dark enough to read as type on their own 18% tint —
+     which the board's imported-rank cells set behind them. */
+  --posink: #1f5138;
+  --actink: #75441b;
   --act: #9a5a24;
   --actbg: #f8f0e6;
   --actrule: #e2d5c2;
@@ -36,12 +42,16 @@
   --panel: #22262b;
   --ink: #e9e6e1;
   --mid: #a4aab2;
-  --faint: #767d86;
+  /* 5.0:1 on --panel; the old #767d86 was 3.7:1. */
+  --faint: #8e959d;
   --rule: #31363d;
   --rule2: #454b53;
   --hair: #272b31;
   --pos: #79c493;
   --posrule: #365243;
+  /* Already light enough against their own tint on this ground. */
+  --posink: #79c493;
+  --actink: #d9a05f;
   --act: #d9a05f;
   --actbg: #26200f;
   --actrule: #443a25;
@@ -120,6 +130,9 @@ input {
 
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
 [tabindex]:focus-visible {
   outline: 2px solid var(--act);
   outline-offset: 1px;

@@ -170,20 +170,37 @@ impl Engine {
                 })
                 .ok_or(error);
         }
-        let at = self.write_cache_off_thread(&name, &all).await;
-        let warning = if failures.is_empty() {
-            None
-        } else {
-            Some(format!(
-                "weekly projections unavailable for weeks {}",
-                failures
-                    .iter()
-                    .map(u32::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))
+        if failures.is_empty() {
+            let at = self.write_cache_off_thread(&name, &all).await;
+            return Ok((at, all, None));
+        }
+        // A partial sweep is never written back. Stamped fresh it would serve
+        // for the whole TTL, and a week missing from the file is a week with
+        // no bonus expectation and no bye information at all — so the wrong
+        // answer would stick around long after the outage that caused it.
+        let warning = format!(
+            "weekly projections unavailable for weeks {}",
+            failures
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let at = match stale {
+            Some((at, cached)) => {
+                // Fill the holes from the copy on disk. Those weeks are older
+                // than the rest, which is what `at` now says.
+                all.extend(
+                    cached
+                        .into_iter()
+                        .filter(|row| row.week.is_some_and(|w| failures.contains(&w))),
+                );
+                all.sort_by_key(|w| w.week);
+                at
+            }
+            None => now_secs(),
         };
-        Ok((at, all, warning))
+        Ok((at, all, Some(warning)))
     }
 }
 

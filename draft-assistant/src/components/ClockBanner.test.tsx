@@ -208,4 +208,44 @@ describe("the queue under league rules the plain snake cannot see", () => {
     expect(picks[0]).toBe(pickLabel(27, view.draft.teams));
     expect(picks[1]).toBe(pickLabel(28, view.draft.teams));
   });
+
+  it("draws the last pick of the draft once, not twice", () => {
+    // 14 × 15 is 210 picks, so opening at 208 leaves a queue of three — every
+    // one of them already on screen. The tail chip used to repeat the last of
+    // them, and the "+n" counted a negative number of hidden picks.
+    const view = fixture();
+    view.draft.current_pick = 208;
+    const { container } = render(<SnakeStrip view={view} />);
+
+    const picks = pickLabels(container);
+    expect(picks).toEqual([208, 209, 210].map((p) => pickLabel(p, view.draft.teams)));
+    expect(new Set(picks).size).toBe(picks.length);
+    expect(container.querySelector(".snake-more")).toBeNull();
+  });
+});
+
+describe("what the strip says is coming", () => {
+  const note = (view: DraftView) =>
+    render(<SnakeStrip view={view} />).container.querySelector(".snake-note")?.textContent;
+
+  it("says you are up rather than counting zero picks ahead of you", () => {
+    const view = fixture();
+    view.draft.picks_until_mine = 0;
+    expect(note(view)).toBe("you are on the clock");
+  });
+
+  it("marks a truncated queue as a floor rather than a total", () => {
+    // The queue is built 24 deep and stops; with no turn of ours in sight,
+    // "24 picks ahead" read as the whole rest of the draft.
+    const view = fixture();
+    view.draft.picks_until_mine = null;
+    expect(note(view)).toBe("24+ picks ahead");
+  });
+
+  it("counts the picks exactly when the whole rest of the draft fits", () => {
+    const view = fixture();
+    view.draft.picks_until_mine = null;
+    view.draft.current_pick = 208;
+    expect(note(view)).toBe("3 picks ahead");
+  });
 });

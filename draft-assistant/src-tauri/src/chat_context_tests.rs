@@ -35,11 +35,97 @@ fn a_plain_league_says_nothing_about_keepers_trades_or_a_reversal() {
     assert!(!has_line_starting(&context, "Traded picks:"), "{context}");
     assert!(!has_line_starting(&context, "Third-round"), "{context}");
     assert!(!has_line_starting(&context, "Round prices"), "{context}");
-    // The board still leads with the head of the list.
+    // The board still leads with the head of the list, now carrying the bye
+    // week and the injury tag a start/sit answer needs.
     assert_eq!(
         line(&context, "11."),
-        "11. Ladd McConkey WR — 214 pts, VORP 114, T4, ADP 11, survives 39%"
+        "11. Ladd McConkey WR — 214 pts, VORP 114, T4, ADP 11, survives 39%, bye 9"
     );
+}
+
+#[test]
+fn the_league_says_how_it_scores_and_what_it_starts() {
+    // Without these, every board is read through full-PPR habits and a roster
+    // shape is guessed from the position mix.
+    let context = draft_context(&draft_fixture());
+    assert_eq!(
+        line(&context, "Scoring:"),
+        "Scoring: half PPR (0.50 per catch), 4 per passing TD"
+    );
+    assert_eq!(line(&context, "Roster:"), "Roster: QBx1 RBx2 FLEXx1 BNx2");
+}
+
+#[test]
+fn a_te_premium_league_says_so() {
+    let mut view = draft_fixture();
+    view.league.scoring_settings.insert("rec".into(), 1.0);
+    view.league
+        .scoring_settings
+        .insert("bonus_rec_te".into(), 0.5);
+    assert_eq!(
+        line(&draft_context(&view), "Scoring:"),
+        "Scoring: full PPR (1.00 per catch), TE premium +0.50 per catch, 4 per passing TD"
+    );
+}
+
+#[test]
+fn an_injury_tag_travels_with_the_player() {
+    let mut view = draft_fixture();
+    view.available[0].player.injury_status = Some("Q".into());
+    view.available[0].player.bye_week = None;
+    assert_eq!(
+        line(&draft_context(&view), "11."),
+        "11. Ladd McConkey WR — 214 pts, VORP 114, T4, ADP 11, survives 39%, bye - (Q)"
+    );
+}
+
+#[test]
+fn kickers_and_defences_stay_off_the_board_until_the_last_rounds() {
+    let mut view = draft_fixture();
+    let mut defence = view.available[0].clone();
+    defence.player.player_id = "LAR".into();
+    defence.player.name = "Los Angeles Rams".into();
+    defence.player.position = "DEF".into();
+    defence.player.overall_rank = 64;
+    view.available.insert(0, defence);
+    // Round 3 of fifteen: not a word about defences.
+    assert!(
+        !draft_context(&view).contains("Los Angeles Rams"),
+        "{}",
+        draft_context(&view)
+    );
+    // Round 14 of fifteen: now it is the pick that is actually due.
+    view.draft.current_round = 14;
+    assert!(draft_context(&view).contains("Los Angeles Rams"));
+}
+
+#[test]
+fn a_round_that_priced_at_nothing_is_left_out_rather_than_reported_as_free() {
+    // The price is clamped at zero, so a round whose median pick was a
+    // below-replacement body prices at zero — which is the floor talking, not
+    // the round being worthless.
+    let mut view = draft_fixture();
+    view.pick_prices = vec![
+        crate::pick_value::PickPrice {
+            round: 1,
+            points: 92.4,
+            example: None,
+        },
+        crate::pick_value::PickPrice {
+            round: 2,
+            points: 0.0,
+            example: None,
+        },
+    ];
+    assert_eq!(
+        line(&draft_context(&view), "Round prices"),
+        "Round prices so far (points over replacement the round actually took): R1 92"
+    );
+    // And a table of nothing but zeroes raises no heading at all.
+    for price in &mut view.pick_prices {
+        price.points = 0.0;
+    }
+    assert!(!has_line_starting(&draft_context(&view), "Round prices"));
 }
 
 #[test]
@@ -188,6 +274,23 @@ fn the_lineup_block_separates_the_set_lineup_from_the_best_one() {
         line(&block, "Your lineup as set"),
         "Your lineup as set projects 32.4 against a best of 38.6 — 6.2 left on the table."
     );
+    assert_eq!(
+        line(&block, "Started but not"),
+        "Started but not in the best lineup: RB Hubbard"
+    );
+}
+
+#[test]
+fn an_empty_starting_slot_is_not_reported_as_a_benched_player() {
+    // A manager who left a slot empty has a row with no player in it. It used
+    // to come out of here as "K " — a benched player with a blank name.
+    let mut view = matchup();
+    let mut empty = view.set_rows[1].clone();
+    empty.my_player_id = None;
+    empty.my_name = String::new();
+    empty.slot = "K".into();
+    view.set_rows.push(empty);
+    let block = lineup_block(&view, 6.2);
     assert_eq!(
         line(&block, "Started but not"),
         "Started but not in the best lineup: RB Hubbard"

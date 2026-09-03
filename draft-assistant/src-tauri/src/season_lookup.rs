@@ -27,8 +27,15 @@ impl Lookup<'_> {
     }
 
     pub fn name(&self, player_id: &str) -> String {
+        // The board wins, but only when it has an actual name: a board row
+        // built from a projection that carried no player meta can hold a blank
+        // one, and returning that put an empty label on the roster where the
+        // player dictionary had the answer all along.
         if let Some(&i) = self.loaded.board_index.get(player_id) {
-            return self.loaded.board[i].name.clone();
+            let name = &self.loaded.board[i].name;
+            if !name.trim().is_empty() {
+                return name.clone();
+            }
         }
         self.loaded
             .player_meta

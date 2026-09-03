@@ -215,10 +215,19 @@ export function Board({
   );
   const showSecondOpinion = columns.length > COLUMNS.length;
 
+  // The imported column comes and goes with the projections behind it, and it
+  // can be the one the board is sorted by. Falling back keeps the board sorted
+  // by something — and keeps the footer's account of it true, rather than
+  // naming a column that is no longer there while nothing is ordering the
+  // rows. The chosen key is left alone, so the column coming back restores it.
+  const sortable = columns.some((c) => c.key === sortKey);
+  const activeKey: SortKey = sortable ? sortKey : "pts";
+  const activeDirection: Direction = sortable ? direction : "desc";
+
   const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const column = columns.find((c) => c.key === sortKey);
-    const sign = direction === "asc" ? 1 : -1;
+    const column = columns.find((c) => c.key === activeKey);
+    const sign = activeDirection === "asc" ? 1 : -1;
     const filtered = players.filter(
       (p) => (pos === "ALL" || p.position === pos) && (!q || p.name.toLowerCase().includes(q)),
     );
@@ -236,7 +245,7 @@ export function Board({
     // in App.tsx recycles this array whenever an incoming view says exactly
     // the same thing about the pool (boardIdentity.ts), so an update that only
     // moved the clock no longer re-filters and re-sorts the whole board.
-  }, [players, columns, pos, query, sortKey, direction]);
+  }, [players, columns, pos, query, activeKey, activeDirection]);
 
   // Paged rather than all-or-nothing. Every row carries two `PlayerName`s, a
   // headshot with its own state, effect and store subscription, and a logo —
@@ -247,7 +256,7 @@ export function Board({
   const hasFilters = pos !== "ALL" || query.trim() !== "";
 
   const sortBy = (key: SortKey) => {
-    if (key === sortKey) {
+    if (key === activeKey) {
       setDirection((d) => (d === "asc" ? "desc" : "asc"));
       return;
     }
@@ -297,8 +306,8 @@ export function Board({
             key={column.key}
             label={column.label}
             title={column.title}
-            active={sortKey === column.key}
-            direction={direction}
+            active={activeKey === column.key}
+            direction={activeDirection}
             align={column.right ? "right" : undefined}
             onClick={() => sortBy(column.key)}
           />
@@ -358,8 +367,8 @@ export function Board({
 
       <div className="board-foot">
         <span className="muted">
-          Sorted by {SORT_LABEL[sortKey]}, {direction === "asc" ? "low to high" : "high to low"} ·
-          click any column
+          Sorted by {SORT_LABEL[activeKey]},{" "}
+          {activeDirection === "asc" ? "low to high" : "high to low"} · click any column
         </span>
         {matching.length > limit && (
           <button

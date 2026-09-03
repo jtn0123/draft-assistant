@@ -65,9 +65,10 @@ jobs:
         with:
           node-version-file: draft-assistant/.nvmrc
 
+      # The pin is the repo-root rust-toolchain.toml, the same one `CI` reads.
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
-        working-directory: draft-assistant/src-tauri
+        working-directory: .
 
       # Keyed separately from the `verify` cache: this job builds different
       # feature sets into their own target directories (`target/wdio` for the

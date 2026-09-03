@@ -35,6 +35,26 @@ pub(crate) fn clock_deadline_ms(
     Some(last_picked? + u64::from(pick_timer.filter(|t| *t > 0)?) * 1000)
 }
 
+/// The pick a player's survival is judged at: my next turn after the one
+/// being made now.
+///
+/// At a snake turn I own two picks with nothing in between, and pricing
+/// survival against the second half of my own turn says everybody survives —
+/// which read the one moment the board is *most* dangerous as the safest.
+/// Back-to-back picks are one window, so it is the turn after them that
+/// counts.
+pub fn survival_target(my_next_picks: &[u32], current_pick: u32, is_my_pick: bool) -> Option<u32> {
+    let mut later = my_next_picks
+        .iter()
+        .copied()
+        .filter(|pick| !is_my_pick || *pick != current_pick);
+    let next = later.next()?;
+    match later.next() {
+        Some(after) if next == current_pick + 1 => Some(after),
+        _ => Some(next),
+    }
+}
+
 /// How many recent picks a positional run is judged over, and how many of them
 /// have to share a position for it to count as one.
 pub(crate) const RUN_WINDOW: u32 = 6;
@@ -81,6 +101,25 @@ mod reliability_tests {
         assert_eq!(clock_deadline_ms("drafting", None, Some(90)), None);
         assert_eq!(clock_deadline_ms("drafting", Some(1_000), None), None);
         assert_eq!(clock_deadline_ms("drafting", Some(1_000), Some(0)), None);
+    }
+
+    #[test]
+    fn a_snake_turn_is_priced_as_one_window() {
+        // Slot 12 of twelve: picks 12 and 13 are back to back, then 36. What
+        // I pass on now I do not see again until 36, not 13.
+        assert_eq!(survival_target(&[12, 13, 36, 37], 12, true), Some(36));
+        // Not on the clock, with my turn about to come round: the pair is
+        // still one window and 36 is still the pick that matters.
+        assert_eq!(survival_target(&[13, 36, 37], 12, false), Some(36));
+        // An ordinary pick in the middle of a round: my next pick is my next
+        // pick.
+        assert_eq!(survival_target(&[30, 43, 54], 30, true), Some(43));
+        assert_eq!(survival_target(&[43, 54], 30, false), Some(43));
+        // The last pick of the draft has nothing after it.
+        assert_eq!(survival_target(&[180], 180, true), None);
+        assert_eq!(survival_target(&[], 180, false), None);
+        // A pair with nothing beyond it: the second half is all there is.
+        assert_eq!(survival_target(&[12, 13], 12, true), Some(13));
     }
 
     #[test]

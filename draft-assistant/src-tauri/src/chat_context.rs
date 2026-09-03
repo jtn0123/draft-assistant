@@ -61,6 +61,49 @@ fn rules_lines(rules: &LeagueRules) -> String {
     out
 }
 
+/// How this league scores, in the three settings that actually change who is
+/// worth what. Without them Claude reads every board through full-PPR habits
+/// and argues for receivers in a league that pays nothing for a catch.
+fn scoring_line(league: &crate::view::LeagueSummary) -> String {
+    let setting = |key: &str| league.scoring_settings.get(key).copied().unwrap_or(0.0);
+    let rec = setting("rec");
+    let format = if rec >= 0.75 {
+        "full PPR"
+    } else if rec >= 0.25 {
+        "half PPR"
+    } else {
+        "standard, no PPR"
+    };
+    let mut out = format!("Scoring: {format} ({rec:.2} per catch)");
+    let te_premium = setting("bonus_rec_te");
+    if te_premium > 0.0 {
+        out.push_str(&format!(", TE premium +{te_premium:.2} per catch"));
+    }
+    out.push_str(&format!(", {:.0} per passing TD", setting("pass_td")));
+    out.push('\n');
+    out
+}
+
+/// The starting lineup this league runs, counted rather than listed: fifteen
+/// slot labels in a row is noise, "QBx1 RBx2 WRx2 TEx1 FLEXx2" is the shape.
+fn roster_shape(league: &crate::view::LeagueSummary) -> String {
+    let mut order: Vec<&str> = Vec::new();
+    let mut counts: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    for slot in &league.roster_positions {
+        let count = counts.entry(slot.as_str()).or_insert_with(|| {
+            order.push(slot.as_str());
+            0
+        });
+        *count += 1;
+    }
+    let shape = order
+        .iter()
+        .map(|slot| format!("{slot}x{}", counts[slot]))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("Roster: {shape}\n")
+}
+
 /// The draft screen's context block.
 pub fn draft_context(view: &crate::view::DraftView) -> String {
     let mut out = String::new();
@@ -79,6 +122,8 @@ pub fn draft_context(view: &crate::view::DraftView) -> String {
             .unwrap_or_else(|| "unknown".into()),
         view.draft.my_next_picks.iter().take(4).collect::<Vec<_>>()
     ));
+    out.push_str(&scoring_line(&view.league));
+    out.push_str(&roster_shape(&view.league));
     out.push_str(&rules_lines(&league_rules(view)));
 
     if let Some(roster) = &view.my_roster {
@@ -103,10 +148,22 @@ pub fn draft_context(view: &crate::view::DraftView) -> String {
         ));
     }
 
-    out.push_str("\nBest available (rank, name, pos, pts, VORP, tier, ADP, survival):\n");
-    for player in view.available.iter().take(40) {
+    // Kickers and defences are left out until the draft is nearly over. Their
+    // value over replacement is real but it is available to anybody in the
+    // last two rounds, and listing them among the best available invited an
+    // argument for taking one in the eighth.
+    let late_rounds = view.draft.current_round + 2 >= view.draft.rounds;
+    out.push_str(
+        "\nBest available (rank, name, pos, pts, VORP, tier, ADP, survival, bye, injury):\n",
+    );
+    for player in view
+        .available
+        .iter()
+        .filter(|p| late_rounds || !crate::board::is_late_only(&p.player.position))
+        .take(40)
+    {
         out.push_str(&format!(
-            "{}. {} {} — {:.0} pts, VORP {:.0}, T{}, ADP {}, survives {}\n",
+            "{}. {} {} — {:.0} pts, VORP {:.0}, T{}, ADP {}, survives {}, bye {}{}\n",
             player.player.overall_rank,
             player.player.name,
             player.player.position,
@@ -122,6 +179,12 @@ pub fn draft_context(view: &crate::view::DraftView) -> String {
                 .survival_next
                 .map(|s| format!("{:.0}%", s * 100.0))
                 .unwrap_or_else(|| "-".into()),
+            player
+                .player
+                .bye_week
+                .map(|w| w.to_string())
+                .unwrap_or_else(|| "-".into()),
+            tag(&player.player.injury_status),
         ));
     }
 
@@ -143,17 +206,21 @@ pub fn draft_context(view: &crate::view::DraftView) -> String {
             run.position, run.count, run.window
         ));
     }
-    if !view.pick_prices.is_empty() {
+    // A round whose median pick was a below-replacement body prices at zero,
+    // because the price is clamped there. "R11 0, R12 0, R13 0" is not a
+    // price list, and Claude read it as those rounds being worthless rather
+    // than as the floor it is — so the rounds that priced at nothing are left
+    // out and the ones that priced at something speak for themselves.
+    let priced: Vec<String> = view
+        .pick_prices
+        .iter()
+        .filter(|p| p.points > 0.0)
+        .take(10)
+        .map(|p| format!("R{} {:.0}", p.round, p.points))
+        .collect();
+    if !priced.is_empty() {
         out.push_str("Round prices so far (points over replacement the round actually took): ");
-        out.push_str(
-            &view
-                .pick_prices
-                .iter()
-                .take(10)
-                .map(|p| format!("R{} {:.0}", p.round, p.points))
-                .collect::<Vec<_>>()
-                .join(", "),
-        );
+        out.push_str(&priced.join(", "));
         out.push('\n');
     }
     if !view.recent_picks.is_empty() {
@@ -206,6 +273,9 @@ pub(crate) fn lineup_block(matchup: &crate::season::MatchupView, points_on_table
     let benched: Vec<String> = matchup
         .set_rows
         .iter()
+        // A slot the manager left empty is not a benched player: it has no id
+        // and no name, and it used to come out as a blank entry in this list.
+        .filter(|set| set.my_player_id.is_some())
         .filter(|set| {
             matchup
                 .rows

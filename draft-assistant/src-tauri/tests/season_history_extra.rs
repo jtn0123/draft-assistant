@@ -3,7 +3,7 @@
 use draft_assistant_lib::board::BoardPlayer;
 use draft_assistant_lib::engine::{Engine, LoadedLeague};
 use draft_assistant_lib::roster::RosterRules;
-use draft_assistant_lib::season_api::Roster;
+use draft_assistant_lib::season_api::{Roster, ScoreGame};
 use draft_assistant_lib::season_engine::LoadedSeason;
 use draft_assistant_lib::season_history::HistoryStore;
 use draft_assistant_lib::season_history::{take_snapshot, History};
@@ -25,7 +25,7 @@ fn league() -> League {
             "total_rosters": 2,
             "roster_positions": ["QB", "BN"],
             "scoring_settings": {"rec": 1.0},
-            "settings": {"playoff_week_start": 3}
+            "settings": {"playoff_week_start": 3, "playoff_teams": 1}
         }"#,
     )
     .unwrap()
@@ -99,11 +99,25 @@ fn loaded_league() -> LoadedLeague {
 }
 
 fn roster(players: &[&str]) -> Roster {
+    roster_with_id(1, players)
+}
+
+fn roster_with_id(roster_id: u32, players: &[&str]) -> Roster {
     serde_json::from_value(serde_json::json!({
-        "roster_id": 1,
-        "owner_id": "user-1",
+        "roster_id": roster_id,
+        "owner_id": format!("user-{roster_id}"),
         "players": players,
     }))
+    .unwrap()
+}
+
+/// A scoreboard in which every one of `week`'s games has finished.
+fn final_scoreboard(week: u32) -> Vec<ScoreGame> {
+    serde_json::from_str(&format!(
+        r#"[{{"game_id": "g1", "status": "complete", "week": {week},
+              "metadata": {{"home_team": "AAA", "away_team": "BBB", "is_over": true,
+                            "is_in_progress": false, "has_started": true}}}}]"#
+    ))
     .unwrap()
 }
 
@@ -238,6 +252,7 @@ fn league_with_a_disputed_position() -> LoadedLeague {
         injury_status: None,
         sleeper_pts_ppr: None,
         second_opinion: None,
+        weekly_cv: None,
     }];
     loaded.board_index = HashMap::from([("swap1".to_string(), 0)]);
     loaded.player_meta =
@@ -257,7 +272,9 @@ fn league_with_a_disputed_position() -> LoadedLeague {
 fn trends_and_standings_field_the_same_lineup_when_board_and_metadata_disagree() {
     let loaded = league_with_a_disputed_position();
     let lookup = Lookup { loaded: &loaded };
-    let season = season(1, vec![roster(&["swap1"])], 0);
+    let mut season = season(1, vec![roster(&["swap1"])], 0);
+    // Week 1 is in the books, so both screens are looking at week 2 alone.
+    season.scores = final_scoreboard(1);
 
     // The board wins: swap1 fills the QB slot, and 8 points in each of weeks
     // 1 and 2 average to 8 per remaining week.
@@ -280,4 +297,38 @@ fn trends_and_standings_field_the_same_lineup_when_board_and_metadata_disagree()
         projected > 0.0,
         "neither screen should field an empty lineup"
     );
+}
+
+/// In the last regular-season week there is nothing scheduled after it, and
+/// odds simulated over an empty schedule are the standings read off as fact.
+/// Every roster showed 100% or 0% on the Sunday that decided them.
+#[test]
+fn the_last_regular_week_is_still_played_rather_than_already_decided() {
+    let loaded = loaded_league();
+    let lookup = Lookup { loaded: &loaded };
+    // The regular season is weeks 1 and 2, so week 2 is the last of them.
+    let mut season = season(
+        2,
+        vec![roster_with_id(1, &["qb1"]), roster_with_id(2, &["wr1"])],
+        0,
+    );
+    season.schedule = vec![(2, vec![(1, 2)])];
+
+    // Sunday: the game is on, and neither team is in or out yet.
+    let live = standings_rows(&loaded, &season, &lookup, None, &|id| format!("Team {id}"));
+    assert_eq!(live.len(), 2);
+    for row in &live {
+        assert!(
+            row.playoff_odds > 0.0 && row.playoff_odds < 1.0,
+            "{} reads as decided at {} with the week still being played",
+            row.name,
+            row.playoff_odds
+        );
+    }
+
+    // Tuesday: every game is over, and now the standings are the answer.
+    season.scores = final_scoreboard(2);
+    let settled = standings_rows(&loaded, &season, &lookup, None, &|id| format!("Team {id}"));
+    assert!(settled.iter().any(|r| r.playoff_odds == 1.0), "{settled:?}");
+    assert!(settled.iter().any(|r| r.playoff_odds == 0.0), "{settled:?}");
 }

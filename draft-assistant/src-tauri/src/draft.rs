@@ -94,7 +94,16 @@ pub struct TeamRoster {
 }
 
 /// P(player still available at market position `at_pick`), given their ADP.
-/// Selection pick modeled as Normal(adp, sigma) with sigma growing with ADP.
+/// Selection pick modeled as Normal(adp, sigma).
+///
+/// Sigma is fitted against this app's own completed draft: the standard
+/// deviation of (pick made - ADP) sits around 20-40 picks across the board,
+/// and is flat-to-slightly-larger at the top rather than tiny there. The old
+/// `0.22 * adp` floored at 3 said the opposite - 3 picks of spread at the top
+/// of round one and 51 at the end of round fifteen - which made every early
+/// name read as certainly gone and every late one as a coin flip. The linear
+/// term is kept because the spread does widen, but the clamp is what carries
+/// the fit.
 ///
 /// `at_pick` is a *market* position, not an overall pick number: ADP counts
 /// selections, so anything that is not a selection must not advance it. Pass
@@ -105,7 +114,7 @@ pub fn survival_probability(adp: f64, at_pick: u32) -> f64 {
         // No real ADP signal — assume safe.
         return 0.99;
     }
-    let sigma = (0.22 * adp).max(3.0);
+    let sigma = (0.35 * adp).clamp(18.0, 35.0);
     let z = (at_pick as f64 - adp) / sigma;
     (1.0 - crate::scoring::norm_cdf(z)).clamp(0.01, 0.99)
 }
@@ -263,10 +272,30 @@ mod tests {
 
     #[test]
     fn survival_extremes() {
-        // ADP 1 player is nearly gone by pick 27.
-        assert!(survival_probability(1.5, 27) < 0.05);
-        // ADP 100 player is nearly certain at pick 27.
+        // An ADP 1 player is probably gone by pick 27; an ADP 100 player is
+        // all but certain to still be there. The gap between them, not either
+        // number alone, is what the survival rail is read for.
+        assert!(survival_probability(1.5, 27) < 0.15);
         assert!(survival_probability(100.0, 27) > 0.95);
+        assert!(survival_probability(100.0, 27) - survival_probability(1.5, 27) > 0.8);
+    }
+
+    #[test]
+    fn the_spread_is_the_fitted_band_at_every_depth() {
+        // The fit this app's own completed draft gives: sd(pick - ADP) is
+        // roughly 20-40 picks, and does not collapse at the top of the board.
+        // Read off the curve as where survival crosses one sigma (16%), which
+        // must land that far past ADP for a first-rounder and a last-rounder
+        // alike. The old 0.22*adp rule put it three picks past ADP at the top.
+        for adp in [3.0, 12.0, 60.0, 180.0] {
+            let one_sigma = (1..500)
+                .find(|&pick| survival_probability(adp, pick) < 0.159)
+                .expect("the curve crosses 16% somewhere") as f64;
+            assert!(
+                (18.0..=36.0).contains(&(one_sigma - adp)),
+                "adp {adp} crosses 16% at pick {one_sigma}"
+            );
+        }
     }
 
     #[test]
@@ -290,8 +319,9 @@ mod tests {
         let keepers: HashSet<u32> = (1..=20).collect();
         let clean = survival_probability(20.0, market_pick(27, &HashSet::new()));
         let kept = survival_probability(20.0, market_pick(27, &keepers));
-        assert!(clean < 0.15, "pessimistic without keepers: {clean}");
-        assert!(kept > 0.9, "seven real picks away: {kept}");
+        assert!(clean < 0.4, "pessimistic without keepers: {clean}");
+        assert!(kept > 0.7, "seven real picks away: {kept}");
+        assert!(kept - clean > 0.3, "{kept} vs {clean}");
     }
 
     #[test]

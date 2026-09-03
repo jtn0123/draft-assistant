@@ -63,7 +63,7 @@
   flex: none;
   width: 10px;
   height: 10px;
-  color: var(--muted);
+  color: var(--faint);
 }
 
 .header-subtitle,

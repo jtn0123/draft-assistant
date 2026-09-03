@@ -263,9 +263,12 @@ fn survival_is_judged_against_real_picks_not_keeper_slots() {
         survival_of(&kept, "q2"),
         draft_assistant_lib::draft::survival_probability(7.0, 2)
     );
+    // Six market positions of difference, read off a curve whose spread is
+    // the ~20-40 picks the app's own draft actually showed: a real move, but
+    // not the near-certainty the old three-pick sigma turned it into.
     assert!(
-        survival_of(&kept, "q2") > survival_of(&clean, "q2") + 0.3,
-        "a keeper-heavy book is far kinder: {} vs {}",
+        survival_of(&kept, "q2") > survival_of(&clean, "q2") + 0.1,
+        "a keeper-heavy book is kinder: {} vs {}",
         survival_of(&kept, "q2"),
         survival_of(&clean, "q2")
     );

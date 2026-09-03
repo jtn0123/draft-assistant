@@ -68,11 +68,22 @@ fn request_is_complete(bytes: &[u8]) -> bool {
     bytes.len() - (split + 4) >= promised
 }
 
+/// A client that ignores `HTTP_PROXY`/`HTTPS_PROXY`. The cache-policy tests in
+/// `projections.rs` set both, process-wide, to a dead port; a plain client
+/// picks that up and the stub server on localhost below becomes unreachable,
+/// which made these tests fail or pass depending on which one ran first.
+fn client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("http client")
+}
+
 fn ask_stub(status: u16, body: &'static str) -> Result<ChatReply, String> {
     let url = stub_server(status, body);
     tokio_test_block(ask_at(
         &url,
-        &reqwest::Client::new(),
+        &client(),
         "sk-ant-test",
         ChatModel::Opus5,
         Effort::High,
@@ -144,11 +155,28 @@ fn an_error_body_is_unwrapped_into_the_message_the_panel_shows() {
     assert_eq!(error, "Rate limited by Anthropic: slow down");
 }
 
+/// Anything between the app and Anthropic can answer with its own error page.
+/// That page used to be pasted into the chat, where a wall of markup reads as
+/// something Claude said; the status is what the user can act on.
 #[test]
-fn an_error_body_that_is_not_json_still_reaches_the_user() {
+fn an_error_body_that_is_not_json_is_logged_rather_than_shown() {
     let error = ask_stub(500, "<html>gateway</html>").unwrap_err();
-    assert!(error.contains("500"), "{error}");
-    assert!(error.contains("gateway"), "{error}");
+    assert!(error.starts_with("Anthropic API error 500"), "{error}");
+    assert!(!error.contains("html"), "{error}");
+    assert!(!error.contains("gateway"), "{error}");
+}
+
+/// The status-specific sentences survive a body that carries no message.
+#[test]
+fn a_status_still_says_what_went_wrong_without_a_message_to_quote() {
+    assert_eq!(
+        ask_stub(401, "<html>denied</html>").unwrap_err(),
+        "Anthropic rejected the API key"
+    );
+    assert_eq!(
+        ask_stub(429, "slow down please").unwrap_err(),
+        "Rate limited by Anthropic"
+    );
 }
 
 #[test]
@@ -165,7 +193,7 @@ fn a_dead_endpoint_reads_as_a_connection_problem() {
     // Port 1 on loopback: bound by nothing, refused immediately.
     let error = tokio_test_block(ask_at(
         "http://127.0.0.1:1/v1/messages",
-        &reqwest::Client::new(),
+        &client(),
         "sk-ant-test",
         ChatModel::Opus5,
         Effort::High,
@@ -190,4 +218,47 @@ fn list_prices_are_the_published_per_million_rates() {
     assert!((turn_cost(ChatModel::Opus5, 1_000_000, 1_000_000) - 30.0).abs() < 1e-9);
     assert!((turn_cost(ChatModel::Fable5, 1_000_000, 1_000_000) - 60.0).abs() < 1e-9);
     assert_eq!(turn_cost(ChatModel::Opus5, 0, 0), 0.0);
+}
+
+/// The guidance block is sent with `cache_control: ephemeral`, so most of a
+/// second turn's prompt is billed as a cache read and never shows up in
+/// `input_tokens`. Pricing the turn without those tiers undercounted every
+/// conversation past its first question.
+#[test]
+fn cached_prompt_tokens_are_priced_rather_than_counted_as_free() {
+    let reply = ask_stub(
+        200,
+        r#"{"model":"claude-opus-5","stop_reason":"end_turn",
+            "content":[{"type":"text","text":"Take Bowers."}],
+            "usage":{"input_tokens":1000,"output_tokens":0,
+                     "cache_creation_input_tokens":1000,
+                     "cache_read_input_tokens":1000}}"#,
+    )
+    .expect("a 200 is a reply");
+    assert_eq!(reply.cache_creation_input_tokens, 1000);
+    assert_eq!(reply.cache_read_input_tokens, 1000);
+
+    // At Opus 5's $5/MTok input: 1000 plain, 1000 written at 1.25x, 1000 read
+    // at 0.1x — $0.005 + $0.00625 + $0.0005.
+    let full = turn_cost_of(ChatModel::Opus5, &reply);
+    assert!((full - 0.011_75).abs() < 1e-9, "{full}");
+    // The uncached reading of the same turn, which is what was charged before.
+    let plain = turn_cost(ChatModel::Opus5, reply.input_tokens, reply.output_tokens);
+    assert!(full > plain, "cached tokens must add to the bill");
+}
+
+/// A response with no cache tiers at all prices exactly as it always did.
+#[test]
+fn a_turn_that_used_no_cache_costs_what_it_did_before() {
+    let reply = ask_stub(
+        200,
+        r#"{"model":"claude-opus-5","stop_reason":"end_turn",
+            "content":[{"type":"text","text":"ok"}],
+            "usage":{"input_tokens":1000,"output_tokens":100}}"#,
+    )
+    .expect("a 200 is a reply");
+    assert_eq!(reply.cache_creation_input_tokens, 0);
+    assert_eq!(reply.cache_read_input_tokens, 0);
+    let full = turn_cost_of(ChatModel::Opus5, &reply);
+    assert!((full - turn_cost(ChatModel::Opus5, 1000, 100)).abs() < 1e-12);
 }

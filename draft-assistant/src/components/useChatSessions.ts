@@ -49,8 +49,8 @@ export interface Current {
   saved: boolean;
 }
 
-/** What the panel opens with: the newest conversation stored for this screen,
- *  or a fresh one when the screen has none. Read once, while the panel's own
+/** What the panel opens with: the newest conversation stored under this
+ *  scope, or a fresh one when the scope has none. Read once, while the panel's own
  *  state is being initialised, so a reopened thread is never rendered empty
  *  and then replaced. */
 export interface ChatOpening {
@@ -58,9 +58,9 @@ export interface ChatOpening {
   reopened: SavedChat | null;
 }
 
-export function beginChat(screen: string): ChatOpening {
-  const [newest] = listSessions(screen);
-  const reopened = newest === undefined ? null : loadSession(screen, newest.id);
+export function beginChat(scope: string): ChatOpening {
+  const [newest] = listSessions(scope);
+  const reopened = newest === undefined ? null : loadSession(scope, newest.id);
   if (reopened === null) {
     return { current: { id: newSessionId(), startedAt: Date.now(), saved: false }, reopened: null };
   }
@@ -71,12 +71,13 @@ export function beginChat(screen: string): ChatOpening {
 }
 
 export function useChatSessions({
-  screen,
+  scope,
   opening,
   onOpen,
   onClear,
 }: {
-  screen: string;
+  /** Which screen's chats, for which league — see `chatScope`. */
+  scope: string;
   /** From `beginChat`, held by the panel so its thread starts on the same
    *  conversation this hook does. */
   opening: ChatOpening;
@@ -84,19 +85,19 @@ export function useChatSessions({
   onClear: () => void;
 }): ChatSessions {
   const [current, setCurrent] = useState<Current>(opening.current);
-  const [sessions, setSessions] = useState<ChatSessionSummary[]>(() => listSessions(screen));
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>(() => listSessions(scope));
 
   const open = useCallback(
     (id: string) => {
-      const chat = loadSession(screen, id);
+      const chat = loadSession(scope, id);
       if (chat === null) {
-        setSessions(listSessions(screen));
+        setSessions(listSessions(scope));
         return;
       }
       setCurrent({ id: chat.id, startedAt: chat.startedAt, saved: true });
       onOpen(chat);
     },
-    [screen, onOpen],
+    [scope, onOpen],
   );
 
   const startNew = useCallback(() => {
@@ -105,20 +106,20 @@ export function useChatSessions({
 
   const remove = useCallback(
     (id: string) => {
-      deleteSession(screen, id);
-      setSessions(listSessions(screen));
+      deleteSession(scope, id);
+      setSessions(listSessions(scope));
       if (id !== current.id) return;
       startNew();
       onClear();
     },
-    [screen, current.id, startNew, onClear],
+    [scope, current.id, startNew, onClear],
   );
 
   const save = useCallback(
     ({ entries, history, questions, costUsd }: ChatSnapshot) => {
       // A thread with nothing asked in it is not a conversation.
       if (!entries.some((entry) => entry.kind === "me")) return;
-      saveSession(screen, {
+      saveSession(scope, {
         id: current.id,
         title: sessionTitle(entries),
         startedAt: current.startedAt,
@@ -129,9 +130,9 @@ export function useChatSessions({
         costUsd,
       });
       setCurrent((prev) => (prev.saved ? prev : { ...prev, saved: true }));
-      setSessions(listSessions(screen));
+      setSessions(listSessions(scope));
     },
-    [screen, current.id, current.startedAt],
+    [scope, current.id, current.startedAt],
   );
 
   return {

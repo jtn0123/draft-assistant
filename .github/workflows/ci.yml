@@ -1,9 +1,19 @@
+# The one gate. It used to be two workflows (`Verify` and `CI`) that ran the
+# same macOS checks twice; `Verify` had been failing on every push since the
+# Rust coverage step moved into `test:ci`, and nobody was watching it.
+#
+# Every action is pinned to a commit SHA rather than a tag: a tag is mutable,
+# so a compromised upstream can repoint `v4` and run with this token. The
+# trailing comment names the version the SHA corresponds to.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -13,61 +23,70 @@ jobs:
   verify:
     name: Verify (macOS)
     runs-on: macos-latest
+    # macos-latest is billed at ten times the Linux rate on a private repo and
+    # the default cap is six hours, so a hung build is expensive.
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: draft-assistant
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version-file: draft-assistant/.nvmrc
           cache: npm
           cache-dependency-path: draft-assistant/package-lock.json
 
-      # The version comes from the repo's rust-toolchain.toml, so CI runs the
-      # exact clippy the laptop does; the action itself needs it spelled out.
+      # The version comes from the repo-root rust-toolchain.toml, so CI runs
+      # the exact clippy the laptop does; the action needs it spelled out.
       - name: Read the pinned Rust version
         id: rust
+        working-directory: .
         run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master, 2026-08
         with:
           toolchain: ${{ steps.rust.outputs.channel }}
           components: clippy, rustfmt
 
-      - uses: Swatinem/rust-cache@v2
+      # Keyed apart from the bundle job: this one builds llvm-cov-instrumented
+      # test targets, that one a release binary, and one cache key would have
+      # the two evicting each other.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: draft-assistant/src-tauri
+          key: verify
 
       # The Rust tests run under cargo-llvm-cov, which enforces the coverage
       # floor as well as running them.
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        with:
+          tool: cargo-llvm-cov
 
       - name: Install dependencies
-        working-directory: draft-assistant
         run: npm ci
 
       - name: Fast gate (loc, css, format, lint, typecheck)
-        working-directory: draft-assistant
         run: npm run verify:fast
 
-      - name: Frontend unit tests
-        working-directory: draft-assistant
-        run: npm run test:frontend
+      # Both suites with their coverage floors: vitest's thresholds only apply
+      # under `test:coverage`, and `test:ci` is what runs it.
+      - name: Unit tests and coverage floors
+        run: npm run test:ci
 
-      - name: Rust tests and coverage floor
-        working-directory: draft-assistant
-        run: npm run test:rust:coverage
+      - name: Production build
+        run: npm run build
 
       - name: Install Playwright Chromium
-        working-directory: draft-assistant
         run: npx playwright install --with-deps chromium
 
       - name: Browser end-to-end tests
-        working-directory: draft-assistant
         run: npm run test:e2e:browser
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report
           path: draft-assistant/playwright-report
@@ -78,41 +97,45 @@ jobs:
     needs: verify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: draft-assistant
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version-file: draft-assistant/.nvmrc
           cache: npm
           cache-dependency-path: draft-assistant/package-lock.json
 
       - name: Read the pinned Rust version
         id: rust
+        working-directory: .
         run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master, 2026-08
         with:
           toolchain: ${{ steps.rust.outputs.channel }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: draft-assistant/src-tauri
+          key: bundle
 
       - name: Install dependencies
-        working-directory: draft-assistant
         run: npm ci
 
       - name: Build the desktop bundle
-        working-directory: draft-assistant
         run: npm run tauri build
 
-      - name: Upload the .app and .dmg
-        uses: actions/upload-artifact@v4
+      # Only the .dmg: upload-artifact zips its input and drops the exec bit,
+      # so a downloaded .app would not launch. The .dmg carries its own.
+      - name: Upload the .dmg
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: draft-assistant-macos
-          path: |
-            draft-assistant/src-tauri/target/release/bundle/macos/*.app
-            draft-assistant/src-tauri/target/release/bundle/dmg/*.dmg
+          path: draft-assistant/src-tauri/target/release/bundle/dmg/*.dmg
           retention-days: 14
           if-no-files-found: error
