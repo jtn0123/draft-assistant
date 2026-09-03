@@ -209,29 +209,24 @@ impl Engine {
 #[cfg(test)]
 pub(crate) mod test_support {
     use crate::engine::{now_secs, Engine};
-    use std::sync::Once;
+    use crate::sleeper::SleeperClient;
 
-    static OFFLINE: Once = Once::new();
+    /// Port 1 is reserved, needs root to bind, and nothing serves it, so a
+    /// connection there is refused immediately. Proxies are ignored by
+    /// `with_host`, so this is the whole story about where these requests go.
+    pub(crate) const DEAD_HOST: &str = "http://127.0.0.1:1";
 
-    /// Point all HTTP at a proxy on a closed local port: the listener is
-    /// bound only to reserve a port nothing listens on, then dropped, so
-    /// every request gets connection-refused immediately.
+    /// An engine pointed at [`DEAD_HOST`]. Per client, not per process: the
+    /// proxy variables this used to set were shared with every other thread
+    /// in the test binary, which is a race and leaked into tests that wanted
+    /// a real localhost server.
     pub(crate) fn offline_engine(label: &str) -> Engine {
-        OFFLINE.call_once(|| {
-            let port = std::net::TcpListener::bind("127.0.0.1:0")
-                .and_then(|l| l.local_addr())
-                .map(|a| a.port())
-                .unwrap_or(9);
-            let proxy = format!("http://127.0.0.1:{port}");
-            std::env::set_var("HTTP_PROXY", &proxy);
-            std::env::set_var("HTTPS_PROXY", &proxy);
-        });
         let dir = std::env::temp_dir().join(format!(
             "draft-assistant-cache-{label}-{}-{}",
             std::process::id(),
             now_secs()
         ));
-        Engine::new(dir)
+        Engine::with_client(dir, SleeperClient::with_host(DEAD_HOST))
     }
 }
 

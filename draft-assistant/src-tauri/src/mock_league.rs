@@ -24,7 +24,12 @@ pub(crate) fn points_per_reception(scoring_type: &str) -> Option<f64> {
     }
 }
 
-pub fn synthesize_league(draft: &Draft) -> League {
+/// The league a mock draft would have had, plus anything the user needs told
+/// about the guesses that went into it.
+///
+/// The warning is returned rather than printed: a mock scored as standard when
+/// it is not moves every pass catcher on the board, and nobody reads stderr.
+pub fn synthesize_league(draft: &Draft) -> (League, Option<String>) {
     let settings = &draft.settings;
     let mut roster_positions = Vec::new();
     let mut push_slots = |position: &str, count: Option<u32>| {
@@ -50,10 +55,16 @@ pub fn synthesize_league(draft: &Draft) -> League {
         .as_ref()
         .and_then(|metadata| metadata.scoring_type.clone())
         .unwrap_or_else(|| "ppr".into());
-    let points_per_reception = points_per_reception(&scoring_type).unwrap_or_else(|| {
-        eprintln!("mock draft: unrecognised scoring type {scoring_type:?}; scoring it as standard");
-        0.0
-    });
+    let (points_per_reception, warning) = match points_per_reception(&scoring_type) {
+        Some(per_reception) => (per_reception, None),
+        None => (
+            0.0,
+            Some(format!(
+                "scoring type '{scoring_type}' not recognised — scored as standard; \
+                 check the board's points"
+            )),
+        ),
+    };
     let scoring_settings: HashMap<String, f64> = [
         ("pass_yd", 0.04),
         ("pass_td", 4.0),
@@ -92,7 +103,7 @@ pub fn synthesize_league(draft: &Draft) -> League {
         .and_then(|metadata| metadata.name.clone())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| format!("Mock draft ({scoring_type})"));
-    League {
+    let league = League {
         league_id: draft.draft_id.clone(),
         name,
         season: draft.season.clone().unwrap_or_else(|| "2026".into()),
@@ -105,12 +116,40 @@ pub fn synthesize_league(draft: &Draft) -> League {
         // and none of the in-season settings apply.
         previous_league_id: None,
         settings: crate::sleeper::LeagueSettings::default(),
-    }
+    };
+    (league, warning)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::points_per_reception;
+    use super::{points_per_reception, synthesize_league};
+    use crate::sleeper::Draft;
+
+    fn mock_draft(scoring_type: &str) -> Draft {
+        serde_json::from_str(&format!(
+            r#"{{"draft_id": "mock-1", "status": "pre_draft", "type": "snake",
+                 "settings": {{"teams": 12, "rounds": 5, "slots_qb": 1}},
+                 "metadata": {{"scoring_type": "{scoring_type}"}},
+                 "season": "2026"}}"#
+        ))
+        .expect("draft fixture")
+    }
+
+    #[test]
+    fn an_unrecognised_scoring_type_comes_back_as_a_warning_not_a_printout() {
+        let (league, warning) = synthesize_league(&mock_draft("tiered_reception"));
+        assert_eq!(league.scoring_settings.get("rec"), Some(&0.0));
+        let warning = warning.expect("the assumption has to be reported");
+        assert!(warning.contains("tiered_reception"), "{warning}");
+        assert!(warning.contains("scored as standard"), "{warning}");
+    }
+
+    #[test]
+    fn a_recognised_scoring_type_has_nothing_to_warn_about() {
+        let (league, warning) = synthesize_league(&mock_draft("dynasty_half_ppr"));
+        assert_eq!(league.scoring_settings.get("rec"), Some(&0.5));
+        assert_eq!(warning, None);
+    }
 
     #[test]
     fn the_format_in_front_of_the_mode_does_not_hide_the_mode() {

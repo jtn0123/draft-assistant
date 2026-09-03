@@ -68,10 +68,12 @@ fn request_is_complete(bytes: &[u8]) -> bool {
     bytes.len() - (split + 4) >= promised
 }
 
-/// A client that ignores `HTTP_PROXY`/`HTTPS_PROXY`. The cache-policy tests in
-/// `projections.rs` set both, process-wide, to a dead port; a plain client
-/// picks that up and the stub server on localhost below becomes unreachable,
-/// which made these tests fail or pass depending on which one ran first.
+/// A client that ignores `HTTP_PROXY`/`HTTPS_PROXY`. The stub server below is
+/// on localhost and must be reached directly: whatever proxy the developer's
+/// shell exports is not in the business of forwarding to it. (The offline
+/// tests in `projections.rs` used to set those variables process-wide, which
+/// made these pass or fail depending on which test ran first; they now point
+/// their own client at a dead host instead.)
 fn client() -> reqwest::Client {
     reqwest::Client::builder()
         .no_proxy()

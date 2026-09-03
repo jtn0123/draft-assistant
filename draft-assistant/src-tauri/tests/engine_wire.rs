@@ -54,6 +54,16 @@ const MOCK_DRAFT: &str = r#"{
     "season": "2026"
 }"#;
 
+/// The same mock, with a scoring type nothing recognises. Sleeper's
+/// `scoring_type` is a free string, so an unknown one is a real possibility.
+const MOCK_DRAFT_ODD: &str = r#"{
+    "draft_id": "mock-odd", "status": "pre_draft", "type": "snake",
+    "settings": {"teams": 12, "rounds": 5, "slots_qb": 1, "slots_rb": 2,
+                 "slots_wr": 2, "slots_flex": 1},
+    "metadata": {"scoring_type": "tiered_reception"},
+    "season": "2026"
+}"#;
+
 const USERS: &str = r#"[
     {"user_id": "user-a", "display_name": "Ada", "metadata": {"team_name": "Ada's Autos"}},
     {"user_id": "user-b", "display_name": "Bo"}
@@ -122,14 +132,16 @@ fn route(path: &str) -> Option<stub::Reply> {
             "type": "snake", "settings": {"teams": 0, "rounds": 0}, "season": "2026"}"#
             .to_string()),
         "/v1/draft/mock-1" => ok(MOCK_DRAFT.to_string()),
+        "/v1/draft/mock-odd" => ok(MOCK_DRAFT_ODD.to_string()),
         "/v1/draft/draft-1/picks"
         | "/v1/draft/draft-torn/picks"
         | "/v1/draft/draft-unset/picks"
-        | "/v1/draft/mock-1/picks" => ok("[]".to_string()),
+        | "/v1/draft/mock-1/picks"
+        | "/v1/draft/mock-odd/picks" => ok("[]".to_string()),
         "/v1/draft/draft-1/traded_picks" => ok(TRADED.to_string()),
-        "/v1/draft/mock-1/traded_picks" | "/v1/draft/draft-unset/traded_picks" => {
-            ok("[]".to_string())
-        }
+        "/v1/draft/mock-1/traded_picks"
+        | "/v1/draft/mock-odd/traded_picks"
+        | "/v1/draft/draft-unset/traded_picks" => ok("[]".to_string()),
         // The one endpoint that is deliberately broken.
         "/v1/draft/draft-torn/traded_picks" => Some((503, "\"unavailable\"".to_string())),
         _ => None,
@@ -251,6 +263,41 @@ async fn a_mock_draft_gets_its_league_settings_synthesized() {
     assert_eq!(loaded.league.name, "Mock draft (half_ppr)");
     assert!(
         loaded.warnings.iter().any(|w| w.contains("mock draft")),
+        "{:?}",
+        loaded.warnings
+    );
+    cleanup(engine);
+}
+
+#[tokio::test]
+async fn a_scoring_type_nobody_recognises_is_a_warning_the_user_can_read() {
+    let engine = engine("mock-odd");
+    let loaded = engine
+        .load_draft_only("mock-odd", true)
+        .await
+        .expect("an unknown scoring type must still load");
+
+    // Scored as standard, and said so where the screen shows warnings —
+    // stderr is not somewhere the user looks.
+    assert_eq!(loaded.league.scoring_settings.get("rec"), Some(&0.0));
+    let warning = loaded
+        .warnings
+        .iter()
+        .find(|w| w.contains("tiered_reception"))
+        .unwrap_or_else(|| panic!("no scoring warning in {:?}", loaded.warnings));
+    assert!(warning.contains("scored as standard"), "{warning}");
+    cleanup(engine);
+}
+
+#[tokio::test]
+async fn a_recognised_scoring_type_adds_no_scoring_warning() {
+    let engine = engine("mock-known");
+    let loaded = engine
+        .load_draft_only("mock-1", true)
+        .await
+        .expect("loaded");
+    assert!(
+        !loaded.warnings.iter().any(|w| w.contains("not recognised")),
         "{:?}",
         loaded.warnings
     );

@@ -1,29 +1,23 @@
 //! Engine loaders when Sleeper is unreachable.
 //!
-//! No real network traffic: every request is routed through a proxy address
-//! on a closed local port, so each fetch fails instantly with a connection
-//! error and the error-handling paths run exactly as they would in an outage.
+//! No real network traffic: this engine's client is built for a dead local
+//! port, so each fetch fails instantly with a connection error and the
+//! error-handling paths run exactly as they would in an outage. The client
+//! carries that host itself — nothing here touches the environment, which is
+//! shared with every other test thread in the binary.
 
 use draft_assistant_lib::engine::Engine;
 use draft_assistant_lib::season_engine::SeasonLoader;
-use draft_assistant_lib::sleeper::League;
-use std::sync::Once;
+use draft_assistant_lib::sleeper::{League, SleeperClient};
 
-static OFFLINE: Once = Once::new();
+/// Port 1 is reserved and needs root to bind, so nothing is listening and
+/// every connection to it is refused immediately.
+const DEAD_HOST: &str = "http://127.0.0.1:1";
 
-/// Route all HTTP through a dead local port. The listener is bound only to
-/// reserve a port that nothing is listening on, then dropped so connections
-/// to it are refused immediately.
+/// An engine whose every Sleeper URL goes to [`DEAD_HOST`]. `with_host` also
+/// ignores `HTTP_PROXY`/`HTTPS_PROXY`, so no shell setting can route these
+/// requests anywhere else — least of all out of the machine.
 fn offline_engine(label: &str) -> Engine {
-    OFFLINE.call_once(|| {
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .and_then(|l| l.local_addr())
-            .map(|a| a.port())
-            .unwrap_or(9);
-        let proxy = format!("http://127.0.0.1:{port}");
-        std::env::set_var("HTTP_PROXY", &proxy);
-        std::env::set_var("HTTPS_PROXY", &proxy);
-    });
     let dir = std::env::temp_dir().join(format!(
         "draft-assistant-offline-{label}-{}-{}",
         std::process::id(),
@@ -32,7 +26,23 @@ fn offline_engine(label: &str) -> Engine {
             .unwrap()
             .as_nanos()
     ));
-    Engine::new(dir)
+    Engine::with_client(dir, SleeperClient::with_host(DEAD_HOST))
+}
+
+/// The point of the whole file: these requests go to the dead port and
+/// nowhere else. The error names the URL that was actually attempted, so it
+/// is proof of the destination rather than of the failure alone.
+#[tokio::test]
+async fn every_request_goes_to_the_dead_port_and_not_to_sleeper() {
+    let engine = offline_engine("destination");
+    let err = engine
+        .load_league("league-1", true)
+        .await
+        .err()
+        .expect("expected an offline failure");
+    assert!(err.contains("127.0.0.1:1"), "unexpected error: {err}");
+    assert!(!err.contains("api.sleeper.app"), "unexpected error: {err}");
+    std::fs::remove_dir_all(engine.data_dir).unwrap();
 }
 
 fn league_json() -> League {

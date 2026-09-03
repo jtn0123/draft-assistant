@@ -12,7 +12,7 @@ use std::time::Duration;
 
 /// The documented v1 API root. Declared once here; `season_api` imports it
 /// rather than repeating the host. Both roots are rewritten on the way out by
-/// `sleeper_host::route`, which is how a debug build can be pointed at the
+/// `sleeper_host::route_to`, which is how a debug build can be pointed at the
 /// replay server instead.
 pub(crate) const BASE: &str = "https://api.sleeper.app/v1";
 /// Root for the undocumented endpoints (projections, scores).
@@ -227,6 +227,11 @@ pub use crate::sleeper_users::{LeagueUser, LeagueUserMeta};
 ///   transactions, the playoff bracket and the live scoreboard
 pub struct SleeperClient {
     http: reqwest::Client,
+    /// Where this client's Sleeper URLs actually go. Decided per client, not
+    /// per process: `new()` asks `sleeper_host`, and a test can stand one up
+    /// against a stub — or against a dead port — without touching the
+    /// environment every other thread in the binary shares.
+    host: String,
 }
 
 impl Default for SleeperClient {
@@ -248,19 +253,35 @@ impl SleeperClient {
         let http = Self::builder()
             .build()
             .expect("failed to build http client");
-        Self { http }
+        Self {
+            http,
+            host: crate::sleeper_host::host().to_string(),
+        }
     }
 
-    /// A client that ignores `HTTP_PROXY`/`HTTPS_PROXY`. The offline tests set
-    /// both, process-wide, to a dead port; transport tests that drive a real
-    /// stub server on localhost must not be routed through that.
-    #[cfg(test)]
-    pub(crate) fn without_proxy() -> Self {
+    /// A client that sends every Sleeper URL to `host` instead of
+    /// api.sleeper.app — `http://127.0.0.1:9` and the like.
+    ///
+    /// Naming an exact destination also means naming it exactly: this client
+    /// ignores `HTTP_PROXY`/`HTTPS_PROXY`, so an offline test cannot be
+    /// re-routed by whatever the developer's shell happens to export.
+    pub fn with_host(host: impl Into<String>) -> Self {
         let http = Self::builder()
             .no_proxy()
             .build()
             .expect("failed to build http client");
-        Self { http }
+        Self {
+            http,
+            host: host.into(),
+        }
+    }
+
+    /// A client that ignores `HTTP_PROXY`/`HTTPS_PROXY` but still talks to the
+    /// host `sleeper_host` picked. Transport tests drive a real stub server on
+    /// localhost and must not be routed through anyone's proxy.
+    #[cfg(test)]
+    pub(crate) fn without_proxy() -> Self {
+        Self::with_host(crate::sleeper_host::host())
     }
 
     /// The pooled HTTP client, reused by other callers (the chat panel) so
@@ -363,14 +384,14 @@ impl SleeperClient {
         &self,
         url: &str,
     ) -> Result<T, SleeperError> {
-        let url = crate::sleeper_host::route(url);
+        let url = crate::sleeper_host::route_to(url, &self.host);
         self.with_retries(|| self.get_json_once(&url)).await
     }
 
     /// A GET that hands back the raw body, for payloads too big to parse on
     /// the runtime thread. Same retry policy as `get_json`.
     pub(crate) async fn get_bytes(&self, url: &str) -> Result<Vec<u8>, SleeperError> {
-        let url = crate::sleeper_host::route(url);
+        let url = crate::sleeper_host::route_to(url, &self.host);
         self.with_retries(|| self.get_bytes_once(&url)).await
     }
 

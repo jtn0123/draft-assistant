@@ -141,12 +141,19 @@ pub struct Engine {
 /// - [`crate::keepers::KeeperStore`] — which picks this league keeps
 impl Engine {
     pub fn new(data_dir: PathBuf) -> Self {
+        Self::with_client(data_dir, SleeperClient::new())
+    }
+
+    /// An engine over a client the caller built. The offline tests use it to
+    /// point one engine at a dead port without setting proxy variables the
+    /// whole process — every other test thread included — would then share.
+    pub fn with_client(data_dir: PathBuf, client: SleeperClient) -> Self {
         std::fs::create_dir_all(&data_dir).ok();
         // Everything under here — rosters, league member names, Sleeper user
         // ids, the players dictionary — is the user's alone to read.
         crate::cache::owner_only_dir(&data_dir);
         Self {
-            client: SleeperClient::new(),
+            client,
             data_dir,
             key_cache: tokio::sync::Mutex::new(None),
         }
@@ -301,13 +308,17 @@ impl Engine {
         force: bool,
     ) -> Result<LoadedLeague, String> {
         let draft = self.client.draft(draft_id).await.map_err(to_message)?;
-        let league = synthesize_league(&draft);
+        let (league, scoring_warning) = synthesize_league(&draft);
         let mut loaded = self
             .assemble(league, draft, HashMap::new(), HashMap::new(), force)
             .await?;
         loaded
             .warnings
             .push("mock draft: league settings synthesized from draft settings".into());
+        // A scoring type nobody recognised was scored as standard. That is a
+        // full point per catch out on a PPR board, so it goes where the user
+        // can see it rather than to stderr.
+        loaded.warnings.extend(scoring_warning);
         Ok(loaded)
     }
 

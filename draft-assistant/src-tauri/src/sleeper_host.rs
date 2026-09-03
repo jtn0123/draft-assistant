@@ -34,14 +34,14 @@ fn parse(given: Option<String>) -> Option<String> {
         .filter(|base| !base.is_empty())
 }
 
-/// Send one already-built URL to `host()`. A no-op — and a borrow, not an
-/// allocation — whenever no override is in force, which is every release build
-/// and every ordinary run.
-pub(crate) fn route(url: &str) -> Cow<'_, str> {
-    route_to(url, host())
-}
-
-fn route_to<'a>(url: &'a str, host: &str) -> Cow<'a, str> {
+/// Send one already-built URL to `host`. A no-op — and a borrow, not an
+/// allocation — whenever the client is pointed at Sleeper itself, which is
+/// every release build and every ordinary run.
+///
+/// The host is the caller's, not this module's: `SleeperClient` decides it
+/// once when it is built, so a test client can be aimed elsewhere without
+/// changing anything process-wide.
+pub(crate) fn route_to<'a>(url: &'a str, host: &str) -> Cow<'a, str> {
     match url.strip_prefix(DEFAULT) {
         Some(rest) if host != DEFAULT => Cow::Owned(format!("{host}{rest}")),
         _ => Cow::Borrowed(url),

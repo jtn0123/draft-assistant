@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for the main window. The frontend uses exactly two things from `@tauri-apps/api`: `invoke` (core:app) and `listen` (core:event). App commands are not ACL-gated in Tauri 2, so nothing else here is needed: no webview, window, path, resources, image, menu, tray or asset-protocol grants. Player headshots and manager avatars arrive as data: URIs through `invoke`, and the file dialog is opened from Rust, so the webview never asks for either.",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:app:default",
+    "core:event:default"
   ]
 }
