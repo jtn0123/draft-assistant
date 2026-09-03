@@ -88,6 +88,9 @@ export default function App() {
     undoLastPick,
     exportState,
     switchLeague,
+    forgetLeague,
+    refreshLeagues,
+    hasAccount,
     refreshData,
   } = useDraftSession(showToast);
 
@@ -134,6 +137,7 @@ export default function App() {
           onReady={(v) => {
             applyView(v);
             setShowSetup(false);
+            void refreshLeagues();
             void startLive();
           }}
         />
@@ -259,6 +263,7 @@ export default function App() {
         <div className="shell-main">
           <Header
             leagueName={view.league.name}
+            onSwitchLeague={() => setLeaguePicker(true)}
             subtitle={subtitle}
             meta={`${d.teams}-team ${scoringFormat(view.league.scoring_settings.rec)} · ${d.rounds} rounds${d.manual_picks_active ? " · manual picks active" : ""}`}
             screen={screen}
@@ -333,11 +338,13 @@ export default function App() {
           leagues={leagues}
           activeId={view.league.league_id}
           season={view.league.season}
+          hasAccount={hasAccount}
           busy={busy}
           onSwitch={(id) => {
             setLeaguePicker(false);
             void switchLeague(id);
           }}
+          onForget={(id) => void forgetLeague(id)}
           onClose={() => setLeaguePicker(false)}
         />
       )}

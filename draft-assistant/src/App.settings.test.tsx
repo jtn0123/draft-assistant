@@ -372,8 +372,8 @@ describe("the league row", () => {
     return {
       ...restoringConfig(view),
       leagues: [
-        { league_id: view.league.league_id, name: view.league.name, season: "2026" },
-        { league_id: "2222222222222222222", name: "Mock draft", season: "2026" },
+        { league_id: view.league.league_id, name: view.league.name, season: "2026", status: null },
+        { league_id: "2222222222222222222", name: "Mock draft", season: "2026", status: null },
       ],
     };
   }
@@ -387,7 +387,7 @@ describe("the league row", () => {
 
     await chooseSetting(/League/);
     expect(screen.getByRole("dialog", { name: "Switch league" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Mock draft/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Mock draft/ })).toBeInTheDocument();
   });
 
   it("stops the old poller, loads the new league, and restarts live sync", async () => {
@@ -403,7 +403,7 @@ describe("the league row", () => {
     h.api.addLeague.mockResolvedValue(other);
     await chooseSetting(/League/);
     await settle(() => {
-      screen.getByRole("button", { name: /Mock draft/ }).click();
+      screen.getByRole("button", { name: /^Mock draft/ }).click();
     });
 
     await screen.findByText(/Switched to Mock draft/);
@@ -425,7 +425,7 @@ describe("the league row", () => {
     h.api.addLeague.mockRejectedValue(new Error("league 2222222222222222222 not found"));
     await chooseSetting(/League/);
     await settle(() => {
-      screen.getByRole("button", { name: /Mock draft/ }).click();
+      screen.getByRole("button", { name: /^Mock draft/ }).click();
     });
 
     const alert = await screen.findByRole("alert");
@@ -433,5 +433,27 @@ describe("the league row", () => {
     expect(alert).toHaveTextContent("not found");
     // The league that was on screen is still the one on screen.
     expect(screen.getByText(view.league.name)).toBeInTheDocument();
+  });
+
+  it("opens from the league name in the header, and forgets a league from its row", async () => {
+    const view = draftFixture();
+    const config = twoLeagues(view);
+    h.api.getConfig.mockResolvedValue(config);
+    h.api.addLeague.mockResolvedValue(view);
+    h.api.removeLeague.mockResolvedValue([config.leagues[0]]);
+    render(<App />);
+    await screen.findByRole("heading", { name: view.league.name });
+
+    await settle(() => screen.getByRole("button", { name: view.league.name }).click());
+    expect(screen.getByRole("dialog", { name: "Switch league" })).toBeInTheDocument();
+    // The account is saved, so Sleeper was asked without a click.
+    expect(h.api.sleeperLeagues).toHaveBeenCalledWith(view.league.season);
+
+    await settle(() => screen.getByRole("button", { name: "Forget Mock draft" }).click());
+    expect(h.api.removeLeague).toHaveBeenCalledWith("2222222222222222222");
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^Mock draft/ })).not.toBeInTheDocument(),
+    );
+    expect(h.api.addLeague).toHaveBeenCalledTimes(1);
   });
 });

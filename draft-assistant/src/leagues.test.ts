@@ -1,13 +1,19 @@
 // The picker's list, which is two sources with an overlap between them.
 
 import { describe, expect, it } from "vitest";
-import { leagueNote, mergeLeagues } from "./leagues";
+import { leagueNote, leagueStage, mergeLeagues } from "./leagues";
 import type { StoredLeague } from "./types";
 
-const league = (id: string, name: string, season = "2026"): StoredLeague => ({
+const league = (
+  id: string,
+  name: string,
+  season = "2026",
+  status: string | null = null,
+): StoredLeague => ({
   league_id: id,
   name,
   season,
+  status,
 });
 
 describe("mergeLeagues", () => {
@@ -47,5 +53,23 @@ describe("leagueNote", () => {
 
   it("does not claim a season it was never told", () => {
     expect(leagueNote(league("1", "Alpha", ""), null)).toBe("season unknown");
+  });
+
+  it("says where the league is when Sleeper has said", () => {
+    expect(leagueNote(league("1", "Sharks", "2026", "pre_draft"), null)).toBe(
+      "2026 season · draft ahead",
+    );
+    expect(leagueNote(league("1", "Sharks", "2026", "drafting"), "1")).toBe(
+      "2026 season · drafting now · on screen now",
+    );
+  });
+});
+
+describe("leagueStage", () => {
+  it("translates each of Sleeper's words, and stays quiet on anything else", () => {
+    expect(leagueStage("in_season")).toBe("in season");
+    expect(leagueStage("complete")).toBe("finished");
+    expect(leagueStage(null)).toBeNull();
+    expect(leagueStage("something_new")).toBeNull();
   });
 });

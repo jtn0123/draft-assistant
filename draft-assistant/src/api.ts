@@ -49,6 +49,9 @@ export interface Api {
   getConfig(): Promise<AppConfig>;
   /** Every league the saved Sleeper account plays in that season. */
   sleeperLeagues(season: string): Promise<StoredLeague[]>;
+  /** Drop a league from the picker's list; the one on screen is refused.
+   *  Resolves to the list as it stands afterwards. */
+  removeLeague(leagueId: string): Promise<StoredLeague[]>;
   getState(): Promise<DraftView>;
   refreshPicks(): Promise<DraftView>;
   refreshData(): Promise<DraftView>;
@@ -90,6 +93,7 @@ const tauriApi: Api = {
   setMyUsername: (username) => invoke<string>("set_my_username", { username }),
   getConfig: () => invoke<AppConfig>("get_config"),
   sleeperLeagues: (season) => invoke<StoredLeague[]>("sleeper_leagues", { season }),
+  removeLeague: (leagueId) => invoke<StoredLeague[]>("remove_league", { leagueId }),
   getState: () => invokeView("get_state"),
   refreshPicks: () => invokeView("refresh_picks"),
   refreshData: () => invokeView("refresh_data"),
@@ -180,14 +184,24 @@ function browserApi(): Api {
             league_id: v.league.league_id,
             name: v.league.name,
             season: v.league.season,
+            status: null,
           },
         ],
       };
     },
     sleeperLeagues: async () => {
       const v = await fixture();
-      return [{ league_id: v.league.league_id, name: v.league.name, season: v.league.season }];
+      return [
+        {
+          league_id: v.league.league_id,
+          name: v.league.name,
+          season: v.league.season,
+          status: null,
+        },
+      ];
     },
+    // The preview has one league and it is always on screen.
+    removeLeague: () => Promise.reject(new Error("that league is on screen")),
     getState: fixture,
     refreshPicks: () => draft.refresh(),
     // Only the dump can be re-read here; the projections behind it are the

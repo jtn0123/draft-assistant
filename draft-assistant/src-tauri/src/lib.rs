@@ -77,7 +77,7 @@ use commands_season::{
 };
 use commands_second_opinion::import_second_opinion;
 use engine::Engine;
-use leagues::sleeper_leagues;
+use leagues::{remove_league, sleeper_leagues};
 use state::AppState;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
@@ -147,6 +147,7 @@ pub fn run() {
             ask_claude,
             chat_suggestions,
             sleeper_leagues,
+            remove_league,
             import_second_opinion,
         ])
         .run(tauri::generate_context!())

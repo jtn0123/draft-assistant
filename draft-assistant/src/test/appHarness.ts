@@ -26,6 +26,7 @@ const METHODS: Record<keyof Api, true> = {
   setMyUsername: true,
   getConfig: true,
   sleeperLeagues: true,
+  removeLeague: true,
   getState: true,
   refreshPicks: true,
   refreshData: true,

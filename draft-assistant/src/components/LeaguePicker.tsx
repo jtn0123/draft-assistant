@@ -1,6 +1,11 @@
 // Switch to another league — one this app has loaded before, one Sleeper says
 // the account plays in, or a brand-new league or mock draft pasted by ID.
 //
+// When an account is saved, Sleeper is asked the moment the dialog opens, so
+// a league joined since the last visit is already in the list; the button
+// stays for asking again. A league the app has loaded can be forgotten from
+// its row, which trims the list and nothing else.
+//
 // It is a dialog rather than a control in the header because switching is the
 // most disruptive thing the shell can do: it tears the board down, drops the
 // season, and restarts both pollers. Local's other "are you sure" moment (the
@@ -17,8 +22,10 @@ export function LeaguePicker({
   leagues,
   activeId,
   season,
+  hasAccount,
   busy,
   onSwitch,
+  onForget,
   onClose,
 }: {
   /** Leagues already known from the config. */
@@ -26,18 +33,23 @@ export function LeaguePicker({
   activeId: string | null;
   /** The season to look up on Sleeper — the one the app has data for. */
   season: string;
+  /** A Sleeper account is saved, so its leagues are looked up on open. */
+  hasAccount: boolean;
   /** True while a switch is in flight; the whole dialog waits for it. */
   busy: boolean;
   onSwitch: (leagueId: string) => void;
+  /** Drop a league the app has loaded from the list. */
+  onForget: (leagueId: string) => void;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDivElement>(null);
   const firstOption = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const [found, setFound] = useState<StoredLeague[]>([]);
-  const [looking, setLooking] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pasted, setPasted] = useState("");
+  const [asked, setAsked] = useState(false);
 
   useEffect(() => {
     opener.current = document.activeElement as HTMLElement | null;
@@ -50,19 +62,43 @@ export function LeaguePicker({
 
   useFocusTrap(dialog, onClose);
 
+  // The lookup on open sets nothing synchronously: every answer lands from
+  // the promise, and "looking" is read off what has and has not come back.
+  useEffect(() => {
+    if (!hasAccount) return;
+    let cancelled = false;
+    api
+      .sleeperLeagues(season)
+      .then((found) => {
+        if (cancelled) return;
+        setFound(found);
+        setAsked(true);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(String(e).replace(/^Error:\s*/, ""));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasAccount, season]);
+
   const look = async () => {
-    setLooking(true);
+    setAsking(true);
     setError(null);
     try {
       setFound(await api.sleeperLeagues(season));
+      setAsked(true);
     } catch (e) {
       setError(String(e).replace(/^Error:\s*/, ""));
     } finally {
-      setLooking(false);
+      setAsking(false);
     }
   };
 
+  const looking = asking || (hasAccount && !asked && error === null);
+
   const options = mergeLeagues(leagues, found, activeId);
+  const stored = new Set(leagues.map((l) => l.league_id));
 
   return (
     <div
@@ -90,24 +126,37 @@ export function LeaguePicker({
 
         {options.length > 0 && (
           <div className="league-list">
-            {options.map((league, index) => (
-              <button
-                key={league.league_id}
-                type="button"
-                className={league.league_id === activeId ? "league-option is-on" : "league-option"}
-                aria-pressed={league.league_id === activeId}
-                disabled={busy}
-                ref={index === 0 ? firstOption : undefined}
-                onClick={() =>
-                  league.league_id === activeId ? onClose() : onSwitch(league.league_id)
-                }
-              >
-                <span className="league-option-name ellipsis">
-                  {league.name === "" ? league.league_id : league.name}
-                </span>
-                <span className="muted league-option-note">{leagueNote(league, activeId)}</span>
-              </button>
-            ))}
+            {options.map((league, index) => {
+              const name = league.name === "" ? league.league_id : league.name;
+              const active = league.league_id === activeId;
+              return (
+                <div key={league.league_id} className="league-row">
+                  <button
+                    type="button"
+                    className={active ? "league-option is-on" : "league-option"}
+                    aria-pressed={active}
+                    disabled={busy}
+                    ref={index === 0 ? firstOption : undefined}
+                    onClick={() => (active ? onClose() : onSwitch(league.league_id))}
+                  >
+                    <span className="league-option-name ellipsis">{name}</span>
+                    <span className="muted league-option-note">{leagueNote(league, activeId)}</span>
+                  </button>
+                  {!active && stored.has(league.league_id) && (
+                    <button
+                      type="button"
+                      className="league-forget"
+                      aria-label={`Forget ${name}`}
+                      title="Drop from this list. Its cached data stays."
+                      disabled={busy}
+                      onClick={() => onForget(league.league_id)}
+                    >
+                      Forget
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -117,7 +166,7 @@ export function LeaguePicker({
           disabled={busy || looking}
           onClick={() => void look()}
         >
-          {looking ? "Asking Sleeper…" : "Find my leagues on Sleeper"}
+          {looking ? "Asking Sleeper…" : asked ? "Ask Sleeper again" : "Find my leagues on Sleeper"}
         </button>
 
         <label className="field">

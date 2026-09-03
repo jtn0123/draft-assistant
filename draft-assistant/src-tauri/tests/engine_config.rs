@@ -40,6 +40,7 @@ fn config_without_key() -> AppConfig {
             league_id: "league-1".into(),
             name: "My League".into(),
             season: "2025".into(),
+            status: None,
         }],
         anthropic_api_key: None,
         chat_provider: Some("api".into()),

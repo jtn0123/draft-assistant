@@ -187,6 +187,9 @@ export interface StoredLeague {
   league_id: string;
   name: string;
   season: string;
+  /** Sleeper's `pre_draft` / `drafting` / `in_season` / `complete`; null
+   *  for a mock draft or a config written before it was recorded. */
+  status: string | null;
 }
 
 export interface AppConfig {

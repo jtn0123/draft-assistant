@@ -37,8 +37,27 @@ export function mergeLeagues(
   });
 }
 
+/** Sleeper's league status as a reader would say it, or null for one the
+ *  app does not know. */
+export function leagueStage(status: string | null): string | null {
+  switch (status) {
+    case "pre_draft":
+      return "draft ahead";
+    case "drafting":
+      return "drafting now";
+    case "in_season":
+      return "in season";
+    case "complete":
+      return "finished";
+    default:
+      return null;
+  }
+}
+
 /** What a league row says under its name. */
 export function leagueNote(league: StoredLeague, activeId: string | null): string {
   const season = league.season === "" ? "season unknown" : `${league.season} season`;
-  return league.league_id === activeId ? `${season} · on screen now` : season;
+  const stage = leagueStage(league.status);
+  const where = stage === null ? season : `${season} · ${stage}`;
+  return league.league_id === activeId ? `${where} · on screen now` : where;
 }

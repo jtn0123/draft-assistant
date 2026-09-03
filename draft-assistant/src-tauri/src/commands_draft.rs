@@ -48,7 +48,13 @@ pub async fn add_league(
             league_id: league_id.clone(),
             name: new_loaded.league.name.clone(),
             season: new_loaded.league.season.clone(),
+            status: Some(new_loaded.league.status.clone()),
         });
+    } else if let Some(stored) = config.leagues.iter_mut().find(|l| l.league_id == league_id) {
+        // A league loaded again has moved on since: it was drafting, now it
+        // is in season. The picker should say so.
+        stored.name = new_loaded.league.name.clone();
+        stored.status = Some(new_loaded.league.status.clone());
     }
     config.active_league_id = Some(league_id);
     state.engine.save_config(&config)?;

@@ -22,9 +22,11 @@ const rows = (onSelect = () => {}): SettingsRow[] => [
 /** The header with the settings menu wired up the way the app wires it. */
 function Harness({
   onSelect,
+  onSwitchLeague = () => {},
   pollHealth = null,
 }: {
   onSelect?: () => void;
+  onSwitchLeague?: () => void;
   pollHealth?: PollHealth | null;
 }) {
   const [open, setOpen] = useState(false);
@@ -32,6 +34,7 @@ function Harness({
     <>
       <Header
         leagueName="Dynasty Warriors"
+        onSwitchLeague={onSwitchLeague}
         subtitle="Week 3"
         meta="14-team full-PPR"
         screen="draft"
@@ -79,6 +82,16 @@ const openMenu = async (onSelect?: () => void) => {
   });
   return gear;
 };
+
+describe("the league name", () => {
+  it("is still the page heading, and is the way into the league picker", async () => {
+    const onSwitchLeague = vi.fn();
+    render(<Harness onSwitchLeague={onSwitchLeague} />);
+    expect(screen.getByRole("heading", { name: "Dynasty Warriors" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Dynasty Warriors" }));
+    expect(onSwitchLeague).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("the settings menu", () => {
   it("is a menu, and each setting says whether it is on", async () => {
@@ -175,6 +188,7 @@ describe("the sync pill", () => {
     const off = (screen_: "season" | "draft") => (
       <Header
         leagueName="Dynasty Warriors"
+        onSwitchLeague={() => {}}
         subtitle="Week 3"
         meta="14-team full-PPR"
         screen={screen_}

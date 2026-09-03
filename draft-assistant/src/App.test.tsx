@@ -142,7 +142,14 @@ describe("App live workflow", () => {
     h.api.getConfig.mockResolvedValue({
       my_user_id: null,
       active_league_id: initial.league.league_id,
-      leagues: [{ league_id: initial.league.league_id, name: "Dynasty Warriors", season: "2026" }],
+      leagues: [
+        {
+          league_id: initial.league.league_id,
+          name: "Dynasty Warriors",
+          season: "2026",
+          status: null,
+        },
+      ],
     });
     h.api.addLeague.mockRejectedValue(new Error("request timed out"));
 

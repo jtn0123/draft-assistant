@@ -83,6 +83,28 @@ pub async fn sleeper_leagues(
     Ok(sorted_stored(leagues))
 }
 
+/// Drop a league from the picker's list. Nothing on disk goes with it: the
+/// cached players and picks stay, so loading it again by ID is as quick as
+/// it was, and the league on screen is refused because the list is also how
+/// the app finds its way back on the next launch.
+#[tauri::command]
+pub async fn remove_league(
+    state: State<'_, AppState>,
+    league_id: String,
+) -> Result<Vec<StoredLeague>, String> {
+    let mut config = state.config.lock().await;
+    if config.active_league_id.as_deref() == Some(league_id.as_str()) {
+        return Err("that league is on screen — switch to another one first".to_string());
+    }
+    let before = config.leagues.len();
+    config.leagues.retain(|l| l.league_id != league_id);
+    if config.leagues.len() == before {
+        return Err(format!("league {league_id} is not in the list"));
+    }
+    state.engine.save_config(&config)?;
+    Ok(config.leagues.clone())
+}
+
 /// Sleeper returns them in creation order, which means nothing to a reader.
 fn sorted_stored(leagues: Vec<League>) -> Vec<StoredLeague> {
     let mut stored: Vec<StoredLeague> = leagues
@@ -91,6 +113,7 @@ fn sorted_stored(leagues: Vec<League>) -> Vec<StoredLeague> {
             league_id: l.league_id,
             name: l.name,
             season: l.season,
+            status: Some(l.status),
         })
         .collect();
     stored.sort_by_key(|l| l.name.to_lowercase());
@@ -134,6 +157,12 @@ mod tests {
                 "{junk:?} should be refused"
             );
         }
+    }
+
+    #[test]
+    fn a_found_league_carries_where_sleeper_says_it_is() {
+        let stored = sorted_stored(vec![league("1", "Sharks")]);
+        assert_eq!(stored[0].status.as_deref(), Some("in_season"));
     }
 
     #[test]

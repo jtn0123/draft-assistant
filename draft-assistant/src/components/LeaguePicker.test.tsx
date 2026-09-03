@@ -6,18 +6,19 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { settle } from "../test/settle";
 
-const mocks = vi.hoisted(() => ({ sleeperLeagues: vi.fn() }));
+const mocks = vi.hoisted(() => ({ sleeperLeagues: vi.fn(), removeLeague: vi.fn() }));
 vi.mock("../api", () => ({ api: mocks }));
 
 import { LeaguePicker } from "./LeaguePicker";
 import type { StoredLeague } from "../types";
 
 const known: StoredLeague[] = [
-  { league_id: "1", name: "Dynasty Warriors", season: "2026" },
-  { league_id: "2", name: "Mock draft", season: "2026" },
+  { league_id: "1", name: "Dynasty Warriors", season: "2026", status: "in_season" },
+  { league_id: "2", name: "Mock draft", season: "2026", status: null },
 ];
 
 const onSwitch = vi.fn();
+const onForget = vi.fn();
 const onClose = vi.fn();
 
 function open(props: Partial<Parameters<typeof LeaguePicker>[0]> = {}) {
@@ -26,8 +27,10 @@ function open(props: Partial<Parameters<typeof LeaguePicker>[0]> = {}) {
       leagues={known}
       activeId="1"
       season="2026"
+      hasAccount={false}
       busy={false}
       onSwitch={onSwitch}
+      onForget={onForget}
       onClose={onClose}
       {...props}
     />,
@@ -44,16 +47,24 @@ describe("the leagues it offers", () => {
     open();
     const active = screen.getByRole("button", { name: /Dynasty Warriors/ });
     expect(active).toHaveAttribute("aria-pressed", "true");
-    expect(active).toHaveTextContent("on screen now");
-    expect(screen.getByRole("button", { name: /Mock draft/ })).toHaveAttribute(
+    expect(active).toHaveTextContent("in season · on screen now");
+    expect(screen.getByRole("button", { name: /^Mock draft/ })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
   });
 
+  it("offers to forget a loaded league, but never the one on screen", async () => {
+    open();
+    expect(screen.queryByRole("button", { name: "Forget Dynasty Warriors" })).toBeNull();
+    await settle(() => screen.getByRole("button", { name: "Forget Mock draft" }).click());
+    expect(onForget).toHaveBeenCalledWith("2");
+    expect(onSwitch).not.toHaveBeenCalled();
+  });
+
   it("switches to another one, and just closes on the one already showing", async () => {
     open();
-    await settle(() => screen.getByRole("button", { name: /Mock draft/ }).click());
+    await settle(() => screen.getByRole("button", { name: /^Mock draft/ }).click());
     expect(onSwitch).toHaveBeenCalledWith("2");
 
     await settle(() => screen.getByRole("button", { name: /Dynasty Warriors/ }).click());
@@ -65,13 +76,31 @@ describe("the leagues it offers", () => {
 describe("looking the account up on Sleeper", () => {
   it("asks for the season on screen and adds what comes back", async () => {
     mocks.sleeperLeagues.mockResolvedValue([
-      { league_id: "3", name: "Work league", season: "2026" },
+      { league_id: "3", name: "Work league", season: "2026", status: "pre_draft" },
     ]);
     open();
     await settle(() => screen.getByRole("button", { name: /Find my leagues/ }).click());
 
     expect(mocks.sleeperLeagues).toHaveBeenCalledWith("2026");
-    expect(screen.getByRole("button", { name: /Work league/ })).toBeInTheDocument();
+    const found = screen.getByRole("button", { name: /Work league/ });
+    expect(found).toHaveTextContent("draft ahead");
+    // Sleeper's answer is not the app's list, so there is nothing to forget.
+    expect(screen.queryByRole("button", { name: "Forget Work league" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Ask Sleeper again" })).toBeInTheDocument();
+  });
+
+  it("asks on its own when an account is saved, and only then", async () => {
+    mocks.sleeperLeagues.mockResolvedValue([
+      { league_id: "3", name: "Sharks League", season: "2026", status: "pre_draft" },
+    ]);
+    await settle(() => open({ hasAccount: true }));
+    expect(mocks.sleeperLeagues).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Sharks League/ })).toBeInTheDocument();
+  });
+
+  it("does not ask when there is no account to ask about", async () => {
+    await settle(() => open());
+    expect(mocks.sleeperLeagues).not.toHaveBeenCalled();
   });
 
   it("says why the lookup failed and leaves the known leagues alone", async () => {
@@ -80,7 +109,7 @@ describe("looking the account up on Sleeper", () => {
     await settle(() => screen.getByRole("button", { name: /Find my leagues/ }).click());
 
     expect(screen.getByText("no Sleeper account saved")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Mock draft/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Mock draft/ })).toBeInTheDocument();
   });
 });
 
@@ -107,7 +136,7 @@ describe("pasting a league or draft", () => {
 describe("while a switch is running", () => {
   it("stops every way of starting a second one", () => {
     open({ busy: true });
-    expect(screen.getByRole("button", { name: /Mock draft/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Mock draft/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Find my leagues/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Loading…" })).toBeDisabled();
   });

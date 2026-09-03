@@ -120,6 +120,7 @@ function GearIcon() {
 
 export function Header({
   leagueName,
+  onSwitchLeague,
   subtitle,
   meta,
   screen,
@@ -135,6 +136,8 @@ export function Header({
   footerNote,
 }: {
   leagueName: string;
+  /** Opens the league picker; the name in the header is the way in. */
+  onSwitchLeague: () => void;
   subtitle: string;
   meta: string;
   screen: Screen;
@@ -235,7 +238,19 @@ export function Header({
     <header className="app-header">
       <div className="header-identity">
         <div className="header-title">
-          <h1 className="ellipsis">{leagueName}</h1>
+          <h1 className="ellipsis">
+            <button
+              type="button"
+              className="league-switch"
+              title="Switch league"
+              onClick={onSwitchLeague}
+            >
+              {leagueName}
+              <svg className="league-switch-caret" viewBox="0 0 10 10" aria-hidden="true">
+                <path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+            </button>
+          </h1>
           <span className="muted header-subtitle">{subtitle}</span>
         </div>
         <div className="header-modes">

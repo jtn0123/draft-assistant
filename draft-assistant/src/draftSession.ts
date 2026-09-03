@@ -30,6 +30,8 @@ export interface DraftSession {
   busy: boolean;
   /** Every league this app has loaded before. */
   leagues: StoredLeague[];
+  /** A Sleeper account is saved, so the picker can look its leagues up. */
+  hasAccount: boolean;
   /** The saved league being restored, named on the launch screen. */
   restoring: StoredLeague | null;
   /** Why the last restore failed, or null. */
@@ -49,6 +51,10 @@ export interface DraftSession {
   /** Write the whole view out as JSON, and say where it went. */
   exportState: () => Promise<void>;
   switchLeague: (leagueId: string) => Promise<void>;
+  /** Drop a league from the picker's list. Nothing on disk goes with it. */
+  forgetLeague: (leagueId: string) => Promise<void>;
+  /** Re-read the config after something else changed it (the setup screen). */
+  refreshLeagues: () => Promise<void>;
   /**
    * Re-fetch projections and rebuild the board.
    *
@@ -79,6 +85,7 @@ export function useDraftSession(
   // Every league the app has loaded before, so switching to a mock draft and
   // back does not mean going to find an ID again.
   const [leagues, setLeagues] = useState<StoredLeague[]>([]);
+  const [hasAccount, setHasAccount] = useState(false);
 
   const applyView = useCallback((next: DraftView) => {
     // Hand the board back the array it has already sorted when the new view
@@ -115,6 +122,7 @@ export function useDraftSession(
       .then((config) => {
         if (cancelled) return null;
         setLeagues(config.leagues);
+        setHasAccount(config.my_user_id !== null);
         const leagueId = config.active_league_id;
         if (leagueId === null) {
           setShowSetup(true);
@@ -125,6 +133,7 @@ export function useDraftSession(
             league_id: leagueId,
             name: "",
             season: "",
+            status: null,
           },
         );
         return api.addLeague(leagueId);
@@ -214,12 +223,31 @@ export function useDraftSession(
       applyView(next);
       const config = await api.getConfig();
       setLeagues(config.leagues);
+      setHasAccount(config.my_user_id !== null);
       await startLive();
       showToast(`Switched to ${next.league.name} — the last league is still in the list`);
     } catch (e) {
       showToast(problem("Could not switch leagues", e), () => void switchLeague(leagueId));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const forgetLeague = async (leagueId: string) => {
+    try {
+      setLeagues(await api.removeLeague(leagueId));
+    } catch (e) {
+      showToast(problem("Could not forget that league", e));
+    }
+  };
+
+  const refreshLeagues = async () => {
+    try {
+      const config = await api.getConfig();
+      setLeagues(config.leagues);
+      setHasAccount(config.my_user_id !== null);
+    } catch (e) {
+      showToast(problem("Could not re-read the league list", e));
     }
   };
 
@@ -251,6 +279,7 @@ export function useDraftSession(
     pollHealth,
     busy,
     leagues,
+    hasAccount,
     restoring,
     launchError,
     attempt,
@@ -262,6 +291,8 @@ export function useDraftSession(
     undoLastPick,
     exportState,
     switchLeague,
+    forgetLeague,
+    refreshLeagues,
     refreshData,
   };
 }
