@@ -22,14 +22,19 @@ fn parse_args() -> (String, Option<String>, Option<String>) {
     )
 }
 
-async fn lookup_user(username: &str) -> Option<String> {
-    #[derive(serde::Deserialize)]
-    struct User {
-        user_id: String,
+/// Resolve a username through the engine's own client, so this dump gets the
+/// same timeouts, retries and host override as the app does. A bare
+/// `reqwest::get` had none of them: no deadline at all, one attempt, and it
+/// ignored `DRAFT_ASSISTANT_SLEEPER_BASE`, so a replay run still went to the
+/// live API for this one call.
+async fn lookup_user(engine: &Engine, username: &str) -> Option<String> {
+    match engine.client.user(username).await {
+        Ok(user) => Some(user.user_id),
+        Err(error) => {
+            eprintln!("warning: {error}");
+            None
+        }
     }
-    let url = format!("https://api.sleeper.app/v1/user/{username}");
-    let user: Option<User> = reqwest::get(&url).await.ok()?.json().await.ok()?;
-    user.map(|u| u.user_id)
 }
 
 #[tokio::main]
@@ -39,10 +44,7 @@ async fn main() {
 
     let mut config = AppConfig::default();
     if let Some(username) = &username {
-        config.my_user_id = lookup_user(username).await;
-        if config.my_user_id.is_none() {
-            eprintln!("warning: Sleeper user '{username}' not found");
-        }
+        config.my_user_id = lookup_user(&engine, username).await;
     }
 
     let loaded = match engine.load_any(&league_id, false, None).await {

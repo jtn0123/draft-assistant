@@ -246,7 +246,7 @@ mod retry_loop_tests {
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 9\r\nConnection: close\r\n\r\n{\"a\": 1}\n",
         );
         let body = SleeperClient::without_proxy()
-            .get_bytes(&url)
+            .get_bytes_within(&url, None)
             .await
             .expect("a 200 with a body");
         assert_eq!(String::from_utf8(body).unwrap(), "{\"a\": 1}\n");
@@ -259,7 +259,7 @@ mod retry_loop_tests {
             "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         );
         let error = SleeperClient::without_proxy()
-            .get_bytes(&url)
+            .get_bytes_within(&url, None)
             .await
             .expect_err("503 is not a body");
         assert!(error.retryable(), "{error}");
@@ -268,7 +268,7 @@ mod retry_loop_tests {
         let (url, hits) =
             stub("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         SleeperClient::without_proxy()
-            .get_bytes(&url)
+            .get_bytes_within(&url, None)
             .await
             .expect_err("404 is not a body");
         assert_eq!(hits.load(Ordering::SeqCst), 1);

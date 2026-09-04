@@ -7,7 +7,14 @@
 
 use crate::engine::now_secs;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// How long a leftover temp file has to sit before a startup sweep collects
+/// it. Long enough that a write in flight in another copy of the app — or in
+/// another test in the same binary — is never pulled out from under it.
+pub(crate) const TEMP_STALE_SECS: u64 = 3600;
 
 /// What a cache file holds: the payload plus when it was fetched.
 #[derive(Serialize, Deserialize)]
@@ -49,6 +56,62 @@ pub(crate) fn safe_key(raw: &str) -> String {
         .collect()
 }
 
+/// A temp file name nobody else will pick.
+///
+/// The old name was `{key}.tmp`, one per cache key: two writers of the same
+/// key — a poll tick and a manual refresh, or two windows of the app — wrote
+/// into the very same file at the same time and then each renamed the
+/// interleaved result over a cache that had been fine. The pid and a counter
+/// make the name unique per writer, so concurrent writes cannot mix and the
+/// rename that lands last simply wins with a whole file.
+pub(crate) fn temp_sibling(final_path: &Path) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let nonce = NEXT.fetch_add(1, Ordering::Relaxed);
+    let name = final_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "cache".to_string());
+    let unique = format!("{name}.{}.{nonce}.tmp", std::process::id());
+    final_path
+        .parent()
+        .map(|dir| dir.join(&unique))
+        .unwrap_or_else(|| PathBuf::from(unique))
+}
+
+/// Remove temp files an earlier run left behind.
+///
+/// A write that is interrupted between the temp file and the rename leaves
+/// its temp file forever, and with unique names those accumulate one per
+/// crash rather than being overwritten. Anything older than
+/// [`TEMP_STALE_SECS`] cannot belong to a write still in progress.
+pub(crate) fn sweep_stale_temp_files(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "tmp") {
+            continue;
+        }
+        if temp_file_is_stale(&path, TEMP_STALE_SECS) {
+            std::fs::remove_file(&path).ok();
+        }
+    }
+}
+
+/// Whether one temp file is old enough to collect. A file whose mtime cannot
+/// be read, or is in the future, is left alone: guessing wrong here deletes
+/// somebody's write in flight.
+fn temp_file_is_stale(path: &Path, older_than: u64) -> bool {
+    let Ok(modified) = std::fs::metadata(path).and_then(|m| m.modified()) else {
+        return false;
+    };
+    let Ok(age) = modified.elapsed() else {
+        return false;
+    };
+    age.as_secs() > older_than
+}
+
 /// Wrap a payload in its envelope and serialize it.
 pub(crate) fn envelope_json<T: Serialize>(fetched_at: u64, data: &T) -> Result<String, String> {
     serde_json::to_string(&Cached { fetched_at, data }).map_err(|e| format!("serialize: {e}"))
@@ -88,9 +151,22 @@ pub(crate) fn owner_only_dir(path: &std::path::Path) {
 /// The mode is narrowed before the rename, so the file is never visible to
 /// anyone else even for an instant.
 pub(crate) fn replace_file(tmp: PathBuf, final_path: PathBuf, json: String) -> Result<(), String> {
-    std::fs::write(&tmp, json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    write_synced(&tmp, json.as_bytes()).map_err(|e| format!("write {}: {e}", tmp.display()))?;
     owner_only(&tmp);
     std::fs::rename(&tmp, &final_path).map_err(|e| format!("replace {}: {e}", final_path.display()))
+}
+
+/// Write a file and make sure the bytes are actually on the disk before the
+/// caller renames it into place.
+///
+/// Without the `sync_all` the rename can reach the disk before the contents
+/// do: a power cut or a hard reset in that window leaves the cache entry
+/// pointing at a file of zeros, which reads back as a parse failure rather
+/// than as the previous good copy the atomic rename was supposed to protect.
+pub(crate) fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 /// Serialize and atomically replace, in one step.
@@ -121,18 +197,13 @@ mod tests {
     fn a_written_envelope_reads_back_with_its_timestamp() {
         let dir = temp("roundtrip");
         let target = dir.join("thing.json");
-        write_atomic(
-            dir.join("thing.tmp"),
-            target.clone(),
-            1234,
-            &vec![1u32, 2, 3],
-        )
-        .unwrap();
+        let tmp = temp_sibling(&target);
+        write_atomic(tmp.clone(), target.clone(), 1234, &vec![1u32, 2, 3]).unwrap();
         let (at, data): (u64, Vec<u32>) = read_cached(target).unwrap();
         assert_eq!(at, 1234);
         assert_eq!(data, vec![1, 2, 3]);
         // The temp file is renamed away, never left behind.
-        assert!(!dir.join("thing.tmp").exists());
+        assert!(!tmp.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -143,6 +214,82 @@ mod tests {
         let broken = dir.join("broken.json");
         std::fs::write(&broken, "{not json").unwrap();
         assert!(read_cached::<Vec<u32>>(broken).is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Two writers of the same cache key used to share one `{key}.tmp`: they
+    /// interleaved into it and each renamed the mixture over a cache file
+    /// that had been perfectly good. With a name per writer, whichever
+    /// rename lands last leaves a whole, parseable file.
+    #[test]
+    fn two_concurrent_writers_of_one_key_leave_a_valid_file() {
+        let dir = temp("concurrent");
+        let target = dir.join("shared.json");
+        let payload_a = vec![1u32; 4000];
+        let payload_b = vec![2u32; 4000];
+        let handles: Vec<_> = [payload_a.clone(), payload_b.clone()]
+            .into_iter()
+            .map(|payload| {
+                let target = target.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..20 {
+                        write_atomic(temp_sibling(&target), target.clone(), 7, &payload).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let (at, data): (u64, Vec<u32>) = read_cached(target).expect("a parseable cache file");
+        assert_eq!(at, 7);
+        assert!(data == payload_a || data == payload_b, "torn payload");
+        // Every temp file was renamed away.
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "left behind {leftovers:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn temp_names_are_unique_per_writer() {
+        let target = PathBuf::from("/somewhere/players.json");
+        let first = temp_sibling(&target);
+        let second = temp_sibling(&target);
+        assert_ne!(first, second);
+        assert_eq!(first.parent(), Some(std::path::Path::new("/somewhere")));
+        assert_eq!(first.extension().unwrap(), "tmp");
+    }
+
+    /// A write killed between its temp file and its rename leaves the temp
+    /// file behind forever. The sweep collects the old ones and keeps its
+    /// hands off anything recent, which may be a write still running.
+    #[test]
+    fn the_sweep_collects_old_temp_files_and_spares_fresh_ones() {
+        let dir = temp("sweep");
+        let stale = dir.join("players.json.1.0.tmp");
+        let fresh = dir.join("players.json.1.1.tmp");
+        let keeper = dir.join("players.json");
+        for path in [&stale, &fresh, &keeper] {
+            std::fs::write(path, "{}").unwrap();
+        }
+        let old =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(TEMP_STALE_SECS * 2);
+        std::fs::File::options()
+            .write(true)
+            .open(&stale)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+
+        sweep_stale_temp_files(&dir);
+        assert!(!stale.exists(), "the old temp file should have been swept");
+        assert!(fresh.exists(), "a fresh temp file may be a write in flight");
+        assert!(keeper.exists(), "the cache itself is not a temp file");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -164,7 +311,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = temp("mode");
         let target = dir.join("private.json");
-        write_atomic(dir.join("private.tmp"), target.clone(), 1, &vec![1u32]).unwrap();
+        write_atomic(temp_sibling(&target), target.clone(), 1, &vec![1u32]).unwrap();
         let mode = std::fs::metadata(&target).unwrap().permissions().mode();
         assert_eq!(
             mode & 0o777,

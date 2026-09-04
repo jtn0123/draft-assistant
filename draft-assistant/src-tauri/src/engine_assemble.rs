@@ -131,6 +131,11 @@ impl Engine {
             .map(|(i, p)| (p.player_id.clone(), i))
             .collect();
 
+        // Anything that failed to reach the disk while this league was being
+        // loaded — a full disk, a data directory that has gone read-only —
+        // goes on screen. It used to be discarded, so the only symptom was a
+        // cold, slow start every single launch with nothing said.
+        warnings.extend(self.take_cache_warnings());
         let keeper_pick_nos = self.load_keepers(&draft.draft_id);
         Ok(LoadedLeague {
             league,

@@ -343,9 +343,13 @@ fn the_chat_settings_report_what_this_machine_can_actually_do() {
     assert!(settings["models"].as_array().is_some_and(|m| !m.is_empty()));
     assert!(["keychain", "file"].contains(&settings["key_store"].as_str().expect("a store")));
 
-    // A budget is a positive number of dollars; anything else means "no cap".
+    // A budget is a number of dollars, and zero turns the cap off. A
+    // negative one is a typo rather than a setting, and is refused so it
+    // cannot be read later as "no cap".
     assert_eq!(s.ok("set_chat_budget", json!({"dollars": 12.5})), 12.5);
-    assert_eq!(s.ok("set_chat_budget", json!({"dollars": -3.0})), 0.0);
+    assert!(s
+        .err("set_chat_budget", json!({"dollars": -3.0}))
+        .contains("cannot be negative"));
     assert_eq!(s.ok("set_chat_budget", json!({"dollars": 0.0})), 0.0);
 
     assert_eq!(s.ok("set_chat_provider", json!({"provider": "api"})), "api");

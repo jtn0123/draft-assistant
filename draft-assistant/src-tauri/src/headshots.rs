@@ -95,7 +95,12 @@ fn data_url(bytes: &[u8]) -> Option<String> {
 fn age_secs(path: &Path) -> Option<u64> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
     let at = modified.duration_since(UNIX_EPOCH).ok()?.as_secs();
-    Some(now_secs().saturating_sub(at))
+    let now = now_secs();
+    // A file stamped in the future never ages: `saturating_sub` floors it at
+    // zero, so it would read as freshly fetched for as long as it sat there
+    // and no refresh would ever happen. The cache envelope treats such a
+    // timestamp as a miss (`cache::fresh_enough`) and so does this.
+    (at <= now).then(|| now - at)
 }
 
 /// What the cache on disk had to say about one image.
@@ -251,6 +256,32 @@ mod tests {
         assert!(!is_player_id("DET"));
         assert!(!is_player_id(""));
         assert!(!is_player_id("../etc/passwd"));
+    }
+
+    /// A file whose mtime is in the future — a clock that was wrong when it
+    /// was written, or has since been set back — used to age at zero
+    /// forever, so a broken image stayed "fresh" and was never refetched.
+    #[test]
+    fn a_file_stamped_in_the_future_has_no_age_rather_than_an_age_of_zero() {
+        let dir = std::env::temp_dir().join(format!(
+            "draft-assistant-headshot-age-{}-{}",
+            std::process::id(),
+            now_secs()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("11560.png");
+        std::fs::write(&path, b"bytes").unwrap();
+        assert!(age_secs(&path).is_some_and(|age| age < 5));
+
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(86_400))
+            .unwrap();
+        assert_eq!(age_secs(&path), None, "a future mtime is a miss");
+        assert_eq!(age_secs(&dir.join("absent.png")), None);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

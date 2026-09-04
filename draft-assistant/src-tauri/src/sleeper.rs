@@ -1,9 +1,7 @@
-//! Read-only Sleeper API client.
-//!
-//! Everything here is unauthenticated GETs against api.sleeper.app.
-//! The projections endpoints are undocumented, so every response is
-//! deserialized defensively (unknown fields ignored, missing fields defaulted)
-//! and raw JSON snapshots are cached on disk by the caller.
+//! Read-only Sleeper API client. Everything here is unauthenticated GETs against api.sleeper.app. The
+//! projections endpoints are undocumented, so every response is deserialized
+//! defensively (unknown fields ignored, missing fields defaulted) and raw JSON
+//! snapshots are cached on disk by the caller.
 
 use crate::sleeper_error::SleeperError;
 use serde::{Deserialize, Serialize};
@@ -19,6 +17,13 @@ pub(crate) const BASE: &str = "https://api.sleeper.app/v1";
 pub(crate) const BASE_UNDOC: &str = "https://api.sleeper.app";
 /// Total attempts per request, including the first.
 const RETRIES: u32 = 3;
+
+/// How long the players dictionary may take. The client-wide timeout suits
+/// the small JSON endpoints; this body is ~14.6 MB, needing ~15 Mbps to land
+/// inside eight seconds. Below that — a hotspot, a crowded draft-night wifi
+/// — it was cancelled every time and a cold start could never finish. The
+/// connect timeout is untouched: an unreachable host still fails in three.
+pub(crate) const PLAYERS_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A Sleeper account, as returned by `/v1/user/{username}`.
 #[derive(Debug, Clone, Deserialize)]
@@ -324,16 +329,19 @@ impl SleeperClient {
     /// the task is hundreds of milliseconds during which no other task on the
     /// runtime moves. Handing back bytes lets the caller push that onto the
     /// blocking pool.
-    async fn get_bytes_once(&self, url: &str) -> Result<Vec<u8>, SleeperError> {
-        let resp = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| SleeperError::Transport {
-                url: url.to_string(),
-                detail: e.to_string(),
-            })?;
+    async fn get_bytes_once(
+        &self,
+        url: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Vec<u8>, SleeperError> {
+        let mut request = self.http.get(url);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
+        let resp = request.send().await.map_err(|e| SleeperError::Transport {
+            url: url.to_string(),
+            detail: e.to_string(),
+        })?;
         let status = resp.status();
         if !status.is_success() {
             return Err(SleeperError::Http {
@@ -389,10 +397,17 @@ impl SleeperClient {
     }
 
     /// A GET that hands back the raw body, for payloads too big to parse on
-    /// the runtime thread. Same retry policy as `get_json`.
-    pub(crate) async fn get_bytes(&self, url: &str) -> Result<Vec<u8>, SleeperError> {
+    /// the runtime thread. Same retry policy as `get_json`. `timeout` gives
+    /// the request a deadline of its own, for a body the client-wide timeout
+    /// was never sized for; `None` keeps the client's.
+    pub(crate) async fn get_bytes_within(
+        &self,
+        url: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Vec<u8>, SleeperError> {
         let url = crate::sleeper_host::route_to(url, &self.host);
-        self.with_retries(|| self.get_bytes_once(&url)).await
+        self.with_retries(|| self.get_bytes_once(&url, timeout))
+            .await
     }
 
     /// Resolve a Sleeper username to its user id.
@@ -454,7 +469,8 @@ impl SleeperClient {
     /// Bytes rather than a `HashMap` because the caller parses it on the
     /// blocking pool — see `projections::players`.
     pub async fn players_bytes(&self) -> Result<Vec<u8>, SleeperError> {
-        self.get_bytes(&format!("{BASE}/players/nfl")).await
+        self.get_bytes_within(&format!("{BASE}/players/nfl"), Some(PLAYERS_TIMEOUT))
+            .await
     }
 
     /// Undocumented: full-season raw-stat projections for one season.

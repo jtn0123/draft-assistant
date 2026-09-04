@@ -252,9 +252,11 @@ fn a_draft_that_comes_back_with_no_teams_is_not_adopted() {
 #[test]
 fn a_league_that_cannot_be_saved_is_not_left_half_added() {
     let s = session("unsaveable-config");
-    // A directory where the config's temporary file goes, so the write fails
-    // the way a full or read-only disk would.
-    std::fs::create_dir_all(s.data_dir.join("config.json.tmp")).expect("the blocker is in place");
+    // A directory standing where the config file itself belongs, so the
+    // rename that puts it in place fails the way a full or read-only disk
+    // would. (The temp file it is renamed from has a unique name per writer
+    // now, so there is no fixed temp path to block instead.)
+    std::fs::create_dir_all(s.data_dir.join("config.json")).expect("the blocker is in place");
 
     let error = s.err("add_league", json!({"leagueId": LEAGUE_ID, "force": true}));
     assert!(error.contains("could not save"), "{error}");

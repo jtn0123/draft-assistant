@@ -5,7 +5,9 @@
 //! and the model can see.
 
 use crate::board::BoardPlayer;
-use crate::cache::{envelope_json, fresh_enough, read_cached, replace_file, write_atomic};
+use crate::cache::{
+    envelope_json, fresh_enough, read_cached, replace_file, temp_sibling, write_atomic,
+};
 use crate::engine_assemble::AssemblyParts;
 use crate::mock_league::synthesize_league;
 use crate::roster::RosterRules;
@@ -135,6 +137,14 @@ pub struct LoadedLeague {
 pub struct Engine {
     pub client: SleeperClient,
     pub data_dir: PathBuf,
+    /// Cache writes that failed, waiting to be shown to the user.
+    ///
+    /// A full disk or a read-only data directory used to be completely
+    /// silent: every fetch worked, nothing was ever written, and the app just
+    /// went back to the wire for 15 MB of players on every launch. The
+    /// failures are collected here and drained into the loaded league's
+    /// warnings, next to the mock-scoring one.
+    pub(crate) cache_warnings: std::sync::Mutex<Vec<(String, String)>>,
     /// The Keychain's answer, remembered.
     ///
     /// Reading it shells out to `/usr/bin/security`: tens of milliseconds on a
@@ -170,11 +180,43 @@ impl Engine {
         // Everything under here — rosters, league member names, Sleeper user
         // ids, the players dictionary — is the user's alone to read.
         crate::cache::owner_only_dir(&data_dir);
+        // A write killed between its temp file and its rename leaves the temp
+        // file behind. Nothing ever collected them, so they accumulated in
+        // the data directory for the life of the install.
+        crate::cache::sweep_stale_temp_files(&data_dir);
         Self {
             client,
             data_dir,
+            cache_warnings: std::sync::Mutex::new(Vec::new()),
             key_cache: tokio::sync::Mutex::new(None),
         }
+    }
+
+    /// Remember that a cache write failed, at most once per cache file.
+    ///
+    /// Deduplicated by name rather than by message: the detail carries the
+    /// temp file's own unique name, so a poll tick failing to write the same
+    /// key every three seconds would otherwise stack up one warning per tick.
+    pub(crate) fn note_cache_failure(&self, name: &str, detail: &str) {
+        if let Ok(mut warnings) = self.cache_warnings.lock() {
+            if warnings.iter().all(|(seen, _)| seen != name) {
+                warnings.push((name.to_string(), format!("{name} was not cached: {detail}")));
+            }
+        }
+    }
+
+    /// Take the cache-write failures collected since the last load, so one
+    /// load reports each of them once.
+    pub(crate) fn take_cache_warnings(&self) -> Vec<String> {
+        self.cache_warnings
+            .lock()
+            .map(|mut w| {
+                std::mem::take(&mut *w)
+                    .into_iter()
+                    .map(|(_, m)| m)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn cache_path(&self, name: &str) -> PathBuf {
@@ -227,17 +269,24 @@ impl Engine {
         let Ok(json) = envelope_json(fetched_at, data) else {
             return fetched_at;
         };
-        let tmp = self.cache_path(&format!("{name}.tmp"));
         let final_path = self.cache_path(name);
-        let _ = tokio::task::spawn_blocking(move || replace_file(tmp, final_path, json)).await;
+        let tmp = temp_sibling(&final_path);
+        let written =
+            tokio::task::spawn_blocking(move || replace_file(tmp, final_path, json)).await;
+        if let Ok(Err(error)) = written {
+            self.note_cache_failure(name, &error);
+        }
         fetched_at
     }
 
     pub(crate) fn write_cache<T: Serialize>(&self, name: &str, data: &T) -> u64 {
-        let fetched_at = now_secs();
-        let tmp = self.cache_path(&format!("{name}.tmp"));
-        write_atomic(tmp, self.cache_path(name), fetched_at, data).ok();
-        fetched_at
+        match self.write_cache_checked(name, data) {
+            Ok(fetched_at) => fetched_at,
+            Err(error) => {
+                self.note_cache_failure(name, &error);
+                now_secs()
+            }
+        }
     }
 
     pub(crate) fn write_cache_checked<T: Serialize>(
@@ -246,9 +295,9 @@ impl Engine {
         data: &T,
     ) -> Result<u64, String> {
         let fetched_at = now_secs();
-        let tmp = self.cache_path(&format!("{name}.tmp"));
-        write_atomic(tmp, self.cache_path(name), fetched_at, data)
-            .map_err(|e| format!("{name}: {e}"))?;
+        let final_path = self.cache_path(name);
+        let tmp = temp_sibling(&final_path);
+        write_atomic(tmp, final_path, fetched_at, data).map_err(|e| format!("{name}: {e}"))?;
         Ok(fetched_at)
     }
 
@@ -286,8 +335,8 @@ impl Engine {
         let json = serde_json::to_string_pretty(config)
             .map_err(|e| format!("could not prepare your settings to be saved: {e}"))?;
         let live = self.cache_path("config.json");
-        let tmp = self.cache_path("config.json.tmp");
-        std::fs::write(&tmp, json)
+        let tmp = temp_sibling(&live);
+        crate::cache::write_synced(&tmp, json.as_bytes())
             .map_err(|e| format!("could not save your settings to {}: {e}", tmp.display()))?;
         crate::cache::owner_only(&tmp);
         if live.exists() {

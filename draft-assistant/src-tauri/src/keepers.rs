@@ -45,18 +45,26 @@ impl KeeperStore for Engine {
 /// A failure to write is a warning, not an error: the app works perfectly
 /// well tonight from the in-memory set, and only forgets at the next launch.
 pub fn note_keepers(engine: &impl KeeperStore, loaded: &mut LoadedLeague) -> Option<String> {
+    let keepers = merge_keepers(loaded)?;
+    engine
+        .save_keepers(&loaded.draft.draft_id, &keepers)
+        .err()
+        .map(|error| format!("keepers not saved: {error}"))
+}
+
+/// The in-memory half of `note_keepers`: fold what this feed shows into the
+/// league's set and hand back the set to write down, or `None` when nothing
+/// was learned and there is nothing to write.
+///
+/// Separate from the write so the poll loop can do this part under the
+/// `loaded` lock and the disk part without it.
+pub fn merge_keepers(loaded: &mut LoadedLeague) -> Option<HashSet<u32>> {
     let teams = loaded.draft.settings.teams.max(1);
     let rounds = loaded.draft.settings.rounds.max(1);
     let seen = picks::keeper_pick_nos(&loaded.api_picks, teams, rounds);
     let before = loaded.keeper_pick_nos.len();
     loaded.keeper_pick_nos.extend(seen);
-    if loaded.keeper_pick_nos.len() == before {
-        return None;
-    }
-    engine
-        .save_keepers(&loaded.draft.draft_id, &loaded.keeper_pick_nos)
-        .err()
-        .map(|error| format!("keepers not saved: {error}"))
+    (loaded.keeper_pick_nos.len() != before).then(|| loaded.keeper_pick_nos.clone())
 }
 
 /// Every keeper this league knows about: the remembered set plus whatever the

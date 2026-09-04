@@ -58,10 +58,16 @@ fn set_starters(
     m.starter_ids()
         .iter()
         .filter(|id| id.as_str() != "0")
-        .map(|id| Starter {
-            position: position_of(players, id).unwrap_or_default(),
-            team: team_of(players, id),
-            points: projections.get(id).copied().unwrap_or(0.0),
+        .map(|id| {
+            let points = projections.get(id).copied().unwrap_or(0.0);
+            Starter {
+                position: position_of(players, id).unwrap_or_default(),
+                team: team_of(players, id),
+                points,
+                // The backtest scores a week before it is played, so every
+                // point of every projection is still unsettled.
+                uncertain: points,
+            }
         })
         .collect()
 }
