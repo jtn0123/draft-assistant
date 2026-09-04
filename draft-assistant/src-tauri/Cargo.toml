@@ -40,7 +40,7 @@ serde_json = "1.0"
 # targets this app does not ship to — on macOS `cargo tree` shows one reqwest,
 # not two. Moving to 0.13 pulls in a different rustls/aws-lc-rs chain for no
 # benefit here; revisit when Android becomes a real target.
-reqwest = { version = "0.12.28", features = ["json", "gzip"] }
+reqwest = { version = "0.13.4", features = ["json", "gzip"] }
 tokio = { version = "1.53", features = ["process", "rt-multi-thread", "macros", "time", "sync"] }
 # Already in the tree via reqwest; used for bounded request concurrency.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
