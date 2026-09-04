@@ -38,6 +38,7 @@ function Harness({
     <>
       <Header
         leagueName="Dynasty Warriors"
+        hostedBy={null}
         onSwitchLeague={onSwitchLeague}
         subtitle="Week 3"
         meta="14-team full-PPR"
@@ -194,6 +195,7 @@ describe("the sync pill", () => {
     const off = (screen_: "season" | "draft") => (
       <Header
         leagueName="Dynasty Warriors"
+        hostedBy={null}
         onSwitchLeague={() => {}}
         subtitle="Week 3"
         meta="14-team full-PPR"
@@ -274,6 +276,7 @@ describe("re-pulling the picks", () => {
     render(
       <Header
         leagueName="Dynasty Warriors"
+        hostedBy={null}
         onSwitchLeague={() => {}}
         subtitle="Week 3"
         meta="14-team full-PPR"

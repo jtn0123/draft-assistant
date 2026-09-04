@@ -13,12 +13,17 @@ import { PlayerName, PosBadge, PanelHead, Empty } from "./bits";
 export function Setup({
   onReady,
   onConnectYahoo,
+  onJoinHost,
 }: {
   onReady: (view: DraftView) => void;
   /** Open the Yahoo connect dialog instead. A Yahoo player has no Sleeper
    *  league id to paste, and this screen used to be the only way in — so the
    *  app was unusable for them until a Sleeper league had been loaded first. */
   onConnectYahoo: () => void;
+  /** Join a Draft Assistant already running on the network instead of
+   *  loading a league here. Someone handed a second screen an app with no
+   *  league of its own used to have to set one up before they could watch. */
+  onJoinHost: () => void;
 }) {
   const [username, setUsername] = useState("");
   const [leagueId, setLeagueId] = useState("");
@@ -83,6 +88,9 @@ export function Setup({
           onClick={onConnectYahoo}
         >
           Connect Yahoo instead
+        </button>
+        <button type="button" className="btn-ghost" disabled={busy !== null} onClick={onJoinHost}>
+          Join another Draft Assistant…
         </button>
       </div>
       <span className="muted small">

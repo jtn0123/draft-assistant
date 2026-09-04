@@ -2,9 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppConfig,
+  CompanionDevice,
+  CompanionStatus,
   DraftView,
   PollHealth,
   SecondOpinionImport,
+  SharedChatThread,
   StoredLeague,
   YahooConnectStart,
   YahooStatus,
@@ -12,6 +15,8 @@ import type {
 import type { SeasonView } from "./season-types";
 import type { ChatReply, ChatRequest, ChatSettings } from "./chat-types";
 import { ReplayFeed, replaySource } from "./replay";
+import { readFollow } from "./companion";
+import { remoteApi } from "./apiRemote";
 
 // Kept in step with DRAFT_SCHEMA_VERSION in src-tauri/src/view_types.rs and
 // SEASON_SCHEMA_VERSION in src-tauri/src/season.rs. Bump both sides together
@@ -109,6 +114,26 @@ export interface Api {
   chatSettings(): Promise<ChatSettings>;
   chatSuggestions(screen: string): Promise<string[]>;
   askClaude(args: ChatRequest): Promise<ChatReply>;
+
+  // ---------- phone & second screen (COMPANION-API.md) ----------
+
+  /** Whether the companion server is up, and on what URL and code. */
+  companionStatus(): Promise<CompanionStatus>;
+  /** Start listening on the LAN. Resolves to the status that follows. */
+  companionEnable(): Promise<CompanionStatus>;
+  companionDisable(): Promise<CompanionStatus>;
+  /** New pairing code; every paired device is dropped. */
+  companionRevoke(): Promise<CompanionStatus>;
+  /** The name this machine signs its shared-chat messages with. Resolves to
+   *  the name that was actually kept. */
+  setDeviceName(name: string): Promise<string>;
+  /** The shared thread for one screen of the league on screen. */
+  sharedChatGet(screen: string): Promise<SharedChatThread>;
+  /** Ask on the shared thread as this device. The answer arrives on the
+   *  `shared-chat` event, not here. */
+  sharedChatSend(screen: string, text: string): Promise<void>;
+  onSharedChat(handler: (thread: SharedChatThread) => void): Promise<UnlistenFn>;
+  onCompanionDevices(handler: (devices: CompanionDevice[]) => void): Promise<UnlistenFn>;
 }
 
 const tauriApi: Api = {
@@ -158,6 +183,17 @@ const tauriApi: Api = {
   chatSettings: () => invoke<ChatSettings>("chat_settings"),
   chatSuggestions: (screen) => invoke<string[]>("chat_suggestions", { screen }),
   askClaude: (args) => invoke<ChatReply>("ask_claude", args),
+  companionStatus: () => invoke<CompanionStatus>("companion_status"),
+  companionEnable: () => invoke<CompanionStatus>("companion_enable"),
+  companionDisable: () => invoke<CompanionStatus>("companion_disable"),
+  companionRevoke: () => invoke<CompanionStatus>("companion_revoke"),
+  setDeviceName: (name) => invoke<string>("set_device_name", { name }),
+  sharedChatGet: (screen) => invoke<SharedChatThread>("shared_chat_get", { screen }),
+  sharedChatSend: (screen, text) => invoke<void>("shared_chat_send", { screen, text }),
+  onSharedChat: (handler) =>
+    listen<SharedChatThread>("shared-chat", (event) => handler(event.payload)),
+  onCompanionDevices: (handler) =>
+    listen<CompanionDevice[]>("companion-devices", (event) => handler(event.payload)),
 };
 
 /**
@@ -290,6 +326,63 @@ function browserApi(): Api {
       }),
     chatSuggestions: () => Promise.resolve([]),
     askClaude: () => readOnly("Ask Claude requires the desktop app"),
+    // The preview has no LAN server, so the panel is shown with plausible
+    // fixtures: turning it on flips a variable in this closure and nothing
+    // else, which is enough to lay the dialog out and read its copy.
+    companionStatus: () => Promise.resolve(previewCompanion()),
+    companionEnable: () => {
+      previewEnabled = true;
+      return Promise.resolve(previewCompanion());
+    },
+    companionDisable: () => {
+      previewEnabled = false;
+      return Promise.resolve(previewCompanion());
+    },
+    companionRevoke: () => {
+      previewCode = String(100000 + Math.floor(Math.random() * 900000));
+      return Promise.resolve(previewCompanion());
+    },
+    setDeviceName: (name) => {
+      previewHostName = name.trim() === "" ? previewHostName : name.trim();
+      return Promise.resolve(previewHostName);
+    },
+    sharedChatGet: async (screen) => ({
+      league_id: (await fixture()).league.league_id,
+      screen,
+      busy: false,
+      entries: [],
+    }),
+    sharedChatSend: () => readOnly("the shared chat needs the desktop app"),
+    onSharedChat: () => Promise.resolve(() => undefined),
+    onCompanionDevices: () => Promise.resolve(() => undefined),
+  };
+}
+
+// The preview's companion server, such as it is: three variables the dialog
+// can move, so its copy and layout are reviewable outside the shell.
+let previewEnabled = false;
+let previewCode = "418902";
+let previewHostName = "This browser";
+
+function previewCompanion(): CompanionStatus {
+  return {
+    enabled: previewEnabled,
+    url: previewEnabled ? "http://192.168.1.24:7878/" : "",
+    code: previewCode,
+    port: 7878,
+    host_name: previewHostName,
+    devices: previewEnabled
+      ? [
+          {
+            device_id: "preview-phone",
+            name: "Rob's iPhone",
+            kind: "phone",
+            paired_at_ms: Date.now() - 600000,
+            last_seen_ms: Date.now() - 4000,
+            connected: true,
+          },
+        ]
+      : [],
   };
 }
 
@@ -306,4 +399,9 @@ function previewLeague(v: DraftView): StoredLeague {
   };
 }
 
-export const api: Api = inTauri ? tauriApi : browserApi();
+/** The host this window follows, read once as the module is created — before
+ *  the Tauri-or-browser choice, because a follower talks to another app's
+ *  server whichever shell it is running in. */
+const follow = readFollow();
+
+export const api: Api = follow !== null ? remoteApi(follow) : inTauri ? tauriApi : browserApi();

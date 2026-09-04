@@ -12,6 +12,7 @@ import { ChatControls } from "./ChatControls";
 import { ChatKeyForm } from "./ChatKeyForm";
 import { ChatSessionBar } from "./ChatSessionBar";
 import { Markdown } from "./Markdown";
+import { SharedChat } from "./SharedChat";
 import { beginChat, useChatSessions } from "./useChatSessions";
 
 // Ship with this chunk, not with the window. live.css owns the pulsing dot
@@ -48,6 +49,7 @@ export function Chat({
   screen,
   leagueId,
   contextNote,
+  sharedOnly = false,
   onClose,
 }: {
   screen: Screen;
@@ -55,6 +57,9 @@ export function Chat({
    *  so switching leagues opens a thread about the board now on screen. */
   leagueId: string;
   contextNote: string;
+  /** Follower mode: the host owns the local composer, its key and its budget,
+   *  so the panel offers the shared thread and nothing else. */
+  sharedOnly?: boolean;
   onClose: () => void;
 }) {
   const scope = chatScope(screen, leagueId);
@@ -62,6 +67,9 @@ export function Chat({
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [effort, setEffort] = useState(DEFAULT_EFFORT);
   const [compact, setCompact] = useState(false);
+  // Whether the pinned shared thread is the one on screen rather than one of
+  // this Mac's saved conversations.
+  const [shared, setShared] = useState(sharedOnly);
   // The conversation this panel opens with: the newest one stored for this
   // screen and league, or a fresh one. Read while the state below is
   // initialised, so a reopened thread paints once rather than appearing after
@@ -118,7 +126,7 @@ export function Chat({
       .then((next) => {
         if (cancelled) return;
         setSettings(next);
-        setShowKeyForm(next.provider === "api" && !next.has_key);
+        setShowKeyForm(!sharedOnly && next.provider === "api" && !next.has_key);
         // The backend holds the cap and the running total it is checked
         // against; the stored copy here is only a cache of them.
         setChatBudget(next.budget_usd);
@@ -134,7 +142,7 @@ export function Chat({
     return () => {
       cancelled = true;
     };
-  }, [settingsToken, scope]);
+  }, [settingsToken, scope, sharedOnly]);
 
   useEffect(() => {
     let cancelled = false;
@@ -290,7 +298,7 @@ export function Chat({
             type="button"
             className="btn-ghost btn-row"
             onClick={() => setAskingNew(true)}
-            disabled={entries.length === 0}
+            disabled={shared || entries.length === 0}
           >
             New
           </button>
@@ -300,32 +308,38 @@ export function Chat({
         </div>
       </div>
 
-      <ChatControls
-        settings={settings}
-        models={settings?.models ?? [DEFAULT_MODEL]}
-        model={model}
-        onModel={setModel}
-        efforts={allowedEfforts}
-        effort={activeEffort}
-        onEffort={setEffort}
-        onProvider={pickProvider}
-      />
+      {!shared && (
+        <ChatControls
+          settings={settings}
+          models={settings?.models ?? [DEFAULT_MODEL]}
+          model={model}
+          onModel={setModel}
+          efforts={allowedEfforts}
+          effort={activeEffort}
+          onEffort={setEffort}
+          onProvider={pickProvider}
+        />
+      )}
 
-      <ChatSessionBar
-        sessions={sessions.sessions}
-        currentId={sessions.sessionId}
-        saved={sessions.saved}
-        spent={spend.costUsd}
-        screenSpent={screenSpend}
-        budget={budget}
-        provider={settings?.provider ?? null}
-        disabled={sending}
-        onOpen={sessions.open}
-        onDelete={sessions.remove}
-        onBudget={pickBudget}
-      />
+      {!sharedOnly && (
+        <ChatSessionBar
+          sessions={sessions.sessions}
+          currentId={sessions.sessionId}
+          shared={shared}
+          onShared={setShared}
+          saved={sessions.saved}
+          spent={spend.costUsd}
+          screenSpent={screenSpend}
+          budget={budget}
+          provider={settings?.provider ?? null}
+          disabled={sending}
+          onOpen={sessions.open}
+          onDelete={sessions.remove}
+          onBudget={pickBudget}
+        />
+      )}
 
-      {askingNew && (
+      {askingNew && !shared && (
         <div className="chat-newbar">
           <span className="small">Start a new chat —</span>
           <button type="button" className="btn-primary btn-row" onClick={startFresh}>
@@ -344,101 +358,112 @@ export function Chat({
         </div>
       )}
 
-      <div className={compact ? "chat-thread is-compact" : "chat-thread"} ref={threadRef}>
-        {showKeyForm ? (
-          <ChatKeyForm
-            hint={settings?.key_hint ?? null}
-            store={settings?.key_store ?? null}
-            onSaved={() => setSettingsToken((n) => n + 1)}
-          />
-        ) : entries.length === 0 ? (
-          <div className="chat-empty">
-            <span className="chat-empty-title">New chat</span>
-            <span className="mid small">{EMPTY_NOTE[screen]}</span>
+      {shared ? (
+        <SharedChat screen={screen} compact={compact} />
+      ) : (
+        <>
+          <div className={compact ? "chat-thread is-compact" : "chat-thread"} ref={threadRef}>
+            {showKeyForm ? (
+              <ChatKeyForm
+                hint={settings?.key_hint ?? null}
+                store={settings?.key_store ?? null}
+                onSaved={() => setSettingsToken((n) => n + 1)}
+              />
+            ) : entries.length === 0 ? (
+              <div className="chat-empty">
+                <span className="chat-empty-title">New chat</span>
+                <span className="mid small">{EMPTY_NOTE[screen]}</span>
+              </div>
+            ) : (
+              entries.map((entry) => (
+                <div className={`msg is-${entry.kind}`} key={entry.id}>
+                  {entry.label && <span className="msg-label">{entry.label}</span>}
+                  {entry.kind === "claude" ? (
+                    <Markdown text={entry.lines.join("\n\n")} />
+                  ) : (
+                    entry.lines.map((line, i) => (
+                      <span className="msg-line" key={i}>
+                        {line}
+                      </span>
+                    ))
+                  )}
+                </div>
+              ))
+            )}
           </div>
-        ) : (
-          entries.map((entry) => (
-            <div className={`msg is-${entry.kind}`} key={entry.id}>
-              {entry.label && <span className="msg-label">{entry.label}</span>}
-              {entry.kind === "claude" ? (
-                <Markdown text={entry.lines.join("\n\n")} />
-              ) : (
-                entry.lines.map((line, i) => (
-                  <span className="msg-line" key={i}>
-                    {line}
-                  </span>
-                ))
-              )}
-            </div>
-          ))
-        )}
-      </div>
 
-      <div className="chat-composer">
-        {sending && (
-          <div className="chat-thinking">
-            <span className="live-dot" />
-            {THINKING_NOTE[activeEffort] ?? "Thinking…"}
-          </div>
-        )}
-        {nearingCap && (
-          <div className="chat-stopped" role="status">
-            This screen&rsquo;s chats have spent {formatUsd(spentOnScreen)} of their{" "}
-            {formatUsd(budget)} budget — the next question may be refused. Raise the budget above.
-          </div>
-        )}
-        {!showKeyForm && entries.length === 0 && suggestions.length > 0 && (
-          <div className="chat-suggestions">
-            {suggestions.map((text) => (
-              <button
-                key={text}
-                type="button"
-                className="chat-suggestion"
-                disabled={composerOff}
-                onClick={() => void send(text)}
-              >
-                {text}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="chat-input-row">
-          <input
-            className="text-input chat-input"
-            /* The form above is the one place a key is added; the composer
+          <div className="chat-composer">
+            {sending && (
+              <div className="chat-thinking">
+                <span className="live-dot" />
+                {THINKING_NOTE[activeEffort] ?? "Thinking…"}
+              </div>
+            )}
+            {nearingCap && (
+              <div className="chat-stopped" role="status">
+                This screen&rsquo;s chats have spent {formatUsd(spentOnScreen)} of their{" "}
+                {formatUsd(budget)} budget — the next question may be refused. Raise the budget
+                above.
+              </div>
+            )}
+            {!showKeyForm && entries.length === 0 && suggestions.length > 0 && (
+              <div className="chat-suggestions">
+                {suggestions.map((text) => (
+                  <button
+                    key={text}
+                    type="button"
+                    className="chat-suggestion"
+                    disabled={composerOff}
+                    onClick={() => void send(text)}
+                  >
+                    {text}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="chat-input-row">
+              <input
+                className="text-input chat-input"
+                /* The form above is the one place a key is added; the composer
                points at it rather than asking a second time. */
-            placeholder={showKeyForm ? "Waiting on the key above…" : "Ask about the board…"}
-            value={draft}
-            disabled={composerOff}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void send(draft);
-            }}
-            aria-label="Ask Claude"
-          />
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={composerOff || draft.trim() === ""}
-            onClick={() => void send(draft)}
-          >
-            Send
-          </button>
-        </div>
-        <span className="muted chat-foot">
-          {model} · {note?.[1] ?? activeEffort} ·{" "}
-          {settings?.provider === "claude_code" ? "via Claude Code" : "via the API"} · reads your
-          board, never writes to Sleeper
-          {settings?.has_key === true && (
-            <>
-              {" · "}
-              <button type="button" className="link-btn" onClick={() => setShowKeyForm((s) => !s)}>
-                {showKeyForm ? "cancel" : "change key"}
+                placeholder={showKeyForm ? "Waiting on the key above…" : "Ask about the board…"}
+                value={draft}
+                disabled={composerOff}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void send(draft);
+                }}
+                aria-label="Ask Claude"
+              />
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={composerOff || draft.trim() === ""}
+                onClick={() => void send(draft)}
+              >
+                Send
               </button>
-            </>
-          )}
-        </span>
-      </div>
+            </div>
+            <span className="muted chat-foot">
+              {model} · {note?.[1] ?? activeEffort} ·{" "}
+              {settings?.provider === "claude_code" ? "via Claude Code" : "via the API"} · reads
+              your board, never writes to Sleeper
+              {settings?.has_key === true && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => setShowKeyForm((s) => !s)}
+                  >
+                    {showKeyForm ? "cancel" : "change key"}
+                  </button>
+                </>
+              )}
+            </span>
+          </div>
+        </>
+      )}
     </aside>
   );
 }

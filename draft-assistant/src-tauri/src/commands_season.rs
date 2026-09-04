@@ -191,9 +191,11 @@ pub async fn start_season_polling<R: tauri::Runtime>(
             // the screen still has to hear that the attempt was made and lost.
             if let Some(health) = &tick.health {
                 app.emit("season-poll-health", health).ok();
+                crate::companion::publish(&app, "season-poll-health", health);
             }
             if let Some(view) = &tick.view {
                 app.emit("season-updated", view).ok();
+                crate::companion::publish(&app, "season-updated", view);
             }
             tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
         }

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Draft Assistant companion</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <div id="companion-root">
+      <p id="reconnect-pill" class="pill" role="status" hidden>Reconnecting…</p>
+
+      <section id="pair-screen" class="screen pair" aria-labelledby="pair-title">
+        <h1 id="pair-title">Draft Assistant</h1>
+        <p id="pair-host" class="muted" hidden></p>
+        <p id="pair-error" class="error" role="alert" hidden></p>
+        <form id="pair-form" novalidate>
+          <label class="field">
+            <span>Pairing code</span>
+            <input
+              id="pair-code"
+              name="code"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              autocomplete="one-time-code"
+              maxlength="6"
+              placeholder="123456"
+              required
+            />
+          </label>
+          <label class="field">
+            <span>This device</span>
+            <input id="pair-device" name="device" autocomplete="off" required />
+          </label>
+          <button id="pair-submit" class="primary" type="submit">Connect</button>
+        </form>
+        <p class="muted small">
+          Ask the host for the six-digit code shown under Phone &amp; second screen.
+        </p>
+      </section>
+
+      <main id="app-screen" class="screen" hidden>
+        <section id="tab-now" class="panel" aria-label="Now">
+          <div id="clock-strip" class="strip"></div>
+          <h2>Recommended</h2>
+          <ul id="recs" class="cards"></ul>
+          <h2>Your roster</h2>
+          <div id="roster" class="roster"></div>
+          <p id="health" class="muted small"></p>
+        </section>
+
+        <section id="tab-picks" class="panel" aria-label="Picks" hidden>
+          <h2>Last picks</h2>
+          <ul id="picks" class="rows"></ul>
+        </section>
+
+        <section id="tab-week" class="panel" aria-label="Week" hidden>
+          <div id="week-header" class="strip"></div>
+          <h2>Start / sit</h2>
+          <ul id="week-calls" class="rows"></ul>
+        </section>
+
+        <!-- One chat block, moved into whichever panel is showing it. -->
+        <section id="tab-chat" class="panel" aria-label="Chat" hidden>
+          <div id="chat-block">
+            <h2 id="chat-heading">Chat</h2>
+            <ul id="chat-list" class="chat"></ul>
+            <p id="chat-note" class="error" role="alert" hidden></p>
+            <form id="chat-form" class="composer" novalidate>
+              <label class="sr-only" for="chat-input">Ask the assistant</label>
+              <input id="chat-input" name="text" autocomplete="off" placeholder="Ask a question" />
+              <button id="chat-send" class="primary" type="submit">Send</button>
+            </form>
+          </div>
+        </section>
+      </main>
+
+      <nav id="tabbar" aria-label="Sections" hidden>
+        <button type="button" data-tab="now">Now</button>
+        <button type="button" data-tab="picks">Picks</button>
+        <button type="button" data-tab="chat">Chat</button>
+        <button type="button" data-tab="week" hidden>Week</button>
+      </nav>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

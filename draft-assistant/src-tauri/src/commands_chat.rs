@@ -274,11 +274,27 @@ pub async fn ask_claude(
     effort: String,
     messages: Vec<ChatMessage>,
 ) -> Result<ChatReply, String> {
+    answer(&state, &screen, &model, &effort, messages).await
+}
+
+/// One answered turn, provider choice, budget and all.
+///
+/// Split out of [`ask_claude`] so the shared chat the companion server runs
+/// goes through exactly the same path: the same context, the same provider
+/// resolution, the same cap, and the same spend written to the same key. A
+/// second implementation would have been a second set of rules about money.
+pub(crate) async fn answer(
+    state: &AppState,
+    screen: &str,
+    model: &str,
+    effort: &str,
+    messages: Vec<ChatMessage>,
+) -> Result<ChatReply, String> {
     // The whole thread is forwarded to Anthropic or written to the CLI's
     // stdin, so it is bounded here rather than discovered as a bill or a
     // rejected request.
     check_thread_size(&messages)?;
-    check_screen(&screen)?;
+    check_screen(screen)?;
     let cli = chat_cli::find_cli();
     let config = state.config.lock().await.clone();
     let api_key = state.engine.api_key(&config).await;
@@ -286,9 +302,9 @@ pub async fn ask_claude(
     // The cap is enforced here rather than in the panel, which cannot be the
     // authority on money: it knows only the conversation in front of it, and
     // it prices turns it did not pay for.
-    let key = spend_key(&screen, config.active_league_id.as_deref());
+    let key = spend_key(screen, config.active_league_id.as_deref());
     let spent = config.chat_spend_usd.get(&key).copied().unwrap_or(0.0);
-    check_budget(spent, budget_of(&config), &screen)?;
+    check_budget(spent, budget_of(&config), screen)?;
 
     // Building a season view is seconds of arithmetic. It must not happen with
     // the pollers' mutexes held, so the season screen's own view is reused and
@@ -309,8 +325,8 @@ pub async fn ask_claude(
         chat_context::draft_context(&view_from(loaded, &config))
     };
 
-    let model = ChatModel::parse(&model);
-    let effort = Effort::parse(&effort);
+    let model = ChatModel::parse(model);
+    let effort = Effort::parse(effort);
     let mut reply = if provider == PROVIDER_CLI {
         let cli = cli.ok_or("Claude Code CLI not found — install it or add an API key")?;
         chat_cli::ask(&cli, model, effort, &context, &messages).await?

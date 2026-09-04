@@ -472,6 +472,8 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
         chat_provider: None,
         chat_budget_usd: None,
         chat_spend_usd: Default::default(),
+        device_name: None,
+        companion_port: None,
     };
     (loaded, season, config)
 }

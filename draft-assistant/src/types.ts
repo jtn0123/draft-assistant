@@ -233,3 +233,76 @@ export type Position = string;
 
 /** The services a league can be read from. */
 export type Platform = "sleeper" | "yahoo";
+
+// ---------- phone & second screen (see COMPANION-API.md) ----------
+
+/** What kind of thing is paired: the trimmed phone page, or a second desktop
+ *  app running in follower mode. */
+export type DeviceKind = "phone" | "desktop";
+
+/** One paired client, as the host lists it. */
+export interface CompanionDevice {
+  device_id: string;
+  name: string;
+  kind: DeviceKind;
+  paired_at_ms: number;
+  last_seen_ms: number;
+  connected: boolean;
+}
+
+/** The host's own view of the companion server. */
+export interface CompanionStatus {
+  enabled: boolean;
+  /** `http://<ip>:<port>/` — what the QR encodes. Empty while off. */
+  url: string;
+  /** The six digits a client pairs with. Rotates on revoke. */
+  code: string;
+  port: number;
+  /** How the host signs its own messages in the shared chat. */
+  host_name: string;
+  devices: CompanionDevice[];
+}
+
+/** Who said a line in the shared thread. */
+export interface SharedChatDevice {
+  name: string;
+  kind: DeviceKind;
+}
+
+/** One line of the shared thread. The assistant's entry carries the device
+ *  that asked, not the host. */
+export interface SharedChatEntry {
+  id: string;
+  at_ms: number;
+  device: SharedChatDevice;
+  role: "user" | "assistant";
+  text: string;
+  cost_usd: number | null;
+  error: string | null;
+}
+
+/** The whole thread for one screen of one league. */
+export interface SharedChatThread {
+  league_id: string;
+  screen: string;
+  /** True while a question is being answered; nobody else may ask. */
+  busy: boolean;
+  entries: SharedChatEntry[];
+}
+
+/** What `GET /api/config` hands a follower — never keys, tokens or budget. */
+export interface RemoteConfig {
+  active_league_id: string | null;
+  leagues: StoredLeague[];
+  my_user_id: string | null;
+  host_name: string;
+  platform: Platform;
+}
+
+/** What this app remembers about the host it follows. */
+export interface FollowRecord {
+  /** Origin only, no trailing slash: `http://192.168.1.5:7878`. */
+  url: string;
+  token: string;
+  host_name: string;
+}

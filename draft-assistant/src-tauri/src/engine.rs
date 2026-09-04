@@ -62,6 +62,16 @@ pub struct AppConfig {
     /// outlive both the conversation and the app.
     #[serde(default)]
     pub chat_spend_usd: HashMap<String, f64>,
+    /// What this Mac calls itself in the shared chat and on a follower's
+    /// "Hosted by …" pill. Unset until the user edits it, and then the
+    /// machine's own computer name is used.
+    #[serde(default)]
+    pub device_name: Option<String>,
+    /// The port the phone / second-screen server last listened on, so the URL
+    /// a user bookmarked keeps working across restarts. Unset means the
+    /// default, 7878.
+    #[serde(default)]
+    pub companion_port: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

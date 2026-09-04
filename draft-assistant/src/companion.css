@@ -1,0 +1,195 @@
+/* Phone & second screen: the host dialog, the join dialog, the follower's
+   pill, and the shared thread's attribution. Every class here is prefixed so
+   nothing in this sheet can collide with the ten it loads beside. */
+
+/* ---------- host dialog ---------- */
+
+.companion-dialog {
+  width: 520px;
+}
+
+.companion-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.companion-join {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+.companion-join-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+}
+
+.companion-url {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.companion-code-label {
+  margin-top: 6px;
+}
+
+/* Read aloud across a room, so: big, spaced, and never re-flowed by the
+   digits that happen to be in it. */
+.companion-code {
+  font-variant-numeric: tabular-nums;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+.companion-qr {
+  width: 168px;
+  height: 168px;
+  border: 1px solid var(--rule2);
+  background: #fff;
+  flex: none;
+}
+
+.companion-name {
+  margin-top: 4px;
+}
+
+.companion-devices-label {
+  margin-top: 8px;
+}
+
+.companion-devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--hair);
+}
+
+.companion-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--hair);
+  font-size: 13px;
+}
+
+.companion-device-name {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.companion-device-kind {
+  flex: 1;
+}
+
+.companion-device-seen {
+  flex: none;
+}
+
+.companion-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--rule2);
+  flex: none;
+}
+
+.companion-dot.is-on {
+  background: var(--pos);
+}
+
+/* A phone and a laptop drawn in CSS: an emoji here would render as a
+   different picture on every machine that opened the dialog. */
+.device-glyph {
+  flex: none;
+  border: 1.5px solid var(--mid);
+  display: inline-block;
+}
+
+.device-glyph.is-phone {
+  width: 9px;
+  height: 14px;
+  border-radius: 2px;
+}
+
+.device-glyph.is-desktop {
+  width: 16px;
+  height: 11px;
+  border-radius: 2px;
+  border-bottom-width: 3px;
+}
+
+/* ---------- join a host ---------- */
+
+.join-host-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--mid);
+}
+
+.join-host-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.join-host-error {
+  color: var(--act);
+  font-size: 13px;
+}
+
+/* ---------- follower ---------- */
+
+.hosted-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--rule2);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--mid);
+  white-space: nowrap;
+}
+
+/* ---------- shared thread ---------- */
+
+.shared-byline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+  margin-bottom: 4px;
+}
+
+.shared-cost {
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.shared-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 4px;
+  color: var(--mid);
+  font-size: 13px;
+}

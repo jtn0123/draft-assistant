@@ -1,0 +1,304 @@
+// The `Api` implementation a follower runs against somebody else's desktop
+// app: the same calls the UI already makes, answered over HTTP and one shared
+// WebSocket instead of Tauri's IPC.
+//
+// Two rules shape all of it. Reads mirror the endpoints in COMPANION-API.md
+// one for one, so the screens cannot tell the difference. Writes — keys,
+// budget, Yahoo, league switching, drafting, the local Ask Claude — are the
+// host's alone and are refused here by name, because a follower silently
+// half-doing them would be worse than a follower that says who is in charge.
+
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import type { Api } from "./api";
+import { validateDraftView, validateSeasonView } from "./api";
+import { clearFollow } from "./companion";
+import type { ChatSettings } from "./chat-types";
+import type { SeasonView } from "./season-types";
+import type {
+  AppConfig,
+  CompanionDevice,
+  DraftView,
+  FollowRecord,
+  PollHealth,
+  RemoteConfig,
+  SharedChatThread,
+} from "./types";
+
+/** Set when a host drops this device, and read once by the shell on the
+ *  reload that follows, so the user is told rather than just demoted. */
+export const REVOKED_KEY = "da.companion.revoked";
+
+/** How long to wait before each reconnection attempt, in ms; the last one
+ *  repeats for as long as the host stays away. */
+const BACKOFF_MS = [1000, 2000, 5000, 10000];
+const PING_MS = 25000;
+
+/** Frames the host sends down the socket. */
+type Frame = { type: string; payload?: unknown };
+
+/** Bytes to a `data:` URL, the shape every image in the UI already takes. */
+function dataUri(type: string, bytes: ArrayBuffer): string {
+  const view = new Uint8Array(bytes);
+  let binary = "";
+  for (const byte of view) binary += String.fromCharCode(byte);
+  return `data:${type || "image/jpeg"};base64,${btoa(binary)}`;
+}
+
+/** A GET that knows about the host's two failure modes: a 404 for something
+ *  not loaded yet, and a 401 for a device that is no longer paired. */
+export function remoteFetcher(follow: FollowRecord, onRevoked: () => void) {
+  return async function fetchJson<T>(path: string): Promise<T | null> {
+    const response = await fetch(`${follow.url}${path}`, {
+      headers: { authorization: `Bearer ${follow.token}` },
+    });
+    if (response.status === 401) {
+      onRevoked();
+      throw new Error("The host revoked this device");
+    }
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`${follow.host_name} answered ${response.status}`);
+    return (await response.json()) as T;
+  };
+}
+
+/** The one socket every screen's live updates come down, reconnecting on its
+ *  own for as long as this window is open. */
+class HostSocket {
+  private socket: WebSocket | null = null;
+  private handlers = new Map<string, Set<(payload: unknown) => void>>();
+  private attempt = 0;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private ping: ReturnType<typeof setInterval> | undefined;
+  private closed = false;
+
+  constructor(
+    private follow: FollowRecord,
+    private onRevoked: () => void,
+  ) {}
+
+  on(type: string, handler: (payload: unknown) => void): UnlistenFn {
+    const set = this.handlers.get(type) ?? new Set();
+    set.add(handler);
+    this.handlers.set(type, set);
+    this.open();
+    return () => set.delete(handler);
+  }
+
+  open(): void {
+    if (this.socket !== null || this.closed) return;
+    const url = `${this.follow.url.replace(/^http/, "ws")}/api/events?token=${encodeURIComponent(this.follow.token)}`;
+    const socket = new WebSocket(url);
+    this.socket = socket;
+    socket.onopen = () => {
+      this.attempt = 0;
+      this.ping = setInterval(() => socket.send(JSON.stringify({ type: "ping" })), PING_MS);
+    };
+    socket.onmessage = (event: MessageEvent) => this.deliver(String(event.data));
+    socket.onclose = () => {
+      clearInterval(this.ping);
+      this.socket = null;
+      this.retry();
+    };
+    // A socket that errors closes straight after; the close handler is the
+    // one place that schedules a retry, so there is only ever one pending.
+    socket.onerror = () => socket.close();
+  }
+
+  private deliver(text: string): void {
+    let frame: Frame;
+    try {
+      frame = JSON.parse(text) as Frame;
+    } catch {
+      return;
+    }
+    if (frame.type === "revoked") {
+      this.stop();
+      this.onRevoked();
+      return;
+    }
+    for (const handler of this.handlers.get(frame.type) ?? []) handler(frame.payload);
+  }
+
+  private retry(): void {
+    if (this.closed) return;
+    const wait = BACKOFF_MS[Math.min(this.attempt, BACKOFF_MS.length - 1)] ?? 10000;
+    this.attempt += 1;
+    this.timer = setTimeout(() => this.open(), wait);
+  }
+
+  stop(): void {
+    this.closed = true;
+    clearTimeout(this.timer);
+    clearInterval(this.ping);
+    this.socket?.close();
+    this.socket = null;
+  }
+}
+
+/** What every host-only call says, naming the machine that owns the setting. */
+function hostOnly(hostName: string): Promise<never> {
+  return Promise.reject(new Error(`That's controlled by the host (${hostName})`));
+}
+
+/**
+ * Build the follower's backend.
+ *
+ * `onRevoked` defaults to forgetting the host and reloading into local mode —
+ * a revoked device has nothing left to show, and the shell says what happened
+ * on the way back up.
+ */
+export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
+  const revoked =
+    onRevoked ??
+    (() => {
+      clearFollow();
+      try {
+        localStorage.setItem(REVOKED_KEY, "1");
+      } catch {
+        // The toast is a nicety; the demotion below is the point.
+      }
+      window.location.reload();
+    });
+  const fetchJson = remoteFetcher(follow, revoked);
+  const socket = new HostSocket(follow, revoked);
+  const refused = () => hostOnly(follow.host_name);
+
+  const state = async (): Promise<DraftView> => {
+    const view = await fetchJson<DraftView>("/api/state");
+    if (view === null) throw new Error(`${follow.host_name} has no league loaded`);
+    return validateDraftView(view);
+  };
+  const season = async (): Promise<SeasonView> => {
+    const view = await fetchJson<SeasonView>("/api/season");
+    if (view === null) throw new Error(`${follow.host_name} has no season loaded`);
+    return validateSeasonView(view);
+  };
+  const image = async (path: string): Promise<string | null> => {
+    try {
+      const response = await fetch(`${follow.url}${path}`, {
+        headers: { authorization: `Bearer ${follow.token}` },
+      });
+      if (!response.ok) return null;
+      return dataUri(response.headers.get("content-type") ?? "", await response.arrayBuffer());
+    } catch {
+      return null;
+    }
+  };
+  const listen = <T>(type: string, handler: (value: T) => void): Promise<UnlistenFn> =>
+    Promise.resolve(socket.on(type, (payload) => handler(payload as T)));
+
+  return {
+    // ---------- reads ----------
+    getState: state,
+    refreshPicks: state,
+    refreshData: state,
+    getSeason: season,
+    loadSeason: season,
+    refreshSeason: season,
+    getConfig: async () => {
+      const config = await fetchJson<RemoteConfig>("/api/config");
+      return remoteConfig(config);
+    },
+    headshot: (playerId) => image(`/api/headshot/${encodeURIComponent(playerId)}`),
+    avatar: (reference, full) =>
+      image(`/api/avatar/${encodeURIComponent(reference)}${full ? "?full=1" : ""}`),
+
+    // ---------- live ----------
+    onDraftUpdated: (handler) =>
+      listen<DraftView>("draft-updated", (view) => handler(validateDraftView(view))),
+    onSeasonUpdated: (handler) =>
+      listen<SeasonView>("season-updated", (view) => handler(validateSeasonView(view))),
+    onPollHealth: (handler) => listen<PollHealth>("poll-health", handler),
+    onSeasonPollHealth: (handler) => listen<PollHealth>("season-poll-health", handler),
+    // The host polls; a follower is only ever told about it.
+    startPolling: () => Promise.resolve(),
+    stopPolling: () => Promise.resolve(),
+    startSeasonPolling: () => Promise.resolve(),
+    stopSeasonPolling: () => Promise.resolve(),
+
+    // ---------- shared chat ----------
+    sharedChatGet: async (screen) => {
+      const thread = await fetchJson<SharedChatThread>(
+        `/api/chat?screen=${encodeURIComponent(screen)}`,
+      );
+      return thread ?? { league_id: "", screen, busy: false, entries: [] };
+    },
+    sharedChatSend: async (screen, text) => {
+      const response = await fetch(`${follow.url}/api/chat`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${follow.token}`, "content-type": "application/json" },
+        body: JSON.stringify({ screen, text }),
+      });
+      if (response.status === 401) {
+        revoked();
+        throw new Error("The host revoked this device");
+      }
+      if (response.status === 409)
+        throw new Error("Someone else is asking — try again in a moment");
+      if (response.status === 429) throw new Error("That's a lot of questions. Give it a minute.");
+      if (!response.ok) throw new Error(`${follow.host_name} answered ${response.status}`);
+    },
+    onSharedChat: (handler) => listen<SharedChatThread>("shared-chat", handler),
+    onCompanionDevices: (handler) => listen<CompanionDevice[]>("devices", handler),
+
+    // ---------- the host's alone ----------
+    addLeague: refused,
+    removeLeague: refused,
+    setMyUsername: refused,
+    setApiKey: refused,
+    setChatBudget: refused,
+    setChatProvider: refused,
+    yahooSaveCredentials: refused,
+    yahooBeginConnect: refused,
+    yahooFinishConnect: refused,
+    yahooDisconnect: refused,
+    yahooLeagues: refused,
+    importSecondOpinion: refused,
+    recordManualPick: refused,
+    undoManualPick: refused,
+    exportState: refused,
+    askClaude: refused,
+    companionStatus: refused,
+    companionEnable: refused,
+    companionDisable: refused,
+    companionRevoke: refused,
+    setDeviceName: refused,
+
+    // ---------- nothing to ask, nothing to fail ----------
+    sleeperLeagues: () => Promise.resolve([]),
+    yahooStatus: () =>
+      Promise.resolve({ configured: false, connected: false, redirect: "oob", account: null }),
+    chatSuggestions: () => Promise.resolve([]),
+    // The follower never runs the local composer, so this only has to be
+    // something the panel can render without asking for a key.
+    chatSettings: () => Promise.resolve(followerChatSettings()),
+  };
+}
+
+/** `/api/config` is deliberately thinner than the desktop's own config — no
+ *  keys, no budget — so the missing halves are defaulted here rather than
+ *  left undefined for a screen to trip over. */
+function remoteConfig(config: RemoteConfig | null): AppConfig {
+  return {
+    my_user_id: config?.my_user_id ?? null,
+    active_league_id: config?.active_league_id ?? null,
+    leagues: config?.leagues ?? [],
+  };
+}
+
+function followerChatSettings(): ChatSettings {
+  return {
+    // "The host has one" — the follower never sends a key of its own, and a
+    // key form on this screen would be asking for something it cannot use.
+    has_key: true,
+    key_hint: null,
+    cli_available: false,
+    provider: "api",
+    key_store: "file",
+    budget_usd: 0,
+    spend_usd: {},
+    models: ["Opus 5"],
+    efforts: { "Opus 5": ["High"] },
+    notes: {},
+  };
+}

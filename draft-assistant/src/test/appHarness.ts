@@ -10,7 +10,14 @@
 import { vi, type Mock } from "vitest";
 import draftFixtureJson from "../../public/dev-fixture.json";
 import type { Api } from "../api";
-import type { AppConfig, DraftView, PollHealth } from "../types";
+import type {
+  AppConfig,
+  CompanionDevice,
+  CompanionStatus,
+  DraftView,
+  PollHealth,
+  SharedChatThread,
+} from "../types";
 import type { SeasonView } from "../season-types";
 
 /**
@@ -59,6 +66,15 @@ const METHODS: Record<keyof Api, true> = {
   chatSettings: true,
   chatSuggestions: true,
   askClaude: true,
+  companionStatus: true,
+  companionEnable: true,
+  companionDisable: true,
+  companionRevoke: true,
+  setDeviceName: true,
+  sharedChatGet: true,
+  sharedChatSend: true,
+  onSharedChat: true,
+  onCompanionDevices: true,
 };
 
 const METHOD_NAMES = Object.keys(METHODS) as (keyof Api)[];
@@ -71,6 +87,10 @@ export interface PushHandlers {
   health: ((health: PollHealth) => void) | null;
   season: ((view: SeasonView) => void) | null;
   seasonHealth: ((health: PollHealth) => void) | null;
+  /** The shared thread the companion server pushes. */
+  sharedChat: ((thread: SharedChatThread) => void) | null;
+  /** The paired-device list, pushed whenever one connects or drops. */
+  devices: ((devices: CompanionDevice[]) => void) | null;
 }
 
 export interface Harness {
@@ -82,7 +102,14 @@ export interface Harness {
 
 function build(): Harness {
   const api = Object.fromEntries(METHOD_NAMES.map((name) => [name, vi.fn()])) as ApiMock;
-  const push: PushHandlers = { draft: null, health: null, season: null, seasonHealth: null };
+  const push: PushHandlers = {
+    draft: null,
+    health: null,
+    season: null,
+    seasonHealth: null,
+    sharedChat: null,
+    devices: null,
+  };
 
   const reset = () => {
     for (const name of METHOD_NAMES) api[name].mockReset();
@@ -90,6 +117,8 @@ function build(): Harness {
     push.health = null;
     push.season = null;
     push.seasonHealth = null;
+    push.sharedChat = null;
+    push.devices = null;
 
     api.startPolling.mockResolvedValue(undefined);
     api.stopPolling.mockResolvedValue(undefined);
@@ -99,6 +128,15 @@ function build(): Harness {
     api.headshot.mockResolvedValue(null);
     api.avatar.mockResolvedValue(null);
     api.chatSuggestions.mockResolvedValue([]);
+    api.companionStatus.mockResolvedValue(companionStatus());
+    api.companionEnable.mockResolvedValue(companionStatus({ enabled: true }));
+    api.companionDisable.mockResolvedValue(companionStatus());
+    api.companionRevoke.mockResolvedValue(companionStatus({ enabled: true, code: "654321" }));
+    api.setDeviceName.mockImplementation((name: string) => Promise.resolve(name));
+    api.sharedChatGet.mockImplementation((screen: string) =>
+      Promise.resolve({ league_id: "1", screen, busy: false, entries: [] }),
+    );
+    api.sharedChatSend.mockResolvedValue(undefined);
     api.sleeperLeagues.mockResolvedValue([]);
     api.yahooLeagues.mockResolvedValue([]);
     api.yahooStatus.mockResolvedValue({
@@ -135,6 +173,14 @@ function build(): Harness {
       push.seasonHealth = handler;
       return Promise.resolve(() => undefined);
     });
+    api.onSharedChat.mockImplementation((handler: (thread: SharedChatThread) => void) => {
+      push.sharedChat = handler;
+      return Promise.resolve(() => undefined);
+    });
+    api.onCompanionDevices.mockImplementation((handler: (devices: CompanionDevice[]) => void) => {
+      push.devices = handler;
+      return Promise.resolve(() => undefined);
+    });
   };
 
   reset();
@@ -167,6 +213,20 @@ export function restoringConfig(view: DraftView): AppConfig {
     my_user_id: "browser-preview",
     active_league_id: view.league.league_id,
     leagues: [],
+  };
+}
+
+/** The companion server as the harness reports it: off, with a code already
+ *  minted, and nothing paired. */
+export function companionStatus(overrides: Partial<CompanionStatus> = {}): CompanionStatus {
+  return {
+    enabled: false,
+    url: "http://192.168.1.24:7878/",
+    code: "418902",
+    port: 7878,
+    host_name: "Justin's Mac",
+    devices: [],
+    ...overrides,
   };
 }
 

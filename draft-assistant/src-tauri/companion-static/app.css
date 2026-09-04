@@ -1,0 +1,429 @@
+/* Companion page: one column, thumb-reachable, honest about what it knows.
+   Light and dark come from the same token set; nothing here animates unless
+   the reader has not asked for less motion. */
+
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --ink: #16181d;
+  --ink-soft: #5b6069;
+  --line: #d9dade;
+  --accent: #1d4ed8;
+  --accent-ink: #ffffff;
+  --mine: #0f5132;
+  --mine-bg: #e4f2e9;
+  --warn: #8a2b16;
+  --warn-bg: #fbe9e4;
+  --radius: 10px;
+  --tabbar: 60px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101215;
+    --surface: #191c21;
+    --ink: #f2f3f5;
+    --ink-soft: #a2a8b2;
+    --line: #2c3138;
+    --accent: #7aa2ff;
+    --accent-ink: #0d1117;
+    --mine: #8fe0b0;
+    --mine-bg: #12291d;
+    --warn: #ffb4a1;
+    --warn-bg: #2e1712;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font:
+    16px/1.45 system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-text-size-adjust: 100%;
+}
+
+#companion-root {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 14px calc(var(--tabbar) + 24px);
+}
+
+h1 {
+  font-size: 22px;
+  margin: 8px 0 16px;
+}
+
+h2 {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 22px 0 8px;
+}
+
+p {
+  margin: 8px 0;
+}
+
+.muted {
+  color: var(--ink-soft);
+}
+
+.small {
+  font-size: 13px;
+}
+
+.error {
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin: 10px 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Pair screen */
+.field {
+  display: block;
+  margin: 14px 0;
+}
+
+.field span {
+  display: block;
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+
+input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+#pair-code {
+  letter-spacing: 0.35em;
+  font-size: 20px;
+}
+
+button {
+  min-height: 44px;
+  min-width: 44px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+button.primary {
+  width: 100%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+button[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Reconnecting pill */
+.pill {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* Cards and rows */
+.strip,
+.card,
+.row,
+.roster {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+}
+
+.strip .headline {
+  font-size: 18px;
+  font-weight: 600;
+  width: 100%;
+}
+
+.strip .mine {
+  color: var(--mine);
+  background: var(--mine-bg);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-weight: 600;
+}
+
+.cards,
+.rows,
+.chat {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.name {
+  font-weight: 600;
+}
+
+.pos {
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid var(--line);
+}
+
+.pos-qb {
+  background: #e8e1fb;
+  color: #40257c;
+}
+
+.pos-rb {
+  background: #dff0e4;
+  color: #14532d;
+}
+
+.pos-wr {
+  background: #dce8fb;
+  color: #17356f;
+}
+
+.pos-te {
+  background: #fbe8d8;
+  color: #713a12;
+}
+
+.pos-k {
+  background: #eceef1;
+  color: #3b4149;
+}
+
+.pos-def {
+  background: #f9dfe6;
+  color: #6d1834;
+}
+
+@media (prefers-color-scheme: dark) {
+  .pos-qb {
+    background: #2a2148;
+    color: #d3c4ff;
+  }
+  .pos-rb {
+    background: #16311f;
+    color: #a7e7bf;
+  }
+  .pos-wr {
+    background: #182b4c;
+    color: #b8d0ff;
+  }
+  .pos-te {
+    background: #3a2513;
+    color: #f2c79b;
+  }
+  .pos-k {
+    background: #262a30;
+    color: #ccd2da;
+  }
+  .pos-def {
+    background: #3d1526;
+    color: #f5b6c8;
+  }
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin-top: 6px;
+}
+
+.reasons {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.row .pick-no {
+  color: var(--ink-soft);
+  font-size: 13px;
+  min-width: 46px;
+}
+
+.row.is-mine {
+  border-color: var(--mine);
+  background: var(--mine-bg);
+}
+
+.roster {
+  display: grid;
+  gap: 4px;
+}
+
+/* Chat */
+.entry {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.entry.assistant {
+  border-left: 3px solid var(--accent);
+}
+
+.entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+
+.kind {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.md p {
+  margin: 6px 0;
+}
+
+.md ul,
+.md ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.md code,
+.md pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.md pre {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  overflow-x: auto;
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.composer button {
+  width: auto;
+  padding: 0 16px;
+}
+
+/* Tab bar */
+#tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* `display: flex` would otherwise beat the browser's rule for [hidden]. */
+#tabbar[hidden] {
+  display: none;
+}
+
+#tabbar button {
+  flex: 1;
+  min-height: var(--tabbar);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+#tabbar button[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pill {
+    transition: opacity 120ms ease;
+  }
+}

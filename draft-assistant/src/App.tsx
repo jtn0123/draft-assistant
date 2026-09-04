@@ -5,21 +5,25 @@ import { setAvatarMode, useAvatarMode } from "./avatars";
 import { playChime } from "./chime";
 import { MAX_RECONNECT_ATTEMPTS, useDraftSession } from "./draftSession";
 import { setChime, setScreen, useChime, useScreen } from "./prefs";
-import { importNote, importSecondOpinion } from "./secondOpinionImport";
+import { importSecondOpinion } from "./secondOpinionImport";
+import { clearFollow, readFollow, useCompanionEnabled } from "./companion";
+import { REVOKED_KEY } from "./apiRemote";
+import { buildSettingsRows } from "./settingsRows";
 import { useSeasonSession } from "./session";
 import type { SeasonView } from "./season-types";
 import type { DraftView } from "./types";
-import { Header, type SettingsRow } from "./components/Header";
+import { Header } from "./components/Header";
 import { Chat, DraftScreen, ScreenFallback, SeasonScreen } from "./components/lazyScreens";
 import { LaunchScreen, Setup } from "./components/Panels";
 import { LeaguePicker } from "./components/LeaguePicker";
 import { YahooConnect } from "./components/YahooConnect";
 import { ConfirmDialog, Toast } from "./components/Overlays";
+import { CompanionPanel } from "./components/CompanionPanel";
+import { JoinHost } from "./components/JoinHost";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { ordinal, pickLabel, age, problem, scoringFormat } from "./format";
-import { platformName } from "./leagues";
+import { ordinal, pickLabel, problem, scoringFormat } from "./format";
 import { cycleThemePreference, useAppliedTheme } from "./theme";
-import { useYahooStatus, yahooNote } from "./yahoo";
+import { useYahooStatus } from "./yahoo";
 // Only the sheets the shell itself paints with. The screen-specific ones are
 // imported by the screens, so Vite ships each alongside the chunk that needs
 // it rather than making every window parse all ten before first paint.
@@ -60,6 +64,24 @@ function useAppVersion(): string {
   return version;
 }
 
+/** The pending "put this toast away" timer. Module scope rather than a ref:
+ *  `showToast` is handed to the settings rows, and a function that reads a
+ *  ref cannot be passed anywhere during render. One window, one toast strip,
+ *  one timer — and the unmount effect still clears it. */
+let toastTimer: number | undefined;
+
+/** The note a revoked follower left for itself, taken and cleared. Null in
+ *  every ordinary launch, which is all but one of them. */
+function revokedNote(): { text: string } | null {
+  try {
+    if (localStorage.getItem(REVOKED_KEY) === null) return null;
+    localStorage.removeItem(REVOKED_KEY);
+  } catch {
+    return null;
+  }
+  return { text: "The host revoked this device" };
+}
+
 /** A line under the header. `retry` marks it as something gone wrong that the
  * user can have another go at — and that should wait for them. */
 type ToastMessage = { text: string; retry?: () => void };
@@ -69,37 +91,48 @@ export default function App() {
   const screen = useScreen();
   const avatars = useAvatarMode();
   const [confirm, setConfirm] = useState<Confirm>(null);
-  const [toast, setToast] = useState<ToastMessage | null>(null);
+  // Read once, as the window opens: `api` chose its backend off the same
+  // record, so a change to it mid-session would leave the two disagreeing.
+  const [follow] = useState(readFollow);
+  // A revoked follower's note, read as the state is initialised so the shell
+  // paints with the explanation rather than after it.
+  const [toast, setToast] = useState<ToastMessage | null>(revokedNote);
   // Stable across renders so the memoised board rows are not invalidated by a
-  // fresh closure on every 3-second poll.
+  // fresh closure on every 3-second poll. A follower has nothing to record —
+  // the host keeps the picks — so it is told who does rather than being shown
+  // a dialog whose only outcome is a refusal.
   const askToDraft = useCallback(
-    (playerId: string, name: string) => setConfirm({ playerId, name }),
-    [],
+    (playerId: string, name: string) => {
+      if (follow !== null) setToast({ text: `${follow.host_name} records the picks` });
+      else setConfirm({ playerId, name });
+    },
+    [follow],
   );
   const [leaguePicker, setLeaguePicker] = useState(false);
+  const [companionOpen, setCompanionOpen] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
   const [yahooOpen, setYahooOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   // Reads the stored choice, keeps the page painted in it, and follows the OS
   // while the choice is "system".
   const { preference, theme } = useAppliedTheme();
-  const toastTimer = useRef<number | undefined>(undefined);
   const wasMyPick = useRef(false);
 
   // ---------- toasts ----------
 
   const showToast = useCallback((text: string, retry?: () => void) => {
     setToast({ text, retry });
-    window.clearTimeout(toastTimer.current);
+    window.clearTimeout(toastTimer);
     // News gets out of the way on its own. Something that failed waits to be
     // answered — a lost pick in the middle of a draft is the worst thing this
     // app could shrug off.
     if (retry === undefined) {
-      toastTimer.current = window.setTimeout(() => setToast(null), 5000);
+      toastTimer = window.setTimeout(() => setToast(null), 5000);
     }
   }, []);
 
-  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+  useEffect(() => () => window.clearTimeout(toastTimer), []);
 
   // The draft's own data lifecycle: restores the last league on launch, keeps
   // it live off the backend's poller, and owns every action that replaces the
@@ -143,6 +176,9 @@ export default function App() {
   // connect dialog hands back every newer answer it is given.
   const yahoo = useYahooStatus();
   const appVersion = useAppVersion();
+  // Only the host has a server to ask about, and the answer is re-read as the
+  // dialog closes so the row never contradicts what was just switched.
+  const companionOn = useCompanionEnabled(follow === null, companionOpen);
 
   // Chime when the clock reaches you — the one moment worth interrupting for.
   useEffect(() => {
@@ -191,7 +227,11 @@ export default function App() {
   if (showSetup) {
     return (
       <div className="app">
-        <Setup onReady={enterLeague} onConnectYahoo={() => setYahooOpen(true)} />
+        <Setup
+          onReady={enterLeague}
+          onConnectYahoo={() => setYahooOpen(true)}
+          onJoinHost={() => setJoinOpen(true)}
+        />
         {toast !== null && (
           <Toast
             message={toast.text}
@@ -201,6 +241,7 @@ export default function App() {
             onDismiss={() => setToast(null)}
           />
         )}
+        {joinOpen && <JoinHost onClose={() => setJoinOpen(false)} />}
         {yahooOpen && (
           // The same dialog the settings menu opens, which already knows how
           // to log in and list the account's leagues. Nothing here is on
@@ -247,109 +288,64 @@ export default function App() {
         : `Week ${season.week} · ${myRecord(season)}`
       : `Round ${d.current_round} of ${d.rounds} · ${d.total_picks_made} picks in`;
 
-  const settingsRows: SettingsRow[] = [
-    {
-      label: "Pick chime",
-      note: "Sound when you're on the clock",
-      value: chime ? "On" : "Off",
-      on: chime,
-      onSelect: () => setChime(!chime),
+  const settingsRows = buildSettingsRows({
+    view,
+    chime,
+    polling,
+    lastSyncAt: pollHealth?.last_success_at ?? null,
+    leagueCount: leagues.length,
+    yahoo: yahoo.status,
+    yahooConnected: yahoo.connected,
+    busy,
+    avatars,
+    preference,
+    theme,
+    appVersion,
+    hostName: follow?.host_name ?? null,
+    companionOn,
+    onChime: (next) => setChime(next),
+    onTogglePolling: () => void togglePolling(),
+    onLeaguePicker: () => {
+      setSettingsOpen(false);
+      setLeaguePicker(true);
     },
-    {
-      label: "Live sync",
-      note: polling
-        ? `Last sync ${age(pollHealth?.last_success_at ?? null)}`
-        : `Not polling ${platformName(view.league.platform)}`,
-      value: polling ? "On" : "Off",
-      on: polling,
-      onSelect: () => void togglePolling(),
+    onYahoo: () => {
+      setSettingsOpen(false);
+      setYahooOpen(true);
     },
-    {
-      label: "League",
-      note: leagues.length > 1 ? `${leagues.length} leagues loaded` : "Switch or add a league",
-      value: "Switch",
-      on: false,
-      onSelect: () => {
-        setSettingsOpen(false);
-        setLeaguePicker(true);
-      },
+    onRefreshData: () => {
+      setSettingsOpen(false);
+      void refreshData(() => {
+        // The season view is built on the old projections until it reloads.
+        if (screen === "season") retrySeason();
+      });
     },
-    {
-      label: "Yahoo",
-      note: yahooNote(yahoo.status),
-      value: yahoo.connected ? "Connected" : "Connect",
-      on: yahoo.connected,
-      onSelect: () => {
-        setSettingsOpen(false);
-        setYahooOpen(true);
-      },
+    onExport: () => {
+      setSettingsOpen(false);
+      void exportState();
     },
-    {
-      label: "Refresh data",
-      note: "Re-fetch projections and rebuild the board",
-      value: busy ? "…" : "Sync",
-      on: false,
-      onSelect: () => {
-        setSettingsOpen(false);
-        void refreshData(() => {
-          // The season view is built on the old projections until it reloads.
-          if (screen === "season") retrySeason();
-        });
-      },
+    onImportCsv: () => {
+      setSettingsOpen(false);
+      void importSecondOpinion(applyView, showToast);
     },
-    {
-      label: "Export state",
-      note: "Full JSON dump of everything on screen",
-      value: "JSON",
-      on: false,
-      onSelect: () => {
-        setSettingsOpen(false);
-        void exportState();
-      },
+    onAvatars: setAvatarMode,
+    onAppearance: cycleThemePreference,
+    onCompanion: () => {
+      setSettingsOpen(false);
+      setCompanionOpen(true);
     },
-    {
-      label: "Import projections CSV…",
-      note: importNote(
-        view.data_health.second_opinion_loaded_at,
-        view.available.find((p) => p.second_opinion !== null)?.second_opinion?.source ?? null,
-      ),
-      value: "Choose",
-      on: view.data_health.second_opinion_loaded_at !== null,
-      onSelect: () => {
-        setSettingsOpen(false);
-        void importSecondOpinion(applyView, showToast);
-      },
+    onJoinHost: () => {
+      setSettingsOpen(false);
+      setJoinOpen(true);
     },
-    {
-      label: "Player pictures",
-      note:
-        avatars === "headshots"
-          ? "Headshots from Sleeper, saved on this Mac after the first look"
-          : "Team logos only — no photo downloads",
-      value: avatars === "headshots" ? "Headshots" : "Team logos",
-      on: avatars === "headshots",
-      onSelect: () => setAvatarMode(avatars === "headshots" ? "logos" : "headshots"),
+    onLeaveHost: () => {
+      // Every screen is built against the host's data, so going home is a
+      // reload rather than a state change — the same way joining was.
+      clearFollow();
+      window.location.reload();
     },
-    {
-      label: "Appearance",
-      note:
-        preference === "system"
-          ? "Following your system setting"
-          : "Overriding your system setting",
-      value: preference === "system" ? `System (${theme})` : theme === "dark" ? "Dark" : "Light",
-      on: theme === "dark",
-      // system -> light -> dark -> back to system
-      onSelect: cycleThemePreference,
-    },
-    {
-      label: "Version",
-      note: "Draft Assistant",
-      value: `v${appVersion}`,
-      on: false,
-      // Nothing to change; selecting it just puts the menu away.
-      onSelect: () => setSettingsOpen(false),
-    },
-  ];
+    onDismiss: () => setSettingsOpen(false),
+  });
 
   return (
     <div className="app">
@@ -357,7 +353,16 @@ export default function App() {
         <div className="shell-main">
           <Header
             leagueName={view.league.name}
-            onSwitchLeague={() => setLeaguePicker(true)}
+            hostedBy={follow?.host_name ?? null}
+            onSwitchLeague={() => {
+              // The host picks the league; a follower's copy of the picker
+              // could only fail, so it says who to ask instead.
+              if (follow !== null) {
+                showToast(`${follow.host_name} picks the league`);
+                return;
+              }
+              setLeaguePicker(true);
+            }}
             subtitle={subtitle}
             meta={`${d.teams}-team ${scoringFormat(view.league.scoring_settings.rec)} · ${d.rounds} rounds${d.manual_picks_active ? " · manual picks active" : ""}`}
             screen={screen}
@@ -425,6 +430,7 @@ export default function App() {
                 key={`${screen}.${view.league.league_id}`}
                 screen={screen}
                 leagueId={view.league.league_id}
+                sharedOnly={follow !== null}
                 contextNote={
                   screen === "season" && season !== null
                     ? `Sees week ${season.week} · your lineup and the league`
@@ -466,6 +472,10 @@ export default function App() {
           onClose={() => setYahooOpen(false)}
         />
       )}
+
+      {companionOpen && <CompanionPanel onClose={() => setCompanionOpen(false)} />}
+
+      {joinOpen && <JoinHost onClose={() => setJoinOpen(false)} />}
 
       {confirm && (
         <ConfirmDialog

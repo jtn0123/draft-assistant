@@ -422,6 +422,7 @@ pub async fn start_polling<R: tauri::Runtime>(
                 }
                 if let Some(health) = health {
                     app.emit("poll-health", &health).ok();
+                    crate::companion::publish(&app, "poll-health", &health);
                 }
                 if changed {
                     let loaded = loaded_ref.lock().await;
@@ -429,6 +430,7 @@ pub async fn start_polling<R: tauri::Runtime>(
                     if let Some(loaded) = loaded.as_ref() {
                         let view = view_from(loaded, &config);
                         app.emit("draft-updated", &view).ok();
+                        crate::companion::publish(&app, "draft-updated", &view);
                     }
                 }
             } else {

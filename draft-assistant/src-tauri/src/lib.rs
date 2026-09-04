@@ -11,10 +11,12 @@ pub mod chat_copy;
 pub mod chat_fixtures;
 pub mod chat_rules;
 pub mod commands_chat;
+pub mod commands_companion;
 pub mod commands_draft;
 pub mod commands_season;
 pub mod commands_second_opinion;
 pub mod commands_yahoo;
+pub mod companion;
 pub mod draft;
 pub mod engine;
 pub mod engine_assemble;
@@ -56,6 +58,7 @@ pub mod season_view_matchup;
 pub mod season_view_standings;
 pub mod second_opinion;
 pub mod secrets;
+pub mod shared_chat;
 pub mod simulation;
 pub mod sleeper;
 pub mod sleeper_error;
@@ -79,6 +82,10 @@ pub mod yahoo_types;
 use commands_chat::{
     ask_claude, chat_settings, chat_suggestions, set_api_key, set_chat_budget, set_chat_provider,
 };
+use commands_companion::{
+    companion_disable, companion_enable, companion_revoke, companion_status, set_device_name,
+    shared_chat_get, shared_chat_send,
+};
 use commands_draft::{
     add_league, export_state, get_config, get_state, record_manual_pick, refresh_data,
     refresh_picks, set_my_username, start_polling, stop_polling, undo_manual_pick,
@@ -92,12 +99,13 @@ use commands_yahoo::{
     yahoo_begin_connect, yahoo_disconnect, yahoo_finish_connect, yahoo_leagues,
     yahoo_save_credentials, yahoo_status,
 };
+use companion::CompanionServer;
 use engine::Engine;
 use leagues::{remove_league, sleeper_leagues};
 use state::{AppState, YahooState};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -113,9 +121,15 @@ pub fn run() {
             // until this runs, `applog::warn` falls back to a stderr that a
             // double-clicked .app does not have.
             applog::init(data_dir.clone());
-            let engine = Engine::new(data_dir);
+            let engine = Engine::new(data_dir.clone());
             let config = engine.load_config();
-            app.manage(AppState {
+            // The name this Mac introduces itself by, and the port its phone
+            // server last used. Read before the config is handed over.
+            let host_name = config
+                .device_name
+                .clone()
+                .unwrap_or_else(commands_companion::default_host_name);
+            let state = AppState {
                 engine: Arc::new(engine),
                 loaded: Arc::new(Mutex::new(None)),
                 season: Arc::new(Mutex::new(None)),
@@ -126,7 +140,21 @@ pub fn run() {
                 season_generation: Arc::new(AtomicU64::new(0)),
                 last_season_view: Arc::new(Mutex::new(None)),
                 yahoo: Arc::new(YahooState::default()),
-            });
+            };
+            // The companion server is built at startup but not started: it is
+            // off until the user turns it on in Settings. What it holds before
+            // then is the pairing code, the shared chat threads, and a handle
+            // onto the same state every command works through.
+            let companion = Arc::new(CompanionServer::new(host_name, data_dir)?);
+            let handle = app.handle().clone();
+            companion.attach(
+                Arc::new(state.share()),
+                Arc::new(move |kind: &str, payload: serde_json::Value| {
+                    handle.emit(kind, payload).ok();
+                }),
+            );
+            app.manage(state);
+            app.manage(companion);
             Ok(())
         });
 
@@ -176,6 +204,13 @@ pub fn run() {
             yahoo_finish_connect,
             yahoo_disconnect,
             yahoo_leagues,
+            companion_status,
+            companion_enable,
+            companion_disable,
+            companion_revoke,
+            set_device_name,
+            shared_chat_get,
+            shared_chat_send,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

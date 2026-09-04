@@ -3,7 +3,12 @@
 // so they sit together on one line above it.
 
 import { useState } from "react";
-import { describeSession, type ChatSessionSummary } from "../chatSessions";
+import {
+  describeSession,
+  SHARED_SESSION_ID,
+  SHARED_SESSION_LABEL,
+  type ChatSessionSummary,
+} from "../chatSessions";
 import { formatUsd } from "../chatCost";
 
 /** What the box holds, read as a cap. `null` when it is not one. */
@@ -18,6 +23,8 @@ function readBudget(typed: string): number | null {
 export function ChatSessionBar({
   sessions,
   currentId,
+  shared,
+  onShared,
   saved,
   spent,
   screenSpent,
@@ -30,6 +37,10 @@ export function ChatSessionBar({
 }: {
   sessions: ChatSessionSummary[];
   currentId: string;
+  /** True while the pinned shared thread is the one on screen. */
+  shared: boolean;
+  /** Switch to or away from the shared thread. */
+  onShared: (next: boolean) => void;
   /** True once this conversation has been written; false for a fresh one. */
   saved: boolean;
   spent: number;
@@ -83,12 +94,21 @@ export function ChatSessionBar({
       <select
         className="chat-session-pick"
         aria-label="Saved chats"
-        value={currentId}
+        value={shared ? SHARED_SESSION_ID : currentId}
         disabled={disabled}
         onChange={(e) => {
-          if (e.target.value !== currentId) onOpen(e.target.value);
+          const picked = e.target.value;
+          if (picked === SHARED_SESSION_ID) {
+            onShared(true);
+            return;
+          }
+          onShared(false);
+          if (picked !== currentId) onOpen(picked);
         }}
       >
+        {/* Pinned above the saved ones, and always there: the thread the
+            phones are reading is not one of this Mac's conversations. */}
+        <option value={SHARED_SESSION_ID}>{SHARED_SESSION_LABEL}</option>
         {!listed && <option value={currentId}>This chat — nothing asked yet</option>}
         {sessions.map((s) => (
           <option key={s.id} value={s.id}>
@@ -100,7 +120,7 @@ export function ChatSessionBar({
         type="button"
         className="link-btn"
         onClick={() => onDelete(currentId)}
-        disabled={disabled || !saved}
+        disabled={disabled || shared || !saved}
         title="Forget this saved conversation"
       >
         Delete

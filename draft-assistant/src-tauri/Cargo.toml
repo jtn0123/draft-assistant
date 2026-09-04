@@ -52,6 +52,11 @@ csv = "1.3"
 # NOT granted to the webview in capabilities/default.json: the frontend asks
 # the app to import a file, and the app -- not the page -- chooses it.
 tauri-plugin-dialog = "2"
+# The phone / second-screen companion server. Pinned to a tested minor for the
+# same reason as reqwest above. `ws` is the only extra feature, and it is what
+# pulls tokio-tungstenite in; nothing else here is new to the graph -- axum,
+# hyper, tower and http were already in it by way of tauri.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
 # Optional, and only ever pulled in by the `wdio` feature above. `optional =
 # true` means these are absent from the dependency graph -- not merely unused
 # -- unless that feature is on; `cargo tree` proves it.
@@ -64,6 +69,10 @@ tauri-plugin-wdio-webdriver = { version = "1.3", optional = true }
 # dependency above -- only the `test` feature is extra, so this adds a feature
 # to a crate already in the graph rather than a new crate.
 tauri = { version = "2.11", features = ["test"] }
+# A WebSocket *client* for tests/companion_chat.rs. Not a new crate in the
+# graph: axum's `ws` feature already pulls this exact version in as the server
+# half. Test-only, so nothing in a shipped binary links the client side.
+tokio-tungstenite = "0.29"
 
 [profile.release]
 overflow-checks = true

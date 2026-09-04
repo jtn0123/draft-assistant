@@ -119,6 +119,8 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         chat_provider: None,
         chat_budget_usd: None,
         chat_spend_usd: Default::default(),
+        device_name: None,
+        companion_port: None,
     };
     let loaded = LoadedLeague {
         my_slot: None,

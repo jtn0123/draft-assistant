@@ -47,6 +47,8 @@ fn config_without_key() -> AppConfig {
         chat_provider: Some("api".into()),
         chat_budget_usd: None,
         chat_spend_usd: Default::default(),
+        device_name: None,
+        companion_port: None,
     }
 }
 

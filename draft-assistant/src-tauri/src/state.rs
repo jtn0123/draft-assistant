@@ -27,6 +27,32 @@ pub struct AppState {
     pub yahoo: Arc<YahooState>,
 }
 
+impl AppState {
+    /// A second handle onto exactly the same state.
+    ///
+    /// Every field is an `Arc`, so this is a set of pointer bumps and not a
+    /// copy of anything: what comes back reads and writes the same league, the
+    /// same season, the same config. It exists because the companion server
+    /// runs outside the Tauri command layer, where a `State<'_, AppState>`
+    /// borrow cannot reach — and it must not be given a *different* view of
+    /// the app, or a phone would see a league the desktop had switched away
+    /// from.
+    pub fn share(&self) -> AppState {
+        AppState {
+            engine: self.engine.clone(),
+            loaded: self.loaded.clone(),
+            season: self.season.clone(),
+            config: self.config.clone(),
+            polling: self.polling.clone(),
+            poll_generation: self.poll_generation.clone(),
+            season_polling: self.season_polling.clone(),
+            season_generation: self.season_generation.clone(),
+            last_season_view: self.last_season_view.clone(),
+            yahoo: self.yahoo.clone(),
+        }
+    }
+}
+
 /// The Yahoo client, built when it is first wanted and thrown away whenever
 /// the credentials or the tokens change.
 ///

@@ -35,6 +35,14 @@ export type ChatSessionSummary = Omit<SavedChat, "entries" | "history">;
 const MAX_SESSIONS = 20;
 const TITLE_CHARS = 52;
 
+/** The pinned conversation at the top of the picker: the one thread every
+ *  paired phone and second screen shares. It is not stored here — the host
+ *  owns it — so it is an id the panel recognises rather than a saved chat. */
+export const SHARED_SESSION_ID = "shared";
+
+/** What the picker calls it. */
+export const SHARED_SESSION_LABEL = "Shared with devices";
+
 /** Where one screen's conversations for one league are filed. Nothing
  *  migrates an older key: a league that has not been asked anything under this
  *  scheme simply opens on an empty thread, which is what a fresh league should

@@ -49,6 +49,30 @@ because a locally built app is never quarantined.
 | `LICENSE` | MIT |
 | `SECURITY.md` | how to report a vulnerability |
 
+## Phone & second screen
+
+The desktop app can host a small HTTP + WebSocket server on the LAN so a phone
+(a trimmed page) or a second copy of the app (full UI, follower mode) can watch
+the same league and share one chat thread. Off by default, port 7878, and the
+whole contract lives in [`COMPANION-API.md`](COMPANION-API.md).
+
+Turn it on in Settings → **Phone & second screen**; join one from Settings →
+**Join another Draft Assistant…** (also on the first-launch screen). A follower
+is read-only by construction: the league, the API key, the budget, Yahoo and
+the username all stay with the host, and `src/apiRemote.ts` refuses those calls
+by name rather than half-doing them.
+
+**Why `connect-src` in `tauri.conf.json` allows `http:` and `ws:`.** A follower
+talks to whatever address the user typed — any LAN IP, and any port the host
+picked when 7878 was taken. There is no way to enumerate that in a CSP: it
+would mean listing `http://*:7878` and the next ten ports, and still failing
+for the eleventh. So `connect-src` alone is widened to `http: ws:`, and every
+other directive stays exactly as strict as it was — `default-src 'self'`,
+`img-src` still limited to `self`, `data:`, `asset:` and Sleeper's CDN, no
+`script-src` relaxation at all. The app never navigates to a remote origin and
+never loads remote code; it only fetches JSON and images from a host the user
+paired with by typing a six-digit code.
+
 ## Conventions
 
 - **Every file is 500 lines or fewer**, enforced by `scripts/check-loc.mjs`.

@@ -6,6 +6,8 @@ import type { PollHealth } from "../types";
 import { age } from "../format";
 import { setChime, useChime, type Screen } from "../prefs";
 
+import "../companion.css";
+
 export interface SettingsRow {
   label: string;
   note: string;
@@ -139,6 +141,7 @@ function GearIcon() {
 
 export function Header({
   leagueName,
+  hostedBy,
   onSwitchLeague,
   subtitle,
   meta,
@@ -157,6 +160,10 @@ export function Header({
   footerNote,
 }: {
   leagueName: string;
+  /** The host this app is following, when it is a follower. The pill beside
+   *  the league name is the one permanent reminder that the data on screen —
+   *  and the league it is about — belongs to somebody else's Mac. */
+  hostedBy: string | null;
   /** Opens the league picker; the name in the header is the way in. */
   onSwitchLeague: () => void;
   subtitle: string;
@@ -277,7 +284,10 @@ export function Header({
               </svg>
             </button>
           </h1>
-          <span className="muted header-subtitle">{subtitle}</span>
+          <span className="muted header-subtitle">
+            {subtitle}
+            {hostedBy !== null && <span className="hosted-pill">Hosted by {hostedBy}</span>}
+          </span>
         </div>
         <div className="header-modes">
           <div className="mode-toggle" role="group" aria-label="Screen">
@@ -305,7 +315,9 @@ export function Header({
       <div className="header-actions" ref={menuRef}>
         <SyncPill polling={polling} health={pollHealth} screen={screen} />
 
-        {screen === "draft" && (
+        {/* Re-pulling and undoing are the host's: a follower's copy of either
+            could only be refused, and the pill above says whose they are. */}
+        {screen === "draft" && hostedBy === null && (
           <>
             <button
               type="button"

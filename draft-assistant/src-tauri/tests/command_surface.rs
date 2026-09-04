@@ -26,10 +26,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 
 use draft_assistant_lib::commands_chat as chat;
+use draft_assistant_lib::commands_companion as companion;
 use draft_assistant_lib::commands_draft as draft;
 use draft_assistant_lib::commands_season as season;
 use draft_assistant_lib::commands_second_opinion as second_opinion;
 use draft_assistant_lib::commands_yahoo as yahoo;
+use draft_assistant_lib::companion::CompanionServer;
 use draft_assistant_lib::engine::Engine;
 use draft_assistant_lib::leagues;
 use draft_assistant_lib::state::{AppState, YahooState};
@@ -145,6 +147,13 @@ fn handler_list() -> BTreeSet<String> {
         "yahoo_finish_connect",
         "yahoo_disconnect",
         "yahoo_leagues",
+        "companion_status",
+        "companion_enable",
+        "companion_disable",
+        "companion_revoke",
+        "set_device_name",
+        "shared_chat_get",
+        "shared_chat_send",
     ]
     .into_iter()
     .map(str::to_string)
@@ -219,11 +228,18 @@ fn every_command_answers_over_the_ipc() {
             yahoo::yahoo_finish_connect,
             yahoo::yahoo_disconnect,
             yahoo::yahoo_leagues,
+            companion::companion_status,
+            companion::companion_enable,
+            companion::companion_disable,
+            companion::companion_revoke,
+            companion::set_device_name,
+            companion::shared_chat_get,
+            companion::shared_chat_send,
         ])
         .build(mock_context(noop_assets()))
         .expect("the app builds on the mock runtime");
 
-    app.manage(AppState {
+    let state = AppState {
         engine: Arc::new(engine),
         loaded: Arc::new(Mutex::new(None)),
         season: Arc::new(Mutex::new(None)),
@@ -234,7 +250,16 @@ fn every_command_answers_over_the_ipc() {
         season_generation: Arc::new(AtomicU64::new(0)),
         last_season_view: Arc::new(Mutex::new(None)),
         yahoo: Arc::new(YahooState::default()),
-    });
+    };
+    // The same pair `lib.rs` installs: the companion is built at startup and
+    // handed the state every other command works through.
+    let companion = Arc::new(
+        CompanionServer::new("Test Mac".to_string(), data_dir.clone())
+            .expect("the companion builds"),
+    );
+    companion.attach(Arc::new(state.share()), Arc::new(|_kind, _payload| {}));
+    app.manage(state);
+    app.manage(companion);
 
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
@@ -273,7 +298,8 @@ fn every_command_answers_over_the_ipc() {
     // — the stub is not installed here — and nothing stopped them. Left
     // running they outlive the test, retrying on the network every few
     // seconds for as long as the binary is alive.
-    for command in ["stop_polling", "stop_season_polling"] {
+    // `companion_enable` above put a real listener on the machine's network.
+    for command in ["stop_polling", "stop_season_polling", "companion_disable"] {
         get_ipc_response(
             &webview,
             InvokeRequest {
