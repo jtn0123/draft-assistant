@@ -58,7 +58,7 @@ async function serve(page: Page, host: Backend): Promise<void> {
         headers: { "content-type": "text/html", "content-security-policy": CSP },
       });
     }
-    if (path === "/static/app.js" || path === "/static/app.css") {
+    if (["/static/helpers.js", "/static/app.js", "/static/app.css"].includes(path)) {
       const type = path.endsWith(".css") ? "text/css" : "text/javascript";
       const body = asset(path.slice("/static/".length));
       return route.fulfill({ body, headers: { "content-type": type } });

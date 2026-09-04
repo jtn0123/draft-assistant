@@ -122,6 +122,20 @@ describe("useSeasonSession", () => {
     expect(onError).toHaveBeenCalledTimes(1);
   });
 
+  it("shows a host with no season open in place, without a toast", async () => {
+    // What a follower raises when the host has not opened its Season screen:
+    // a state to display where the season would be, not a failure to nag about.
+    const noSeason = new Error("Justin's Mac hasn't opened the Season screen yet");
+    noSeason.name = "NoSeasonOnHost";
+    mocks.loadSeason.mockRejectedValue(noSeason);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useSeasonSession(true, "1", onError));
+
+    await waitFor(() => expect(result.current.error).toMatch(/hasn't opened the Season screen/));
+    expect(result.current.error).not.toMatch(/^Error:/);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("says so when live updates could not be started", async () => {
     mocks.loadSeason.mockResolvedValue(view(2));
     mocks.startSeasonPolling.mockRejectedValue(new Error("no league loaded"));

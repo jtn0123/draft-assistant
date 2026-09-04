@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { stableAvailable } from "./boardIdentity";
+import { readFollow } from "./companion";
 import { platformName, platformOf } from "./leagues";
 import { problem } from "./format";
 import type { DraftView, PollHealth, StoredLeague } from "./types";
@@ -105,7 +106,11 @@ export function useDraftSession(
 
   // Which service the toasts should name. The view knows once there is one;
   // before that the league being restored does, from the shape of its id.
-  const service = platformName(view?.league.platform ?? restoring?.platform ?? "sleeper");
+  // A follower is not talking to Sleeper or Yahoo at all; it is talking to
+  // the host, and the launch screen should say so.
+  const service =
+    readFollow()?.host_name ??
+    platformName(view?.league.platform ?? restoring?.platform ?? "sleeper");
 
   const applyView = useCallback((next: DraftView) => {
     // Hand the board back the array it has already sorted when the new view

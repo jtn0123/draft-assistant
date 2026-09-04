@@ -112,3 +112,17 @@ fn events_reach_a_subscriber_as_type_and_payload() {
     assert_eq!(value["type"], "poll-health");
     assert_eq!(value["payload"]["ok"], true);
 }
+
+#[test]
+fn pairing_again_under_the_same_name_replaces_the_old_entry_and_its_token() {
+    let hub = hub();
+    let (first_token, _) = paired(&hub);
+    let (second_token, _) = paired(&hub);
+    let devices = hub.devices();
+    assert_eq!(devices.len(), 1, "{devices:?}");
+    assert!(hub.device_for(&second_token).is_some());
+    assert!(
+        hub.device_for(&first_token).is_none(),
+        "the replaced device's token must stop working"
+    );
+}

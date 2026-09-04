@@ -145,6 +145,7 @@ impl Srv {
 /// serving them from the binary rather than from disk is what keeps the app a
 /// single bundle with nothing to install beside it.
 pub const INDEX_HTML: &str = include_str!("../../companion-static/index.html");
+pub const HELPERS_JS: &str = include_str!("../../companion-static/helpers.js");
 pub const APP_JS: &str = include_str!("../../companion-static/app.js");
 pub const APP_CSS: &str = include_str!("../../companion-static/app.css");
 
@@ -155,6 +156,7 @@ pub const APP_CSS: &str = include_str!("../../companion-static/app.css");
 pub fn static_file(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
         "index.html" => Some(("text/html; charset=utf-8", INDEX_HTML)),
+        "helpers.js" => Some(("text/javascript; charset=utf-8", HELPERS_JS)),
         "app.js" => Some(("text/javascript; charset=utf-8", APP_JS)),
         "app.css" => Some(("text/css; charset=utf-8", APP_CSS)),
         _ => None,
@@ -166,8 +168,8 @@ mod tests {
     use super::static_file;
 
     #[test]
-    fn only_the_three_page_files_are_served() {
-        for name in ["index.html", "app.js", "app.css"] {
+    fn only_the_page_files_are_served() {
+        for name in ["index.html", "helpers.js", "app.js", "app.css"] {
             let (mime, body) = static_file(name).expect("{name} is served");
             assert!(!mime.is_empty());
             assert!(!body.is_empty(), "{name} is empty");

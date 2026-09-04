@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { NO_SEASON_ON_HOST } from "./apiRemote";
 import type { SeasonView } from "./season-types";
 import type { PollHealth } from "./types";
 
@@ -120,8 +121,10 @@ export function useSeasonSession(
         // opening it again is allowed to try once more.
         loadedRef.current = false;
         if (!live) return;
-        setError(String(e));
-        onErrorRef.current(String(e));
+        setError(describe(e));
+        // A follower whose host has no season open is shown that in place;
+        // a toast on top would nag about something nobody here can fix.
+        if (!isNoSeasonOnHost(e)) onErrorRef.current(describe(e));
       });
     return () => {
       live = false;
@@ -162,13 +165,22 @@ export function useSeasonSession(
       })
       .catch((e) => {
         if (asked !== generation.current) return;
-        setError(String(e));
+        setError(describe(e));
         // The screen only shows `error` while it has no view at all, so a
         // retry that failed with last week's numbers still on it changed
         // nothing anyone could see. Say it out loud instead.
-        onErrorRef.current(String(e));
+        if (!isNoSeasonOnHost(e)) onErrorRef.current(describe(e));
       });
   }, []);
 
   return { season, error, pollHealth, retry };
+}
+
+/** An error's own message; `String(e)` would prefix every one with "Error:". */
+function describe(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+function isNoSeasonOnHost(e: unknown): boolean {
+  return e instanceof Error && e.name === NO_SEASON_ON_HOST;
 }

@@ -85,7 +85,7 @@ describe("reads", () => {
     fetchMock.mockResolvedValue(json({ error: "no league loaded" }, 404));
     await expect(remoteFetcher(follow, () => undefined)("/api/season")).resolves.toBeNull();
     await expect(remoteApi(follow, () => undefined).getSeason()).rejects.toThrow(
-      /Justin's Mac has no season loaded/,
+      /Justin's Mac hasn't opened the Season screen yet/,
     );
   });
 
@@ -180,7 +180,6 @@ describe("what the host keeps", () => {
   it("refuses every host-only call by name", async () => {
     const api = remoteApi(follow, () => undefined);
     for (const call of [
-      () => api.addLeague("L2"),
       () => api.setApiKey("sk-x"),
       () => api.setChatBudget(9),
       () => api.yahooLeagues(),
@@ -191,6 +190,19 @@ describe("what the host keeps", () => {
     ]) {
       await expect(call()).rejects.toThrow("That's controlled by the host (Justin's Mac)");
     }
+  });
+
+  it("restores the host's own league as a read, and refuses to switch it", async () => {
+    // The shell re-adds its active league on every boot; on a follower that
+    // must come back as the host's board, not as a refusal.
+    fetchMock.mockResolvedValue(json(draftView));
+    const api = remoteApi(follow, () => undefined);
+    await expect(api.addLeague("L1")).resolves.toMatchObject({ league: { league_id: "L1" } });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://192.168.1.5:7878/api/state",
+      expect.anything(),
+    );
+    await expect(api.addLeague("L2")).rejects.toThrow(/Justin's Mac is on a different league/);
   });
 
   it("still asks and sends on the shared thread", async () => {

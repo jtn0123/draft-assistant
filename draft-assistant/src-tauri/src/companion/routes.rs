@@ -32,7 +32,39 @@ pub fn router(srv: Arc<Srv>) -> Router {
             get(super::routes_chat::get_chat).post(super::routes_chat::post_chat),
         )
         .route("/api/events", get(super::ws::events))
+        .layer(axum::middleware::from_fn(cors))
         .with_state(srv)
+}
+
+/// Let a page served from somewhere else call this API.
+///
+/// The follower desktop's webview is its own origin (`tauri://localhost`), and
+/// so is the Vite dev server; without these headers a browser refuses to hand
+/// either the response, and the preflight it sends first would be a 405. Any
+/// origin is allowed on purpose: the bearer token is the whole access control,
+/// no cookie is ever set, and a LAN page that knows the token is a paired
+/// device by definition.
+async fn cors(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let allow = |mut response: Response| {
+        let headers = response.headers_mut();
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            "*".parse().expect("static"),
+        );
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            "authorization, content-type".parse().expect("static"),
+        );
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            "GET, POST, OPTIONS".parse().expect("static"),
+        );
+        response
+    };
+    if request.method() == axum::http::Method::OPTIONS {
+        return allow(StatusCode::NO_CONTENT.into_response());
+    }
+    allow(next.run(request).await)
 }
 
 /// Every failure this server produces: a status and `{ "error": … }`, which

@@ -197,11 +197,18 @@ impl CompanionHub {
             } else {
                 "phone"
             };
+            // The same phone pairing again — a reinstalled page, a new code
+            // after a revoke — replaces its old entry rather than sitting
+            // beside it as a ghost; the old token dies with it.
+            let name = display_name(name);
+            inner
+                .devices
+                .retain(|d| !(d.device.name == name && d.device.kind == kind));
             inner.devices.push(Paired {
                 token: token.clone(),
                 device: Device {
                     device_id: device_id.clone(),
-                    name: display_name(name),
+                    name,
                     kind: kind.to_string(),
                     paired_at_ms: now,
                     last_seen_ms: now,

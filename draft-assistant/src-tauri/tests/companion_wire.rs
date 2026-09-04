@@ -249,3 +249,48 @@ async fn the_url_on_screen_points_at_the_port_that_was_taken() {
     assert!(url.starts_with("http://"), "{url}");
     assert!(url.ends_with(&format!(":{port}/")), "{url}");
 }
+
+/// A follower desktop's webview and the Vite dev server are other origins;
+/// without these headers the browser drops every answer and the preflight
+/// would be a 405.
+#[tokio::test]
+async fn another_origin_is_allowed_to_call_the_api() {
+    let host = harness::host("cors").await;
+    let preflight = host
+        .http
+        .request(reqwest::Method::OPTIONS, format!("{}/api/pair", host.base))
+        .header("origin", "tauri://localhost")
+        .header("access-control-request-method", "POST")
+        .send()
+        .await
+        .expect("preflight goes through");
+    assert_eq!(preflight.status(), 204);
+    let allow = |name: &str| {
+        preflight
+            .headers()
+            .get(name)
+            .map(|v| v.to_str().unwrap_or("").to_string())
+            .unwrap_or_default()
+    };
+    assert_eq!(allow("access-control-allow-origin"), "*");
+    assert!(allow("access-control-allow-headers").contains("authorization"));
+    assert!(allow("access-control-allow-methods").contains("POST"));
+
+    let paired = host.pair_ok("Rob's iPhone", "phone").await;
+    let response = host
+        .http
+        .get(format!("{}/api/state", host.base))
+        .bearer_auth(&paired.token)
+        .header("origin", "http://localhost:1420")
+        .send()
+        .await
+        .expect("the request goes through");
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get("access-control-allow-origin")
+            .map(|v| v.to_str().unwrap_or("")),
+        Some("*")
+    );
+}

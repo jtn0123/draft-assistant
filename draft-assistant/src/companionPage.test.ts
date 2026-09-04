@@ -50,6 +50,9 @@ interface Companion {
   relativeTime(atMs: number, nowMs: number): string;
   positionClass(position: string | null): string;
   modeLabel(mode: unknown): string;
+  collapseAgreeing(
+    recs: { player_id: string; mode: string }[],
+  ): { player_id: string; mode: string }[];
   backoffDelay(attempt: number): number;
   formatCost(usd: number | null): string | null;
   formatClock(deadlineMs: number | null, nowMs: number): string | null;
@@ -60,7 +63,11 @@ interface Companion {
 
 // Resolved from the project root: vitest runs with the package as its cwd,
 // and under jsdom `import.meta.url` is not a file URL.
-const source = readFileSync(resolve("src-tauri/companion-static/app.js"), "utf8");
+// helpers.js publishes `window.Companion`; app.js only reads it back. Both
+// run so a helper app.js needs but helpers.js forgot to publish fails here.
+const source = ["helpers.js", "app.js"]
+  .map((file) => readFileSync(resolve(`src-tauri/companion-static/${file}`), "utf8"))
+  .join("\n");
 
 const sandbox: { window: { Companion?: Companion }; document: unknown } = {
   window: {},
@@ -86,6 +93,23 @@ describe("relative time", () => {
     expect(companion.modeLabel("balanced")).toBe("Balanced");
     expect(companion.modeLabel("upside")).toBe("Upside");
     expect(companion.modeLabel(null)).toBe("");
+    const same = [
+      { player_id: "a", mode: "balanced" },
+      { player_id: "a", mode: "safe" },
+      { player_id: "a", mode: "upside" },
+    ];
+    expect(companion.collapseAgreeing(same)).toEqual([
+      { player_id: "a", mode: "Balanced · Safe · Upside agree" },
+    ]);
+    const split = [
+      { player_id: "a", mode: "balanced" },
+      { player_id: "b", mode: "safe" },
+      { player_id: "a", mode: "upside" },
+    ];
+    expect(companion.collapseAgreeing(split).map((r) => r.mode)).toEqual([
+      "Balanced · Upside agree",
+      "Safe",
+    ]);
     expect(companion.relativeTime(now - 5_000, now)).toBe("just now");
     expect(companion.relativeTime(now - 44_000, now)).toBe("just now");
     expect(companion.relativeTime(now - 240_000, now)).toBe("4m ago");
@@ -120,6 +144,8 @@ describe("costs and clocks", () => {
     expect(companion.formatCost(0.0184)).toBe("$0.02");
     expect(companion.formatCost(0.0004)).toBe("$0.0004");
     expect(companion.formatCost(null)).toBeNull();
+    // A Claude Code answer costs the cap nothing; "$0.0000" reads as a bug.
+    expect(companion.formatCost(0)).toBeNull();
   });
 
   it("counts a pick clock down, and stops at zero", () => {

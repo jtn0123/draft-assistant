@@ -1,7 +1,10 @@
 //! Headless companion host: loads a league the way the app does, then serves
 //! the phone page and the follower API for it without the desktop window.
 //!
-//! Usage: companion_host <league_id> [username] [--port N] [--data-dir PATH]
+//! Usage: companion_host <league_id> [username] [--port N] [--data-dir PATH] [--chat-cli]
+//!
+//! `--chat-cli` answers shared-chat questions through the Claude Code CLI
+//! (subscription, $0) even when an API key is in the Keychain.
 //!
 //! Meant for trying the phone page in a browser and for driving the follower
 //! mode against something real. Prints the address and the pairing code, then
@@ -19,10 +22,13 @@ struct Args {
     username: Option<String>,
     port: u16,
     data_dir: std::path::PathBuf,
+    chat_cli: bool,
 }
 
 fn usage() -> ! {
-    eprintln!("usage: companion_host <league_id> [username] [--port N] [--data-dir PATH]");
+    eprintln!(
+        "usage: companion_host <league_id> [username] [--port N] [--data-dir PATH] [--chat-cli]"
+    );
     std::process::exit(2);
 }
 
@@ -30,6 +36,7 @@ fn parse_args() -> Args {
     let mut positional: Vec<String> = Vec::new();
     let mut port = draft_assistant_lib::companion::net::DEFAULT_PORT;
     let mut data_dir = std::env::temp_dir().join("draft-assistant-companion-host");
+    let mut chat_cli = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -40,6 +47,7 @@ fn parse_args() -> Args {
                     .unwrap_or_else(|| usage())
             }
             "--data-dir" => data_dir = args.next().map(Into::into).unwrap_or_else(|| usage()),
+            "--chat-cli" => chat_cli = true,
             _ => positional.push(arg),
         }
     }
@@ -51,6 +59,7 @@ fn parse_args() -> Args {
         username: positional.get(1).cloned(),
         port,
         data_dir,
+        chat_cli,
     }
 }
 
@@ -67,6 +76,9 @@ async fn main() {
         }
     }
     config.active_league_id = Some(args.league_id.clone());
+    if args.chat_cli {
+        config.chat_provider = Some("claude_code".to_string());
+    }
 
     let loaded = match engine.load_any(&args.league_id, false, None).await {
         Ok(l) => l,

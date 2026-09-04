@@ -135,6 +135,20 @@ class HostSocket {
   }
 }
 
+/** The name on the error a follower raises when the host has no season open. */
+export const NO_SEASON_ON_HOST = "NoSeasonOnHost";
+
+/** Not a failure so much as a state: the host has not opened its Season
+ *  screen, and nothing on a follower can make it. The shell shows this in
+ *  place rather than as a toast. */
+function noSeasonOnHost(hostName: string): Error {
+  const error = new Error(
+    `${hostName} hasn't opened the Season screen yet — the season shows here once it does`,
+  );
+  error.name = NO_SEASON_ON_HOST;
+  return error;
+}
+
 /** What every host-only call says, naming the machine that owns the setting. */
 function hostOnly(hostName: string): Promise<never> {
   return Promise.reject(new Error(`That's controlled by the host (${hostName})`));
@@ -170,7 +184,7 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
   };
   const season = async (): Promise<SeasonView> => {
     const view = await fetchJson<SeasonView>("/api/season");
-    if (view === null) throw new Error(`${follow.host_name} has no season loaded`);
+    if (view === null) throw noSeasonOnHost(follow.host_name);
     return validateSeasonView(view);
   };
   const image = async (path: string): Promise<string | null> => {
@@ -242,7 +256,19 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
     onCompanionDevices: (handler) => listen<CompanionDevice[]>("devices", handler),
 
     // ---------- the host's alone ----------
-    addLeague: refused,
+    // The shell "adds" its active league on every boot to restore it. On a
+    // follower that league is whatever the host has open, so the call is a
+    // read: hand back the host's board, and refuse only a *different* id,
+    // which really would be asking the host to switch.
+    addLeague: async (leagueId: string) => {
+      const view = await state();
+      if (view.league.league_id !== leagueId) {
+        throw new Error(
+          `${follow.host_name} is on a different league; switching is up to the host`,
+        );
+      }
+      return view;
+    },
     removeLeague: refused,
     setMyUsername: refused,
     setApiKey: refused,
