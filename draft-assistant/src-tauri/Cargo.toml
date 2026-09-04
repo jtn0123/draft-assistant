@@ -72,7 +72,7 @@ tauri = { version = "2.11", features = ["test"] }
 # A WebSocket *client* for tests/companion_chat.rs. Not a new crate in the
 # graph: axum's `ws` feature already pulls this exact version in as the server
 # half. Test-only, so nothing in a shipped binary links the client side.
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 
 [profile.release]
 overflow-checks = true
