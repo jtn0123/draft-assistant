@@ -23,7 +23,7 @@ fn fixture_csv() -> String {
 fn the_view_carries_every_players_second_opinion_and_the_load_date() {
     let (loaded, _, config) = common::fixture();
     let view = build_view(&loaded, &config);
-    assert_eq!(view.schema_version, "1.3");
+    assert_eq!(view.schema_version, "1.4");
     assert_eq!(
         view.data_health.second_opinion_loaded_at,
         Some(1_756_000_000)

@@ -257,6 +257,8 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
         slot_to_roster_id: None,
     };
     let loaded = LoadedLeague {
+        my_slot: None,
+        yahoo_ids: std::collections::HashMap::new(),
         league,
         draft,
         user_names: HashMap::from([

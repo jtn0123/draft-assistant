@@ -27,6 +27,12 @@ const METHODS: Record<keyof Api, true> = {
   getConfig: true,
   sleeperLeagues: true,
   removeLeague: true,
+  yahooStatus: true,
+  yahooSaveCredentials: true,
+  yahooBeginConnect: true,
+  yahooFinishConnect: true,
+  yahooDisconnect: true,
+  yahooLeagues: true,
   getState: true,
   refreshPicks: true,
   refreshData: true,
@@ -94,6 +100,13 @@ function build(): Harness {
     api.avatar.mockResolvedValue(null);
     api.chatSuggestions.mockResolvedValue([]);
     api.sleeperLeagues.mockResolvedValue([]);
+    api.yahooLeagues.mockResolvedValue([]);
+    api.yahooStatus.mockResolvedValue({
+      configured: false,
+      connected: false,
+      redirect: "oob",
+      account: null,
+    });
     api.chatSettings.mockResolvedValue({
       cli_available: false,
       provider: "api",
@@ -179,6 +192,7 @@ export function seasonFixture(overrides: Partial<SeasonView> = {}): SeasonView {
       league_id: "1",
       name: "Dynasty Warriors",
       season: "2026",
+      platform: "sleeper",
       total_rosters: 12,
       roster_positions: ["QB", "RB", "BN"],
       draftable_positions: ["QB", "RB"],

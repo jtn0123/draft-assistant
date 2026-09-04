@@ -1,6 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AppConfig, DraftView, PollHealth, SecondOpinionImport, StoredLeague } from "./types";
+import type {
+  AppConfig,
+  DraftView,
+  PollHealth,
+  SecondOpinionImport,
+  StoredLeague,
+  YahooConnectStart,
+  YahooStatus,
+} from "./types";
 import type { SeasonView } from "./season-types";
 import type { ChatReply, ChatRequest, ChatSettings } from "./chat-types";
 import { ReplayFeed, replaySource } from "./replay";
@@ -9,7 +17,7 @@ import { ReplayFeed, replaySource } from "./replay";
 // SEASON_SCHEMA_VERSION in src-tauri/src/season.rs. Bump both sides together
 // with the fixtures in public/ — src-tauri/tests/fixture_shape.rs fails if the
 // fixtures and the structs disagree about a single field.
-const DRAFT_VIEW_SCHEMA_VERSION = "1.3";
+const DRAFT_VIEW_SCHEMA_VERSION = "1.4";
 const SEASON_VIEW_SCHEMA_VERSION = "1.2";
 
 export function validateDraftView(value: DraftView): DraftView {
@@ -49,6 +57,21 @@ export interface Api {
   getConfig(): Promise<AppConfig>;
   /** Every league the saved Sleeper account plays in that season. */
   sleeperLeagues(season: string): Promise<StoredLeague[]>;
+  /** How far the Yahoo connection has got: whether an app's credentials are
+   *  saved, and whether a token was ever swapped for them. */
+  yahooStatus(): Promise<YahooStatus>;
+  /** Keep the client id and secret from developer.yahoo.com. The secret is
+   *  write-only — nothing hands it back. */
+  yahooSaveCredentials(clientId: string, clientSecret: string): Promise<YahooStatus>;
+  /** Start the OAuth dance. The backend also tries to open the browser; the
+   *  URL comes back so the dialog can show it when that fails. */
+  yahooBeginConnect(): Promise<YahooConnectStart>;
+  /** Swap the code Yahoo showed the user for a token. */
+  yahooFinishConnect(code: string, state: string): Promise<YahooStatus>;
+  /** Forget the token. The saved credentials stay. */
+  yahooDisconnect(): Promise<YahooStatus>;
+  /** Every league the connected Yahoo account plays in. */
+  yahooLeagues(): Promise<StoredLeague[]>;
   /** Drop a league from the picker's list; the one on screen is refused.
    *  Resolves to the list as it stands afterwards. */
   removeLeague(leagueId: string): Promise<StoredLeague[]>;
@@ -94,6 +117,13 @@ const tauriApi: Api = {
   getConfig: () => invoke<AppConfig>("get_config"),
   sleeperLeagues: (season) => invoke<StoredLeague[]>("sleeper_leagues", { season }),
   removeLeague: (leagueId) => invoke<StoredLeague[]>("remove_league", { leagueId }),
+  yahooStatus: () => invoke<YahooStatus>("yahoo_status"),
+  yahooSaveCredentials: (clientId, clientSecret) =>
+    invoke<YahooStatus>("yahoo_save_credentials", { clientId, clientSecret }),
+  yahooBeginConnect: () => invoke<YahooConnectStart>("yahoo_begin_connect"),
+  yahooFinishConnect: (code, state) => invoke<YahooStatus>("yahoo_finish_connect", { code, state }),
+  yahooDisconnect: () => invoke<YahooStatus>("yahoo_disconnect"),
+  yahooLeagues: () => invoke<StoredLeague[]>("yahoo_leagues"),
   getState: () => invokeView("get_state"),
   refreshPicks: () => invokeView("refresh_picks"),
   refreshData: () => invokeView("refresh_data"),
@@ -147,6 +177,10 @@ function browserApi(): Api {
   // desktop app does.
   const readOnly = (advice: string): Promise<never> =>
     Promise.reject(new Error(`browser preview is read-only — ${advice}`));
+  // Yahoo needs a keychain and a browser the app can open, so every step of
+  // it says the same thing rather than half-working.
+  const needsDesktop = (): Promise<never> =>
+    Promise.reject(new Error("Yahoo needs the desktop app"));
   const search = window.location.search;
   const draft = new ReplayFeed<DraftView>({
     source: replaySource(search, "replay", "/dev-fixture.json"),
@@ -179,27 +213,19 @@ function browserApi(): Api {
       return {
         my_user_id: "browser-preview",
         active_league_id: v.league.league_id,
-        leagues: [
-          {
-            league_id: v.league.league_id,
-            name: v.league.name,
-            season: v.league.season,
-            status: null,
-          },
-        ],
+        leagues: [previewLeague(v)],
       };
     },
-    sleeperLeagues: async () => {
-      const v = await fixture();
-      return [
-        {
-          league_id: v.league.league_id,
-          name: v.league.name,
-          season: v.league.season,
-          status: null,
-        },
-      ];
-    },
+    sleeperLeagues: async () => [previewLeague(await fixture())],
+    // Nothing is configured, so the dialog opens on its first step and says
+    // what the rest of it needs.
+    yahooStatus: () =>
+      Promise.resolve({ configured: false, connected: false, redirect: "oob", account: null }),
+    yahooSaveCredentials: () => needsDesktop(),
+    yahooBeginConnect: () => needsDesktop(),
+    yahooFinishConnect: () => needsDesktop(),
+    yahooDisconnect: () => needsDesktop(),
+    yahooLeagues: () => needsDesktop(),
     // The preview has one league and it is always on screen.
     removeLeague: () => Promise.reject(new Error("that league is on screen")),
     getState: fixture,
@@ -263,6 +289,19 @@ function browserApi(): Api {
       }),
     chatSuggestions: () => Promise.resolve([]),
     askClaude: () => readOnly("Ask Claude requires the desktop app"),
+  };
+}
+
+/** The one league the preview has, as the picker's list wants it. */
+function previewLeague(v: DraftView): StoredLeague {
+  return {
+    league_id: v.league.league_id,
+    name: v.league.name,
+    season: v.league.season,
+    status: null,
+    // A fixture captured before platforms existed says nothing; it is a
+    // Sleeper dump either way.
+    platform: v.league.platform ?? "sleeper",
   };
 }
 

@@ -91,7 +91,7 @@ async fn load_draft_only_surfaces_the_fetch_error() {
 async fn load_any_explains_both_failed_interpretations() {
     let engine = offline_engine("load-any");
     let err = engine
-        .load_any("mystery-id", true)
+        .load_any("mystery-id", true, None)
         .await
         .err()
         .expect("expected an offline failure");

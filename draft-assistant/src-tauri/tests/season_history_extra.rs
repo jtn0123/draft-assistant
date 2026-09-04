@@ -70,6 +70,8 @@ fn loaded_league() -> LoadedLeague {
     let roster_rules = RosterRules::new(&league.roster_positions);
     let scoring = league.scoring_settings.clone();
     LoadedLeague {
+        my_slot: None,
+        yahoo_ids: std::collections::HashMap::new(),
         league,
         draft: draft(),
         user_names: HashMap::new(),

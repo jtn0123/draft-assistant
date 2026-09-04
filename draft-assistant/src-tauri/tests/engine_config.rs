@@ -41,6 +41,7 @@ fn config_without_key() -> AppConfig {
             name: "My League".into(),
             season: "2025".into(),
             status: None,
+            platform: "sleeper".into(),
         }],
         anthropic_api_key: None,
         chat_provider: Some("api".into()),
@@ -205,4 +206,50 @@ fn save_config_reports_disk_failures() {
     assert!(engine.load_config().leagues.is_empty(), "nothing was saved");
 
     std::fs::remove_file(blocker).unwrap();
+}
+
+/// A config written before Yahoo existed has no `platform` on its leagues.
+/// It has to keep loading, and every league in it is a Sleeper one, because
+/// that is what it was.
+#[test]
+fn a_config_from_before_yahoo_loads_with_every_league_read_as_sleepers() {
+    let dir = test_dir("platform-default");
+    let engine = Engine::new(dir.clone());
+    std::fs::write(
+        dir.join("config.json"),
+        r#"{"my_user_id": "user-1", "active_league_id": "league-1",
+            "leagues": [{"league_id": "league-1", "name": "My League",
+                         "season": "2025", "status": "in_season"}]}"#,
+    )
+    .expect("write a pre-Yahoo config");
+    let config = engine.load_config();
+    assert_eq!(config.leagues.len(), 1);
+    assert_eq!(config.leagues[0].platform, "sleeper");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// And one written since round-trips whichever platform it names.
+#[test]
+fn a_platform_survives_a_save_and_a_load() {
+    let dir = test_dir("platform-round-trip");
+    let engine = Engine::new(dir.clone());
+    let mut config = config_without_key();
+    config.leagues.push(StoredLeague {
+        league_id: "449.l.12345".into(),
+        name: "Wire Wednesday".into(),
+        season: "2026".into(),
+        status: Some("drafting".into()),
+        platform: "yahoo".into(),
+    });
+    engine.save_config(&config).expect("save the config");
+
+    let back = Engine::new(dir.clone()).load_config();
+    let platforms: Vec<&str> = back
+        .leagues
+        .iter()
+        .map(|league| league.platform.as_str())
+        .collect();
+    assert_eq!(platforms, ["sleeper", "yahoo"]);
+    assert_eq!(back.leagues[1].league_id, "449.l.12345");
+    std::fs::remove_dir_all(&dir).ok();
 }

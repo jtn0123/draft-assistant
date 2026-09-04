@@ -13,10 +13,14 @@ pub mod commands_chat;
 pub mod commands_draft;
 pub mod commands_season;
 pub mod commands_second_opinion;
+pub mod commands_yahoo;
 pub mod draft;
 pub mod engine;
+pub mod engine_assemble;
+pub mod engine_yahoo;
 pub mod headshots;
 pub mod keepers;
+pub mod league_ref;
 pub mod leagues;
 pub mod mock_league;
 pub mod pick_value;
@@ -64,6 +68,7 @@ pub mod view_signals;
 pub mod view_types;
 pub mod weekly;
 pub mod yahoo;
+pub mod yahoo_crosswalk;
 pub mod yahoo_map;
 pub mod yahoo_oauth;
 pub mod yahoo_parse;
@@ -82,9 +87,13 @@ use commands_season::{
     stop_season_polling,
 };
 use commands_second_opinion::import_second_opinion;
+use commands_yahoo::{
+    yahoo_begin_connect, yahoo_disconnect, yahoo_finish_connect, yahoo_leagues,
+    yahoo_save_credentials, yahoo_status,
+};
 use engine::Engine;
 use leagues::{remove_league, sleeper_leagues};
-use state::AppState;
+use state::{AppState, YahooState};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use tauri::Manager;
@@ -111,6 +120,7 @@ pub fn run() {
                 season_polling: Arc::new(AtomicBool::new(false)),
                 season_generation: Arc::new(AtomicU64::new(0)),
                 last_season_view: Arc::new(Mutex::new(None)),
+                yahoo: Arc::new(YahooState::default()),
             });
             Ok(())
         });
@@ -155,6 +165,12 @@ pub fn run() {
             sleeper_leagues,
             remove_league,
             import_second_opinion,
+            yahoo_status,
+            yahoo_save_credentials,
+            yahoo_begin_connect,
+            yahoo_finish_connect,
+            yahoo_disconnect,
+            yahoo_leagues,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

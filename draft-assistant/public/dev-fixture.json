@@ -1,8 +1,9 @@
 {
-  "schema_version": "1.3",
+  "schema_version": "1.4",
   "generated_at": 1787882005,
   "league": {
     "league_id": "1389710366300200960",
+    "platform": "sleeper",
     "name": "UMass Wrestling Fantasy Football League",
     "season": "2026",
     "total_rosters": 14,

@@ -15,8 +15,8 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 const draftView = {
-  schema_version: "1.3",
-  league: { league_id: "L1", name: "Test", season: "2026" },
+  schema_version: "1.4",
+  league: { league_id: "L1", name: "Test", season: "2026", platform: "sleeper" },
 } as unknown as DraftView;
 const seasonView = { schema_version: "1.2" } as unknown as SeasonView;
 
@@ -45,7 +45,7 @@ describe("schema validation", () => {
     expect(validateDraftView(draftView)).toBe(draftView);
     expect(validateSeasonView(seasonView)).toBe(seasonView);
     expect(() => validateDraftView({ schema_version: "0.9" } as DraftView)).toThrow(
-      /expected schema 1\.3, received 0\.9/,
+      /expected schema 1\.4, received 0\.9/,
     );
     expect(() => validateSeasonView({} as SeasonView)).toThrow(/received missing/);
   });
@@ -89,6 +89,33 @@ describe("tauri arm", () => {
     expect(invoke).toHaveBeenCalledWith("avatar", { reference: "abc123", full: true });
     invoke.mockResolvedValue({});
     await api.getConfig();
+    invoke.mockResolvedValue({
+      configured: true,
+      connected: false,
+      redirect: "oob",
+      account: null,
+    });
+    await api.yahooStatus();
+    expect(invoke).toHaveBeenCalledWith("yahoo_status");
+    await api.yahooSaveCredentials("dj0yJm", "secret");
+    expect(invoke).toHaveBeenCalledWith("yahoo_save_credentials", {
+      clientId: "dj0yJm",
+      clientSecret: "secret",
+    });
+    await api.yahooFinishConnect("xy7q9", "s-1");
+    expect(invoke).toHaveBeenCalledWith("yahoo_finish_connect", { code: "xy7q9", state: "s-1" });
+    await api.yahooDisconnect();
+    expect(invoke).toHaveBeenCalledWith("yahoo_disconnect");
+    invoke.mockResolvedValue({
+      authorize_url: "https://yahoo.example",
+      state: "s",
+      redirect: "oob",
+    });
+    await api.yahooBeginConnect();
+    expect(invoke).toHaveBeenCalledWith("yahoo_begin_connect");
+    invoke.mockResolvedValue([]);
+    await api.yahooLeagues();
+    expect(invoke).toHaveBeenCalledWith("yahoo_leagues");
     invoke.mockResolvedValue(true);
     await api.setApiKey("sk-test");
     invoke.mockResolvedValue("api");
@@ -159,6 +186,7 @@ describe("browser arm", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     const config = await api.getConfig();
     expect(config.leagues[0]?.league_id).toBe("L1");
+    expect(config.leagues[0]?.platform).toBe("sleeper");
     expect(config.my_user_id).toBe("browser-preview");
   });
 
@@ -213,6 +241,27 @@ describe("browser arm", () => {
     expect((await api.onPollHealth(() => undefined))()).toBeUndefined();
     expect((await api.onSeasonUpdated(() => undefined))()).toBeUndefined();
     expect((await api.onSeasonPollHealth(() => undefined))()).toBeUndefined();
+  });
+
+  it("says Yahoo needs the desktop app, and reports nothing configured", async () => {
+    const { api } = await load(false);
+    expect(await api.yahooStatus()).toEqual({
+      configured: false,
+      connected: false,
+      redirect: "oob",
+      account: null,
+    });
+    await expect(api.yahooSaveCredentials("a", "b")).rejects.toThrow("Yahoo needs the desktop app");
+    await expect(api.yahooBeginConnect()).rejects.toThrow("Yahoo needs the desktop app");
+    await expect(api.yahooFinishConnect("c", "s")).rejects.toThrow("Yahoo needs the desktop app");
+    await expect(api.yahooDisconnect()).rejects.toThrow("Yahoo needs the desktop app");
+    await expect(api.yahooLeagues()).rejects.toThrow("Yahoo needs the desktop app");
+  });
+
+  it("calls a fixture with no platform on it a Sleeper league", async () => {
+    const { api } = await load(false);
+    fixtureFetch({ ...draftView, league: { league_id: "L1", name: "Test", season: "2026" } });
+    expect((await api.sleeperLeagues("2026"))[0]?.platform).toBe("sleeper");
   });
 });
 

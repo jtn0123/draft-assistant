@@ -16,7 +16,34 @@ use std::collections::HashMap;
 /// The frontend gate in `src/api.ts` refuses any other version outright, and
 /// `tests/fixture_shape.rs` refuses to let it move without the checked-in
 /// `public/dev-fixture.json` moving with it.
-pub const DRAFT_SCHEMA_VERSION: &str = "1.3";
+pub const DRAFT_SCHEMA_VERSION: &str = "1.4";
+
+/// The two platforms a league can come from, as they are spelled on the wire.
+pub const SLEEPER: &str = "sleeper";
+pub const YAHOO: &str = "yahoo";
+
+/// Which platform an id belongs to, read off the id itself.
+///
+/// A Sleeper league or draft id is a long run of digits; a Yahoo league key is
+/// `<game key>.l.<league id>`. Neither can be mistaken for the other, so no
+/// extra field has to be threaded through `League` and every stored id already
+/// says where it came from.
+pub fn platform_for(league_id: &str) -> &'static str {
+    if is_yahoo_key(league_id) {
+        YAHOO
+    } else {
+        SLEEPER
+    }
+}
+
+/// Whether `id` is a Yahoo league key: digits, `.l.`, digits.
+pub fn is_yahoo_key(id: &str) -> bool {
+    let Some((game, league)) = id.split_once(".l.") else {
+        return false;
+    };
+    let digits = |part: &str| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit());
+    digits(game) && digits(league)
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DraftStatus {
@@ -99,6 +126,10 @@ pub struct DraftView {
 #[derive(Debug, Clone, Serialize)]
 pub struct LeagueSummary {
     pub league_id: String,
+    /// "sleeper" or "yahoo" — which platform this league is read from. The
+    /// frontend shows it next to the league name and uses it to decide which
+    /// attribution line to print.
+    pub platform: String,
     pub name: String,
     pub season: String,
     pub total_rosters: u32,
@@ -121,4 +152,31 @@ pub struct DataHealth {
     /// `None` when nothing has been imported. The board's extra column names
     /// this date in its header tooltip.
     pub second_opinion_loaded_at: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_yahoo_key, platform_for, SLEEPER, YAHOO};
+
+    #[test]
+    fn a_yahoo_league_key_is_told_apart_from_a_sleeper_id() {
+        assert_eq!(platform_for("449.l.12345"), YAHOO);
+        assert_eq!(platform_for("1389710366300200960"), SLEEPER);
+        assert_eq!(platform_for(""), SLEEPER);
+    }
+
+    #[test]
+    fn only_the_exact_key_shape_counts_as_yahoo() {
+        assert!(is_yahoo_key("449.l.12345"));
+        for junk in [
+            "449.l.12345.t.7",
+            "nfl.l.12345",
+            "449.l.",
+            ".l.12345",
+            "449l12345",
+            "449.p.30977",
+        ] {
+            assert!(!is_yahoo_key(junk), "{junk:?} is not a league key");
+        }
+    }
 }

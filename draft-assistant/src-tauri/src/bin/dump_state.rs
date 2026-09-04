@@ -59,7 +59,7 @@ async fn main() {
         }
     }
 
-    let mut loaded = match engine.load_any(&league_id, false).await {
+    let mut loaded = match engine.load_any(&league_id, false, None).await {
         Ok(l) => l,
         Err(e) => {
             eprintln!("load failed: {e}");

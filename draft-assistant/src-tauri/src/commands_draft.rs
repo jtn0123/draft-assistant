@@ -1,35 +1,20 @@
 //! Tauri commands for the draft screen.
 
+use crate::commands_yahoo::{client_from, persist_tokens_for, yahoo_picks};
 use crate::draft;
-use crate::engine::{AppConfig, StoredLeague};
+use crate::engine::{AppConfig, Engine, LoadedLeague, StoredLeague};
 use crate::keepers;
+use crate::league_ref::{extract_ref, Pasted};
 use crate::picks::{self, ManualPickStore};
 use crate::poll::{self, record_poll_outcome, DraftPollMemory};
 use crate::sleeper::{Draft, Pick};
 use crate::sleeper_error::to_message;
-use crate::state::{view_from, AppState};
+use crate::state::{view_from, AppState, YahooState};
 use crate::view::{self, DraftView};
+use crate::view_types::{is_yahoo_key, platform_for};
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use tauri::{Emitter, State};
-
-/// Pull a Sleeper id out of whatever the user pasted — a bare id, or a URL
-/// like `sleeper.com/draft/nfl/1234567890123456789`.
-///
-/// Anything that is not a run of digits is refused rather than passed through:
-/// the result is interpolated straight into a request path, and text that
-/// happens to contain `../` would otherwise walk out of `/v1/`.
-fn extract_id(input: &str) -> Result<String, String> {
-    input
-        .split(|c: char| !c.is_ascii_digit())
-        .max_by_key(|run| run.len())
-        .filter(|run| (15..=25).contains(&run.len()))
-        .map(str::to_string)
-        .ok_or_else(|| {
-            "that doesn't look like a Sleeper ID — paste the league or draft link, \
-             or the long number from it"
-                .to_string()
-        })
-}
 
 /// What a tick says when Sleeper hands back an empty pick list for a draft
 /// that already has picks on it. `/picks` answers `null` now and then, which
@@ -58,6 +43,77 @@ fn unusable(draft: &Draft) -> Option<String> {
 /// one wording for one situation.
 const LEAGUE_CHANGED: &str = "the league changed while this was loading — try again";
 
+/// Load a league on whichever platform its id belongs to.
+///
+/// The Yahoo client is built here rather than inside the engine so that the
+/// tokens it may have refreshed on the way are written back afterwards — the
+/// client renews in place, and a renewal nobody stores is spent again on the
+/// next launch.
+async fn load_dispatched(
+    state: &AppState,
+    league_id: &str,
+    force: bool,
+) -> Result<LoadedLeague, String> {
+    if !is_yahoo_key(league_id) {
+        return state.engine.load_any(league_id, force, None).await;
+    }
+    let client = client_from(&state.engine, &state.yahoo).await?;
+    let loaded = state
+        .engine
+        .load_any(league_id, force, Some(client.as_ref()))
+        .await;
+    persist_tokens_for(&state.engine, &state.yahoo, &client).await;
+    loaded
+}
+
+/// Turn the league id out of a Yahoo URL into the key every Yahoo call takes.
+///
+/// A URL carries `12345`; the API wants `449.l.12345`, and only the account's
+/// own league list knows which game key that is.
+async fn resolve_yahoo_league(state: &AppState, numeric: &str) -> Result<String, String> {
+    let client = client_from(&state.engine, &state.yahoo).await?;
+    let leagues = state.engine.yahoo_user_leagues(&client).await;
+    persist_tokens_for(&state.engine, &state.yahoo, &client).await;
+    leagues?
+        .into_iter()
+        .find(|league| league.league_id == numeric)
+        .map(|league| league.league_key)
+        .ok_or_else(|| {
+            format!(
+                "no league {numeric} on your Yahoo account — check you are signed in as \
+                 the manager who plays in it, or paste the league key (449.l.{numeric})"
+            )
+        })
+}
+
+/// One refresh of the picks — and, where the platform has one to refresh, the
+/// draft resource beside them.
+///
+/// Sleeper serves both from the draft id. Yahoo has no draft resource at all:
+/// the picks come from `draftresults` and the team list, and the draft's shape
+/// was settled at load time, so there is nothing to re-read and `None` is
+/// returned in its place.
+async fn fetch_tick(
+    engine: &Engine,
+    yahoo: &YahooState,
+    draft_id: &str,
+    yahoo_ids: &HashMap<String, String>,
+) -> (Result<Vec<Pick>, String>, Option<Result<Draft, String>>) {
+    if is_yahoo_key(draft_id) {
+        return (yahoo_picks(engine, yahoo, draft_id, yahoo_ids).await, None);
+    }
+    let (picks, draft) = tokio::join!(engine.client.picks(draft_id), engine.client.draft(draft_id));
+    (
+        picks.map_err(to_message),
+        Some(draft.map_err(|error| error.to_string())),
+    )
+}
+
+/// What one tick needs to know about the league on screen before it goes out.
+fn tick_target(loaded: &LoadedLeague) -> (String, HashMap<String, String>) {
+    (loaded.draft.draft_id.clone(), loaded.yahoo_ids.clone())
+}
+
 /// Add (or re-sync) a league by ID, make it active, and build its board.
 /// Also accepts a bare draft ID (mock drafts) or a pasted sleeper.com URL.
 #[tauri::command]
@@ -67,8 +123,11 @@ pub async fn add_league(
     force: Option<bool>,
 ) -> Result<DraftView, String> {
     let force = force.unwrap_or(false);
-    let league_id = extract_id(&league_id)?;
-    let new_loaded = state.engine.load_any(&league_id, force).await?;
+    let league_id = match extract_ref(&league_id)? {
+        Pasted::Sleeper(id) | Pasted::Yahoo(id) => id,
+        Pasted::YahooNumeric(numeric) => resolve_yahoo_league(&state, &numeric).await?,
+    };
+    let new_loaded = load_dispatched(&state, &league_id, force).await?;
     let mut config = state.config.lock().await;
     // Edited on a copy and only committed once it is safely on disk: a failed
     // save used to leave the picker showing a league the next launch would
@@ -80,12 +139,14 @@ pub async fn add_league(
             name: new_loaded.league.name.clone(),
             season: new_loaded.league.season.clone(),
             status: Some(new_loaded.league.status.clone()),
+            platform: platform_for(&league_id).to_string(),
         });
     } else if let Some(stored) = next.leagues.iter_mut().find(|l| l.league_id == league_id) {
         // A league loaded again has moved on since: it was drafting, now it
         // is in season. The picker should say so.
         stored.name = new_loaded.league.name.clone();
         stored.status = Some(new_loaded.league.status.clone());
+        stored.platform = platform_for(&league_id).to_string();
     }
     next.active_league_id = Some(league_id);
     state.engine.save_config(&next)?;
@@ -137,20 +198,12 @@ pub async fn get_state(state: State<'_, AppState>) -> Result<DraftView, String> 
 /// Re-poll picks once, right now.
 #[tauri::command]
 pub async fn refresh_picks(state: State<'_, AppState>) -> Result<DraftView, String> {
-    let draft_id = {
+    let (draft_id, yahoo_ids) = {
         let loaded = state.loaded.lock().await;
-        loaded
-            .as_ref()
-            .ok_or("no league loaded")?
-            .draft
-            .draft_id
-            .clone()
+        tick_target(loaded.as_ref().ok_or("no league loaded")?)
     };
-    let (picks, draft) = tokio::join!(
-        state.engine.client.picks(&draft_id),
-        state.engine.client.draft(&draft_id)
-    );
-    let picks = picks.map_err(to_message)?;
+    let (picks, draft) = fetch_tick(&state.engine, &state.yahoo, &draft_id, &yahoo_ids).await;
+    let picks = picks?;
 
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
@@ -179,7 +232,7 @@ pub async fn refresh_picks(state: State<'_, AppState>) -> Result<DraftView, Stri
         errors.extend(keepers::note_keepers(state.engine.as_ref(), loaded));
     }
     // Also refresh draft status/order — it flips to "drafting" at start time.
-    if let Ok(draft) = draft {
+    if let Some(Ok(draft)) = draft {
         match unusable(&draft) {
             Some(error) => errors.push(error),
             None => loaded.draft = draft,
@@ -197,7 +250,7 @@ pub async fn refresh_data(state: State<'_, AppState>) -> Result<DraftView, Strin
         let config = state.config.lock().await;
         config.active_league_id.clone().ok_or("no active league")?
     };
-    let new_loaded = state.engine.load_any(&league_id, true).await?;
+    let new_loaded = load_dispatched(&state, &league_id, true).await?;
     // The rebuild goes back to the wire for everything, which takes long
     // enough for the user to have picked a different league meanwhile. Both
     // locks are taken here, in the order the rest of the app takes them, so
@@ -303,6 +356,7 @@ pub async fn start_polling<R: tauri::Runtime>(
     state.polling.store(true, Ordering::SeqCst);
 
     let engine = state.engine.clone();
+    let yahoo = state.yahoo.clone();
     let loaded_ref = state.loaded.clone();
     let config_ref = state.config.clone();
     let polling = state.polling.clone();
@@ -316,15 +370,12 @@ pub async fn start_polling<R: tauri::Runtime>(
             {
                 break;
             }
-            let draft_id = {
+            let target = {
                 let loaded = loaded_ref.lock().await;
-                loaded.as_ref().map(|l| l.draft.draft_id.clone())
+                loaded.as_ref().map(tick_target)
             };
-            if let Some(draft_id) = draft_id {
-                let (picks, draft) = tokio::join!(
-                    engine.client.picks(&draft_id),
-                    engine.client.draft(&draft_id)
-                );
+            if let Some((draft_id, yahoo_ids)) = target {
+                let (picks, draft) = fetch_tick(&engine, &yahoo, &draft_id, &yahoo_ids).await;
                 let mut changed = false;
                 let mut errors = Vec::new();
                 let mut health = None;
@@ -360,17 +411,19 @@ pub async fn start_polling<R: tauri::Runtime>(
                                     errors.extend(keepers::note_keepers(engine.as_ref(), loaded));
                                 }
                             }
-                            Err(error) => errors.push(error.to_string()),
+                            Err(error) => errors.push(error),
                         }
                         match draft {
-                            Ok(draft) => match unusable(&draft) {
+                            Some(Ok(draft)) => match unusable(&draft) {
                                 Some(error) => errors.push(error),
                                 None => {
                                     changed |= memory.status_changed(&draft.status);
                                     loaded.draft = draft;
                                 }
                             },
-                            Err(error) => errors.push(error.to_string()),
+                            Some(Err(error)) => errors.push(error),
+                            // Yahoo has no draft resource to refresh.
+                            None => {}
                         }
                         record_poll_outcome(loaded, &errors);
                         health = Some(poll::poll_health(loaded));
@@ -398,51 +451,4 @@ pub async fn start_polling<R: tauri::Runtime>(
 pub async fn stop_polling(state: State<'_, AppState>) -> Result<(), String> {
     state.polling.store(false, Ordering::SeqCst);
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::extract_id;
-
-    #[test]
-    fn a_bare_id_and_a_pasted_link_both_work() {
-        assert_eq!(
-            extract_id("1389710366300200960").unwrap(),
-            "1389710366300200960"
-        );
-        assert_eq!(
-            extract_id("https://sleeper.com/draft/nfl/1389710366300200960").unwrap(),
-            "1389710366300200960"
-        );
-        assert_eq!(
-            extract_id("  1389710366300200960  ").unwrap(),
-            "1389710366300200960"
-        );
-    }
-
-    #[test]
-    fn anything_without_an_id_in_it_is_refused_rather_than_sent_on() {
-        // These used to be passed through verbatim and interpolated straight
-        // into a request path.
-        for junk in [
-            "",
-            "   ",
-            "hello",
-            "../../projections/nfl/2025",
-            "12345",
-            "https://sleeper.com/leagues",
-        ] {
-            let result = extract_id(junk);
-            assert!(
-                result.is_err(),
-                "{junk:?} should be refused, got {result:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_error_tells_the_user_what_to_paste() {
-        let error = extract_id("nonsense").unwrap_err();
-        assert!(error.contains("Sleeper ID"), "unhelpful: {error}");
-    }
 }

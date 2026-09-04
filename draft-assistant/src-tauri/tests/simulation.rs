@@ -121,6 +121,8 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         chat_spend_usd: Default::default(),
     };
     let loaded = LoadedLeague {
+        my_slot: None,
+        yahoo_ids: std::collections::HashMap::new(),
         league,
         draft,
         user_names: HashMap::from([(my_user_id, "Simulation User".into())]),

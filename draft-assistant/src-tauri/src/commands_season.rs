@@ -254,6 +254,8 @@ mod tests {
             draft,
             user_names: HashMap::new(),
             user_avatars: HashMap::new(),
+            my_slot: None,
+            yahoo_ids: HashMap::new(),
             board: Vec::new(),
             board_index: HashMap::new(),
             replacement_model: ReplacementModel {

@@ -321,7 +321,7 @@ async fn a_draft_with_no_teams_is_refused_by_name() {
 async fn an_id_that_is_not_a_league_is_tried_as_a_draft() {
     let engine = engine("load-any");
     let loaded = engine
-        .load_any("mock-1", true)
+        .load_any("mock-1", true, None)
         .await
         .expect("the id is a mock draft even though it is not a league");
     assert_eq!(loaded.draft.draft_id, "mock-1");

@@ -6,15 +6,25 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { settle } from "../test/settle";
 
-const mocks = vi.hoisted(() => ({ sleeperLeagues: vi.fn(), removeLeague: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  sleeperLeagues: vi.fn(),
+  yahooLeagues: vi.fn(),
+  removeLeague: vi.fn(),
+}));
 vi.mock("../api", () => ({ api: mocks }));
 
 import { LeaguePicker } from "./LeaguePicker";
 import type { StoredLeague } from "../types";
 
 const known: StoredLeague[] = [
-  { league_id: "1", name: "Dynasty Warriors", season: "2026", status: "in_season" },
-  { league_id: "2", name: "Mock draft", season: "2026", status: null },
+  {
+    league_id: "1",
+    name: "Dynasty Warriors",
+    season: "2026",
+    status: "in_season",
+    platform: "sleeper",
+  },
+  { league_id: "2", name: "Mock draft", season: "2026", status: null, platform: "sleeper" },
 ];
 
 const onSwitch = vi.fn();
@@ -28,6 +38,7 @@ function open(props: Partial<Parameters<typeof LeaguePicker>[0]> = {}) {
       activeId="1"
       season="2026"
       hasAccount={false}
+      yahooConnected={false}
       busy={false}
       onSwitch={onSwitch}
       onForget={onForget}
@@ -40,6 +51,7 @@ function open(props: Partial<Parameters<typeof LeaguePicker>[0]> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.sleeperLeagues.mockResolvedValue([]);
+  mocks.yahooLeagues.mockResolvedValue([]);
 });
 
 describe("the leagues it offers", () => {
@@ -76,7 +88,13 @@ describe("the leagues it offers", () => {
 describe("looking the account up on Sleeper", () => {
   it("asks for the season on screen and adds what comes back", async () => {
     mocks.sleeperLeagues.mockResolvedValue([
-      { league_id: "3", name: "Work league", season: "2026", status: "pre_draft" },
+      {
+        league_id: "3",
+        name: "Work league",
+        season: "2026",
+        status: "pre_draft",
+        platform: "sleeper",
+      },
     ]);
     open();
     await settle(() => screen.getByRole("button", { name: /Find my leagues/ }).click());
@@ -91,7 +109,13 @@ describe("looking the account up on Sleeper", () => {
 
   it("asks on its own when an account is saved, and only then", async () => {
     mocks.sleeperLeagues.mockResolvedValue([
-      { league_id: "3", name: "Sharks League", season: "2026", status: "pre_draft" },
+      {
+        league_id: "3",
+        name: "Sharks League",
+        season: "2026",
+        status: "pre_draft",
+        platform: "sleeper",
+      },
     ]);
     await settle(() => open({ hasAccount: true }));
     expect(mocks.sleeperLeagues).toHaveBeenCalledTimes(1);
@@ -113,12 +137,53 @@ describe("looking the account up on Sleeper", () => {
   });
 });
 
+describe("Yahoo leagues", () => {
+  const work: StoredLeague = {
+    league_id: "449.l.98765",
+    name: "Office League",
+    season: "2026",
+    status: "pre_draft",
+    platform: "yahoo",
+  };
+
+  it("asks Yahoo on open when it is connected, and marks what comes back", async () => {
+    mocks.yahooLeagues.mockResolvedValue([work]);
+    await settle(() => open({ yahooConnected: true }));
+
+    expect(mocks.yahooLeagues).toHaveBeenCalledTimes(1);
+    const row = screen.getByRole("button", { name: /Office League/ });
+    expect(row).toHaveTextContent("Yahoo");
+    // Sleeper is the ordinary case here and carries no mark of its own.
+    expect(screen.getByRole("button", { name: /Dynasty Warriors/ })).not.toHaveTextContent("Yahoo");
+    await settle(() => row.click());
+    expect(onSwitch).toHaveBeenCalledWith("449.l.98765");
+  });
+
+  it("does not ask when Yahoo is not connected", async () => {
+    await settle(() => open());
+    expect(mocks.yahooLeagues).not.toHaveBeenCalled();
+    expect(screen.queryByText("Yahoo")).toBeNull();
+  });
+
+  it("says why the Yahoo lookup failed and keeps the rest of the list", async () => {
+    mocks.yahooLeagues.mockRejectedValue(new Error("Yahoo sign-in expired"));
+    await settle(() => open({ yahooConnected: true }));
+
+    expect(screen.getByText("Yahoo sign-in expired")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Mock draft/ })).toBeInTheDocument();
+  });
+});
+
 describe("pasting a league or draft", () => {
   it("will not load an empty box, and loads a pasted id", async () => {
     const user = userEvent.setup();
     open();
     expect(screen.getByRole("button", { name: "Load" })).toBeDisabled();
 
+    expect(screen.getByLabelText(/Or paste a league or draft/)).toHaveAttribute(
+      "placeholder",
+      expect.stringContaining("449.l.12345"),
+    );
     await user.type(screen.getByLabelText(/Or paste a league or draft/), " 1389710366 ");
     await user.click(screen.getByRole("button", { name: "Load" }));
 

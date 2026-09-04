@@ -234,6 +234,13 @@
   opacity: 0.6;
 }
 
+.league-option-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .league-option-name {
   font-size: 13px;
   font-weight: 600;

@@ -105,6 +105,8 @@ fn loaded_league() -> LoadedLeague {
         .map(|(i, p)| (p.player_id.clone(), i))
         .collect();
     LoadedLeague {
+        my_slot: None,
+        yahoo_ids: std::collections::HashMap::new(),
         league,
         draft: draft(),
         user_names: HashMap::from([("user-1".to_string(), "Me".to_string())]),

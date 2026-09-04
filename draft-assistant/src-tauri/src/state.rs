@@ -4,6 +4,7 @@ use crate::engine::{now_secs, AppConfig, Engine, LoadedLeague};
 use crate::season::{build_season_view_cached, SeasonAnalysis, SeasonView};
 use crate::season_engine::LoadedSeason;
 use crate::view::{build_view, DraftView};
+use crate::yahoo::{YahooClient, YahooHosts};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use tauri::State;
@@ -22,6 +23,83 @@ pub struct AppState {
     /// rather than building its own, which is what keeps a question from
     /// stalling both pollers for the length of a full rebuild.
     pub last_season_view: Arc<Mutex<Option<CachedSeasonView>>>,
+    /// Everything the Yahoo side needs to keep between commands.
+    pub yahoo: Arc<YahooState>,
+}
+
+/// The Yahoo client, built when it is first wanted and thrown away whenever
+/// the credentials or the tokens change.
+///
+/// The client refreshes its access token in place, so whoever uses it has to
+/// write the new pair back to the Keychain afterwards — see
+/// [`crate::commands_yahoo`], which is the only place that does.
+pub struct YahooState {
+    /// Where the two hosts point. Yahoo's own in the app; a stub in the tests,
+    /// which is why this is a field and not a constant.
+    pub hosts: YahooHosts,
+    /// Whether the credentials and tokens may go in the machine's Keychain.
+    /// Off in the tests, which must never write to a developer's real login
+    /// Keychain, and which get the file store in the scratch data directory
+    /// instead.
+    pub keychain: bool,
+    /// Whether "Connect" may hand the authorize URL to the machine's browser.
+    /// Off in the tests, for the obvious reason.
+    pub open_browser: bool,
+    client: Mutex<Option<Arc<YahooClient>>>,
+    /// The `state` parameter of the connect the user is part-way through.
+    /// Compared on the way back, then dropped.
+    pending: Mutex<Option<String>>,
+}
+
+impl Default for YahooState {
+    fn default() -> Self {
+        Self::new(YahooHosts::default())
+    }
+}
+
+impl YahooState {
+    /// The real thing: the machine's Keychain and the machine's browser.
+    pub fn new(hosts: YahooHosts) -> Self {
+        Self {
+            hosts,
+            keychain: true,
+            open_browser: true,
+            client: Mutex::new(None),
+            pending: Mutex::new(None),
+        }
+    }
+
+    /// The same, but touching nothing outside the app's data directory: the
+    /// secrets go in a file there and no browser is opened. This is what the
+    /// tests run against.
+    pub fn sandboxed(hosts: YahooHosts) -> Self {
+        Self {
+            keychain: false,
+            open_browser: false,
+            ..Self::new(hosts)
+        }
+    }
+
+    /// The client as it stands, or nothing if none has been built yet.
+    pub async fn client(&self) -> Option<Arc<YahooClient>> {
+        self.client.lock().await.clone()
+    }
+
+    pub async fn set_client(&self, client: Option<Arc<YahooClient>>) {
+        *self.client.lock().await = client;
+    }
+
+    /// Remember the `state` of a connect that has just been started.
+    pub async fn expect_state(&self, state: &str) {
+        *self.pending.lock().await = Some(state.to_string());
+    }
+
+    /// Take the expected `state` back out. It is consumed either way: a
+    /// mismatched reply must not leave the old one lying about for a second
+    /// attempt to be matched against.
+    pub async fn take_state(&self) -> Option<String> {
+        self.pending.lock().await.take()
+    }
 }
 
 /// A season view kept for the chat panel, with the moment it was built.

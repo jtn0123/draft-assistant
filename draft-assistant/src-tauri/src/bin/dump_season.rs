@@ -45,7 +45,7 @@ async fn main() {
         }
     }
 
-    let loaded = match engine.load_any(&league_id, false).await {
+    let loaded = match engine.load_any(&league_id, false, None).await {
         Ok(l) => l,
         Err(e) => {
             eprintln!("load failed: {e}");

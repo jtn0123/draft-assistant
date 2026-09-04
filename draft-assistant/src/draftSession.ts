@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { stableAvailable } from "./boardIdentity";
+import { platformOf } from "./leagues";
 import { problem } from "./format";
 import type { DraftView, PollHealth, StoredLeague } from "./types";
 
@@ -144,6 +145,9 @@ export function useDraftSession(
             name: "",
             season: "",
             status: null,
+            // Nothing but the id is known yet; its shape says which service
+            // it belongs to.
+            platform: platformOf(leagueId),
           },
         );
         return api.addLeague(leagueId);

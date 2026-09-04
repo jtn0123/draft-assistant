@@ -11,10 +11,12 @@ import { Header, type SettingsRow } from "./components/Header";
 import { Chat, DraftScreen, ScreenFallback, SeasonScreen } from "./components/lazyScreens";
 import { LaunchScreen, Setup } from "./components/Panels";
 import { LeaguePicker } from "./components/LeaguePicker";
+import { YahooConnect } from "./components/YahooConnect";
 import { ConfirmDialog, Toast } from "./components/Overlays";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ordinal, pickLabel, age, problem, scoringFormat } from "./format";
 import { cycleThemePreference, useAppliedTheme } from "./theme";
+import { useYahooStatus, yahooNote } from "./yahoo";
 // Only the sheets the shell itself paints with. The screen-specific ones are
 // imported by the screens, so Vite ships each alongside the chunk that needs
 // it rather than making every window parse all ten before first paint.
@@ -24,6 +26,7 @@ import "./header.css";
 import "./bits.css";
 import "./components.css";
 import "./zoom.css";
+import "./yahoo.css";
 
 type Confirm = { playerId: string; name: string } | null;
 
@@ -44,6 +47,7 @@ export default function App() {
     [],
   );
   const [leaguePicker, setLeaguePicker] = useState(false);
+  const [yahooOpen, setYahooOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   // Reads the stored choice, keeps the page painted in it, and follows the OS
@@ -103,6 +107,9 @@ export default function App() {
     retry: retrySeason,
   } = useSeasonSession(screen === "season", view?.league.league_id ?? null, showToast);
   const chime = useChime();
+  // Asked once for the settings row and the picker's Yahoo lookup; the
+  // connect dialog hands back every newer answer it is given.
+  const yahoo = useYahooStatus();
 
   // Chime when the clock reaches you — the one moment worth interrupting for.
   useEffect(() => {
@@ -199,6 +206,16 @@ export default function App() {
       },
     },
     {
+      label: "Yahoo",
+      note: yahooNote(yahoo.status),
+      value: yahoo.connected ? "Connected" : "Connect",
+      on: yahoo.connected,
+      onSelect: () => {
+        setSettingsOpen(false);
+        setYahooOpen(true);
+      },
+    },
+    {
       label: "Refresh data",
       note: "Re-fetch projections and rebuild the board",
       value: busy ? "…" : "Sync",
@@ -276,7 +293,13 @@ export default function App() {
             settingsOpen={settingsOpen}
             onToggleSettings={() => setSettingsOpen((s) => !s)}
             settingsRows={settingsRows}
-            footerNote={`${view.league.name} · league ${view.league.league_id} · read-only connection`}
+            footerNote={
+              // Yahoo's terms ask for the attribution wherever their data is
+              // shown; this is the line every screen carries under the menu.
+              view.league.platform === "yahoo"
+                ? "Fantasy data provided by Yahoo Fantasy · read-only connection"
+                : `${view.league.name} · league ${view.league.league_id} · read-only connection`
+            }
           />
 
           {toast !== null && (
@@ -341,6 +364,7 @@ export default function App() {
           activeId={view.league.league_id}
           season={view.league.season}
           hasAccount={hasAccount}
+          yahooConnected={yahoo.connected}
           busy={busy}
           onSwitch={(id) => {
             setLeaguePicker(false);
@@ -348,6 +372,19 @@ export default function App() {
           }}
           onForget={(id) => void forgetLeague(id)}
           onClose={() => setLeaguePicker(false)}
+        />
+      )}
+
+      {yahooOpen && (
+        <YahooConnect
+          activeId={view.league.league_id}
+          busy={busy}
+          onSwitch={(id) => {
+            setYahooOpen(false);
+            void switchLeague(id);
+          }}
+          onStatus={yahoo.setStatus}
+          onClose={() => setYahooOpen(false)}
         />
       )}
 

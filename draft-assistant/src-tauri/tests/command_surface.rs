@@ -29,9 +29,10 @@ use draft_assistant_lib::commands_chat as chat;
 use draft_assistant_lib::commands_draft as draft;
 use draft_assistant_lib::commands_season as season;
 use draft_assistant_lib::commands_second_opinion as second_opinion;
+use draft_assistant_lib::commands_yahoo as yahoo;
 use draft_assistant_lib::engine::Engine;
 use draft_assistant_lib::leagues;
-use draft_assistant_lib::state::AppState;
+use draft_assistant_lib::state::{AppState, YahooState};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
 use tauri::webview::InvokeRequest;
@@ -104,8 +105,9 @@ fn declared_in_crate() -> BTreeSet<String> {
 /// Commands that open native UI when invoked. They are registered on the
 /// mock runtime like everything else, so the wiring is checked, but calling
 /// one here would either pop a real file picker or panic for want of the
-/// dialog plugin's state, which the mock app has no window to host.
-const OPENS_NATIVE_UI: [&str; 1] = ["import_second_opinion"];
+/// dialog plugin's state, which the mock app has no window to host --- or, in
+/// `yahoo_begin_connect`'s case, hand a URL to the machine's browser.
+const OPENS_NATIVE_UI: [&str; 2] = ["import_second_opinion", "yahoo_begin_connect"];
 
 /// The full command list, as `lib.rs` should have it.
 fn handler_list() -> BTreeSet<String> {
@@ -137,6 +139,12 @@ fn handler_list() -> BTreeSet<String> {
         "ask_claude",
         "chat_suggestions",
         "import_second_opinion",
+        "yahoo_status",
+        "yahoo_save_credentials",
+        "yahoo_begin_connect",
+        "yahoo_finish_connect",
+        "yahoo_disconnect",
+        "yahoo_leagues",
     ]
     .into_iter()
     .map(str::to_string)
@@ -205,6 +213,12 @@ fn every_command_answers_over_the_ipc() {
             chat::ask_claude,
             chat::chat_suggestions,
             second_opinion::import_second_opinion,
+            yahoo::yahoo_status,
+            yahoo::yahoo_save_credentials,
+            yahoo::yahoo_begin_connect,
+            yahoo::yahoo_finish_connect,
+            yahoo::yahoo_disconnect,
+            yahoo::yahoo_leagues,
         ])
         .build(mock_context(noop_assets()))
         .expect("the app builds on the mock runtime");
@@ -219,6 +233,7 @@ fn every_command_answers_over_the_ipc() {
         season_polling: Arc::new(AtomicBool::new(false)),
         season_generation: Arc::new(AtomicU64::new(0)),
         last_season_view: Arc::new(Mutex::new(None)),
+        yahoo: Arc::new(YahooState::default()),
     });
 
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default())

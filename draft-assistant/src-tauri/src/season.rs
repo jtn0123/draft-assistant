@@ -287,6 +287,7 @@ pub fn build_season_view_cached(
         generated_at: now_secs(),
         league: LeagueSummary {
             league_id: loaded.league.league_id.clone(),
+            platform: crate::view_types::platform_for(&loaded.league.league_id).to_string(),
             name: loaded.league.name.clone(),
             season: loaded.league.season.clone(),
             total_rosters: loaded.league.total_rosters,

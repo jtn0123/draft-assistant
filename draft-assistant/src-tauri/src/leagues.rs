@@ -114,6 +114,7 @@ fn sorted_stored(leagues: Vec<League>) -> Vec<StoredLeague> {
             name: l.name,
             season: l.season,
             status: Some(l.status),
+            platform: crate::view_types::SLEEPER.to_string(),
         })
         .collect();
     stored.sort_by_key(|l| l.name.to_lowercase());

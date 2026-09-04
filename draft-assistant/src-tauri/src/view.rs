@@ -84,6 +84,10 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
                 }
             })
     });
+    // Yahoo names the logged-in user's own team on the team resource, so the
+    // loader has already worked the slot out; there is no Sleeper user id to
+    // look it up with.
+    let my_slot = my_slot.or(loaded.my_slot);
     let (my_slot, slot_warning) = validated_slot(my_slot, teams);
 
     // Mine by ownership, not by slot — a pick I traded away is not mine, and
@@ -255,6 +259,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         generated_at: now_secs(),
         league: LeagueSummary {
             league_id: league.league_id.clone(),
+            platform: crate::view_types::platform_for(&league.league_id).to_string(),
             name: league.name.clone(),
             season: league.season.clone(),
             total_rosters: league.total_rosters,

@@ -20,7 +20,7 @@ use draft_assistant_lib::commands_draft as draft;
 use draft_assistant_lib::commands_season as season;
 use draft_assistant_lib::engine::Engine;
 use draft_assistant_lib::leagues;
-use draft_assistant_lib::state::AppState;
+use draft_assistant_lib::state::{AppState, YahooState};
 use routes::{route, LEAGUE_ID, USER_ID};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -81,6 +81,7 @@ fn session(label: &str) -> Session {
         season_polling: Arc::new(AtomicBool::new(false)),
         season_generation: Arc::new(AtomicU64::new(0)),
         last_season_view: Arc::new(Mutex::new(None)),
+        yahoo: Arc::new(YahooState::default()),
     });
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()

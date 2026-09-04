@@ -122,6 +122,8 @@ export interface LeagueSummary {
   league_id: string;
   name: string;
   season: string;
+  /** Which service this league is read from. */
+  platform: Platform;
   total_rosters: number;
   roster_positions: string[];
   draftable_positions: string[];
@@ -195,6 +197,30 @@ export interface StoredLeague {
   /** Sleeper's `pre_draft` / `drafting` / `in_season` / `complete`; null
    *  for a mock draft or a config written before it was recorded. */
   status: string | null;
+  /** Which service the league is read from. Always written by the backend;
+   *  a config saved before Yahoo existed reads as Sleeper. */
+  platform: Platform;
+}
+
+/** How far the Yahoo connection has got. The secret is never handed back —
+ *  `configured` is the only thing the UI is told about it. */
+export interface YahooStatus {
+  /** A client id and secret have been saved. */
+  configured: boolean;
+  /** A refresh token is in the keychain, so Yahoo can be called. */
+  connected: boolean;
+  /** The redirect URI the saved app has to be registered with. */
+  redirect: string;
+  /** Whose Yahoo account it is, once connected. */
+  account: string | null;
+}
+
+/** What `yahoo_begin_connect` hands back: where to send the user, and the
+ *  state string `yahoo_finish_connect` has to be given back with the code. */
+export interface YahooConnectStart {
+  authorize_url: string;
+  state: string;
+  redirect: string;
 }
 
 export interface AppConfig {
@@ -204,3 +230,6 @@ export interface AppConfig {
 }
 
 export type Position = string;
+
+/** The services a league can be read from. */
+export type Platform = "sleeper" | "yahoo";

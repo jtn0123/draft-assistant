@@ -1,10 +1,11 @@
-// Switch to another league — one this app has loaded before, one Sleeper says
-// the account plays in, or a brand-new league or mock draft pasted by ID.
+// Switch to another league — one this app has loaded before, one an account
+// says it plays in, or a brand-new league or mock draft pasted by ID.
 //
-// When an account is saved, Sleeper is asked the moment the dialog opens, so
-// a league joined since the last visit is already in the list; the button
-// stays for asking again. A league the app has loaded can be forgotten from
-// its row, which trims the list and nothing else.
+// When an account is saved, it is asked the moment the dialog opens, so a
+// league joined since the last visit is already in the list; the button stays
+// for asking again. Both platforms are asked, when both are connected, and
+// the two answers land in one list. A league the app has loaded can be
+// forgotten from its row, which trims the list and nothing else.
 //
 // It is a dialog rather than a control in the header because switching is the
 // most disruptive thing the shell can do: it tears the board down, drops the
@@ -14,8 +15,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { leagueNote, mergeLeagues } from "../leagues";
+import { mergeLeagues } from "../leagues";
 import type { StoredLeague } from "../types";
+import { LeagueRow } from "./LeagueRow";
 import { useFocusTrap } from "./useFocusTrap";
 
 export function LeaguePicker({
@@ -23,6 +25,7 @@ export function LeaguePicker({
   activeId,
   season,
   hasAccount,
+  yahooConnected,
   busy,
   onSwitch,
   onForget,
@@ -35,6 +38,8 @@ export function LeaguePicker({
   season: string;
   /** A Sleeper account is saved, so its leagues are looked up on open. */
   hasAccount: boolean;
+  /** Yahoo has a token, so its leagues are looked up on open too. */
+  yahooConnected: boolean;
   /** True while a switch is in flight; the whole dialog waits for it. */
   busy: boolean;
   onSwitch: (leagueId: string) => void;
@@ -46,6 +51,7 @@ export function LeaguePicker({
   const firstOption = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const [found, setFound] = useState<StoredLeague[]>([]);
+  const [yahooFound, setYahooFound] = useState<StoredLeague[]>([]);
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pasted, setPasted] = useState("");
@@ -82,6 +88,25 @@ export function LeaguePicker({
     };
   }, [hasAccount, season]);
 
+  // Yahoo is a second account with its own list, and the button below is
+  // Sleeper's alone. So this asks on open and nowhere else: a failure here
+  // says so and leaves everything the picker already had on screen.
+  useEffect(() => {
+    if (!yahooConnected) return;
+    let cancelled = false;
+    api
+      .yahooLeagues()
+      .then((leagues) => {
+        if (!cancelled) setYahooFound(leagues);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(String(e).replace(/^Error:\s*/, ""));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [yahooConnected]);
+
   const look = async () => {
     setAsking(true);
     setError(null);
@@ -97,7 +122,7 @@ export function LeaguePicker({
 
   const looking = asking || (hasAccount && !asked && error === null);
 
-  const options = mergeLeagues(leagues, found, activeId);
+  const options = mergeLeagues(leagues, [...found, ...yahooFound], activeId);
   const stored = new Set(leagues.map((l) => l.league_id));
 
   return (
@@ -127,34 +152,21 @@ export function LeaguePicker({
         {options.length > 0 && (
           <div className="league-list">
             {options.map((league, index) => {
-              const name = league.name === "" ? league.league_id : league.name;
               const active = league.league_id === activeId;
               return (
-                <div key={league.league_id} className="league-row">
-                  <button
-                    type="button"
-                    className={active ? "league-option is-on" : "league-option"}
-                    aria-pressed={active}
-                    disabled={busy}
-                    ref={index === 0 ? firstOption : undefined}
-                    onClick={() => (active ? onClose() : onSwitch(league.league_id))}
-                  >
-                    <span className="league-option-name ellipsis">{name}</span>
-                    <span className="muted league-option-note">{leagueNote(league, activeId)}</span>
-                  </button>
-                  {!active && stored.has(league.league_id) && (
-                    <button
-                      type="button"
-                      className="league-forget"
-                      aria-label={`Forget ${name}`}
-                      title="Drop from this list. Its cached data stays."
-                      disabled={busy}
-                      onClick={() => onForget(league.league_id)}
-                    >
-                      Forget
-                    </button>
-                  )}
-                </div>
+                <LeagueRow
+                  key={league.league_id}
+                  league={league}
+                  activeId={activeId}
+                  busy={busy}
+                  buttonRef={index === 0 ? firstOption : undefined}
+                  onPick={() => (active ? onClose() : onSwitch(league.league_id))}
+                  onForget={
+                    !active && stored.has(league.league_id)
+                      ? () => onForget(league.league_id)
+                      : undefined
+                  }
+                />
               );
             })}
           </div>
@@ -174,7 +186,7 @@ export function LeaguePicker({
           <input
             className="text-input"
             value={pasted}
-            placeholder="1389710366300200960 or a sleeper.com link"
+            placeholder="1389710366300200960, a sleeper.com link, or a Yahoo key like 449.l.12345"
             onChange={(e) => setPasted(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && pasted.trim() !== "" && !busy) onSwitch(pasted.trim());

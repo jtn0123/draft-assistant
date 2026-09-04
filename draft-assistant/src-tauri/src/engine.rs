@@ -4,11 +4,10 @@
 //! state dump — there is deliberately no difference between what the human
 //! and the model can see.
 
-use crate::board::{build_board, BoardPlayer};
+use crate::board::BoardPlayer;
 use crate::cache::{envelope_json, fresh_enough, read_cached, replace_file, write_atomic};
-use crate::keepers::KeeperStore;
+use crate::engine_assemble::AssemblyParts;
 use crate::mock_league::synthesize_league;
-use crate::picks::{reconcile_manual_picks, ManualPickStore};
 use crate::roster::RosterRules;
 use crate::sleeper::{Draft, League, Pick, PlayerMeta, SleeperClient};
 use crate::sleeper_error::to_message;
@@ -72,6 +71,16 @@ pub struct StoredLeague {
     /// older configs and for a mock draft, which has no league to ask.
     #[serde(default)]
     pub status: Option<String>,
+    /// `"sleeper"` or `"yahoo"`. Defaulted so a config written before Yahoo
+    /// existed still loads, with every league in it read as a Sleeper one —
+    /// which is what it was.
+    #[serde(default = "sleeper")]
+    pub platform: String,
+}
+
+/// The platform a stored league has when its config predates the field.
+fn sleeper() -> String {
+    crate::view_types::SLEEPER.to_string()
 }
 
 // ---------- engine ----------
@@ -84,6 +93,15 @@ pub struct LoadedLeague {
     pub user_names: HashMap<String, String>,
     /// user_id -> avatar hash or custom image URL, same call.
     pub user_avatars: HashMap<String, String>,
+    /// The slot the logged-in user's own team drafts from, when the platform
+    /// says so outright. Yahoo flags the current login on a team's manager;
+    /// Sleeper has no such flag and leaves this `None`, resolving "my team"
+    /// through the Sleeper user id in the config instead.
+    pub my_slot: Option<u32>,
+    /// `yahoo:<player id>` -> the id that player sits on the board under, from
+    /// the load's crosswalk. Empty for a Sleeper league; the poll tick reads
+    /// it so it never has to build the crosswalk again.
+    pub yahoo_ids: HashMap<String, String>,
     pub board: Vec<BoardPlayer>,
     pub board_index: HashMap<String, usize>,
     pub replacement_model: ReplacementModel,
@@ -322,8 +340,22 @@ impl Engine {
         Ok(loaded)
     }
 
-    /// Try the ID as a league first, then as a bare draft (mock).
-    pub async fn load_any(&self, id: &str, force: bool) -> Result<LoadedLeague, String> {
+    /// Load whatever the id turns out to name.
+    ///
+    /// A Yahoo league key goes down the Yahoo path and needs the connected
+    /// client to do it; everything else is a Sleeper league, or failing that a
+    /// bare draft id (a mock draft).
+    pub async fn load_any(
+        &self,
+        id: &str,
+        force: bool,
+        yahoo: Option<&crate::yahoo::YahooClient>,
+    ) -> Result<LoadedLeague, String> {
+        if crate::view_types::is_yahoo_key(id) {
+            let client = yahoo
+                .ok_or("that is a Yahoo league — connect your Yahoo account in Settings first")?;
+            return self.load_yahoo_league(client, id, force).await;
+        }
         match self.load_league(id, force).await {
             Ok(l) => Ok(l),
             Err(league_err) => self.load_draft_only(id, force).await.map_err(|draft_err| {
@@ -362,19 +394,6 @@ impl Engine {
                 )),
             ),
         };
-        let mut manual_picks = self.load_manual_picks(&draft.draft_id);
-        if reconcile_manual_picks(&api_picks, &mut manual_picks) {
-            self.save_manual_picks(&draft.draft_id, &manual_picks)?;
-        }
-        // Every pick calculation divides by the team count and counts up to
-        // teams * rounds, so a draft that reports neither is refused here
-        // rather than panicking on the next view build.
-        if draft.settings.teams == 0 || draft.settings.rounds == 0 {
-            return Err(format!(
-                "draft {} reports {} teams and {} rounds — it has not been set up yet",
-                draft.draft_id, draft.settings.teams, draft.settings.rounds
-            ));
-        }
         let season: u32 = league
             .season
             .parse()
@@ -396,78 +415,22 @@ impl Engine {
         warnings.extend(projections_warning);
         warnings.extend(weekly_warning);
         warnings.extend(traded_warning);
-        if let Some(error) = &poll_last_error {
-            warnings.push(format!("initial picks refresh failed: {error}"));
-        }
-        let scoring_map = league.scoring_settings.clone();
-        let roster_rules = RosterRules::new(&league.roster_positions);
-        let board_build = build_board(
-            &league,
-            &draft,
-            &player_meta,
-            &season_rows,
-            &weekly_rows,
-            &roster_rules,
-            &mut warnings,
-        );
-        let mut board = board_build.players;
-        // The imported second opinion, if the user has ever chosen one. A file
-        // that has stopped parsing becomes a warning rather than a failed
-        // load: it is a nice-to-have column, not the board.
-        let second_opinion_loaded_at = match crate::second_opinion::load(&self.data_dir) {
-            Ok(Some(table)) => {
-                let report = crate::second_opinion::apply(&table, &mut board);
-                if report.matched == 0 {
-                    warnings.push(
-                        "imported projections matched nobody on this board — \
-                         check it is the right season"
-                            .into(),
-                    );
-                }
-                Some(table.loaded_at)
-            }
-            Ok(None) => None,
-            Err(error) => {
-                warnings.push(format!("imported projections could not be read: {error}"));
-                None
-            }
-        };
-        if board.len() < 200 {
-            warnings.push(format!(
-                "board unusually small ({} players) — projections may be incomplete",
-                board.len()
-            ));
-        }
-        let board_index = board
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (p.player_id.clone(), i))
-            .collect();
-
-        let keeper_pick_nos = self.load_keepers(&draft.draft_id);
-        Ok(LoadedLeague {
+        self.finish_assembly(AssemblyParts {
             league,
             draft,
             user_names,
             user_avatars,
-            board,
-            board_index,
-            replacement_model: board_build.replacement,
-            roster_rules,
             api_picks,
-            manual_picks,
             traded_picks,
-            keeper_pick_nos,
+            my_slot: None,
+            yahoo_ids: HashMap::new(),
             poll_last_success_at,
             poll_consecutive_failures,
             poll_last_error,
-            players_fetched_at: players_at,
-            projections_fetched_at: proj_at,
-            weekly_fetched_at: weekly_at,
+            players: (players_at, player_meta),
+            season_projections: (proj_at, season_rows),
+            weekly: (weekly_at, weekly_rows),
             warnings,
-            weekly_points: WeeklyPoints::build(&weekly_rows, &scoring_map),
-            player_meta,
-            second_opinion_loaded_at,
         })
     }
 }

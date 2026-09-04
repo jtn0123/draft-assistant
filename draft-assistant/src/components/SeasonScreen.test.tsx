@@ -56,6 +56,7 @@ function view(overrides: Partial<SeasonView> = {}): SeasonView {
       league_id: "1",
       name: "Dynasty Warriors",
       season: "2026",
+      platform: "sleeper",
       total_rosters: 12,
       roster_positions: ["QB", "RB", "BN"],
       draftable_positions: ["QB", "RB"],

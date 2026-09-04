@@ -1,0 +1,68 @@
+/* Everything the Yahoo connection adds to the screen: the dialog's own bits,
+   and the small mark a Yahoo league carries in either list of leagues.
+
+   It is its own sheet rather than more of App.css because it is the whole of
+   one feature, and because the picker and the connect dialog both want the
+   pill — putting it in either dialog's sheet would make the other one's
+   styling depend on a file that has nothing else to do with it. */
+
+/* Which service a league comes from, said once and quietly. Sleeper leagues
+   carry no mark at all: they are the ordinary case, and a pill on every row
+   would be noise rather than information. */
+.platform-pill {
+  flex: none;
+  padding: 1px 5px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mid);
+}
+
+/* The redirect URI, quoted inline in the setup instructions: it has to be
+   copied into Yahoo's form character for character. */
+.yahoo-redirect {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--panel);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--ink);
+}
+
+/* Each step's one button, kept off the full width of the dialog. */
+.yahoo-action {
+  align-self: flex-start;
+}
+
+/* The authorize URL and its copy button, for when the browser did not open
+   on its own. The URL is long and never worth wrapping over three lines. */
+.yahoo-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+.yahoo-url-text {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--mid);
+}
+
+.yahoo-copy {
+  flex: none;
+}
+
+/* Find leagues and Disconnect: one thing to do next, and one way out. */
+.yahoo-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
