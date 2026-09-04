@@ -75,7 +75,7 @@ export function Setup({
       <div className="launch-actions">
         <button
           type="button"
-          className="btn-primary"
+          className="btn-primary card-screen-submit"
           disabled={!leagueId.trim() || busy !== null}
           onClick={() => void submit()}
         >

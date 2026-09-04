@@ -38,6 +38,11 @@ const STATE: &str = r#"{"season": "2026", "week": 3, "display_week": 3, "season_
 /// starts failing. The stub's router is a plain `fn`, so the switch has to
 /// live somewhere it can reach.
 static STATE_IS_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The stub is shared by every test in this binary and they run in parallel,
+/// so a load that happens to overlap the outage would see the 500 too. Every
+/// ordinary test holds this for reading while it loads; the outage test takes
+/// it for writing around the flip, and so waits for the others to finish.
+static STATE_GATE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
 const ROSTERS: &str = r#"[
     {"roster_id": 1, "owner_id": "user-a", "players": ["qb-1", "rb-1"],
@@ -134,6 +139,7 @@ fn cleanup(engine: Engine) {
 #[tokio::test]
 async fn a_season_load_gathers_the_week_the_table_and_the_scoreboard() {
     let engine = engine("season");
+    let _state_up = STATE_GATE.read().await;
     let season = engine
         .load_season(&league("league-2026", None), Some("user-a"), true)
         .await
@@ -175,6 +181,7 @@ async fn a_season_load_gathers_the_week_the_table_and_the_scoreboard() {
 #[tokio::test]
 async fn the_sweep_totals_only_the_weeks_already_played() {
     let engine = engine("sweep");
+    let _state_up = STATE_GATE.read().await;
     let season = engine
         .load_season(&league("league-2026", None), None, true)
         .await
@@ -205,6 +212,7 @@ async fn the_sweep_totals_only_the_weeks_already_played() {
 #[tokio::test]
 async fn last_seasons_table_puts_the_champion_above_the_points_leader() {
     let engine = engine("last-season");
+    let _state_up = STATE_GATE.read().await;
     let season = engine
         .load_season(
             &league("league-2026", Some("league-2025")),
@@ -235,6 +243,7 @@ async fn last_seasons_table_puts_the_champion_above_the_points_leader() {
 #[tokio::test]
 async fn a_league_with_no_previous_season_shows_no_table() {
     let engine = engine("no-previous");
+    let _state_up = STATE_GATE.read().await;
     for previous in [None, Some(""), Some("0")] {
         let season = engine
             .load_season(&league("league-2026", previous), None, true)
@@ -251,6 +260,7 @@ async fn a_league_with_no_previous_season_shows_no_table() {
 #[tokio::test]
 async fn a_live_refresh_moves_the_clock_and_the_scores() {
     let engine = engine("refresh");
+    let _state_up = STATE_GATE.read().await;
     let mut season = engine
         .load_season(&league("league-2026", None), None, true)
         .await
@@ -296,12 +306,14 @@ async fn a_week_that_cannot_be_checked_falls_back_to_the_last_one_seen() {
         first.warnings
     );
 
+    let outage = STATE_GATE.write().await;
     STATE_IS_DOWN.store(true, std::sync::atomic::Ordering::SeqCst);
     let stale = engine
         .load_season(&league, Some("user-a"), true)
         .await
         .expect("the cached week must keep the screen alive");
     STATE_IS_DOWN.store(false, std::sync::atomic::Ordering::SeqCst);
+    drop(outage);
 
     assert_eq!(stale.week, CURRENT_WEEK);
     assert_eq!(stale.rosters.len(), 2, "the rest of the load still ran");
