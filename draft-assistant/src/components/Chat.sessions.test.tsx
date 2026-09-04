@@ -194,7 +194,7 @@ describe("the spend cap", () => {
   it("shows what the whole screen has spent, not just this conversation", async () => {
     // A conversation opened after earlier ones: the cap is checked against the
     // screen's total, so the panel has to show that total too.
-    mocks.chatSettings.mockResolvedValue(settings({ spend_usd: { draft: 3.5 } }));
+    mocks.chatSettings.mockResolvedValue(settings({ spend_usd: { "draft.1": 3.5 } }));
     panel();
     await screen.findByRole("textbox", { name: "Ask Claude" });
     expect(screen.getByText(/\$3\.50 on this screen/)).toBeInTheDocument();
@@ -217,7 +217,8 @@ describe("the spend cap", () => {
     panel();
     const cap = await screen.findByLabelText("Spend cap in dollars");
     await userEvent.clear(cap);
-    await userEvent.type(cap, "1");
+    // Committed on Enter, not on every keystroke.
+    await userEvent.type(cap, "1{Enter}");
     // The cap the backend enforces is kept in step with the one shown here.
     expect(mocks.setChatBudget).toHaveBeenLastCalledWith(1);
 
@@ -230,7 +231,7 @@ describe("the spend cap", () => {
     expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled();
 
     await userEvent.clear(cap);
-    await userEvent.type(cap, "9");
+    await userEvent.type(cap, "9{Enter}");
     expect(screen.queryByText(/of their \$1\.00 budget/)).not.toBeInTheDocument();
   });
 
@@ -238,7 +239,7 @@ describe("the spend cap", () => {
     // This chat has asked nothing; the cap the backend enforces has already
     // been reached by the conversations before it, and the next question here
     // is the one that gets refused.
-    mocks.chatSettings.mockResolvedValue(settings({ budget_usd: 5, spend_usd: { draft: 6 } }));
+    mocks.chatSettings.mockResolvedValue(settings({ budget_usd: 5, spend_usd: { "draft.1": 6 } }));
     panel();
     expect(
       await screen.findByText(/screen.s chats have spent \$6\.00 of their \$5\.00 budget/),
@@ -258,7 +259,7 @@ describe("the spend cap", () => {
     await userEvent.clear(cap);
     expect(mocks.setChatBudget).not.toHaveBeenCalled();
 
-    await userEvent.type(cap, "7");
+    await userEvent.type(cap, "7{Enter}");
     expect(mocks.setChatBudget.mock.calls.flat()).toEqual([7]);
   });
 
@@ -275,7 +276,7 @@ describe("the spend cap", () => {
     panel();
     const cap = await screen.findByLabelText("Spend cap in dollars");
     await userEvent.clear(cap);
-    await userEvent.type(cap, "0");
+    await userEvent.type(cap, "0{Enter}");
     mocks.askClaude.mockResolvedValue(reply({ text: "An answer.", cost_usd: 20 }));
     await userEvent.type(screen.getByRole("textbox", { name: "Ask Claude" }), "A question{Enter}");
     await screen.findByText("An answer.");
@@ -300,5 +301,79 @@ describe("Markdown in an answer", () => {
       "he plays",
     ]);
     expect(screen.queryByText(/\*\*Bijan\*\*/)).not.toBeInTheDocument();
+  });
+});
+
+describe("the spend cap", () => {
+  it("commits what was typed on blur rather than on every keystroke", async () => {
+    // Every keystroke used to be written, so "12" set a cap of 1 on its way
+    // to 12 — and each of those went to the backend as a separate cap.
+    mocks.chatSettings.mockResolvedValue(settings({ budget_usd: 5 }));
+    panel();
+    const cap = await screen.findByLabelText("Spend cap in dollars");
+    mocks.setChatBudget.mockClear();
+
+    await userEvent.clear(cap);
+    await userEvent.type(cap, "12");
+    expect(mocks.setChatBudget).not.toHaveBeenCalled();
+
+    await userEvent.tab();
+    expect(mocks.setChatBudget.mock.calls.flat()).toEqual([12]);
+  });
+
+  it("refuses a negative cap and keeps the one that was in force", async () => {
+    // 0 is the value that means "no cap", and a negative one used to be
+    // rounded up to it — so "-1" removed the budget instead of being refused.
+    mocks.chatSettings.mockResolvedValue(settings({ budget_usd: 5 }));
+    panel();
+    const cap = await screen.findByLabelText("Spend cap in dollars");
+    mocks.setChatBudget.mockClear();
+
+    await userEvent.clear(cap);
+    await userEvent.type(cap, "-1{Enter}");
+
+    expect(mocks.setChatBudget).not.toHaveBeenCalled();
+    expect(cap).toHaveValue(5);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/not a budget/);
+  });
+
+  it("says nothing about a cap that is simply a number", async () => {
+    mocks.chatSettings.mockResolvedValue(settings({ budget_usd: 5 }));
+    panel();
+    const cap = await screen.findByLabelText("Spend cap in dollars");
+    await userEvent.clear(cap);
+    await userEvent.type(cap, "8{Enter}");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(cap).toHaveValue(8);
+  });
+
+  it("counts what this league's chats spent, not another league's", async () => {
+    // Conversations are filed per screen and league; the running spend the cap
+    // is checked against is filed the same way. A bare screen key is from the
+    // scheme before that and is a mixture of every league's spending.
+    mocks.chatSettings.mockResolvedValue(
+      settings({ spend_usd: { "draft.2": 4, "draft.9": 99, draft: 77 } }),
+    );
+    panel("draft", "2");
+    await screen.findByRole("textbox", { name: "Ask Claude" });
+    expect(screen.getByText(/\$4\.00 on this screen/)).toBeInTheDocument();
+    expect(screen.queryByText(/\$99\.00|\$77\.00/)).not.toBeInTheDocument();
+  });
+
+  it("says who pays when the answers come from Claude Code", async () => {
+    // The CLI route is billed to the subscription, so the panel sits at
+    // "$0.00 spent" forever and the cap counts nothing. Unexplained, that
+    // reads as a broken meter.
+    mocks.chatSettings.mockResolvedValue(
+      settings({ provider: "claude_code", cli_available: true }),
+    );
+    panel();
+    expect(await screen.findByText(/billed to your Claude subscription/)).toBeInTheDocument();
+  });
+
+  it("says nothing of the sort on the API route, where the cap is real", async () => {
+    panel();
+    await screen.findByRole("textbox", { name: "Ask Claude" });
+    expect(screen.queryByText(/billed to your Claude subscription/)).not.toBeInTheDocument();
   });
 });

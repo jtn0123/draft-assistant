@@ -1,9 +1,16 @@
 //! The "Ask Claude" panel's backend: the Anthropic Messages API over raw HTTP.
 //!
 //! Rust has no official Anthropic SDK, so this speaks the wire format
-//! directly. The board, roster and clock are passed as a cached system prompt
-//! rather than pasted into every user turn, so a long conversation re-sends
-//! the volatile part only.
+//! directly. The board, roster and clock are passed as a system prompt rather
+//! than pasted into every user turn.
+//!
+//! The cache breakpoint sits on the *last* system block, so the cached prefix
+//! is the guidance plus the context together. The guidance alone is around 450
+//! tokens — under the 512-token minimum a prefix must reach before Opus 5
+//! caches it at all — so a breakpoint on the guidance by itself silently
+//! cached nothing. Caching is a byte-exact prefix match, so the hits are real
+//! only while the context is unchanged: a second question about the same board
+//! reads the prefix back, and the next pick rewrites it.
 
 use serde::{Deserialize, Serialize};
 
@@ -66,9 +73,9 @@ pub fn turn_cost(model: ChatModel, input_tokens: u32, output_tokens: u32) -> f64
 
 /// What a whole reply cost, cache tiers included.
 ///
-/// The guidance block is sent with `cache_control: ephemeral`, so on every
-/// turn after the first most of the prompt is billed as a cache read and none
-/// of it appears in `input_tokens`. Pricing a turn from `input_tokens` alone
+/// The system prompt is sent with a `cache_control: ephemeral` breakpoint, so
+/// on a turn that hits the cache most of the prompt is billed as a cache read
+/// and none of it appears in `input_tokens`. Pricing a turn from `input_tokens` alone
 /// therefore undercounts it — badly on the turn that writes the cache, which
 /// is charged at a premium — and the panel's running spend drifts under the
 /// cap it is supposed to enforce.
@@ -199,8 +206,9 @@ struct Request<'a> {
     output_config: OutputConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     thinking: Option<Thinking>,
-    betas: Vec<&'static str>,
-    /// Route around a policy decline instead of returning nothing.
+    /// Route around a policy decline instead of returning nothing. A body
+    /// parameter; the beta that enables it travels in the `anthropic-beta`
+    /// header, which is the only place the API looks for it.
     fallbacks: &'static str,
 }
 
@@ -293,13 +301,16 @@ async fn ask_at(
             SystemBlock {
                 kind: "text",
                 text: crate::chat_copy::GUIDANCE,
-                // Everything above this point is byte-identical every turn.
-                cache_control: Some(CacheControl { kind: "ephemeral" }),
+                cache_control: None,
             },
             SystemBlock {
                 kind: "text",
+                // Guidance + context is the cacheable prefix: the guidance on
+                // its own is too short to reach the minimum. Everything the
+                // user types renders after this block, so a second question
+                // about an unchanged board reads the whole prefix back.
                 text: context,
-                cache_control: None,
+                cache_control: Some(CacheControl { kind: "ephemeral" }),
             },
         ],
         messages,
@@ -317,7 +328,6 @@ async fn ask_at(
                 display: Some("summarized"),
             })
         },
-        betas: vec![FALLBACK_BETA],
         fallbacks: "default",
     };
 
@@ -325,6 +335,7 @@ async fn ask_at(
         .post(endpoint)
         .header("x-api-key", api_key)
         .header("anthropic-version", API_VERSION)
+        .header("anthropic-beta", FALLBACK_BETA)
         .header("content-type", "application/json")
         .json(&request)
         .send()
@@ -347,7 +358,9 @@ async fn ask_at(
             // the user nothing and looks like the model said it, so the body
             // goes to the log and the status speaks for itself.
             let logged: String = body.chars().take(300).collect();
-            eprintln!("Anthropic API {status} with a body that is not an error object: {logged}");
+            crate::applog::warn(format!(
+                "Anthropic API {status} with a body that is not an error object: {logged}"
+            ));
         }
         let sentence = match status.as_u16() {
             401 => "Anthropic rejected the API key".to_string(),
@@ -419,72 +432,8 @@ fn tokio_test_block<F: std::future::Future>(future: F) -> F::Output {
 #[path = "chat_wire_tests.rs"]
 mod wire_tests;
 
+/// The request shape and the pure helpers around it. Its own file only
+/// because this one is at the line cap.
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn model_ids_are_the_exact_published_strings() {
-        assert_eq!(ChatModel::Opus5.id(), "claude-opus-5");
-        assert_eq!(ChatModel::Fable5.id(), "claude-fable-5");
-    }
-
-    #[test]
-    fn effort_labels_map_to_api_values() {
-        assert_eq!(Effort::parse("xhigh").api_effort(), "xhigh");
-        assert_eq!(Effort::parse("Max").api_effort(), "max");
-        assert_eq!(Effort::parse("nonsense").api_effort(), "high");
-        // Disabled thinking must not ride at xhigh/max, which the API rejects.
-        assert_eq!(Effort::Off.api_effort(), "medium");
-    }
-
-    #[test]
-    fn an_empty_key_fails_before_any_request_is_made() {
-        let http = reqwest::Client::new();
-        let result = tokio_test_block(ask(
-            &http,
-            "   ",
-            ChatModel::Opus5,
-            Effort::High,
-            "context",
-            &[ChatMessage {
-                role: "user".into(),
-                content: "hi".into(),
-            }],
-        ));
-        assert!(result.unwrap_err().contains("no Anthropic API key"));
-    }
-
-    #[test]
-    fn the_request_body_matches_the_documented_wire_shape() {
-        let messages = [ChatMessage {
-            role: "user".into(),
-            content: "Walker or Bowers?".into(),
-        }];
-        let request = Request {
-            model: ChatModel::Opus5.id(),
-            max_tokens: MAX_TOKENS,
-            system: vec![SystemBlock {
-                kind: "text",
-                text: crate::chat_copy::GUIDANCE,
-                cache_control: Some(CacheControl { kind: "ephemeral" }),
-            }],
-            messages: &messages,
-            output_config: OutputConfig { effort: "xhigh" },
-            thinking: Some(Thinking {
-                kind: "adaptive",
-                display: Some("summarized"),
-            }),
-            betas: vec![FALLBACK_BETA],
-            fallbacks: "default",
-        };
-        let json = serde_json::to_value(&request).unwrap();
-        assert_eq!(json["model"], "claude-opus-5");
-        assert_eq!(json["output_config"]["effort"], "xhigh");
-        assert_eq!(json["thinking"]["type"], "adaptive");
-        assert_eq!(json["fallbacks"], "default");
-        // budget_tokens is removed on these models and 400s if sent.
-        assert!(json["thinking"].get("budget_tokens").is_none());
-        assert!(json.get("temperature").is_none());
-    }
-}
+#[path = "chat_request_tests.rs"]
+mod request_tests;

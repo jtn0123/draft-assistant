@@ -49,6 +49,46 @@ fn stub_server(status: u16, body: &'static str) -> String {
     url
 }
 
+/// Like [`stub_server`], but hands back what the client actually sent as
+/// `(head, body)`. The request shape is unit-tested against a hand-built
+/// `Request`; what only a real socket can show is the headers, which never
+/// touch that struct at all.
+fn capturing_stub(body: &'static str) -> (String, std::sync::mpsc::Receiver<(String, String)>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let url = format!(
+        "http://{}/v1/messages",
+        listener.local_addr().expect("addr")
+    );
+    let (send, recv) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().expect("accept");
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            match socket.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => request.extend_from_slice(&chunk[..n]),
+            }
+            if request_is_complete(&request) {
+                break;
+            }
+        }
+        let whole = String::from_utf8_lossy(&request).into_owned();
+        let (head, sent) = whole.split_once("\r\n\r\n").unwrap_or((whole.as_str(), ""));
+        let _ = send.send((head.to_string(), sent.to_string()));
+        let head = format!(
+            "HTTP/1.1 200 X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        let _ = socket.write_all(head.as_bytes());
+        let _ = socket.write_all(body.as_bytes());
+        let _ = socket.flush();
+        let _ = socket.shutdown(std::net::Shutdown::Write);
+    });
+    (url, recv)
+}
+
 /// True once `bytes` holds the request head and as many body bytes as its
 /// `Content-Length` promised. A head with no length is complete on its own.
 fn request_is_complete(bytes: &[u8]) -> bool {
@@ -222,7 +262,7 @@ fn list_prices_are_the_published_per_million_rates() {
     assert_eq!(turn_cost(ChatModel::Opus5, 0, 0), 0.0);
 }
 
-/// The guidance block is sent with `cache_control: ephemeral`, so most of a
+/// The system prompt carries a `cache_control: ephemeral` breakpoint, so most of a
 /// second turn's prompt is billed as a cache read and never shows up in
 /// `input_tokens`. Pricing the turn without those tiers undercounted every
 /// conversation past its first question.
@@ -263,4 +303,73 @@ fn a_turn_that_used_no_cache_costs_what_it_did_before() {
     assert_eq!(reply.cache_read_input_tokens, 0);
     let full = turn_cost_of(ChatModel::Opus5, &reply);
     assert!((full - turn_cost(ChatModel::Opus5, 1000, 100)).abs() < 1e-12);
+}
+
+/// The request the API actually receives, headers and all.
+fn sent_request() -> (String, serde_json::Value) {
+    let (url, recv) = capturing_stub(
+        r#"{"model":"claude-opus-5","stop_reason":"end_turn",
+            "content":[{"type":"text","text":"ok"}],
+            "usage":{"input_tokens":1,"output_tokens":1}}"#,
+    );
+    tokio_test_block(ask_at(
+        &url,
+        &client(),
+        "sk-ant-test",
+        ChatModel::Opus5,
+        Effort::High,
+        "context",
+        &[ChatMessage {
+            role: "user".into(),
+            content: "Walker or Bowers?".into(),
+        }],
+    ))
+    .expect("a 200 is a reply");
+    let (head, body) = recv.recv().expect("the stub captured the request");
+    (
+        head.to_ascii_lowercase(),
+        serde_json::from_str(&body).expect("the body is JSON"),
+    )
+}
+
+/// Server-side fallbacks are opted into with the `anthropic-beta` header. The
+/// opt-in used to ride in the body as `betas`, which is what an SDK calls the
+/// field it turns into that header — on the raw wire it is an unknown
+/// parameter, so every refusal fell through unrescued.
+#[test]
+fn the_fallback_beta_travels_as_a_header_and_not_in_the_body() {
+    let (head, body) = sent_request();
+    assert!(
+        head.contains(&format!("anthropic-beta: {FALLBACK_BETA}")),
+        "{head}"
+    );
+    assert!(head.contains("anthropic-version: 2023-06-01"), "{head}");
+    assert_eq!(body["fallbacks"], "default");
+    assert!(body.get("betas").is_none(), "betas is not a body parameter");
+}
+
+/// The key must not be logged, echoed, or sent anywhere but its own header.
+#[test]
+fn the_key_rides_in_x_api_key_and_nowhere_else() {
+    let (head, body) = sent_request();
+    assert!(head.contains("x-api-key: sk-ant-test"), "{head}");
+    assert!(!body.to_string().contains("sk-ant-test"));
+}
+
+/// The breakpoint has to sit on the *last* system block. On the first alone,
+/// the cacheable prefix was the ~450-token guidance — under the 512-token
+/// minimum — so nothing was ever written and every turn paid full price.
+#[test]
+fn the_cache_breakpoint_covers_the_guidance_and_the_context_together() {
+    let (_, body) = sent_request();
+    let system = body["system"].as_array().expect("system blocks");
+    assert_eq!(system.len(), 2, "{system:?}");
+    assert!(
+        system[0].get("cache_control").is_none(),
+        "the guidance alone is too short a prefix to cache"
+    );
+    assert_eq!(system[1]["cache_control"]["type"], "ephemeral");
+    // Order matters as much as placement: the marker caches everything before
+    // it, so the volatile board must be inside the prefix, not after it.
+    assert_eq!(system[1]["text"], "context");
 }

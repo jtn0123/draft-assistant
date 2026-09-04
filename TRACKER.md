@@ -276,3 +276,16 @@ Fresh numbers: fe 484 tests / 95.5% stmts; rust 702 tests / 91.3% lines / 87.8% 
 | Yahoo | B+ (new) | Auction detected only by `draft_type=="auction"`, `is_auction_draft` unread (`engine_yahoo.rs:305`); unmapped stat ids dropped silently (`yahoo_map.rs:113`); pending OAuth state consumed before exchange so a mistyped code forces restart (`commands_yahoo.rs:262`); no `scope` param; `Debug` derives on secret structs; 80 sequential pool pages, HTTP 999 not retryable. |
 
 Overall: **B+ / A−**. Engineering discipline is high everywhere; the misses cluster in the two newest surfaces (Yahoo first live contact, chat API wire) and in the recommender's hard-coded 1QB/1TE assumptions.
+
+---
+## Phone companion (requested 2026-09-03, after the grade-3 fix lanes)
+
+Ask: a website you open on a phone that pairs with the running desktop app, shows the chat session plus recommendations/pick history, and can send messages into the same chat, so one person is on the desktop and another on a phone at the same time.
+
+Design (assumptions stated; change on request):
+- **Hosting: the desktop app serves it.** A small HTTP + WebSocket server (axum on the tokio runtime already in the tree) inside the Tauri process, LAN only, OFF by default. Settings → "Phone companion" turns it on, shows the URL and a QR code; a random pairing token lives in the URL, rotated on every enable. No cloud, no accounts, no data leaves the network. Off-network use: run Tailscale on both devices, unchanged.
+- **Shared chat lives in the backend.** New "Shared" session per league owned by Rust (persisted under the data dir), broadcast over WebSocket to every client (desktop webview subscribes via the same event). A question from the phone goes through the same `ask_claude` path with the desktop's key/CLI and the same budget cap; the answer lands on both screens. Desktop-only sessions stay as they are.
+- **Phone page** (mobile-first, served from the app, no install): current recommendation cards with reasons, on-the-clock strip, last N picks, my roster, sync status; chat thread with composer. Season screen: this week's calls + shared chat.
+- **Security:** token required on every request and the socket; server binds all interfaces only while enabled; rate-limited chat posts; CSP on the served page; no Sleeper/Yahoo/Anthropic secrets ever cross to the phone.
+
+Lanes: (1) Rust server + shared-chat store + events, (2) phone page (separate Vite entry, bundled via include_str), (3) desktop Settings pairing panel + Shared session in the chat panel, (4) tests: axum wire tests, Playwright mobile viewport against fixtures.

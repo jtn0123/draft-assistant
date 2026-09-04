@@ -24,8 +24,14 @@ export function chatBudget(): number {
   return Number(budget.get());
 }
 
-export function setChatBudget(next: number): void {
-  budget.set(Number.isFinite(next) && next >= 0 ? String(next) : "0");
+/** Record a cap. A negative or non-finite one is not a cap and is ignored —
+ *  whatever was in force stays in force. It used to be stored as "0", which is
+ *  the one value that means *no cap*, so typing a minus sign removed the
+ *  budget instead of being rejected. Returns whether it took. */
+export function setChatBudget(next: number): boolean {
+  if (!Number.isFinite(next) || next < 0) return false;
+  budget.set(String(next));
+  return true;
 }
 
 /** Read the cap in a component, re-rendering when it changes. */

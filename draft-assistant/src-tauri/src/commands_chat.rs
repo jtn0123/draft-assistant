@@ -15,7 +15,7 @@ const PROVIDER_CLI: &str = "claude_code";
 #[derive(serde::Serialize)]
 pub struct ChatSettings {
     has_key: bool,
-    /// Last four characters of the stored key, for confirmation in Settings.
+    /// The stored key, masked, for confirmation in Settings.
     key_hint: Option<String>,
     /// Whether the Claude Code CLI was found on this machine.
     cli_available: bool,
@@ -25,8 +25,10 @@ pub struct ChatSettings {
     key_store: &'static str,
     /// The dollar cap a screen's chat runs under. 0 means the user removed it.
     budget_usd: f64,
-    /// screen -> what that screen's chats have cost so far, all conversations
-    /// together. This is what the cap is checked against.
+    /// `screen.league_id` -> what that screen's chats about that league have
+    /// cost so far, all conversations together. This is what the cap is
+    /// checked against. Bare-screen keys are from an older scheme and are not
+    /// read; see [`spend_key`].
     spend_usd: std::collections::HashMap<String, f64>,
     models: Vec<&'static str>,
     /// Effort levels each model accepts — they differ, and sending the wrong
@@ -46,22 +48,34 @@ fn resolve_provider(config: &AppConfig, has_key: bool, cli_available: bool) -> &
     }
 }
 
-/// Hand `store` a copy of the config and commit the key it comes back with.
+/// Run `store` with the config mutex free, then commit the one field it
+/// decided on — the key the config file should now carry, or `None`.
 ///
 /// The mutex is deliberately not held while `store` runs: storing the key
 /// means the `security` command in a subprocess, which can take a moment and
 /// can put a prompt in front of the user. Held across that, every command that
 /// reads the config — and both poll ticks — waited on the Keychain.
-async fn store_key_unlocked<F, Fut>(config: &Mutex<AppConfig>, store: F) -> Result<(), String>
+///
+/// Committing is the clone-save-commit the rest of the app uses: the live
+/// config is re-read *after* the wait, edited on a copy, written, and only
+/// then swapped in. Nothing the pollers did while the Keychain was busy is
+/// rolled back, and a failed save leaves memory and disk agreeing.
+async fn store_key_unlocked<F, Fut, S>(
+    config: &Mutex<AppConfig>,
+    store: F,
+    save: S,
+) -> Result<(), String>
 where
-    F: FnOnce(AppConfig) -> Fut,
-    Fut: std::future::Future<Output = Result<AppConfig, String>>,
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<Option<String>, String>>,
+    S: FnOnce(&AppConfig) -> Result<(), String>,
 {
-    let copy = config.lock().await.clone();
-    let stored = store(copy).await?;
-    // Only the key can have changed, so only the key is committed: anything
-    // else written while the Keychain was busy stays where it is.
-    config.lock().await.anthropic_api_key = stored.anthropic_api_key;
+    let in_file = store().await?;
+    let mut config = config.lock().await;
+    let mut next = config.clone();
+    next.anthropic_api_key = in_file;
+    save(&next)?;
+    *config = next;
     Ok(())
 }
 
@@ -76,10 +90,11 @@ pub async fn set_api_key(state: State<'_, AppState>, key: String) -> Result<bool
     };
     let stored = next.is_some();
     let engine = state.engine.clone();
-    store_key_unlocked(&state.config, |mut copy| async move {
-        engine.store_api_key(&mut copy, next).await?;
-        Ok(copy)
-    })
+    store_key_unlocked(
+        &state.config,
+        || async move { engine.store_api_key(next).await },
+        |config| state.engine.save_config(config),
+    )
     .await?;
     Ok(stored)
 }
@@ -190,14 +205,28 @@ fn check_budget(spent: f64, cap: f64, screen: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The cap a caller asked for, or a refusal.
+///
+/// A negative cap used to be quietly rounded up to zero — and zero is the one
+/// value that means *no cap at all*, so "-1" turned the budget off instead of
+/// being rejected. Nothing below zero is a cap, so nothing below zero is
+/// accepted; the panel keeps whatever cap it had and says why.
+fn checked_budget(dollars: f64) -> Result<f64, String> {
+    if !dollars.is_finite() {
+        return Err("that is not a number of dollars".to_string());
+    }
+    if dollars < 0.0 {
+        return Err(format!(
+            "a budget cannot be negative (${dollars:.2}) — 0 is the way to turn the cap off"
+        ));
+    }
+    Ok(dollars)
+}
+
 /// Set the dollar cap a screen's chat runs under. Zero turns it off.
 #[tauri::command]
 pub async fn set_chat_budget(state: State<'_, AppState>, dollars: f64) -> Result<f64, String> {
-    let dollars = if dollars.is_finite() && dollars > 0.0 {
-        dollars
-    } else {
-        0.0
-    };
+    let dollars = checked_budget(dollars)?;
     let mut config = state.config.lock().await;
     config.chat_budget_usd = Some(dollars);
     state.engine.save_config(&config)?;
@@ -215,6 +244,24 @@ fn check_screen(screen: &str) -> Result<(), String> {
         "draft" | "season" => Ok(()),
         other => Err(format!("'{other}' is not a screen Ask Claude answers for")),
     }
+}
+
+/// Where one screen's running spend is filed: `screen.league_id`.
+///
+/// The same shape the panel files its saved conversations under (`chatScope`
+/// in `chatSessions.ts`), and for the same reason — a question about one
+/// league's board is not a question about another's. Spend used to be keyed by
+/// screen alone, so every league on the machine drew down one shared cap and
+/// the panel's "spent on this screen" figure belonged to no league in
+/// particular.
+///
+/// Keys written under the old scheme are bare screen names, which no scope can
+/// collide with. They are left in the config and never read: they are a
+/// mixture of every league's spending, so there is no league to migrate them
+/// to, and the alternative — charging them all to whichever league happens to
+/// be open — would refuse turns over money that league never spent.
+pub fn spend_key(screen: &str, league_id: Option<&str>) -> String {
+    format!("{screen}.{}", league_id.unwrap_or("none"))
 }
 
 /// Ask Claude about the board or the week. `screen` selects which view is
@@ -239,7 +286,8 @@ pub async fn ask_claude(
     // The cap is enforced here rather than in the panel, which cannot be the
     // authority on money: it knows only the conversation in front of it, and
     // it prices turns it did not pay for.
-    let spent = config.chat_spend_usd.get(&screen).copied().unwrap_or(0.0);
+    let key = spend_key(&screen, config.active_league_id.as_deref());
+    let spent = config.chat_spend_usd.get(&key).copied().unwrap_or(0.0);
     check_budget(spent, budget_of(&config), &screen)?;
 
     // Building a season view is seconds of arithmetic. It must not happen with
@@ -288,13 +336,13 @@ pub async fn ask_claude(
     };
     reply.provider = provider.to_string();
     let mut config = state.config.lock().await;
-    let running = config.chat_spend_usd.entry(screen).or_insert(0.0);
+    let running = config.chat_spend_usd.entry(key).or_insert(0.0);
     *running += reply.cost_usd;
     reply.screen_spend_usd = *running;
     // A failure to write it down is not a reason to withhold the answer the
     // user already paid for; the next turn re-reads whatever did land.
     if let Err(e) = state.engine.save_config(&config) {
-        eprintln!("could not record what Ask Claude spent: {e}");
+        crate::applog::warn(format!("could not record what Ask Claude spent: {e}"));
     }
     Ok(reply)
 }
@@ -306,126 +354,5 @@ pub fn chat_suggestions(screen: String) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn config(provider: Option<&str>) -> AppConfig {
-        AppConfig {
-            chat_provider: provider.map(str::to_string),
-            ..AppConfig::default()
-        }
-    }
-
-    #[tokio::test]
-    async fn the_config_is_not_held_while_the_key_goes_to_the_keychain() {
-        let config = Mutex::new(AppConfig::default());
-        let free = std::cell::Cell::new(false);
-        store_key_unlocked(&config, |mut copy| async {
-            // Standing in for the `security` subprocess: whatever runs here
-            // must not be running behind the config mutex.
-            free.set(config.try_lock().is_ok());
-            copy.anthropic_api_key = Some("sk-test".to_string());
-            Ok(copy)
-        })
-        .await
-        .expect("the key was stored");
-
-        assert!(free.get(), "the Keychain ran with the config mutex held");
-        assert_eq!(
-            config.lock().await.anthropic_api_key.as_deref(),
-            Some("sk-test"),
-            "the key was not committed once it was safely stored"
-        );
-    }
-
-    #[test]
-    fn only_the_two_real_screens_can_ask_a_question() {
-        assert!(check_screen("draft").is_ok());
-        assert!(check_screen("season").is_ok());
-        // Anything else used to open its own uncapped spending tally.
-        for junk in ["", "Draft", "../etc", "settings"] {
-            assert!(check_screen(junk).is_err(), "{junk:?} was accepted");
-        }
-    }
-
-    #[test]
-    fn the_cli_is_preferred_only_when_there_is_no_key() {
-        assert_eq!(resolve_provider(&config(None), false, true), PROVIDER_CLI);
-        assert_eq!(resolve_provider(&config(None), true, true), PROVIDER_API);
-        assert_eq!(resolve_provider(&config(None), false, false), PROVIDER_API);
-    }
-
-    #[test]
-    fn an_explicit_choice_wins_unless_the_cli_is_missing() {
-        assert_eq!(
-            resolve_provider(&config(Some(PROVIDER_CLI)), true, true),
-            PROVIDER_CLI
-        );
-        assert_eq!(
-            resolve_provider(&config(Some(PROVIDER_CLI)), false, false),
-            PROVIDER_API
-        );
-        assert_eq!(
-            resolve_provider(&config(Some(PROVIDER_API)), false, true),
-            PROVIDER_API
-        );
-    }
-
-    fn turn(content: &str) -> ChatMessage {
-        ChatMessage {
-            role: "user".into(),
-            content: content.into(),
-        }
-    }
-
-    #[test]
-    fn an_ordinary_conversation_goes_through() {
-        let thread: Vec<ChatMessage> = (0..10).map(|i| turn(&format!("question {i}"))).collect();
-        assert!(check_thread_size(&thread).is_ok());
-    }
-
-    #[test]
-    fn too_many_turns_is_refused_with_something_the_user_can_act_on() {
-        let thread: Vec<ChatMessage> = (0..=MAX_TURNS).map(|_| turn("hi")).collect();
-        let error = check_thread_size(&thread).unwrap_err();
-        assert!(error.contains("new chat"), "unhelpful: {error}");
-    }
-
-    #[test]
-    fn one_enormous_turn_is_refused_even_though_the_count_is_small() {
-        let thread = vec![turn(&"x".repeat(MAX_THREAD_BYTES + 1))];
-        assert!(check_thread_size(&thread).is_err());
-    }
-
-    #[test]
-    fn a_cap_nobody_has_set_is_the_default_and_zero_means_off() {
-        assert_eq!(budget_of(&AppConfig::default()), DEFAULT_BUDGET_USD);
-        let off = AppConfig {
-            chat_budget_usd: Some(0.0),
-            ..AppConfig::default()
-        };
-        assert_eq!(budget_of(&off), 0.0);
-        // A negative cap in a hand-edited config file is not a negative cap.
-        let nonsense = AppConfig {
-            chat_budget_usd: Some(-3.0),
-            ..AppConfig::default()
-        };
-        assert_eq!(budget_of(&nonsense), 0.0);
-    }
-
-    #[test]
-    fn the_cap_stops_the_screen_that_reached_it_and_says_which_one() {
-        assert!(check_budget(4.99, 5.0, "draft").is_ok());
-        let error = check_budget(5.0, 5.0, "draft").unwrap_err();
-        assert!(error.contains("$5.00 of its $5.00 cap"), "{error}");
-        assert!(error.contains("draft screen"), "{error}");
-        assert!(error.contains("raise the budget"), "{error}");
-        // A turn that overshot lands, and the next one is refused for it.
-        assert!(check_budget(9.40, 5.0, "season").is_err());
-    }
-
-    #[test]
-    fn no_cap_never_stops_anything() {
-        assert!(check_budget(500.0, 0.0, "draft").is_ok());
-    }
-}
+#[path = "commands_chat_tests.rs"]
+mod tests;

@@ -214,6 +214,25 @@ describe("Chat model and effort", () => {
     expect(screen.getByText(/Fable 5 · high effort/)).toBeInTheDocument();
     expect(screen.getByText("thinking always on")).toBeInTheDocument();
   });
+
+  it("writes xhigh as a level and not as an identifier", async () => {
+    // The wire value is the API's own, and the backend passes it through, so
+    // it was the one button in the row set in lowercase.
+    mocks.chatSettings.mockResolvedValue(settings({ has_key: true }));
+    render(
+      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
+    );
+    await screen.findByRole("textbox", { name: "Ask Claude" });
+
+    const level = screen.getByRole("button", { name: "X-High" });
+    expect(screen.queryByRole("button", { name: "xhigh" })).not.toBeInTheDocument();
+    // Only the label changed: what is sent is still the value the API takes.
+    await userEvent.click(level);
+    mocks.askClaude.mockResolvedValue(reply({ text: "An answer." }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Ask Claude" }), "Who?{Enter}");
+    await screen.findByText("An answer.");
+    expect(mocks.askClaude).toHaveBeenLastCalledWith(expect.objectContaining({ effort: "xhigh" }));
+  });
 });
 
 describe("Chat thread controls", () => {

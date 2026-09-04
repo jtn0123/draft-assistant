@@ -14,6 +14,12 @@ const PROVIDERS: [id: "claude_code" | "api", name: string, title: string][] = [
   ["api", "API key", "Calls the Anthropic API directly with the key stored in this app"],
 ];
 
+/** How an effort level is written on its button. The wire values are the
+ *  API's own (`xhigh`), and the backend sends them through verbatim — so
+ *  `xhigh` was the one button in the row set in lowercase, reading like a bug
+ *  rather than a level. Only the label changes; the value sent is untouched. */
+const EFFORT_LABEL: Record<string, string> = { xhigh: "X-High" };
+
 /** Model-button tooltips, from the design. */
 const MODEL_TITLE: Record<string, string> = {
   "Opus 5": "Claude Opus 5 — adaptive thinking, supports all five effort levels",
@@ -70,7 +76,7 @@ export function ChatControls({
             title={settings?.notes[level]?.[0]}
             aria-pressed={level === effort}
           >
-            {level}
+            {EFFORT_LABEL[level] ?? level}
           </button>
         ))}
       </div>

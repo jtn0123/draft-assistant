@@ -142,27 +142,32 @@ impl crate::engine::Engine {
 
     /// Store (or, with `None`, clear) the key: Keychain when there is one,
     /// the config file otherwise.
-    pub async fn store_api_key(
-        &self,
-        config: &mut AppConfig,
-        key: Option<String>,
-    ) -> Result<(), String> {
-        if crate::secrets::available() {
-            let writing = key.clone();
-            tokio::task::spawn_blocking(move || match &writing {
-                Some(k) => crate::secrets::store(k),
-                None => crate::secrets::clear(),
-            })
-            .await
-            .map_err(|e| format!("could not reach the Keychain: {e}"))??;
-            // The remembered answer is now the one we just wrote, so the next
-            // question does not have to go and ask again.
-            *self.key_cache.lock().await = Some(key);
-            config.anthropic_api_key = None;
-        } else {
-            config.anthropic_api_key = key;
+    ///
+    /// Nothing is written to `config.json` here, and no `AppConfig` is taken.
+    /// This used to be handed a clone of the live config and save the whole
+    /// thing once the Keychain came back — and the Keychain can take seconds
+    /// and put a prompt in front of the user, so anything the pollers wrote
+    /// meanwhile (a refreshed board, a new league, what Ask Claude had spent)
+    /// was rolled back to whatever the clone remembered. What the caller gets
+    /// instead is the one field that changed: it re-reads the live config,
+    /// sets that field, and saves under the lock.
+    pub async fn store_api_key(&self, key: Option<String>) -> Result<Option<String>, String> {
+        if !crate::secrets::available() {
+            // No Keychain: the key itself is what belongs in the config file.
+            return Ok(key);
         }
-        self.save_config(config)
+        let writing = key.clone();
+        tokio::task::spawn_blocking(move || match &writing {
+            Some(k) => crate::secrets::store(k),
+            None => crate::secrets::clear(),
+        })
+        .await
+        .map_err(|e| format!("could not reach the Keychain: {e}"))??;
+        // The remembered answer is now the one we just wrote, so the next
+        // question does not have to go and ask again.
+        *self.key_cache.lock().await = Some(key);
+        // The Keychain holds it; the config file must not also hold a copy.
+        Ok(None)
     }
 }
 

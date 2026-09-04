@@ -122,7 +122,10 @@ export function Chat({
         // The backend holds the cap and the running total it is checked
         // against; the stored copy here is only a cache of them.
         setChatBudget(next.budget_usd);
-        setScreenSpend(next.spend_usd[screen] ?? 0);
+        // Keyed by screen *and* league, the same scope the conversations are
+        // filed under: a cap drawn down by another league's questions is not
+        // this league's cap.
+        setScreenSpend(next.spend_usd[scope] ?? 0);
       })
       .catch(() => {
         // Without settings the panel still renders, just with defaults.
@@ -131,7 +134,7 @@ export function Chat({
     return () => {
       cancelled = true;
     };
-  }, [settingsToken, screen]);
+  }, [settingsToken, scope]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,7 +177,9 @@ export function Chat({
   /** Keep the cap the panel warns on and the cap the backend enforces the
    *  same number. A backend that refuses the write still warns correctly. */
   const pickBudget = (next: number) => {
-    setChatBudget(next);
+    // A cap the local half will not take is one the backend refuses too, so
+    // it never goes over the wire.
+    if (!setChatBudget(next)) return;
     api.setChatBudget(next).catch(() => {
       // Not stored for next time; this session still uses it.
     });
@@ -313,6 +318,7 @@ export function Chat({
         spent={spend.costUsd}
         screenSpent={screenSpend}
         budget={budget}
+        provider={settings?.provider ?? null}
         disabled={sending}
         onOpen={sessions.open}
         onDelete={sessions.remove}

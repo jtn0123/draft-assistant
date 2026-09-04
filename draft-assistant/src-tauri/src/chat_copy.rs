@@ -84,20 +84,29 @@ pub fn effort_note(effort: crate::chat::Effort) -> (&'static str, &'static str) 
     }
 }
 
-/// Redact everything but the tail of a key, for display.
+/// Redact a key down to what a user needs to recognise it by.
+///
+/// A real Anthropic key is a hundred-odd characters, and showing the `sk-ant-`
+/// prefix with the last four is how the Console names them. Anything short
+/// enough that those two windows would overlap into most of the string is
+/// masked further instead: the four visible characters of a five-character
+/// value are not a hint, they are the value. A short string here is a typo or
+/// a test fixture rather than a real key, but it is still a secret, and the
+/// masking cannot be a function of how good the secret is.
 pub fn mask_key(key: &str) -> String {
-    let visible: String = key
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    if key.len() <= 4 {
+    let chars: Vec<char> = key.chars().collect();
+    // Eight or fewer: nothing is shown at all.
+    if chars.len() <= 8 {
         return "····".to_string();
     }
-    format!("····{visible}")
+    let tail: String = chars[chars.len() - 4..].iter().collect();
+    // The head is only worth showing once there is plenty of key hidden
+    // between it and the tail.
+    if chars.len() >= 20 {
+        let head: String = chars[..7].iter().collect();
+        return format!("{head}····{tail}");
+    }
+    format!("····{tail}")
 }
 
 #[cfg(test)]
@@ -111,9 +120,44 @@ mod tests {
     }
 
     #[test]
-    fn keys_are_masked_to_their_last_four() {
-        assert_eq!(mask_key("sk-ant-api03-abcd1234"), "····1234");
-        assert_eq!(mask_key("abc"), "····");
+    fn a_real_key_shows_its_prefix_and_its_last_four() {
+        // 21 characters: long enough that the two windows leave most of it
+        // hidden between them.
+        assert_eq!(mask_key("sk-ant-api03-abcd1234"), "sk-ant-····1234");
+        assert_eq!(mask_key(&format!("sk-ant-api03-{}", "x".repeat(90))), {
+            let tail = "x".repeat(4);
+            format!("sk-ant-····{tail}")
+        });
+    }
+
+    #[test]
+    fn a_short_string_is_masked_rather_than_mostly_shown() {
+        // These used to print four of the five characters, which is the
+        // secret with a decoration on it.
+        assert_eq!(mask_key("abcde"), "····");
+        assert_eq!(mask_key("sk-ant12"), "····");
+        // Between the two: the tail only, never the head.
+        assert_eq!(mask_key("sk-ant123"), "····t123");
+        // Nineteen characters: one short of the length that opens the head.
+        assert_eq!(mask_key("sk-ant-api03-abc123"), "····c123");
+        assert_eq!(mask_key(""), "····");
+    }
+
+    /// The two windows never meet in the middle, at any length.
+    #[test]
+    fn no_length_lets_the_windows_meet() {
+        for len in 0..40usize {
+            let key: String = ('a'..='z').cycle().take(len).collect();
+            let masked = mask_key(&key);
+            let shown = masked.chars().filter(|c| *c != '·').count();
+            // Eleven characters at most — the seven-character head window
+            // plus the four-character tail — and the head only opens once
+            // there is a long key behind it to hide.
+            assert!(shown <= 11, "{len}: {masked}");
+            assert!(shown <= 4 || len >= 20, "{len}: {masked}");
+            assert!(shown == 0 || len > 8, "{len}: {masked}");
+            assert_ne!(masked, key, "{len}: the key was printed whole");
+        }
     }
 
     #[test]
