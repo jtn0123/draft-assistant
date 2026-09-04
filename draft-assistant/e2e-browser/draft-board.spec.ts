@@ -127,15 +127,47 @@ test("an older dump is ignored, so a restarted recording cannot rewind the board
   const subtitle = page.locator(".header-subtitle");
   await expect(subtitle).toContainText("26 picks in");
 
+  // What the board reads before anything is rewritten. Read off the page
+  // rather than written down, like everything else here.
+  const settled = (await subtitle.innerText()).trim();
+
   const draft = state.draft as Record<string, number>;
   server.write({
     ...state,
     generated_at: (state.generated_at as number) - 60,
     draft: { ...draft, total_picks_made: 3 },
   });
-  // Give the poll several turns to get it wrong.
-  await page.waitForTimeout(9000);
-  await expect(subtitle).toContainText("26 picks in");
+
+  // Wait for the preview to actually re-read the rewound dump several times,
+  // rather than sleeping for three poll periods and hoping they happened.
+  // Sleeping proves nothing either way: nine seconds in which the app never
+  // polled would pass just as happily as nine in which it polled and correctly
+  // ignored what it read.
+  //
+  // Every sample of the subtitle taken while waiting is collected, so a board
+  // that rewinds and then recovers between two checks still fails -- an
+  // end-state assertion alone would miss exactly that.
+  const readsBefore = server.reads();
+  const seen = new Set<string>();
+  const POLL_CYCLES = 3;
+  await expect
+    .poll(
+      async () => {
+        seen.add((await subtitle.innerText()).trim());
+        return server.reads();
+      },
+      {
+        intervals: Array<number>(60).fill(250),
+        timeout: 30_000,
+        message: `the preview should have re-read the replay source ${POLL_CYCLES} more times`,
+      },
+    )
+    .toBeGreaterThanOrEqual(readsBefore + POLL_CYCLES);
+
+  expect(
+    Array.from(seen),
+    "the older dump moved the board at some point during the poll cycles",
+  ).toEqual([settled]);
 });
 
 test("live sync stays off, and says why, without a replay source", async ({ page }) => {

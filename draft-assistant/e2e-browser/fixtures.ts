@@ -25,6 +25,14 @@ export interface ReplayServer {
   write(next: Record<string, unknown>): void;
   /** What was served last, for editing and writing back. */
   latest(): Record<string, unknown>;
+  /**
+   * How many times the preview has fetched this source.
+   *
+   * A test that wants to prove the app *ignored* something has to know the
+   * app actually looked. Counting the reads lets it wait for real poll cycles
+   * instead of sleeping for a number of seconds and hoping.
+   */
+  reads(): number;
 }
 
 /**
@@ -42,14 +50,19 @@ export async function serveReplay(
   initial: Record<string, unknown>,
 ): Promise<ReplayServer> {
   let current = initial;
+  let served = 0;
   await page.route(
     (url) => url.pathname === path,
-    (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(current) }),
+    (route) => {
+      served += 1;
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(current) });
+    },
   );
   return {
     write: (next) => {
       current = next;
     },
     latest: () => current,
+    reads: () => served,
   };
 }

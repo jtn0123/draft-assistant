@@ -1,3 +1,4 @@
+pub mod applog;
 pub mod backtest;
 pub mod board;
 pub mod cache;
@@ -108,6 +109,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir().expect("no app data dir");
+            // First point in the process where there is anywhere to write:
+            // until this runs, `applog::warn` falls back to a stderr that a
+            // double-clicked .app does not have.
+            applog::init(data_dir.clone());
             let engine = Engine::new(data_dir);
             let config = engine.load_config();
             app.manage(AppState {

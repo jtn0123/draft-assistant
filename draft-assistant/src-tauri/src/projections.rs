@@ -148,7 +148,7 @@ impl Engine {
                 }
                 Err(e) => {
                     // A missing week degrades bonus precision, not correctness.
-                    eprintln!("weekly projections week {week} failed: {e}");
+                    crate::applog::warn(format!("weekly projections week {week} failed: {e}"));
                     failures.push(week);
                 }
             }
