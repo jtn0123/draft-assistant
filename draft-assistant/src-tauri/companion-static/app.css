@@ -391,9 +391,16 @@ button[disabled] {
   margin-top: 12px;
 }
 
+.composer input {
+  min-width: 0;
+}
+
+/* "Answering…" is wider than "Send"; the input gives way, not the label. */
 .composer button {
+  flex: 0 0 auto;
   width: auto;
   padding: 0 16px;
+  white-space: nowrap;
 }
 
 /* Tab bar */
