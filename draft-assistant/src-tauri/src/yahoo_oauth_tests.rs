@@ -3,6 +3,10 @@
 //! over a real socket. Nothing here talks to Yahoo.
 
 use super::*;
+// `TcpListener` and the io traits used to arrive with `super::*`; the loopback
+// listener has its own module now, so the socket-driving tests name them.
+use std::io::{Read, Write};
+use std::net::TcpListener;
 
 fn creds() -> YahooCredentials {
     YahooCredentials {
@@ -264,4 +268,61 @@ fn a_port_already_in_use_is_reported_rather_than_panicked() {
     let port = held.local_addr().expect("addr").port();
     let error = catch_redirect(port).expect_err("the port is taken");
     assert!(matches!(error, AuthError::Invalid(_)), "{error:?}");
+}
+
+#[test]
+fn the_authorize_url_asks_for_the_read_only_fantasy_scope() {
+    let url = authorize_url("id", OOB, "st");
+    assert!(url.contains("scope=fspt-r"), "{url}");
+    // Read, not write: nothing this app is issued can change a league.
+    assert!(!url.contains("fspt-w"), "{url}");
+}
+
+#[test]
+fn a_debug_print_of_the_credentials_never_carries_either_half() {
+    let printed = format!("{:?}", creds());
+    assert!(!printed.contains(&creds().client_secret), "{printed}");
+    assert!(!printed.contains(&creds().client_id), "{printed}");
+    assert!(printed.contains("YahooCredentials"), "{printed}");
+    // And nested inside something else, which is how a `{:?}` usually happens.
+    let nested = format!("{:?}", Some(vec![creds()]));
+    assert!(!nested.contains(&creds().client_secret), "{nested}");
+}
+
+#[test]
+fn a_debug_print_of_a_token_set_keeps_the_expiry_and_nothing_else() {
+    let tokens = TokenSet {
+        access_token: "at-supersecret".into(),
+        refresh_token: "rt-supersecret".into(),
+        expires_at: 1_800_000_000,
+    };
+    let printed = format!("{tokens:?}");
+    assert!(!printed.contains("supersecret"), "{printed}");
+    assert!(printed.contains("1800000000"), "{printed}");
+}
+
+#[test]
+fn a_browser_that_never_comes_back_gives_up_instead_of_waiting_forever() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let started = std::time::Instant::now();
+    let error = catch_redirect_on_within(listener, std::time::Duration::from_millis(150))
+        .expect_err("nothing connected, so there is no redirect");
+    assert!(
+        matches!(error, AuthError::Transport(_)),
+        "{error:?} should read as the browser not arriving"
+    );
+    assert!(error.to_string().contains("never came back"), "{error}");
+    // The point of the change: it returned rather than blocking on `accept`.
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "the wait was not bounded: {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn the_app_itself_waits_long_enough_for_a_real_sign_in() {
+    // Five minutes: a Yahoo login with two-factor on the end of it, and no
+    // more — an abandoned connect must not hold the port for the session.
+    assert_eq!(REDIRECT_WAIT, std::time::Duration::from_secs(300));
 }

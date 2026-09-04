@@ -368,6 +368,8 @@ function Connected({
       <span className="mid dialog-note">
         Connected as <strong>{account ?? "your Yahoo account"}</strong>. This is a read-only
         connection: the app reads leagues, rosters and draft picks, and never writes anything back.
+        Disconnecting signs out of this Yahoo account and keeps the app you registered, so
+        connecting again is one click.
       </span>
       {leagues !== null &&
         (leagues.length === 0 ? (

@@ -39,13 +39,20 @@ pub(crate) const CODE: &str = "abcd1234";
 /// session's stub starts serving the finished draft instead of the partial
 /// one. Per-session so the two tests that use it can run side by side, which
 /// is how `cargo test` runs them.
-fn yahoo_route(request: &Request, advanced: &AtomicBool) -> Reply {
+fn yahoo_route(request: &Request, advanced: &AtomicBool, pool_calls: &AtomicU64) -> Reply {
     let path = request.path();
     if path.ends_with("/oauth2/get_token") {
-        // The exchange must carry the app's identity and the code the user
-        // pasted; anything else is not the flow under test.
-        if request.header("authorization").is_none() || request.form("code").is_none() {
-            return Reply::status(400, r#"{"error":"invalid_request"}"#);
+        // The exchange must carry the app's identity, and the code has to be
+        // the one Yahoo issued — a mistyped code is answered the way Yahoo
+        // answers one, so the retry path is exercised rather than assumed.
+        let identified = request.header("authorization").is_some();
+        let granted = match request.form("code") {
+            Some(code) => code == CODE,
+            // No code at all means this is the refresh grant.
+            None => request.form("refresh_token").is_some(),
+        };
+        if !identified || !granted {
+            return Reply::status(400, r#"{"error":"invalid_grant"}"#);
         }
         return Reply::ok(
             r#"{"access_token": "flow-access", "refresh_token": "flow-refresh",
@@ -68,6 +75,7 @@ fn yahoo_route(request: &Request, advanced: &AtomicBool) -> Reply {
         };
     }
     if path.contains("/players") {
+        pool_calls.fetch_add(1, Ordering::SeqCst);
         return Reply::ok(PLAYERS_0);
     }
     Reply::status(404, r#"{"error":{"description":"no such resource"}}"#)
@@ -115,6 +123,9 @@ pub(crate) struct Session {
     data_dir: std::path::PathBuf,
     /// Flip it and this session's Yahoo stub serves the finished draft.
     pub(crate) advanced: Arc<AtomicBool>,
+    /// How many player-pool pages this session's stub has served. The pool is
+    /// 25 rows a page, so it is the one call worth not repeating.
+    pub(crate) pool_calls: Arc<AtomicU64>,
     _stub: Stub,
 }
 
@@ -122,7 +133,9 @@ pub(crate) fn session(label: &str) -> Session {
     stub::serve(sleeper_route);
     let advanced = Arc::new(AtomicBool::new(false));
     let served = advanced.clone();
-    let yahoo_stub = yahoo_stub::serve(move |request| yahoo_route(request, &served));
+    let pool_calls = Arc::new(AtomicU64::new(0));
+    let counted = pool_calls.clone();
+    let yahoo_stub = yahoo_stub::serve(move |request| yahoo_route(request, &served, &counted));
     let hosts = YahooHosts {
         api_base: format!("{}/fantasy/v2", yahoo_stub.base()),
         login_base: yahoo_stub.base(),
@@ -168,6 +181,7 @@ pub(crate) fn session(label: &str) -> Session {
         webview,
         data_dir,
         advanced,
+        pool_calls,
         _stub: yahoo_stub,
     }
 }

@@ -52,8 +52,17 @@ pub struct YahooLeague {
     pub draft_status: String,
     /// Epoch seconds, as a string in the payload. `None` until scheduled.
     pub draft_time: Option<u64>,
-    /// `live` | `auction` | `offline` (absent on some leagues).
+    /// `live` | `auction` | `offline` (absent on some leagues). Yahoo says
+    /// `live` for an auction held live, so this alone does not decide.
     pub draft_type: Option<String>,
+    /// Yahoo's own auction flag, sent as `"1"` / `"0"`. This is the field that
+    /// actually answers "is this an auction": a live auction arrives as
+    /// `draft_type: "live"` with this set.
+    ///
+    /// Defaulted on the way in so that a cache written before this field
+    /// existed still deserializes.
+    #[serde(default)]
+    pub is_auction_draft: bool,
     /// `head` | `roto` | `point`.
     pub scoring_type: Option<String>,
     pub roster_positions: Vec<RosterSlot>,
@@ -152,6 +161,18 @@ mod tests {
         let text = serde_json::to_string(&league).expect("serialize");
         let back: YahooLeague = serde_json::from_str(&text).expect("deserialize");
         assert_eq!(back, league);
+    }
+
+    #[test]
+    fn a_league_cached_before_the_auction_flag_existed_still_reads() {
+        // The on-disk cache is written by this struct's own `Serialize`, so a
+        // file from an earlier build has no `is_auction_draft` at all.
+        let older = r#"{"league_key":"449.l.1","league_id":"1","name":"Old","season":"2025",
+            "num_teams":10,"draft_status":"postdraft","draft_time":null,"draft_type":"live",
+            "scoring_type":"head","roster_positions":[],"stat_modifiers":[],
+            "stat_categories":[]}"#;
+        let league: YahooLeague = serde_json::from_str(older).expect("an older cache still reads");
+        assert!(!league.is_auction_draft);
     }
 
     #[test]

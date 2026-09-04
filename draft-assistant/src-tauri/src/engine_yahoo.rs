@@ -182,6 +182,11 @@ impl Engine {
         warnings.extend(projections_warning);
         warnings.extend(weekly_warning);
         warnings.extend(crosswalk.warning());
+        // A stat this app cannot score is silently worth zero to every player,
+        // which is invisible on the board and changes the ranking; saying so is
+        // the difference between a board that is wrong and one that is wrong
+        // and says why.
+        warnings.extend(yahoo_map::unscored_stats_warning(&yahoo_league));
 
         self.finish_assembly(AssemblyParts {
             draft: draft_for(league_key, &yahoo_league, &teams),
@@ -302,9 +307,13 @@ pub fn draft_for(league_key: &str, yahoo: &YahooLeague, teams: &[YahooTeam]) -> 
         // pick and keeper files are named after.
         draft_id: league_key.to_string(),
         status: draft_status(&yahoo.draft_status),
-        draft_type: match yahoo.draft_type.as_deref() {
-            Some("auction") => "auction".to_string(),
-            _ => "snake".to_string(),
+        // Yahoo answers `draft_type: "live"` for a live auction and flags the
+        // auction separately, so both have to be read: on the type alone every
+        // auction league would be drawn as a snake board.
+        draft_type: if yahoo.is_auction_draft || yahoo.draft_type.as_deref() == Some("auction") {
+            "auction".to_string()
+        } else {
+            "snake".to_string()
         },
         settings: DraftSettings {
             teams: if yahoo.num_teams > 0 {

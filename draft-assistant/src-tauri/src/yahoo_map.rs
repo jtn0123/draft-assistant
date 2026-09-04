@@ -22,9 +22,12 @@ use std::collections::HashMap;
 /// Sleeper splits in three — id 16 is "2-point conversions" however they were
 /// scored — so the value is a list, and the modifier is applied to each.
 ///
-/// Ids not listed here (bonus categories, IDP, Yahoo's own composite stats)
-/// are dropped: scoring a stat the projections never produce would only add a
-/// constant zero, and a wrong guess at a key would add a wrong number.
+/// Ids not listed here (bonus categories, IDP, Yahoo's own composite stats,
+/// and return yardage, which Yahoo counts as one number and Sleeper splits
+/// between kick and punt returns) are dropped: a wrong guess at a key would
+/// add a wrong number to every player. Dropping one is not silent, though —
+/// [`unscored_stats_warning`] puts the ones a league actually pays for on the
+/// board's health strip.
 pub const YAHOO_STAT_IDS: &[(u32, &[&str])] = &[
     // Offence
     (4, &["pass_yd"]),
@@ -37,6 +40,7 @@ pub const YAHOO_STAT_IDS: &[(u32, &[&str])] = &[
     (13, &["rec_td"]),
     (15, &["st_td"]),
     (16, &["pass_2pt", "rush_2pt", "rec_2pt"]),
+    (17, &["fum"]),
     (18, &["fum_lost"]),
     // Kicking
     (19, &["fgm_0_19"]),
@@ -44,7 +48,12 @@ pub const YAHOO_STAT_IDS: &[(u32, &[&str])] = &[
     (21, &["fgm_30_39"]),
     (22, &["fgm_40_49"]),
     (23, &["fgm_50p"]),
+    (25, &["fgmiss_0_19"]),
+    (26, &["fgmiss_20_29"]),
+    (27, &["fgmiss_30_39"]),
+    (28, &["fgmiss_40_49"]),
     (29, &["xpm"]),
+    (30, &["xpmiss"]),
     // Team defence
     (32, &["sack"]),
     (33, &["int"]),
@@ -119,6 +128,47 @@ pub fn scoring_settings(modifiers: &[StatModifier]) -> HashMap<String, f64> {
         }
     }
     scoring
+}
+
+/// The scoring rules this league pays for that [`YAHOO_STAT_IDS`] cannot
+/// translate, named the way Yahoo names them.
+///
+/// A rule worth zero is left out: a league that scores a category at 0.0 loses
+/// nothing by the app not knowing it, and Yahoo lists plenty of those.
+pub fn unscored_stats(league: &YahooLeague) -> Vec<String> {
+    let known: HashMap<u32, &[&str]> = YAHOO_STAT_IDS.iter().copied().collect();
+    let names: HashMap<u32, &str> = league
+        .stat_categories
+        .iter()
+        .map(|category| (category.stat_id, category.name.as_str()))
+        .collect();
+    league
+        .stat_modifiers
+        .iter()
+        .filter(|modifier| modifier.value != 0.0 && !known.contains_key(&modifier.stat_id))
+        .map(|modifier| match names.get(&modifier.stat_id) {
+            Some(name) => format!("{name} ({})", modifier.stat_id),
+            // Yahoo sends `stat_categories` only when the settings were asked
+            // for; without it the id is all there is to report, and an id is
+            // still enough to look up.
+            None => format!("Yahoo stat {}", modifier.stat_id),
+        })
+        .collect()
+}
+
+/// [`unscored_stats`] as one line for the board's warnings, or nothing when
+/// every rule the league pays for is understood.
+pub fn unscored_stats_warning(league: &YahooLeague) -> Option<String> {
+    let missing = unscored_stats(league);
+    if missing.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "this league scores {} the app cannot read from the projections, so {} worth nothing here: {}",
+        if missing.len() == 1 { "a category" } else { "categories" },
+        if missing.len() == 1 { "it is" } else { "they are" },
+        missing.join(", ")
+    ))
 }
 
 /// A Yahoo league as the app's `League`.

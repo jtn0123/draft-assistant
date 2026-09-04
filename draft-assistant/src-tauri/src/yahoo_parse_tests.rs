@@ -163,3 +163,31 @@ fn a_league_with_no_key_is_not_a_league() {
     let payload = json!({"fantasy_content": {"league": [{"name": "Nameless"}]}});
     assert!(league(&payload).is_none());
 }
+
+#[test]
+fn yahoos_auction_flag_is_read_off_the_settings_however_it_is_written() {
+    for written in [json!("1"), json!(1), json!(true)] {
+        let payload = json!({"fantasy_content": {"league": [
+            {"league_key": "449.l.1"},
+            {"settings": [{"draft_type": "live", "is_auction_draft": written}]}
+        ]}});
+        let parsed = league(&payload).expect("a league");
+        assert!(
+            parsed.is_auction_draft,
+            "{written} should read as an auction"
+        );
+        // The type Yahoo actually sends for a live auction is kept as it is.
+        assert_eq!(parsed.draft_type.as_deref(), Some("live"));
+    }
+    let snake = json!({"fantasy_content": {"league": [
+        {"league_key": "449.l.1"},
+        {"settings": [{"draft_type": "live", "is_auction_draft": "0"}]}
+    ]}});
+    assert!(!league(&snake).expect("a league").is_auction_draft);
+    // Absent entirely — some older leagues omit it — is not an auction.
+    let silent = json!({"fantasy_content": {"league": [
+        {"league_key": "449.l.1"},
+        {"settings": [{"draft_type": "live"}]}
+    ]}});
+    assert!(!league(&silent).expect("a league").is_auction_draft);
+}

@@ -19,14 +19,25 @@
 //! new dependency; it is exercised against the RFC 4648 vectors.
 
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
-use std::net::TcpListener;
 use std::time::Duration;
+
+/// The loopback listener. Split out to keep this file about the token dance;
+/// re-exported below so that `yahoo_oauth::catch_redirect` still names it.
+#[path = "yahoo_redirect.rs"]
+pub mod redirect;
+
+pub use redirect::{
+    catch_redirect, catch_redirect_on, catch_redirect_on_within, catch_redirect_within,
+    parse_redirect, Redirect, REDIRECT_WAIT,
+};
 
 /// Yahoo's login host. Both OAuth endpoints hang off it.
 pub const LOGIN_BASE: &str = "https://api.login.yahoo.com";
 /// The "show the user a code to paste" redirect.
 pub const OOB: &str = "oob";
+/// Yahoo Fantasy, read only. Asking for it by name is what keeps the token
+/// this flow issues from being able to write to anybody's league.
+pub const SCOPE: &str = "fspt-r";
 /// An access token is refreshed this many seconds before it actually expires,
 /// so a request cannot leave with a token that dies in flight.
 pub const SKEW: u64 = 60;
@@ -34,22 +45,48 @@ pub const SKEW: u64 = 60;
 /// The credentials Yahoo issues when an app is registered. The secret lives in
 /// the Keychain (see [`crate::yahoo_secrets`]) and travels no further than the
 /// `Authorization` header this module builds.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct YahooCredentials {
     pub client_id: String,
     pub client_secret: String,
+}
+
+/// Written by hand rather than derived: a derived `Debug` would put the secret
+/// into any `{:?}`, and one `dbg!` in a panic message or a log line is all it
+/// would take to spill it. Neither half is shown — the id identifies the
+/// registered app, which is enough to pair a leaked secret with.
+impl std::fmt::Debug for YahooCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("YahooCredentials")
+            .field("client_id", &"<redacted>")
+            .field("client_secret", &"<redacted>")
+            .finish()
+    }
 }
 
 /// A token pair, plus the wall-clock second the access token stops working.
 ///
 /// Yahoo's refresh tokens do not expire — they survive password changes — so
 /// this is the whole of what has to be persisted between runs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenSet {
     pub access_token: String,
     pub refresh_token: String,
     /// Epoch seconds.
     pub expires_at: u64,
+}
+
+/// Redacted for the same reason [`YahooCredentials`]'s is: a token is a
+/// password. The expiry stays, because that is the field a failing test or a
+/// log line actually wants to see.
+impl std::fmt::Debug for TokenSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenSet")
+            .field("access_token", &"<redacted>")
+            .field("refresh_token", &"<redacted>")
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 impl TokenSet {
@@ -60,8 +97,9 @@ impl TokenSet {
     }
 }
 
-/// Yahoo's reply to `/oauth2/get_token`.
-#[derive(Debug, Clone, Deserialize)]
+/// Yahoo's reply to `/oauth2/get_token`. No `Debug`: it is a token pair
+/// before it becomes a [`TokenSet`], and just as worth not printing.
+#[derive(Clone, Deserialize)]
 struct TokenResponse {
     access_token: String,
     #[serde(default)]
@@ -111,9 +149,10 @@ pub fn authorize_url(client_id: &str, redirect_uri: &str, state: &str) -> String
 /// [`authorize_url`] against a different login host, for tests.
 pub fn authorize_url_on(base: &str, client_id: &str, redirect_uri: &str, state: &str) -> String {
     format!(
-        "{base}/oauth2/request_auth?client_id={}&redirect_uri={}&response_type=code&state={}&language=en-us",
+        "{base}/oauth2/request_auth?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}&language=en-us",
         encode(client_id),
         encode(redirect_uri),
+        encode(SCOPE),
         encode(state)
     )
 }
@@ -314,111 +353,6 @@ pub fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
-}
-
-/// What the browser handed back on the loopback redirect.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Redirect {
-    pub code: String,
-    pub state: String,
-}
-
-/// Take the one redirect the browser makes to `http://localhost:<port>`.
-///
-/// Blocking, and deliberately so: it is called from a blocking task while the
-/// user is over in their browser. The page it answers with is the only thing
-/// they see, so it says the one useful thing and stops.
-pub fn catch_redirect(port: u16) -> Result<Redirect, AuthError> {
-    let listener = TcpListener::bind(("127.0.0.1", port))
-        .map_err(|e| AuthError::Invalid(format!("could not listen on port {port}: {e}")))?;
-    catch_redirect_on(listener)
-}
-
-/// [`catch_redirect`] with the listener already bound — which is how a test
-/// gets a port without racing for a fixed one.
-pub fn catch_redirect_on(listener: TcpListener) -> Result<Redirect, AuthError> {
-    let (mut socket, _) = listener
-        .accept()
-        .map_err(|e| AuthError::Transport(format!("the browser never arrived: {e}")))?;
-    let mut request = Vec::new();
-    let mut chunk = [0u8; 4096];
-    // The head is all there is: the browser sends a GET with no body.
-    while !request.windows(4).any(|w| w == b"\r\n\r\n") {
-        match socket.read(&mut chunk) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => request.extend_from_slice(&chunk[..n]),
-        }
-    }
-    let head = String::from_utf8_lossy(&request);
-    let target = head.split_whitespace().nth(1).unwrap_or("/");
-    let redirect = parse_redirect(target);
-    let page = if redirect.code.is_empty() {
-        "<!doctype html><title>Yahoo</title><p>No authorization code arrived. Try connecting again."
-    } else {
-        "<!doctype html><title>Yahoo</title><p>Connected. You can close this tab."
-    };
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}",
-        page.len()
-    );
-    let _ = socket.write_all(response.as_bytes());
-    let _ = socket.flush();
-    let _ = socket.shutdown(std::net::Shutdown::Write);
-    if redirect.code.is_empty() {
-        return Err(AuthError::Invalid(
-            "the redirect carried no authorization code".into(),
-        ));
-    }
-    Ok(redirect)
-}
-
-/// Pull `code` and `state` out of the request target (`/?code=..&state=..`).
-pub fn parse_redirect(target: &str) -> Redirect {
-    let query = target.split_once('?').map(|(_, q)| q).unwrap_or("");
-    let mut redirect = Redirect::default();
-    for pair in query.split('&') {
-        let Some((name, value)) = pair.split_once('=') else {
-            continue;
-        };
-        match name {
-            "code" => redirect.code = decode(value),
-            "state" => redirect.state = decode(value),
-            _ => {}
-        }
-    }
-    redirect
-}
-
-/// The percent-decoding half of [`encode`], enough for a query value.
-fn decode(raw: &str) -> String {
-    let bytes = raw.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'%' if index + 2 < bytes.len() => {
-                match u8::from_str_radix(&raw[index + 1..index + 3], 16) {
-                    Ok(byte) => {
-                        out.push(byte);
-                        index += 3;
-                    }
-                    Err(_) => {
-                        out.push(b'%');
-                        index += 1;
-                    }
-                }
-            }
-            b'+' => {
-                out.push(b' ');
-                index += 1;
-            }
-            byte => {
-                out.push(byte);
-                index += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Standard base64 with padding (RFC 4648 §4). Present so that the one place

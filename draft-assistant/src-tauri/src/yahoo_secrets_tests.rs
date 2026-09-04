@@ -215,9 +215,41 @@ fn the_fallback_file_is_readable_only_by_its_owner() {
 }
 
 #[test]
-fn availability_tracks_the_security_binary_on_macos() {
-    let expected = cfg!(target_os = "macos") && Path::new("/usr/bin/security").is_file();
-    assert_eq!(available(), expected);
+fn signing_out_forgets_the_token_and_keeps_the_registered_app() {
+    // Disconnect is signing out of an account, not un-registering the app: the
+    // client id and secret cost a trip to developer.yahoo.com to replace, so
+    // reconnecting has to stay one click.
+    let scratch = Scratch::new("signout");
+    let store = scratch.store();
+    save_credentials(&store, &credentials()).expect("save credentials");
+    save_tokens(&store, &tokens()).expect("save tokens");
+    clear_tokens(&store).expect("clear the token");
+    assert!(load_tokens(&store).is_none());
+    assert_eq!(load_credentials(&store), Some(credentials()));
+    // And it is idempotent: signing out twice is not an error.
+    clear_tokens(&store).expect("clear again");
+    assert_eq!(load_credentials(&store), Some(credentials()));
+}
+
+#[test]
+fn a_machine_without_a_keychain_still_gets_a_store_that_works() {
+    // `store_for` is the only place that decides between the two backends. On
+    // a machine with no `security` binary it has to hand back the file store
+    // rather than a `Keychain` that would fail on every call — and whichever
+    // one this machine gets, the round trip has to work.
+    let scratch = Scratch::new("store-for");
+    let store = store_for(&scratch.0);
+    if available() {
+        // The Keychain is this developer's real login keychain; writing to it
+        // from a test is exactly what these tests must not do.
+        return;
+    }
+    save_tokens(store.as_ref(), &tokens()).expect("save through the fallback");
+    assert_eq!(load_tokens(store.as_ref()), Some(tokens()));
+    assert!(
+        scratch.0.join("yahoo-secrets.json").is_file(),
+        "the fallback did not write to the data directory"
+    );
 }
 
 #[test]

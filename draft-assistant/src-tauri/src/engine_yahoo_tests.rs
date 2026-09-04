@@ -39,6 +39,7 @@ fn league() -> YahooLeague {
         draft_status: "draft".into(),
         draft_time: Some(1_789_000_000),
         draft_type: Some("live".into()),
+        is_auction_draft: false,
         scoring_type: Some("head".into()),
         roster_positions: slots(&[("QB", 1), ("RB", 2), ("W/R/T", 1), ("BN", 5), ("IR", 2)]),
         stat_modifiers: vec![],
@@ -122,6 +123,37 @@ fn an_auction_league_is_marked_as_one() {
     let mut league = league();
     league.draft_type = Some("auction".into());
     assert_eq!(draft_for("449.l.1", &league, &[]).draft_type, "auction");
+}
+
+#[test]
+fn a_live_auction_is_an_auction_even_though_yahoo_calls_the_type_live() {
+    // The shape Yahoo actually sends for an auction: the type says `live` and
+    // only `is_auction_draft` says auction.
+    let settings = serde_json::json!({
+        "fantasy_content": { "league": [
+            { "league_key": "449.l.12345", "league_id": "12345", "name": "Bid Night",
+              "season": "2026", "num_teams": 12, "draft_status": "predraft" },
+            { "settings": [ { "draft_type": "live", "is_auction_draft": "1" } ] }
+        ] }
+    });
+    let parsed = crate::yahoo_parse::league(&settings).expect("the league parses");
+    assert_eq!(parsed.draft_type.as_deref(), Some("live"));
+    assert!(parsed.is_auction_draft);
+    assert_eq!(draft_for("449.l.12345", &parsed, &[]).draft_type, "auction");
+}
+
+#[test]
+fn the_snake_fixture_is_still_a_snake_once_the_auction_flag_is_read() {
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/yahoo/league_settings.json"),
+    )
+    .expect("the settings fixture");
+    let value: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+    let parsed = crate::yahoo_parse::league(&value).expect("the league parses");
+    // `is_auction_draft: "0"` is in the fixture and has to read as false.
+    assert!(!parsed.is_auction_draft);
+    assert_eq!(draft_for("449.l.12345", &parsed, &[]).draft_type, "snake");
 }
 
 #[test]

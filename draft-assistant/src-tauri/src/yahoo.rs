@@ -55,12 +55,18 @@ pub enum YahooError {
     },
 }
 
+/// Yahoo answers a throttled caller with its own status 999 rather than the
+/// documented 429. Both mean the same thing and both clear on their own.
+pub const RATE_LIMITED: [u16; 2] = [429, 999];
+
 impl YahooError {
     /// Whether repeating the identical request could plausibly succeed.
     pub fn retryable(&self) -> bool {
         match self {
             YahooError::Transport { .. } => true,
-            YahooError::Http { status, .. } => (500..600).contains(status),
+            YahooError::Http { status, .. } => {
+                (500..600).contains(status) || RATE_LIMITED.contains(status)
+            }
             YahooError::Invalid(_) | YahooError::Auth(_) | YahooError::Decode { .. } => false,
         }
     }
@@ -71,6 +77,11 @@ impl std::fmt::Display for YahooError {
         match self {
             YahooError::Invalid(message) => f.write_str(message),
             YahooError::Auth(error) => write!(f, "{error}"),
+            // "HTTP 999" is Yahoo's, and means nothing to anybody; the one
+            // thing the user can do about it is wait, so say that instead.
+            YahooError::Http { status, .. } if RATE_LIMITED.contains(status) => {
+                f.write_str("Yahoo is rate-limiting requests — try again in a minute")
+            }
             YahooError::Http { status, url } => write!(f, "HTTP {status} for {url}"),
             YahooError::Transport { url, detail } => write!(f, "request failed: {url}: {detail}"),
             YahooError::Decode { url, detail } => write!(f, "bad JSON from {url}: {detail}"),
@@ -417,6 +428,23 @@ mod tests {
             );
         }
         assert!(check_key("league", "449.l.12345.t.7").is_ok());
+    }
+
+    #[test]
+    fn a_throttled_caller_is_told_to_wait_rather_than_shown_yahoos_own_status() {
+        for status in RATE_LIMITED {
+            let error = YahooError::Http {
+                status,
+                url: "https://fantasysports.yahooapis.com/x".into(),
+            };
+            assert!(error.retryable(), "{status} should be worth repeating");
+            let said = error.to_string();
+            assert_eq!(
+                said,
+                "Yahoo is rate-limiting requests — try again in a minute"
+            );
+            assert!(!said.contains(&status.to_string()), "{said}");
+        }
     }
 
     #[test]

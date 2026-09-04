@@ -19,7 +19,7 @@ use crate::sleeper::Pick;
 use crate::state::AppState;
 use crate::state::YahooState;
 use crate::yahoo::YahooClient;
-use crate::yahoo_oauth::{authorize_url_on, OauthClient, TokenSet, YahooCredentials};
+use crate::yahoo_oauth::{authorize_url_on, AuthError, OauthClient, TokenSet, YahooCredentials};
 use crate::yahoo_secrets::{self, SecretStore};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -155,7 +155,7 @@ pub async fn persist_tokens_for(engine: &Engine, yahoo: &YahooState, client: &Ya
         tokio::task::spawn_blocking(move || yahoo_secrets::save_tokens(store.as_ref(), &tokens))
             .await;
     if let Err(error) = stored.map_err(|e| e.to_string()).and_then(|r| r) {
-        eprintln!("yahoo: refreshed token not saved: {error}");
+        crate::applog::warn(format!("yahoo: refreshed token not saved: {error}"));
     }
 }
 
@@ -259,23 +259,36 @@ pub async fn yahoo_finish_connect(
     code: String,
     state: String,
 ) -> Result<YahooStatus, String> {
-    let expected = app.yahoo.take_state().await;
-    match expected {
-        Some(expected) if expected == state.trim() => {}
-        Some(_) => {
-            return Err(
-                "that code belongs to a different sign-in — start Connect again".to_string(),
-            )
-        }
-        None => return Err("no Yahoo sign-in is in progress — use Connect first".to_string()),
+    let Some(expected) = app.yahoo.take_state().await else {
+        return Err("no Yahoo sign-in is in progress — use Connect first".to_string());
+    };
+    if expected != state.trim() {
+        // A reply from some other sign-in is not a typo to correct, so this one
+        // stays consumed and the user starts again.
+        return Err("that code belongs to a different sign-in — start Connect again".to_string());
     }
     let store = store_for(app.engine.data_dir.clone(), app.yahoo.keychain).await?;
     let (credentials, _) = read_secrets(store.clone()).await?;
     let credentials = credentials.ok_or("Yahoo is not set up — save your app credentials first")?;
-    let tokens = OauthClient::with_base(app.yahoo.hosts.login_base.clone())
+    let tokens = match OauthClient::with_base(app.yahoo.hosts.login_base.clone())
         .exchange_code(&credentials, &code, &app.yahoo.hosts.redirect_uri)
         .await
-        .map_err(|error| error.to_string())?;
+    {
+        Ok(tokens) => tokens,
+        Err(error) => {
+            // The sign-in itself is still good — Yahoo's code is still on the
+            // user's screen — so the pending state goes back and the dialog can
+            // take another try at the code rather than sending them round the
+            // browser again.
+            app.yahoo.expect_state(&expected).await;
+            return Err(match error {
+                AuthError::Transport(_) => {
+                    format!("could not reach Yahoo to finish signing in — {error}")
+                }
+                _ => "Yahoo rejected that code — check it and try again".to_string(),
+            });
+        }
+    };
     tokio::task::spawn_blocking(move || yahoo_secrets::save_tokens(store.as_ref(), &tokens))
         .await
         .map_err(|e| format!("Yahoo tokens: {e}"))??;
@@ -284,13 +297,26 @@ pub async fn yahoo_finish_connect(
     status_now(&app).await
 }
 
-/// Forget the tokens and the credentials both.
+/// Sign out of the Yahoo account.
+///
+/// The token goes; the registered app's client id and secret stay, so
+/// reconnecting is one click rather than another trip to
+/// developer.yahoo.com. `forget_credentials` is the deliberate second step —
+/// the "forget the app too" the settings panel asks about separately — and it
+/// is the only thing that clears the pair.
 #[tauri::command]
-pub async fn yahoo_disconnect(state: State<'_, AppState>) -> Result<YahooStatus, String> {
+pub async fn yahoo_disconnect(
+    state: State<'_, AppState>,
+    forget_credentials: Option<bool>,
+) -> Result<YahooStatus, String> {
+    let forget = forget_credentials.unwrap_or(false);
     let store = store_for(state.engine.data_dir.clone(), state.yahoo.keychain).await?;
-    tokio::task::spawn_blocking(move || yahoo_secrets::clear_all(store.as_ref()))
-        .await
-        .map_err(|e| format!("Yahoo credentials: {e}"))??;
+    tokio::task::spawn_blocking(move || match forget {
+        true => yahoo_secrets::clear_all(store.as_ref()),
+        false => yahoo_secrets::clear_tokens(store.as_ref()),
+    })
+    .await
+    .map_err(|e| format!("Yahoo credentials: {e}"))??;
     state.yahoo.set_client(None).await;
     let _ = state.yahoo.take_state().await;
     status_now(&state).await

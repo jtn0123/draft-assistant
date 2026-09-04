@@ -115,6 +115,35 @@ fn a_code_from_a_different_sign_in_is_refused_and_burns_the_one_in_progress() {
 }
 
 #[test]
+fn a_mistyped_code_can_be_corrected_without_going_round_the_browser_again() {
+    let s = session("yahoo-bad-code");
+    s.ok(
+        "yahoo_save_credentials",
+        json!({"clientId": CLIENT_ID, "clientSecret": SECRET}),
+    );
+    let start = s.ok("yahoo_begin_connect", json!({}));
+    let state = start["state"].as_str().expect("a state").to_string();
+
+    // Yahoo refuses the code. The sign-in is still the user's, so the message
+    // says what to do and does not blame a sign-in that is not in progress.
+    let error = s.err(
+        "yahoo_finish_connect",
+        json!({"code": "typo-abcd", "state": state}),
+    );
+    assert!(error.contains("rejected that code"), "{error}");
+    assert!(!error.contains("no Yahoo sign-in"), "{error}");
+    assert_eq!(s.ok("yahoo_status", json!({}))["connected"], false);
+
+    // The same sign-in, the right code: no second trip to the browser.
+    let status = s.ok(
+        "yahoo_finish_connect",
+        json!({"code": CODE, "state": state}),
+    );
+    assert_eq!(status["connected"], true);
+    s.finish();
+}
+
+#[test]
 fn a_finished_sign_in_leaves_the_account_connected() {
     let s = session("yahoo-connect");
     let status = s.connect();
@@ -205,6 +234,32 @@ fn a_yahoo_league_key_builds_a_board_out_of_sleepers_numbers() {
 }
 
 #[test]
+fn a_reload_serves_the_player_pool_from_disk_rather_than_paging_yahoo_again() {
+    let s = session("yahoo-pool-cache");
+    s.connect();
+    s.ok("add_league", json!({"leagueId": LEAGUE_KEY, "force": true}));
+    let first = s.pool_calls.load(Ordering::SeqCst);
+    assert!(first > 0, "the pool was never fetched at all");
+
+    // Same league again, unforced. The pool is the expensive call — 25 rows a
+    // page — and its cache is still fresh, so not one page goes out.
+    s.ok("add_league", json!({"leagueId": LEAGUE_KEY}));
+    assert_eq!(
+        s.pool_calls.load(Ordering::SeqCst),
+        first,
+        "the cached player pool was fetched again"
+    );
+
+    // Forcing is still the way to go back to Yahoo for it.
+    s.ok("add_league", json!({"leagueId": LEAGUE_KEY, "force": true}));
+    assert!(
+        s.pool_calls.load(Ordering::SeqCst) > first,
+        "a forced refresh did not refetch the pool"
+    );
+    s.finish();
+}
+
+#[test]
 fn a_pasted_yahoo_league_url_is_resolved_to_the_key_the_api_wants() {
     let s = session("yahoo-add-url");
     s.connect();
@@ -288,16 +343,42 @@ fn the_background_poller_applies_new_yahoo_picks_and_says_so() {
 }
 
 #[test]
-fn disconnecting_forgets_both_halves_and_stops_every_call() {
+fn disconnecting_signs_out_but_keeps_the_registered_app() {
     let s = session("yahoo-disconnect");
     s.connect();
     s.ok("yahoo_leagues", json!({}));
 
     let status = s.ok("yahoo_disconnect", json!({}));
-    assert_eq!(status["configured"], false);
     assert_eq!(status["connected"], false);
+    // The app the user registered is not the account they signed out of.
+    assert_eq!(status["configured"], true);
     assert_eq!(s.ok("yahoo_status", json!({}))["connected"], false);
     // The client built while connected is thrown away with the tokens.
+    let error = s.err("yahoo_leagues", json!({}));
+    assert!(error.contains("not connected to Yahoo"), "{error}");
+
+    // …and reconnecting is the browser trip alone: no credentials to re-paste.
+    let start = s.ok("yahoo_begin_connect", json!({}));
+    let state = start["state"].as_str().expect("a state");
+    let status = s.ok(
+        "yahoo_finish_connect",
+        json!({"code": CODE, "state": state}),
+    );
+    assert_eq!(status["connected"], true);
+    s.finish();
+}
+
+#[test]
+fn forgetting_the_app_credentials_is_a_second_deliberate_step() {
+    let s = session("yahoo-forget");
+    s.connect();
+
+    let status = s.ok("yahoo_disconnect", json!({"forgetCredentials": true}));
+    assert_eq!(status["connected"], false);
+    assert_eq!(status["configured"], false);
+    // With no app registered there is nothing left to sign in with.
+    let error = s.err("yahoo_begin_connect", json!({}));
+    assert!(error.contains("client id"), "{error}");
     let error = s.err("yahoo_leagues", json!({}));
     assert!(error.contains("Yahoo is not set up"), "{error}");
     s.finish();

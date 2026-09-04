@@ -186,6 +186,10 @@ fn apply_settings(league: &mut YahooLeague, settings: &Value) {
     let map = flatten(settings);
     league.draft_time = opt_num(&map, "draft_time");
     league.draft_type = opt_text(&map, "draft_type");
+    // Yahoo describes a live auction as `draft_type: "live"` and says
+    // "auction" only through this flag, so reading the type alone would put an
+    // auction league on a snake board.
+    league.is_auction_draft = flag(&map, "is_auction_draft");
     if league.scoring_type.is_none() {
         league.scoring_type = opt_text(&map, "scoring_type");
     }

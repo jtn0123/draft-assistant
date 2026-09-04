@@ -246,8 +246,18 @@ pub fn save_credentials(
     store.write(Item::Credentials, &text)
 }
 
-/// Disconnect: forget both items. Used by a "Disconnect Yahoo" button, and by
-/// the recovery path when a refresh token has been revoked.
+/// Sign out: forget the token pair and nothing else.
+///
+/// This is what "Disconnect" does. The registered app's id and secret are not
+/// the account — they identify this install to Yahoo, they cost a trip to
+/// developer.yahoo.com to replace, and throwing them away to sign out of an
+/// account would be a surprise.
+pub fn clear_tokens(store: &dyn SecretStore) -> Result<(), String> {
+    store.clear(Item::Token)
+}
+
+/// Forget both items: the token pair and the registered app with it. The
+/// deliberate second step behind "Forget app credentials".
 pub fn clear_all(store: &dyn SecretStore) -> Result<(), String> {
     store.clear(Item::Token)?;
     store.clear(Item::Credentials)

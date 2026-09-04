@@ -176,6 +176,36 @@ describe("the sign-in step", () => {
     expect(screen.queryByLabelText("Code from Yahoo")).toBeNull();
   });
 
+  it("retries a refused code against the same sign-in rather than starting over", async () => {
+    const user = userEvent.setup();
+    await open(configured);
+    mocks.yahooBeginConnect.mockResolvedValue({
+      authorize_url: "https://yahoo.example/auth",
+      state: "s-4",
+      redirect: "oob",
+    });
+    mocks.yahooFinishConnect.mockRejectedValueOnce(
+      new Error("Yahoo rejected that code — check it and try again"),
+    );
+
+    await settle(() => screen.getByRole("button", { name: "Sign in to Yahoo" }).click());
+    await user.type(screen.getByLabelText("Code from Yahoo"), "typo");
+    await settle(() => screen.getByRole("button", { name: "Finish" }).click());
+    expect(screen.getByText(/rejected that code/)).toBeInTheDocument();
+
+    // The corrected code goes back with the state the sign-in started with —
+    // one browser trip, not two.
+    mocks.yahooFinishConnect.mockResolvedValue(status({ configured: true, connected: true }));
+    await user.clear(screen.getByLabelText("Code from Yahoo"));
+    await user.type(screen.getByLabelText("Code from Yahoo"), "xy7q9");
+    await settle(() => screen.getByRole("button", { name: "Finish" }).click());
+
+    expect(mocks.yahooFinishConnect).toHaveBeenCalledTimes(2);
+    expect(mocks.yahooFinishConnect).toHaveBeenLastCalledWith("xy7q9", "s-4");
+    expect(mocks.yahooBeginConnect).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Find my Yahoo leagues" })).toBeInTheDocument();
+  });
+
   it("says why a code was refused and leaves it there to try again", async () => {
     const user = userEvent.setup();
     await open(configured);
@@ -236,6 +266,11 @@ describe("the connected step", () => {
     mocks.yahooLeagues.mockRejectedValue(new Error("Yahoo is throttling us"));
     await settle(() => screen.getByRole("button", { name: "Find my Yahoo leagues" }).click());
     expect(screen.getByText("Yahoo is throttling us")).toBeInTheDocument();
+  });
+
+  it("says that disconnecting keeps the registered app", async () => {
+    await open(connected);
+    expect(screen.getByText(/keeps the app you registered/)).toBeInTheDocument();
   });
 
   it("disconnects back to signing in, keeping the saved app", async () => {

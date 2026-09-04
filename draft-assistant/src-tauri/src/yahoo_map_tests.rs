@@ -24,6 +24,7 @@ fn sample_league() -> YahooLeague {
         draft_status: "predraft".into(),
         draft_time: Some(1_789_000_000),
         draft_type: Some("live".into()),
+        is_auction_draft: false,
         scoring_type: Some("head".into()),
         roster_positions: vec![
             slot("QB", 1),
@@ -410,4 +411,88 @@ fn a_page_of_players_maps_row_for_row() {
     let mapped = players(&rows);
     assert_eq!(mapped.len(), 2);
     assert_eq!(mapped[1].id, "yahoo:200");
+}
+
+#[test]
+fn the_stat_ids_yahoo_leagues_actually_use_all_land_on_a_scoring_key() {
+    // The ids added after the first pass: the negatives a kicker and a
+    // ball-carrier are docked for, which a league that scores them would
+    // otherwise have quietly counted as zero.
+    let scoring = scoring_settings(&[
+        modifier(17, -1.0),
+        modifier(25, -3.0),
+        modifier(26, -2.0),
+        modifier(27, -2.0),
+        modifier(28, -1.0),
+        modifier(30, -1.0),
+    ]);
+    assert_eq!(scoring.get("fum"), Some(&-1.0));
+    assert_eq!(scoring.get("fgmiss_0_19"), Some(&-3.0));
+    assert_eq!(scoring.get("fgmiss_20_29"), Some(&-2.0));
+    assert_eq!(scoring.get("fgmiss_30_39"), Some(&-2.0));
+    assert_eq!(scoring.get("fgmiss_40_49"), Some(&-1.0));
+    assert_eq!(scoring.get("xpmiss"), Some(&-1.0));
+    // Fumbles and fumbles lost are two rules, not one.
+    let both = scoring_settings(&[modifier(17, -1.0), modifier(18, -2.0)]);
+    assert_eq!(both.get("fum"), Some(&-1.0));
+    assert_eq!(both.get("fum_lost"), Some(&-2.0));
+}
+
+#[test]
+fn no_two_stat_ids_claim_the_same_scoring_key() {
+    let mut seen: HashMap<&str, u32> = HashMap::new();
+    for (id, keys) in YAHOO_STAT_IDS {
+        for key in *keys {
+            if let Some(other) = seen.insert(key, *id) {
+                panic!("stat ids {other} and {id} both write {key}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_scored_category_the_app_cannot_read_is_named_rather_than_dropped() {
+    let mut league = sample_league();
+    // Yahoo id 14 is return yardage, which the app has no key for.
+    league.stat_modifiers.push(modifier(14, 0.04));
+    league.stat_categories.push(StatCategory {
+        stat_id: 14,
+        name: "Return Yards".into(),
+        display: "Ret Yds".into(),
+    });
+    assert_eq!(unscored_stats(&league), ["Return Yards (14)"]);
+    let warning = unscored_stats_warning(&league).expect("a warning");
+    assert!(warning.contains("Return Yards (14)"), "{warning}");
+    assert!(warning.contains("a category"), "{warning}");
+    // The ones it can read are not mentioned.
+    assert!(!warning.contains("Passing Yards"), "{warning}");
+}
+
+#[test]
+fn several_unreadable_categories_are_listed_together_and_read_as_plural() {
+    let mut league = sample_league();
+    league.stat_modifiers.push(modifier(14, 0.04));
+    league.stat_modifiers.push(modifier(78, 1.0));
+    let warning = unscored_stats_warning(&league).expect("a warning");
+    // No `stat_categories` row for either, so the id is what gets reported.
+    assert!(warning.contains("Yahoo stat 14"), "{warning}");
+    assert!(warning.contains("Yahoo stat 78"), "{warning}");
+    assert!(warning.contains("categories"), "{warning}");
+    assert!(warning.contains("they are"), "{warning}");
+}
+
+#[test]
+fn a_league_whose_every_rule_is_understood_gets_no_warning() {
+    assert!(unscored_stats_warning(&sample_league()).is_none());
+    assert!(unscored_stats(&sample_league()).is_empty());
+}
+
+#[test]
+fn a_category_yahoo_lists_but_pays_nothing_for_is_not_worth_a_warning() {
+    let mut league = sample_league();
+    league.stat_modifiers.push(modifier(14, 0.0));
+    assert!(
+        unscored_stats_warning(&league).is_none(),
+        "a rule worth zero costs the board nothing"
+    );
 }
