@@ -19,6 +19,19 @@ updates:
         update-types:
           - minor
           - patch
+      # vite and its React plugin pin each other's major: neither installs
+      # without the other, so a major has to arrive as one PR.
+      vite:
+        patterns:
+          - vite
+          - "@vitejs/plugin-react"
+        update-types:
+          - major
+    ignore:
+      # typescript-eslint does not accept TypeScript 7 as a peer yet. Drop
+      # this once it does.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   # The WebdriverIO tree. All dev dependencies, never shipped, and the source
   # of most of this repo's advisories.
@@ -32,6 +45,10 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Same reason as the app's tree above.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: cargo
     directory: /draft-assistant/src-tauri
@@ -43,6 +60,10 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Stays on 0.12 on purpose; the note beside it in Cargo.toml says why.
+      - dependency-name: reqwest
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: pip
     directory: /draft-assistant/scripts/projections
