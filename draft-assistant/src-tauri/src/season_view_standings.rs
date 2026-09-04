@@ -103,12 +103,22 @@ pub fn standings_rows(
             acc.wrapping_mul(1_000_003).wrapping_add(x)
         });
 
-    season_odds::standings(
+    let mut rows = season_odds::standings(
         &teams,
         &schedule,
         playoff_teams,
         team_name,
         my_roster_id,
         seed,
-    )
+    );
+    // Past the last regular week the schedule is empty and the simulation has
+    // nothing to run, so every percentage it hands back is a flat 1.0 or 0.0.
+    // Show the state those numbers actually describe instead of dressing the
+    // standings up as a forecast that is certain of itself.
+    if week > last_regular {
+        for row in &mut rows {
+            row.playoff_status = Some(season_odds::playoff_status(row.seed, playoff_teams));
+        }
+    }
+    rows
 }

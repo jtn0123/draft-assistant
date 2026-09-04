@@ -241,3 +241,22 @@ describe("LastSeason", () => {
     expect(screen.getByText("Last season")).toBeInTheDocument();
   });
 });
+
+describe("Standings once the bracket is cut", () => {
+  /** From week 15 the simulation has nothing left to run and hands back a
+   *  flat 100%/0%, which the table printed as though it were a forecast. */
+  it("prints the bracket state in place of the percentage", () => {
+    render(
+      <Standings
+        rows={[
+          standing({ roster_id: 1, playoff_odds: 1, playoff_status: "In the playoffs — seed 1" }),
+          standing({ roster_id: 2, playoff_odds: 0, playoff_status: "Missed the playoffs" }),
+        ]}
+        avatars={{}}
+      />,
+    );
+    expect(screen.getByText("In the playoffs — seed 1")).toBeInTheDocument();
+    expect(screen.getByText("Missed the playoffs")).toBeInTheDocument();
+    expect(screen.queryByText("100%")).not.toBeInTheDocument();
+  });
+});

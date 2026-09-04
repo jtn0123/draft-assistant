@@ -93,3 +93,17 @@ describe("GamesTab", () => {
     expect(screen.queryByText(/Byes this week/)).not.toBeInTheDocument();
   });
 });
+
+describe("GamesTab banked share", () => {
+  /** The bug: this was measured against whichever lineup the toggle happened
+   *  to be showing, so flipping to "Best" changed a percentage describing
+   *  points that only the set lineup can score. */
+  it("names the set lineup as what the banked points are measured against", () => {
+    const section = live([]);
+    section.totals.my_live_points = 60;
+    render(
+      <GamesTab live={section} myProjected={120} oppProjected={110} opponentName="punt_god" />,
+    );
+    expect(screen.getByText(/50% of your 120.0 set-lineup projection banked/)).toBeInTheDocument();
+  });
+});

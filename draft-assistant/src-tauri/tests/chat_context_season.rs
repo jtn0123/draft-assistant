@@ -17,6 +17,17 @@ fn context() -> String {
     season_context(&view)
 }
 
+/// The same context with an empty scoreboard, i.e. before anything has kicked
+/// off. The fixture's live game started in the second quarter, and a start/sit
+/// call about two players already on the field is no longer a call — so a test
+/// about the advice has to be taken at a moment the advice can be acted on.
+fn context_before_kickoff() -> String {
+    let (loaded, mut season, config) = common::fixture();
+    season.scores.clear();
+    let view = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+    season_context(&view)
+}
+
 fn line<'a>(text: &'a str, prefix: &str) -> &'a str {
     text.lines()
         .find(|l| l.starts_with(prefix))
@@ -57,7 +68,7 @@ fn the_lineup_block_comes_with_what_the_set_lineup_is_giving_up() {
 
 #[test]
 fn every_start_sit_call_is_offered_with_the_reason_for_it() {
-    let context = context();
+    let context = context_before_kickoff();
     assert!(
         context.contains("Start/sit calls available:"),
         "the fixture has a better lineup than the one set:\n{context}"

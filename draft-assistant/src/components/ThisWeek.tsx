@@ -12,9 +12,14 @@ import { setLineupView, useLineupView } from "../prefs";
 export function CallsToMake({
   calls,
   pointsOnTable,
+  started = false,
 }: {
   calls: LineupCall[];
   pointsOnTable: number;
+  /** True once any game this week has kicked off. A call whose players are
+   *  already on the field is dropped in Rust, so an empty list on a Sunday
+   *  afternoon means "too late", not "nothing to fix". */
+  started?: boolean;
 }) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [allOpen, setAllOpen] = useState(false);
@@ -22,9 +27,13 @@ export function CallsToMake({
   if (calls.length === 0) {
     return (
       <div className="calls is-clear">
-        <span className="calls-title">Your lineup is already optimal</span>
+        <span className="calls-title">
+          {started ? "Nothing left to change" : "Your lineup is already optimal"}
+        </span>
         <span className="mid small">
-          Every starting slot holds the best projected player on your roster.
+          {started
+            ? "Every swap worth making involves a player whose game has already kicked off."
+            : "Every starting slot holds the best projected player on your roster."}
         </span>
       </div>
     );

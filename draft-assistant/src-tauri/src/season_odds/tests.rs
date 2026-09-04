@@ -23,6 +23,7 @@ fn lineup(total: f64) -> Vec<Starter> {
             position: "WR".into(),
             team: None,
             points: total / 9.0,
+            uncertain: total / 9.0,
         })
         .collect()
 }
@@ -133,6 +134,7 @@ fn a_steadier_lineup_needs_a_smaller_lead_to_be_favoured() {
                 position: position.into(),
                 team: None,
                 points: total / 9.0,
+                uncertain: total / 9.0,
             })
             .collect()
     };
@@ -151,6 +153,7 @@ fn stacking_a_lead_makes_it_less_safe() {
                 position: "WR".into(),
                 team: team.map_or_else(|| Some(format!("T{i}")), |t| Some(t.to_string())),
                 points: total / 9.0,
+                uncertain: total / 9.0,
             })
             .collect()
     };
@@ -168,4 +171,59 @@ fn seeding_breaks_ties_on_points_and_flags_my_team() {
     assert_eq!(rows[1].record, "2\u{2013}0");
     assert!(rows[1].is_mine);
     assert!(!rows[0].is_mine);
+}
+
+/// The Sunday-night reading. Every one of the opponent's starters has finished
+/// and I am forty points clear: the week is over in all but name, and the odds
+/// have to say so. Priced off projections alone this used to sit near 80%.
+#[test]
+fn a_forty_point_lead_over_an_exhausted_roster_is_a_win() {
+    let settled = |total: f64| -> Vec<Starter> {
+        (0..9)
+            .map(|_| Starter {
+                position: "WR".into(),
+                team: None,
+                points: total / 9.0,
+                uncertain: 0.0,
+            })
+            .collect()
+    };
+    // Their nine are done on 100. Mine are done on 140.
+    let odds = win_probability(&settled(140.0), &settled(100.0));
+    assert!(odds > 0.999, "a decided week must read as decided: {odds}");
+
+    // And with one of mine still to play, the lead is still overwhelming.
+    let mut mine = settled(140.0);
+    mine.push(Starter {
+        position: "WR".into(),
+        team: None,
+        points: 10.0,
+        uncertain: 10.0,
+    });
+    let odds = win_probability(&mine, &settled(100.0));
+    assert!(odds > 0.99, "{odds}");
+}
+
+/// The bug: from week 15 there is nothing left to simulate, so the odds
+/// collapse to a flat 100%/0% that the screen printed as a forecast. The
+/// percentage is unchanged — it is what the standings say — but a caller now
+/// has a label to show instead of it.
+#[test]
+fn once_the_bracket_is_cut_there_is_a_state_to_show_instead_of_a_percentage() {
+    assert_eq!(playoff_status(1, 6), "In the playoffs \u{2014} seed 1");
+    assert_eq!(playoff_status(6, 6), "In the playoffs \u{2014} seed 6");
+    assert_eq!(playoff_status(7, 6), "Missed the playoffs");
+    // A league that somehow reports no playoff teams still cuts somebody.
+    assert_eq!(playoff_status(1, 0), "In the playoffs \u{2014} seed 1");
+    assert_eq!(playoff_status(2, 0), "Missed the playoffs");
+}
+
+#[test]
+fn the_regular_season_leaves_the_status_unset() {
+    let teams = vec![team(1, 2, 0, 210.0, 100.0), team(2, 1, 1, 260.0, 100.0)];
+    let rows = standings(&teams, &[], 1, &|id| format!("team{id}"), Some(1), 5);
+    assert!(
+        rows.iter().all(|r| r.playoff_status.is_none()),
+        "only the caller that knows the week may fill this in"
+    );
 }

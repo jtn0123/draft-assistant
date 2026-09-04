@@ -49,7 +49,7 @@ function fresh(): SourceHealth {
 
 function view(overrides: Partial<SeasonView> = {}): SeasonView {
   return {
-    schema_version: "1.2",
+    schema_version: "1.3",
     generated_at: 0,
     team_avatars: {},
     league: {
@@ -73,6 +73,7 @@ function view(overrides: Partial<SeasonView> = {}): SeasonView {
       win_odds_best: 0.62,
       win_odds_set: 0.55,
       playoff_odds: 0.88,
+      playoff_status: null,
       locks_in_ms: null,
     },
     matchup: null,
@@ -320,5 +321,65 @@ describe("the age of cached ideas", () => {
     // And nothing at all when the backend did not stamp the view.
     render(<SeasonScreen view={view()} />);
     expect(screen.queryByText(/ideas from/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SeasonScreen header", () => {
+  /** The fixture's live section, with one game in whatever state is asked for
+   *  and some points already banked. */
+  function liveSection(state: "pre" | "live" | "final") {
+    return {
+      games: [
+        {
+          game_id: "g1",
+          away: "SF",
+          home: "LAR",
+          away_score: null,
+          home_score: null,
+          state,
+          status: state === "live" ? "Q3 07:12" : state === "final" ? "Final" : "",
+          kickoff_ms: FROZEN,
+          flag: null,
+          channel: null,
+          chips: [],
+        },
+      ],
+      windows: [],
+      totals: { my_playing: 1, my_pre: 0, my_done: 0, my_live_points: 71.5, opp_live_points: 64.2 },
+      next_kickoff_ms: null,
+      bye_teams: [],
+    };
+  }
+
+  it("leads with the projection while every game is still to come", () => {
+    render(<SeasonScreen view={view({ live: liveSection("pre") })} pollHealth={null} />);
+    expect(screen.getByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
+    expect(screen.getByText("This week")).toBeInTheDocument();
+  });
+
+  /** The bug: all Sunday the header quoted projected against projected, with
+   *  the score that had actually happened buried in another tab. */
+  it("leads with the live score once anything has kicked off", () => {
+    render(<SeasonScreen view={view({ live: liveSection("live") })} pollHealth={null} />);
+    expect(screen.getByText("vs punt_god · 71.5 – 64.2")).toBeInTheDocument();
+    expect(screen.getByText("This week · live")).toBeInTheDocument();
+    expect(screen.getByText("live · projected 122.4 – 108.9")).toBeInTheDocument();
+  });
+
+  it("keeps the live lead once the games are final", () => {
+    render(<SeasonScreen view={view({ live: liveSection("final") })} pollHealth={null} />);
+    expect(screen.getByText("vs punt_god · 71.5 – 64.2")).toBeInTheDocument();
+  });
+
+  /** Past the last regular week the simulation short-circuits to a flat 100%
+   *  or 0%, which read as a wildly confident forecast. */
+  it("shows the bracket state instead of a playoff percentage once it is set", () => {
+    render(<SeasonScreen view={view()} pollHealth={null} />);
+    expect(screen.getByText("88%")).toBeInTheDocument();
+
+    const done = view();
+    done.header.playoff_status = "In the playoffs — seed 3";
+    render(<SeasonScreen view={done} pollHealth={null} />);
+    expect(screen.getByText("In the playoffs — seed 3")).toBeInTheDocument();
   });
 });

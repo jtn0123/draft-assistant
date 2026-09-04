@@ -18,7 +18,7 @@ const draftView = {
   schema_version: "1.4",
   league: { league_id: "L1", name: "Test", season: "2026", platform: "sleeper" },
 } as unknown as DraftView;
-const seasonView = { schema_version: "1.2" } as unknown as SeasonView;
+const seasonView = { schema_version: "1.3" } as unknown as SeasonView;
 
 async function load(shell: boolean, search = "") {
   vi.resetModules();
@@ -105,7 +105,7 @@ describe("tauri arm", () => {
     await api.yahooFinishConnect("xy7q9", "s-1");
     expect(invoke).toHaveBeenCalledWith("yahoo_finish_connect", { code: "xy7q9", state: "s-1" });
     await api.yahooDisconnect();
-    expect(invoke).toHaveBeenCalledWith("yahoo_disconnect");
+    expect(invoke).toHaveBeenCalledWith("yahoo_disconnect", { forgetCredentials: false });
     invoke.mockResolvedValue({
       authorize_url: "https://yahoo.example",
       state: "s",

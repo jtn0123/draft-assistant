@@ -16,9 +16,10 @@ use crate::season_lineup::{
     calls_from_diff, candidates_for, optimal_lineup, Candidate, LineupCall, LineupSlot,
 };
 use crate::season_lookup::Lookup;
-use crate::season_spread::{self, Starter};
+use crate::season_spread::{self, LiveScore, Starter};
 use crate::season_types::{MatchupRow, MatchupView};
 use crate::weekly::WeeklyPoints;
+use std::collections::HashMap;
 
 /// The head-to-head section, plus the working values later sections reuse.
 pub struct MatchupSection<'a> {
@@ -90,13 +91,6 @@ pub fn build_matchup<'a>(
         position_of(id).is_some_and(|position| RosterRules::can_fill(slot, &position))
     };
     let mut calls = calls_from_diff(&my_optimal, &my_current, &eligible, &describe, &reason);
-    // Rust's additive identity for f64 is -0.0, so an empty sum serialises as
-    // "-0.0" and would render as "−0.0 points on the table". Normalise it.
-    //
-    // Counted before the injury calls join the list: those are about a player
-    // who may not take the field at all, not about points being left on the
-    // bench, and their gain is often negative.
-    let points_on_table: f64 = calls.iter().map(|c| c.gain).sum::<f64>() + 0.0;
 
     let facts = season_calls::WeekFacts {
         players: lookup,
@@ -107,6 +101,19 @@ pub fn build_matchup<'a>(
             .unwrap_or(i64::MAX)
             .saturating_mul(1000),
     };
+    // Swaps whose players are already on the field are dropped before the
+    // total is taken: a header offering 2.0 points above a panel that lists
+    // no calls is worse than either half on its own.
+    //
+    // Rust's additive identity for f64 is -0.0, so an empty sum serialises as
+    // "-0.0" and would render as "−0.0 points on the table". Normalise it.
+    //
+    // Counted before the injury calls join the list: those are about a player
+    // who may not take the field at all, not about points being left on the
+    // bench, and their gain is often negative.
+    facts.retain_open(&mut calls);
+    let points_on_table: f64 = calls.iter().map(|c| c.gain).sum::<f64>() + 0.0;
+
     let injury_calls = facts.injury_calls(&my_current, &my_candidates, &calls, &eligible);
     calls.extend(injury_calls);
     facts.finish(&mut calls);
@@ -156,6 +163,17 @@ pub fn build_matchup<'a>(
         set_projected: my_set_projected,
     });
 
+    // The win odds are priced off where each starter's game actually is, not
+    // off his projection alone: a player who has finished is worth what he
+    // scored and can move no further, and one at half time is worth what he
+    // has plus half of what he was projected for. Before kickoff this is
+    // exactly the projection, so a Saturday reading is unchanged.
+    let remaining = crate::season_live::remaining_by_team(&season.scores);
+    let priced = |lineup: &[LineupSlot], side: Option<&Matchup>| {
+        let live_of = |id: &str| live_score(side, &remaining, &team_of, id);
+        season_spread::live_starters(lineup, &position_of, &team_of, &live_of)
+    };
+
     MatchupSection {
         my_matchup,
         opp_matchup,
@@ -165,13 +183,29 @@ pub fn build_matchup<'a>(
         my_projected,
         my_set_projected,
         opp_projected,
-        my_spread: season_spread::starters_of(&my_optimal, &position_of, &team_of),
-        my_set_spread: season_spread::starters_of(&my_current, &position_of, &team_of),
-        opp_spread: season_spread::starters_of(&opp_current, &position_of, &team_of),
+        my_spread: priced(&my_optimal, my_matchup),
+        my_set_spread: priced(&my_current, my_matchup),
+        opp_spread: priced(&opp_current, opp_matchup),
         my_current,
         opp_current,
         my_candidates,
     }
+}
+
+/// Where one starter's week stands, or `None` when his game has not kicked
+/// off and his projection is still the whole story.
+fn live_score(
+    side: Option<&Matchup>,
+    remaining: &HashMap<String, f64>,
+    team_of: &impl Fn(&str) -> Option<String>,
+    player_id: &str,
+) -> Option<LiveScore> {
+    let team = team_of(player_id)?;
+    let remaining = *remaining.get(team.to_ascii_uppercase().as_str())?;
+    Some(LiveScore {
+        banked: side.and_then(|m| m.points_for(player_id)).unwrap_or(0.0),
+        remaining,
+    })
 }
 
 /// My lineup, slot by slot, against the one the opponent has set — the rows

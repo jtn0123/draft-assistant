@@ -199,13 +199,22 @@ pub fn trends_view(
                 continue;
             };
             let delta = team.strength - before.strength;
-            let reasons = explain(
+            let mut reasons = explain(
                 before,
                 team,
                 (prev.taken_at, next.taken_at),
                 transactions,
                 player_name,
             );
+            // Strength is a mean over the weeks still to play, so the window
+            // shrinking by one at every rollover moves every line on the graph
+            // at once. That step is real, but it is not the roster moving, and
+            // labelling it "projections moved" was the wrong story. Say what
+            // actually happened, first, because it explains most of the jump.
+            if prev.week != next.week {
+                reasons.insert(0, format!("window moved to week {}", next.week));
+                reasons.truncate(3);
+            }
             if delta.abs() < MIN_REPORTED_DELTA && reasons.is_empty() {
                 continue;
             }
@@ -342,5 +351,64 @@ mod tests {
         let view = trends_view(&history, &[], &|r| format!("T{r}"), &name, None, 10);
         assert!(view.changes.is_empty());
         assert_eq!(view.series[0].points.len(), 2);
+    }
+
+    /// The step every line takes at a weekly rollover is the averaging window
+    /// losing a week, not the roster changing. It used to be reported as
+    /// "projections moved", which is a story about players that never happened.
+    #[test]
+    fn a_rollover_names_itself_rather_than_blaming_the_projections() {
+        let mut history = History::default();
+        push(
+            &mut history,
+            Snapshot {
+                taken_at: 1_000,
+                week: 3,
+                teams: vec![team(1, 100.0, &[("a", 10.0)])],
+            },
+        );
+        push(
+            &mut history,
+            Snapshot {
+                taken_at: 2_000,
+                week: 4,
+                teams: vec![team(1, 96.0, &[("a", 8.0)])],
+            },
+        );
+        let view = trends_view(&history, &[], &|id| format!("team{id}"), &name, Some(1), 10);
+        let change = &view.changes[0];
+        assert!((change.delta - -4.0).abs() < 1e-9);
+        assert_eq!(
+            change.reasons.first().map(String::as_str),
+            Some("window moved to week 4"),
+            "the window is the biggest part of the step and must lead"
+        );
+        assert!(
+            change.reasons.iter().any(|r| r.contains("projection")),
+            "the player move is still reported behind it: {:?}",
+            change.reasons
+        );
+    }
+
+    #[test]
+    fn a_step_inside_one_week_is_still_attributed_to_the_players() {
+        let mut history = History::default();
+        push(
+            &mut history,
+            snapshot(1_000, vec![team(1, 100.0, &[("a", 10.0)])]),
+        );
+        push(
+            &mut history,
+            snapshot(2_000, vec![team(1, 96.0, &[("a", 8.0)])]),
+        );
+        let view = trends_view(&history, &[], &|id| format!("team{id}"), &name, Some(1), 10);
+        assert!(
+            !view.changes[0]
+                .reasons
+                .iter()
+                .any(|r| r.starts_with("window moved")),
+            "nothing moved the window: {:?}",
+            view.changes[0].reasons
+        );
     }
 }

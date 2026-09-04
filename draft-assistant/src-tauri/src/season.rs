@@ -39,7 +39,7 @@ use std::collections::HashSet;
 /// Bumped whenever `SeasonView` gains, loses, or renames a serialized field.
 /// Gated in `src/api.ts` and pinned against the checked-in
 /// `public/dev-season-fixture.json` by `tests/fixture_shape.rs`.
-pub const SEASON_SCHEMA_VERSION: &str = "1.2";
+pub const SEASON_SCHEMA_VERSION: &str = "1.3";
 
 pub use crate::season_sources::{SourceHealth, SourceStatus};
 pub use crate::season_types::{
@@ -277,10 +277,9 @@ pub fn build_season_view_cached(
         season_odds::win_probability(&head_to_head.my_spread, &head_to_head.opp_spread);
     let win_odds_set =
         season_odds::win_probability(&head_to_head.my_set_spread, &head_to_head.opp_spread);
-    let playoff_odds = my_roster_id
-        .and_then(|id| standings.iter().find(|s| s.roster_id == id))
-        .map(|s| s.playoff_odds)
-        .unwrap_or(0.0);
+    let my_standing = my_roster_id.and_then(|id| standings.iter().find(|s| s.roster_id == id));
+    let playoff_odds = my_standing.map_or(0.0, |s| s.playoff_odds);
+    let playoff_status = my_standing.and_then(|s| s.playoff_status.clone());
 
     SeasonView {
         schema_version: SEASON_SCHEMA_VERSION.into(),
@@ -306,6 +305,7 @@ pub fn build_season_view_cached(
             win_odds_best,
             win_odds_set,
             playoff_odds,
+            playoff_status,
             locks_in_ms: next_kickoff_ms,
         },
         matchup: head_to_head.matchup,

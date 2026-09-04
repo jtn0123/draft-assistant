@@ -60,7 +60,22 @@ pub struct Starter {
     pub position: String,
     /// NFL team, for the stack correlation. `None` never stacks.
     pub team: Option<String>,
+    /// What he is expected to finish the week on: banked points plus whatever
+    /// of his projection is still to be played.
     pub points: f64,
+    /// The part of `points` that is not yet settled. Equal to `points` before
+    /// kickoff, zero once his game is final — a player who has finished can no
+    /// longer move the score, so he contributes nothing to the spread.
+    pub uncertain: f64,
+}
+
+/// What a player's game has done to his week so far.
+#[derive(Debug, Clone, Copy)]
+pub struct LiveScore {
+    /// Fantasy points already scored.
+    pub banked: f64,
+    /// How much of his game is still to be played, 0.0..=1.0.
+    pub remaining: f64,
 }
 
 /// Resolve a filled lineup into the starters a spread is computed over.
@@ -78,6 +93,48 @@ pub fn starters_of(
                 position: position_of(id).unwrap_or_default(),
                 team: team_of(id),
                 points: slot.points,
+                uncertain: slot.points,
+            })
+        })
+        .collect()
+}
+
+/// The same resolution, but with each starter priced off where his game
+/// actually is.
+///
+/// A projection is the right number for a player who has not kicked off. It is
+/// the wrong one all Sunday afternoon: a starter who has finished on 4.2 is
+/// worth 4.2 and cannot move again, and one at half time is worth what he has
+/// plus half of what he was projected for. Pricing the week off projections
+/// alone is why the win odds used to read the same at midnight Sunday as they
+/// did at kickoff.
+///
+/// `live_of` returns `None` for a player whose game has not started, which
+/// reproduces [`starters_of`] exactly.
+pub fn live_starters(
+    lineup: &[LineupSlot],
+    position_of: &impl Fn(&str) -> Option<String>,
+    team_of: &impl Fn(&str) -> Option<String>,
+    live_of: &impl Fn(&str) -> Option<LiveScore>,
+) -> Vec<Starter> {
+    lineup
+        .iter()
+        .filter_map(|slot| {
+            let id = slot.player_id.as_deref()?;
+            let projected = slot.points;
+            let (points, uncertain) = match live_of(id) {
+                Some(live) => {
+                    let remaining = live.remaining.clamp(0.0, 1.0);
+                    let left = projected * remaining;
+                    (live.banked + left, left)
+                }
+                None => (projected, projected),
+            };
+            Some(Starter {
+                position: position_of(id).unwrap_or_default(),
+                team: team_of(id),
+                points,
+                uncertain,
             })
         })
         .collect()
@@ -88,7 +145,7 @@ pub fn starters_of(
 fn team_variance(starters: &[Starter]) -> f64 {
     let sigmas: Vec<f64> = starters
         .iter()
-        .map(|s| position_cv(&s.position) * s.points)
+        .map(|s| position_cv(&s.position) * s.uncertain)
         .collect();
     let mut variance: f64 = sigmas.iter().map(|x| x * x).sum();
     for i in 0..starters.len() {
@@ -129,7 +186,75 @@ mod tests {
             position: position.into(),
             team: team.map(str::to_string),
             points,
+            uncertain: points,
         }
+    }
+
+    fn lineup() -> Vec<LineupSlot> {
+        vec![
+            LineupSlot {
+                slot: "QB".into(),
+                player_id: Some("qb".into()),
+                points: 20.0,
+            },
+            LineupSlot {
+                slot: "WR".into(),
+                player_id: Some("wr".into()),
+                points: 12.0,
+            },
+        ]
+    }
+
+    fn position_of(id: &str) -> Option<String> {
+        Some(id.to_uppercase())
+    }
+
+    fn team_of(_: &str) -> Option<String> {
+        Some("BUF".to_string())
+    }
+
+    /// Nobody has kicked off, so the live resolution must reproduce the
+    /// projection-only one exactly — mean and spread both.
+    #[test]
+    fn before_kickoff_the_live_reading_is_the_projected_one() {
+        let lineup = lineup();
+        let plain = starters_of(&lineup, &position_of, &team_of);
+        let live = live_starters(&lineup, &position_of, &team_of, &|_| None);
+        assert_eq!(live.len(), plain.len());
+        for (a, b) in live.iter().zip(&plain) {
+            assert!((a.points - b.points).abs() < 1e-12);
+            assert!((a.uncertain - b.uncertain).abs() < 1e-12);
+            assert_eq!(a.position, b.position);
+        }
+        assert!((team_sigma(&live) - team_sigma(&plain)).abs() < 1e-12);
+        assert!((total_points(&live) - total_points(&plain)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_finished_starter_is_worth_what_he_scored_and_can_move_no_further() {
+        let live = live_starters(&lineup(), &position_of, &team_of, &|id| {
+            Some(LiveScore {
+                banked: if id == "qb" { 4.2 } else { 30.0 },
+                remaining: 0.0,
+            })
+        });
+        assert!((total_points(&live) - 34.2).abs() < 1e-9);
+        assert_eq!(team_sigma(&live), 0.0, "a settled week has no spread left");
+    }
+
+    #[test]
+    fn a_starter_at_half_time_keeps_half_his_projection_and_half_his_spread() {
+        let live = live_starters(&lineup(), &position_of, &team_of, &|id| {
+            (id == "qb").then_some(LiveScore {
+                banked: 9.0,
+                remaining: 0.5,
+            })
+        });
+        // 9 banked + half of 20 projected, and the receiver untouched.
+        assert!((live[0].points - 19.0).abs() < 1e-9);
+        assert!((live[0].uncertain - 10.0).abs() < 1e-9);
+        assert!((live[1].points - 12.0).abs() < 1e-9);
+        assert!((live[1].uncertain - 12.0).abs() < 1e-9);
     }
 
     #[test]

@@ -99,9 +99,30 @@ pub struct StandingsRow {
     pub points_for: f64,
     /// Season-long point total: banked plus projected.
     pub projected_points: f64,
-    /// Probability of making the playoff bracket, 0.0..=1.0.
+    /// Probability of making the playoff bracket, 0.0..=1.0. Meaningless once
+    /// the bracket is set — see `playoff_status`, which is what the screen
+    /// shows instead from that point on.
     pub playoff_odds: f64,
+    /// Where this team stands now the regular season is over: "In the
+    /// playoffs" or "Missed the playoffs". `None` during the regular season,
+    /// when the percentage is the honest answer.
+    ///
+    /// From week 15 there is nothing left on the schedule to simulate, so the
+    /// simulation short-circuits and every roster reads a flat 100% or 0% —
+    /// technically the standings, but presented as a forecast it is a lie
+    /// about certainty. Saying what actually happened is both shorter and true.
+    #[serde(default)]
+    pub playoff_status: Option<String>,
     pub is_mine: bool,
+}
+
+/// What to say about a team once the bracket is cut.
+pub fn playoff_status(seed: u32, playoff_teams: u32) -> String {
+    if seed <= playoff_teams.max(1) {
+        format!("In the playoffs \u{2014} seed {seed}")
+    } else {
+        "Missed the playoffs".to_string()
+    }
 }
 
 /// One scheduled game with both sides' distributions already resolved to
@@ -321,6 +342,7 @@ pub fn standings(
             points_for: t.points_for,
             projected_points: t.projected_total(),
             playoff_odds: odds.get(&t.roster_id).copied().unwrap_or(0.0),
+            playoff_status: None,
             is_mine: my_roster_id == Some(t.roster_id),
         })
         .collect()

@@ -228,17 +228,28 @@ export function SeasonScreen({
   const best = lineup === "Best";
   const myProjected = best ? header.my_projected : header.my_set_projected;
   const winOdds = best ? header.win_odds_best : header.win_odds_set;
+  // Once the ball is in the air the projection is the second-most interesting
+  // number on the screen. Lead with what has actually been scored, and keep the
+  // projection beside it as the thing still to come.
+  const anyStarted = view.live.games.some((game) => game.state !== "pre");
+  const { my_live_points: myLive, opp_live_points: oppLive } = view.live.totals;
+  const thisWeek =
+    header.opponent_name === null
+      ? `Week ${view.week} · bye`
+      : anyStarted
+        ? `vs ${header.opponent_name} · ${fmt(myLive, 1)} – ${fmt(oppLive, 1)}`
+        : `vs ${header.opponent_name} · ${fmt(myProjected, 1)} – ${fmt(header.opp_projected, 1)}`;
+  const thisWeekSub = anyStarted
+    ? `live · projected ${fmt(myProjected, 1)} – ${fmt(header.opp_projected, 1)}`
+    : null;
 
   return (
     <div className="season-screen">
       <div className="season-header">
         <div className="season-stat is-lead">
-          <span className="eyebrow">This week</span>
-          <span className="season-stat-value ellipsis">
-            {header.opponent_name === null
-              ? `Week ${view.week} · bye`
-              : `vs ${header.opponent_name} · ${fmt(myProjected, 1)} – ${fmt(header.opp_projected, 1)}`}
-          </span>
+          <span className="eyebrow">{anyStarted ? "This week · live" : "This week"}</span>
+          <span className="season-stat-value ellipsis">{thisWeek}</span>
+          {thisWeekSub !== null && <span className="season-stat-sub ellipsis">{thisWeekSub}</span>}
         </div>
         {/* The note sits on the first of the two odds and speaks for both:
             one line, so a percentage is read as a model rather than a promise.
@@ -249,7 +260,9 @@ export function SeasonScreen({
           value={pct(winOdds)}
           sub={`${best ? "best lineup" : "lineup as set"} · ${ODDS_NOTE}`}
         />
-        <HeaderStat label="Playoffs" value={pct(header.playoff_odds)} />
+        {/* A percentage is a forecast. Past the last regular week there is
+            nothing left to forecast, so the bracket's own answer is shown. */}
+        <HeaderStat label="Playoffs" value={header.playoff_status ?? pct(header.playoff_odds)} />
         <HeaderStat
           label="Locks in"
           value={untilLabel(header.locks_in_ms)}
@@ -267,7 +280,11 @@ export function SeasonScreen({
 
       <div className="season-body">
         <div className="season-main">
-          <CallsToMake calls={view.calls} pointsOnTable={view.points_on_table} />
+          <CallsToMake
+            calls={view.calls}
+            pointsOnTable={view.points_on_table}
+            started={anyStarted}
+          />
           <LineupCompare matchup={matchup} which={lineup} onWhich={setLineup} winOdds={winOdds} />
           <Waivers
             waivers={view.waivers}
@@ -307,7 +324,10 @@ export function SeasonScreen({
             {tab === "Games" && (
               <GamesTab
                 live={view.live}
-                myProjected={myProjected}
+                // Always the lineup actually playing. Measuring what has been
+                // banked against a hypothetical best lineup compares a real
+                // score to points nobody is scoring.
+                myProjected={header.my_set_projected}
                 oppProjected={header.opp_projected}
                 opponentName={header.opponent_name}
               />

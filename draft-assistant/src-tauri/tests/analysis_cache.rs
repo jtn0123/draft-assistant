@@ -121,3 +121,36 @@ fn a_zero_window_is_clamped_rather_than_dividing_by_zero() {
         );
     }
 }
+
+/// And the counter it reads: a held analysis keeps its number, a rebuilt one
+/// gets the next.
+#[test]
+fn the_analysis_generation_steps_once_per_rebuild() {
+    let mut cache = AnalysisCache::new(3);
+    assert_eq!(cache.generation(), 0, "nothing has been built yet");
+    let view = view();
+
+    cache.observe(&view);
+    let first = cache.generation();
+    assert_eq!(first, 1);
+    cache.observe(&view);
+    assert_eq!(
+        cache.generation(),
+        first,
+        "a reused analysis is the same one"
+    );
+    cache.observe(&view);
+    assert_eq!(cache.generation(), first, "the window closes here");
+    cache.observe(&view);
+    assert_eq!(
+        cache.generation(),
+        first + 1,
+        "and the rebuild is a new one"
+    );
+
+    // Dropping it on purpose — a week that rolled over — counts the same way.
+    cache.invalidate();
+    assert!(cache.get().is_none());
+    cache.observe(&view);
+    assert_eq!(cache.generation(), first + 2);
+}

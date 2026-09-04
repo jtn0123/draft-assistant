@@ -16,10 +16,12 @@ fn live_section_joins_both_lineups_to_their_nfl_games() {
     assert_eq!(live_game.game_id, "g-live");
     assert_eq!(live_game.home, "ATL");
     assert!(live_game.status.starts_with("Q2"), "{}", live_game.status);
+    // The flex (w2) plays for Indianapolis, whose game is not on this
+    // scoreboard, so it is the other three starters who are in this game.
     assert_eq!(
         live_game.my_starter_count(),
-        4,
-        "my whole lineup plays here"
+        3,
+        "three of my four starters play here"
     );
     assert!(
         live_game.chips.iter().all(|c| c.is_mine),
@@ -40,9 +42,11 @@ fn live_section_joins_both_lineups_to_their_nfl_games() {
     assert!(pre_game.chips.iter().all(|c| !c.is_mine));
     assert_eq!(pre_game.chips.len(), 4, "all four rival starters");
 
-    assert_eq!(v.live.totals.my_playing, 4);
+    // Three starters are in the live game; the flex's Indianapolis game is
+    // not on the scoreboard, so it is neither playing nor pregame.
+    assert_eq!(v.live.totals.my_playing, 3);
     assert_eq!(v.live.totals.my_pre, 0);
-    assert!((v.live.totals.my_live_points - 56.5).abs() < 1e-9);
+    assert!((v.live.totals.my_live_points - 48.5).abs() < 1e-9);
     assert_eq!(v.live.totals.opp_live_points, 0.0, "their game is pregame");
     assert_eq!(v.live.windows.len(), 2);
     assert_eq!(v.live.next_kickoff_ms, season.scores[1].start_time);

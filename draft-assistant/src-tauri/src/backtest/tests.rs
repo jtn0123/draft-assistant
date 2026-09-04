@@ -6,6 +6,7 @@ fn starter(position: &str, team: Option<&str>, points: f64) -> Starter {
         position: position.into(),
         team: team.map(str::to_string),
         points,
+        uncertain: points,
     }
 }
 

@@ -34,6 +34,11 @@ fn league(id: &str, previous: Option<&str>) -> League {
 
 const STATE: &str = r#"{"season": "2026", "week": 3, "display_week": 3, "season_type": "regular"}"#;
 
+/// Flipped by the outage test so `/v1/state/nfl` — and only that route —
+/// starts failing. The stub's router is a plain `fn`, so the switch has to
+/// live somewhere it can reach.
+static STATE_IS_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 const ROSTERS: &str = r#"[
     {"roster_id": 1, "owner_id": "user-a", "players": ["qb-1", "rb-1"],
      "starters": ["qb-1"], "settings": {"wins": 2, "losses": 1, "fpts": 310, "fpts_decimal": 50}},
@@ -87,6 +92,9 @@ fn route(path: &str) -> Option<stub::Reply> {
     let path = path.split('?').next().unwrap_or(path);
     let ok = |body: String| Some((200u16, body));
     if path == "/v1/state/nfl" {
+        if STATE_IS_DOWN.load(std::sync::atomic::Ordering::SeqCst) {
+            return Some((500, "\"boom\"".to_string()));
+        }
         return ok(STATE.to_string());
     }
     if path.starts_with("/scores/nfl/regular/2026/") {
@@ -261,5 +269,49 @@ async fn a_live_refresh_moves_the_clock_and_the_scores() {
         "a successful refresh restarts the staleness clock"
     );
     assert_eq!(season.sources.scores.last_success_secs, season.fetched_at);
+    cleanup(engine);
+}
+
+/// Which week it is is the first thing every other request needs, so losing
+/// that one endpoint used to take the whole screen down — no rosters, no
+/// matchups, no scoreboard, on data already sitting on disk. The last state
+/// seen is now kept and used, with the usual admission that it is stale.
+#[tokio::test]
+async fn a_week_that_cannot_be_checked_falls_back_to_the_last_one_seen() {
+    let engine = engine("state-outage");
+    let league = league("league-2026", None);
+
+    // One good load banks the state envelope.
+    let first = engine
+        .load_season(&league, Some("user-a"), true)
+        .await
+        .expect("the first load has every endpoint");
+    assert_eq!(first.week, CURRENT_WEEK);
+    assert!(
+        !first
+            .warnings
+            .iter()
+            .any(|w| w.contains("which NFL week it is")),
+        "a load that checked the week must not claim to be stale: {:?}",
+        first.warnings
+    );
+
+    STATE_IS_DOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+    let stale = engine
+        .load_season(&league, Some("user-a"), true)
+        .await
+        .expect("the cached week must keep the screen alive");
+    STATE_IS_DOWN.store(false, std::sync::atomic::Ordering::SeqCst);
+
+    assert_eq!(stale.week, CURRENT_WEEK);
+    assert_eq!(stale.rosters.len(), 2, "the rest of the load still ran");
+    assert!(
+        stale
+            .warnings
+            .iter()
+            .any(|w| w.contains("which NFL week it is could not be checked")),
+        "the fallback has to admit itself: {:?}",
+        stale.warnings
+    );
     cleanup(engine);
 }

@@ -123,11 +123,17 @@ impl WeekFacts<'_> {
         }
     }
 
-    /// Fill in the reason and the deadline on every call, then put the ones
-    /// about a sidelined starter first — those are urgent however small the
-    /// projected gain.
-    pub fn finish(&self, calls: &mut [LineupCall]) {
+    /// Drop the calls that can no longer be made, fill in the reason and the
+    /// deadline on the rest, then put the ones about a sidelined starter first
+    /// — those are urgent however small the projected gain.
+    ///
+    /// A swap needs both halves to still be benchable. Once either player's
+    /// game has kicked off, Sleeper will not accept the change and the advice
+    /// is no longer advice: it is a reminder of a decision that is already
+    /// made, and it used to sit at the top of the screen all Sunday saying so.
+    pub fn finish(&self, calls: &mut Vec<LineupCall>) {
         let kickoffs = kickoff_by_team(self.scores);
+        self.retain_open(calls);
         for call in calls.iter_mut() {
             if call.reason.is_none() {
                 call.reason = Some(self.short_reason(&call.player_out_id));
@@ -140,9 +146,30 @@ impl WeekFacts<'_> {
         });
     }
 
-    /// The earlier of the two players' kickoffs, ignoring any already past:
-    /// once either game starts, that half of the swap can no longer be made.
-    fn locks_at(&self, kickoffs: &HashMap<String, i64>, call: &LineupCall) -> Option<i64> {
+    /// Drop every call that can no longer be acted on.
+    ///
+    /// Separate from [`finish`](Self::finish) because "points on the table" is
+    /// counted off these calls, and a total that includes swaps nobody can
+    /// make would say 2.0 points are available above a panel listing none.
+    pub fn retain_open(&self, calls: &mut Vec<LineupCall>) {
+        let kickoffs = kickoff_by_team(self.scores);
+        calls.retain(|call| !self.has_kicked_off(&kickoffs, call));
+    }
+
+    /// True when either side of the swap is already playing. A player whose
+    /// game is not on the scoreboard at all has not started as far as we know,
+    /// so the call stands.
+    fn has_kicked_off(&self, kickoffs: &HashMap<String, i64>, call: &LineupCall) -> bool {
+        self.kickoffs_for(kickoffs, call)
+            .any(|ms| ms <= self.now_ms)
+    }
+
+    /// Both players' kickoffs, where the scoreboard knows them.
+    fn kickoffs_for(
+        &self,
+        kickoffs: &HashMap<String, i64>,
+        call: &LineupCall,
+    ) -> std::vec::IntoIter<i64> {
         [
             call.player_in_team.clone(),
             self.players.team(&call.player_out_id),
@@ -150,8 +177,16 @@ impl WeekFacts<'_> {
         .into_iter()
         .flatten()
         .filter_map(|team| kickoffs.get(team.to_ascii_uppercase().as_str()).copied())
-        .filter(|ms| *ms > self.now_ms)
-        .min()
+        .collect::<Vec<_>>()
+        .into_iter()
+    }
+
+    /// The earlier of the two players' kickoffs, ignoring any already past:
+    /// once either game starts, that half of the swap can no longer be made.
+    fn locks_at(&self, kickoffs: &HashMap<String, i64>, call: &LineupCall) -> Option<i64> {
+        self.kickoffs_for(kickoffs, call)
+            .filter(|ms| *ms > self.now_ms)
+            .min()
     }
 }
 
@@ -180,279 +215,5 @@ fn kickoff_by_team(scores: &[ScoreGame]) -> HashMap<String, i64> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::season_api::GameMeta;
-    use crate::sleeper::ProjectionRow;
-
-    /// A handful of players, each with a team and an optional injury status.
-    struct Roster(HashMap<&'static str, (&'static str, Option<&'static str>)>);
-
-    impl PlayerFacts for Roster {
-        fn name(&self, player_id: &str) -> String {
-            player_id.to_uppercase()
-        }
-        fn team(&self, player_id: &str) -> Option<String> {
-            self.0.get(player_id).map(|(team, _)| (*team).to_string())
-        }
-        fn injury_status(&self, player_id: &str) -> Option<String> {
-            self.0
-                .get(player_id)
-                .and_then(|(_, hurt)| hurt.map(str::to_string))
-        }
-    }
-
-    fn roster() -> Roster {
-        Roster(HashMap::from([
-            ("waddle", ("MIA", Some("Out"))),
-            ("shaky", ("MIA", Some("Doubtful"))),
-            ("maybe", ("KC", Some("Questionable"))),
-            ("healthy", ("PHI", None)),
-            ("bench", ("PHI", None)),
-            ("resting", ("DAL", None)),
-            ("hurt_bench", ("DAL", Some("IR"))),
-        ]))
-    }
-
-    /// `resting` is on bye in week 2; everyone else is projected every week.
-    fn weekly() -> WeeklyPoints {
-        let mut rows = Vec::new();
-        for id in ["waddle", "shaky", "maybe", "healthy", "bench", "hurt_bench"] {
-            for week in 1..=3 {
-                rows.push(row(id, week, 100.0));
-            }
-        }
-        rows.push(row("resting", 1, 100.0));
-        rows.push(row("resting", 3, 100.0));
-        WeeklyPoints::build(&rows, &HashMap::from([("rush_yd".to_string(), 0.1)]))
-    }
-
-    fn row(player_id: &str, week: u32, rush_yd: f64) -> ProjectionRow {
-        ProjectionRow {
-            player_id: player_id.into(),
-            stats: Some(HashMap::from([("rush_yd".to_string(), rush_yd)])),
-            player: None,
-            week: Some(week),
-            opponent: None,
-        }
-    }
-
-    fn game(home: &str, away: &str, start: Option<i64>) -> ScoreGame {
-        ScoreGame {
-            game_id: Some(format!("{away}@{home}")),
-            status: None,
-            start_time: start,
-            week: Some(2),
-            metadata: Some(GameMeta {
-                home_team: Some(home.into()),
-                away_team: Some(away.into()),
-                ..GameMeta::default()
-            }),
-        }
-    }
-
-    const SUNDAY_EARLY: i64 = 1_700_000_000_000;
-    const SUNDAY_LATE: i64 = 1_700_012_000_000;
-
-    fn scores() -> Vec<ScoreGame> {
-        vec![
-            game("MIA", "NYJ", Some(SUNDAY_EARLY)),
-            game("PHI", "DAL", Some(SUNDAY_LATE)),
-            game("KC", "LV", None),
-        ]
-    }
-
-    fn facts<'a>(
-        players: &'a Roster,
-        weekly: &'a WeeklyPoints,
-        scores: &'a [ScoreGame],
-    ) -> WeekFacts<'a> {
-        WeekFacts {
-            players,
-            weekly,
-            week: 2,
-            scores,
-            now_ms: SUNDAY_EARLY - 3_600_000,
-        }
-    }
-
-    fn slot(slot: &str, id: Option<&str>, points: f64) -> LineupSlot {
-        LineupSlot {
-            slot: slot.into(),
-            player_id: id.map(str::to_string),
-            points,
-        }
-    }
-
-    fn candidate(id: &str, points: f64) -> Candidate {
-        Candidate {
-            player_id: id.into(),
-            position: "WR".into(),
-            points,
-        }
-    }
-
-    fn call(player_in: &str, player_out: &str, gain: f64) -> LineupCall {
-        LineupCall {
-            slot: "WR".into(),
-            player_in: player_in.to_uppercase(),
-            player_in_id: player_in.into(),
-            player_in_team: Some("PHI".into()),
-            player_out: player_out.to_uppercase(),
-            player_out_id: player_out.into(),
-            gain,
-            why: "long form".into(),
-            reason: None,
-            locks_at_ms: None,
-        }
-    }
-
-    #[test]
-    fn both_teams_in_a_game_share_its_kickoff() {
-        let kickoffs = kickoff_by_team(&[
-            game("PHI", "DAL", Some(SUNDAY_EARLY)),
-            game("BUF", "NYJ", None),
-            game("SEA", "SF", Some(0)),
-        ]);
-        assert_eq!(kickoffs.get("PHI"), Some(&SUNDAY_EARLY));
-        assert_eq!(kickoffs.get("DAL"), Some(&SUNDAY_EARLY));
-        assert_eq!(kickoffs.get("BUF"), None, "no start time is not a deadline");
-        assert_eq!(kickoffs.get("SEA"), None, "nor is a zero one");
-    }
-
-    #[test]
-    fn each_reason_says_the_strongest_thing_the_data_supports() {
-        let (players, weekly, scores) = (roster(), weekly(), scores());
-        let facts = facts(&players, &weekly, &scores);
-        for (player_out, want) in [
-            ("", "that starting spot is empty right now"),
-            ("resting", "RESTING is on bye this week"),
-            ("waddle", "WADDLE is listed Out"),
-            ("shaky", "SHAKY is listed Doubtful"),
-            ("maybe", "MAYBE is listed Questionable"),
-            ("healthy", "higher projection at the same spot"),
-        ] {
-            assert_eq!(facts.short_reason(player_out), want, "for {player_out:?}");
-        }
-    }
-
-    #[test]
-    fn a_bye_outranks_an_injury_tag_because_it_is_certain() {
-        // Sleeper leaves an injury tag on a player whose team is idle. The bye
-        // is the fact that matters, so it must be the line the user reads.
-        let players = Roster(HashMap::from([("resting", ("DAL", Some("Questionable")))]));
-        let (weekly, scores) = (weekly(), scores());
-        let facts = facts(&players, &weekly, &scores);
-        assert_eq!(facts.short_reason("resting"), "RESTING is on bye this week");
-    }
-
-    #[test]
-    fn a_sidelined_starter_becomes_a_call_the_maths_would_not_raise() {
-        let (players, weekly, scores) = (roster(), weekly(), scores());
-        let facts = facts(&players, &weekly, &scores);
-        let current = vec![
-            slot("WR", Some("waddle"), 14.0),
-            slot("WR", Some("maybe"), 9.0),
-        ];
-        let roster_players = vec![
-            candidate("waddle", 14.0),
-            candidate("maybe", 9.0),
-            // The best bench body is hurt himself, so the healthy one wins.
-            candidate("hurt_bench", 20.0),
-            candidate("bench", 11.0),
-            candidate("resting", 30.0),
-        ];
-        let calls = facts.injury_calls(&current, &roster_players, &[], &|_, _| true);
-
-        assert_eq!(calls.len(), 1, "only Out and Doubtful raise a call");
-        let call = &calls[0];
-        assert_eq!(call.player_out_id, "waddle");
-        assert_eq!(
-            call.player_in_id, "bench",
-            "a hurt or idle bench is no help"
-        );
-        assert_eq!(
-            call.reason.as_deref(),
-            Some("WADDLE is listed Out — pick a replacement")
-        );
-        assert!(call.why.contains("is listed out this week"));
-        assert!((call.gain - -3.0).abs() < 1e-9, "an honest, negative gain");
-    }
-
-    #[test]
-    fn a_starter_the_projections_already_flagged_is_not_called_twice() {
-        let (players, weekly, scores) = (roster(), weekly(), scores());
-        let facts = facts(&players, &weekly, &scores);
-        let current = vec![slot("WR", Some("waddle"), 14.0)];
-        let roster_players = vec![candidate("waddle", 14.0), candidate("bench", 11.0)];
-        let existing = vec![call("bench", "waddle", 2.0)];
-        assert!(facts
-            .injury_calls(&current, &roster_players, &existing, &|_, _| true)
-            .is_empty());
-    }
-
-    #[test]
-    fn no_eligible_bench_body_means_no_call_to_make() {
-        let (players, weekly, scores) = (roster(), weekly(), scores());
-        let facts = facts(&players, &weekly, &scores);
-        let current = vec![slot("WR", Some("waddle"), 14.0)];
-        let roster_players = vec![candidate("waddle", 14.0), candidate("bench", 11.0)];
-        assert!(facts
-            .injury_calls(&current, &roster_players, &[], &|_, _| false)
-            .is_empty());
-    }
-
-    #[test]
-    fn finishing_adds_the_reason_and_the_deadline_and_leads_with_the_urgent_one() {
-        let (players, weekly, scores) = (roster(), weekly(), scores());
-        let facts = facts(&players, &weekly, &scores);
-        // A fat projection gain, and a small one about a player who is Out.
-        let mut calls = vec![call("bench", "healthy", 8.0), call("bench", "waddle", 0.5)];
-        facts.finish(&mut calls);
-
-        assert_eq!(calls[0].player_out_id, "waddle", "the injury leads");
-        assert_eq!(calls[0].reason.as_deref(), Some("WADDLE is listed Out"));
-        // Waddle plays in Miami's early game; the incoming bench player is in
-        // the later one, so the swap must be made before the earlier kickoff.
-        assert_eq!(calls[0].locks_at_ms, Some(SUNDAY_EARLY));
-        assert_eq!(
-            calls[1].reason.as_deref(),
-            Some("higher projection at the same spot")
-        );
-        assert_eq!(calls[1].locks_at_ms, Some(SUNDAY_LATE));
-    }
-
-    #[test]
-    fn a_reason_already_written_is_left_alone() {
-        let (players, weekly, scores) = (roster(), weekly(), scores());
-        let facts = facts(&players, &weekly, &scores);
-        let mut calls = vec![call("bench", "waddle", 0.5)];
-        calls[0].reason = Some("already said".into());
-        facts.finish(&mut calls);
-        assert_eq!(calls[0].reason.as_deref(), Some("already said"));
-    }
-
-    #[test]
-    fn a_kickoff_already_past_is_not_offered_as_a_deadline() {
-        let (players, weekly, scores) = (roster(), weekly(), scores());
-        let mut facts = facts(&players, &weekly, &scores);
-        facts.now_ms = SUNDAY_EARLY + 1;
-        let mut calls = vec![call("bench", "waddle", 0.5)];
-        facts.finish(&mut calls);
-        // Miami has kicked off, so only Philadelphia's later game is a deadline.
-        assert_eq!(calls[0].locks_at_ms, Some(SUNDAY_LATE));
-
-        facts.now_ms = SUNDAY_LATE + 1;
-        facts.finish(&mut calls);
-        assert_eq!(calls[0].locks_at_ms, None, "nothing left to decide");
-    }
-
-    #[test]
-    fn a_player_whose_game_is_not_on_the_scoreboard_gets_no_deadline() {
-        let (players, weekly) = (roster(), weekly());
-        let facts = facts(&players, &weekly, &[]);
-        let mut calls = vec![call("bench", "waddle", 0.5)];
-        facts.finish(&mut calls);
-        assert_eq!(calls[0].locks_at_ms, None);
-    }
-}
+#[path = "season_calls_tests.rs"]
+mod tests;

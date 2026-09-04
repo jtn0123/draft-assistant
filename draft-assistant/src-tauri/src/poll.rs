@@ -9,6 +9,7 @@
 
 use crate::engine::{now_secs, AppConfig, LoadedLeague};
 use crate::season::{SeasonAnalysis, SeasonView};
+use crate::season_engine::week_watch::WeekWatch;
 use crate::season_engine::{LoadedSeason, SeasonLoader};
 use crate::season_live::LiveGame;
 use crate::sleeper::Pick;
@@ -171,17 +172,33 @@ fn games_signature(games: &[LiveGame]) -> u64 {
 /// unchanged one is pure cost.
 #[derive(Debug, Default)]
 pub struct LiveEmitGate {
-    /// Points as hundredths (floats are not worth comparing exactly),
-    /// alongside the scoreboard they were counted off.
-    last: Option<(u64, u64, u64)>,
+    /// Points as hundredths (floats are not worth comparing exactly), the
+    /// scoreboard they were counted off, and which build of the analysis they
+    /// were carried beside.
+    last: Option<(u64, u64, u64, u64)>,
 }
 
 impl LiveEmitGate {
-    fn should_emit(&mut self, my_points: f64, opp_points: f64, games: &[LiveGame]) -> bool {
+    /// `analysis` is [`AnalysisCache::generation`]: it steps every time the
+    /// expensive half of the view is rebuilt.
+    ///
+    /// Without it a midweek rebuild was computed and then thrown away. Waivers
+    /// clear on a Tuesday morning with every game 0 - 0 and every scoreboard
+    /// row identical, so the gate saw nothing move and the fresh waiver
+    /// targets, trade ideas and playoff odds never reached the screen — until
+    /// something scored, which on a Tuesday is never.
+    fn should_emit(
+        &mut self,
+        my_points: f64,
+        opp_points: f64,
+        games: &[LiveGame],
+        analysis: u64,
+    ) -> bool {
         let signature = (
             (my_points * 100.0).round() as u64,
             (opp_points * 100.0).round() as u64,
             games_signature(games),
+            analysis,
         );
         if self.last == Some(signature) {
             return false;
@@ -202,6 +219,7 @@ pub struct AnalysisCache {
     held: Option<SeasonAnalysis>,
     ticks: u32,
     rebuild_every: u32,
+    generation: u64,
 }
 
 impl AnalysisCache {
@@ -210,6 +228,7 @@ impl AnalysisCache {
             held: None,
             ticks: 0,
             rebuild_every: rebuild_every.max(1),
+            generation: 0,
         }
     }
 
@@ -218,11 +237,25 @@ impl AnalysisCache {
         self.held.as_ref()
     }
 
+    /// Which build of the analysis is being held. Steps every time a fresh one
+    /// is taken, which is what tells the emit gate that a view carries
+    /// something new even when nobody has scored.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Throw the held analysis away, so the next tick builds a fresh one.
+    /// Used when the ground has moved under it — a new week, most of all.
+    pub fn invalidate(&mut self) {
+        self.held = None;
+    }
+
     /// Take the reusable parts out of a freshly built view, and count the tick
     /// so the cache expires on schedule.
     pub fn observe(&mut self, view: &SeasonView) {
         if self.held.is_none() {
             self.held = Some(SeasonAnalysis::of(view));
+            self.generation = self.generation.wrapping_add(1);
         }
         self.ticks = self.ticks.saturating_add(1);
         if self.ticks.is_multiple_of(self.rebuild_every) {
@@ -238,6 +271,7 @@ pub struct SeasonPollMemory {
     health: PollHealthMemory,
     gate: LiveEmitGate,
     analysis: AnalysisCache,
+    week: WeekWatch,
 }
 
 impl SeasonPollMemory {
@@ -247,6 +281,7 @@ impl SeasonPollMemory {
             health: PollHealthMemory::default(),
             gate: LiveEmitGate::default(),
             analysis: AnalysisCache::new(rebuild_every),
+            week: WeekWatch::default(),
         }
     }
 }
@@ -260,6 +295,44 @@ pub struct SeasonTick {
     /// league open yet, or the season not loaded. Neither is the feed failing,
     /// so neither should be reported as one.
     pub health: Option<PollHealth>,
+}
+
+/// Reload the whole season for a week that has just turned over, replacing
+/// what the poller was watching. `false` when the reload failed or the league
+/// changed underneath it — either way there is nothing to emit this tick.
+///
+/// The load runs with nothing locked, exactly like the live fetch: it is
+/// fifteen matchup requests and can take seconds, and holding the season
+/// across it would stall every command in the app.
+async fn reload_for_week<E: SeasonLoader>(
+    engine: &E,
+    loaded_ref: &Mutex<Option<LoadedLeague>>,
+    season_ref: &Mutex<Option<LoadedSeason>>,
+    config_ref: &Mutex<AppConfig>,
+    league_id: &str,
+) -> bool {
+    let league = {
+        let loaded = loaded_ref.lock().await;
+        match loaded.as_ref() {
+            Some(l) if l.league.league_id == league_id => l.league.clone(),
+            _ => return false,
+        }
+    };
+    let my_user_id = config_ref.lock().await.my_user_id.clone();
+    let Ok(fresh) = engine
+        .load_season(&league, my_user_id.as_deref(), false)
+        .await
+    else {
+        return false;
+    };
+    // Checked again on the way back in: the load ran unlocked, and writing
+    // this would otherwise file one league's rosters under another's.
+    let loaded = loaded_ref.lock().await;
+    if loaded.as_ref().map(|l| l.league.league_id.as_str()) != Some(league_id) {
+        return false;
+    }
+    *season_ref.lock().await = Some(fresh);
+    true
 }
 
 /// One turn of the season poll loop: refresh the live slice, note whether that
@@ -283,13 +356,36 @@ pub async fn season_tick<E: SeasonLoader>(
         return SeasonTick::default();
     };
 
-    let watching = {
+    let read_watching = || async {
         let season = season_ref.lock().await;
-        let Some(season) = season.as_ref() else {
-            return SeasonTick::default();
-        };
-        (season.season, season.week)
+        season.as_ref().map(|s| (s.season, s.week))
     };
+    let Some(mut watching) = read_watching().await else {
+        return SeasonTick::default();
+    };
+
+    // Has the NFL moved on? Checked on a ten-minute clock of its own, because
+    // the answer changes once a week and a poll tick is thirty seconds. A new
+    // week is not a live refresh — every roster, matchup and projection is a
+    // different week's — so it goes down the full load path and the analysis
+    // held from the old week is dropped with it.
+    if memory.week.due(now_secs()) {
+        memory.week.checked(now_secs());
+        if let Ok(week) = engine.current_week().await {
+            if week != watching.1 {
+                memory.analysis.invalidate();
+                if !reload_for_week(engine, loaded_ref, season_ref, config_ref, &league_id).await {
+                    return SeasonTick::default();
+                }
+                // The live fetch below has to ask for the new week, not the
+                // one this tick started on.
+                let Some(now_watching) = read_watching().await else {
+                    return SeasonTick::default();
+                };
+                watching = now_watching;
+            }
+        }
+    }
     // The three requests run with nothing locked. Each has an eight-second
     // timeout and retries, so holding `season` across them stalled every
     // command that needs it and queued the next tick behind this one.
@@ -336,6 +432,7 @@ pub async fn season_tick<E: SeasonLoader>(
         view.live.totals.my_live_points,
         view.live.totals.opp_live_points,
         &view.live.games,
+        memory.analysis.generation(),
     );
     SeasonTick {
         view: moved.then_some(view),

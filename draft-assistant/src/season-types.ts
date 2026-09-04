@@ -13,8 +13,13 @@ export interface SeasonHeader {
   win_odds_best: number;
   /** 0..1 with the lineup as set — lower whenever points sit on the bench. */
   win_odds_set: number;
-  /** 0..1 */
+  /** 0..1. Only a forecast while `playoff_status` is null. */
   playoff_odds: number;
+  /**
+   * "In the playoffs — seed 3" / "Missed the playoffs", once the regular
+   * season is over and the percentage is a meaningless flat 1 or 0.
+   */
+  playoff_status?: string | null;
   locks_in_ms: number | null;
 }
 
@@ -91,8 +96,10 @@ export interface StandingsRow {
   ties: number;
   points_for: number;
   projected_points: number;
-  /** 0..1 */
+  /** 0..1. Only a forecast while `playoff_status` is null. */
   playoff_odds: number;
+  /** Where this team ended up, once the bracket is cut. */
+  playoff_status?: string | null;
   is_mine: boolean;
 }
 

@@ -7,11 +7,12 @@
 
 mod last_season;
 mod rows;
+pub mod week_watch;
 
 use crate::cache::safe_key;
 use crate::engine::{now_secs, Engine, REQUEST_CONCURRENCY};
 use crate::season::LastSeasonRow;
-use crate::season_api::{Matchup, Roster, ScoreGame, SeasonEndpoints, Transaction};
+use crate::season_api::{Matchup, NflState, Roster, ScoreGame, SeasonEndpoints, Transaction};
 use crate::season_history::History;
 use crate::season_sources::{LiveFetch, SourceHealth};
 use crate::sleeper::League;
@@ -24,6 +25,10 @@ use std::collections::HashMap;
 /// Live scoring windows move fast; everything else can lag a little.
 const LIVE_TTL_SECS: u64 = 30;
 const WEEK_SWEEP_TTL_SECS: u64 = 6 * 3600;
+/// Where the NFL is, cached on disk. Not a freshness window — the copy is only
+/// ever read when the live request fails — so the whole season is fair game:
+/// last week's answer beats no screen at all.
+const NFL_STATE_CACHE: &str = "nfl_state.json";
 pub(crate) const LAST_SEASON_TTL_SECS: u64 = 30 * 24 * 3600;
 
 /// Everything in-season, already fetched.
@@ -70,6 +75,14 @@ pub trait SeasonLoader {
         my_user_id: Option<&str>,
         force: bool,
     ) -> Result<LoadedSeason, String>;
+
+    /// Which NFL week it is now.
+    ///
+    /// Asked again while the app is running, not only at load: a season opened
+    /// on Monday and left open used to keep scoring Monday's week through
+    /// Tuesday's rollover and all of the next Sunday.
+    #[allow(async_fn_in_trait)]
+    async fn current_week(&self) -> Result<u32, String>;
 
     /// Pull the fast-moving slice — this week's scoring and the NFL scoreboard
     /// — without touching any shared state. Callers that hold the season
@@ -198,16 +211,55 @@ impl Engine {
     pub fn live_is_stale(season: &LoadedSeason) -> bool {
         Self::live_age(season) >= LIVE_TTL_SECS
     }
+
+    /// Where the NFL is, from the network when it answers and from the last
+    /// good copy on disk when it does not.
+    ///
+    /// This one request used to fail the whole season load: offline, or with
+    /// Sleeper down, the screen went from "stale but readable" to nothing at
+    /// all, because the week is the first thing every other request needs.
+    /// The fallback comes with the usual stale warning rather than quietly
+    /// pretending the week is current.
+    pub(crate) async fn nfl_state_or_cached(&self) -> Result<(NflState, Option<String>), String> {
+        match self.client.nfl_state().await {
+            Ok(state) => {
+                self.write_cache_off_thread(NFL_STATE_CACHE, &state).await;
+                Ok((state, None))
+            }
+            Err(error) => {
+                let error = to_message(error);
+                let Some((at, state)) = self
+                    .read_cache_any_off_thread::<NflState>(NFL_STATE_CACHE)
+                    .await
+                else {
+                    return Err(error);
+                };
+                let age_hours = now_secs().saturating_sub(at) / 3600;
+                Ok((
+                    state,
+                    Some(format!(
+                        "which NFL week it is could not be checked ({error}) \u{2014} showing the week last seen {age_hours}h ago"
+                    )),
+                ))
+            }
+        }
+    }
 }
 
 impl SeasonLoader for Engine {
+    async fn current_week(&self) -> Result<u32, String> {
+        self.nfl_state_or_cached()
+            .await
+            .map(|(state, _)| state.current_week())
+    }
+
     async fn load_season(
         &self,
         league: &League,
         my_user_id: Option<&str>,
         force: bool,
     ) -> Result<LoadedSeason, String> {
-        let state = self.client.nfl_state().await.map_err(to_message)?;
+        let (state, stale_week) = self.nfl_state_or_cached().await?;
         let week = state.current_week();
         let season: u32 = league
             .season
@@ -215,6 +267,7 @@ impl SeasonLoader for Engine {
             .map_err(|_| format!("league season '{}' is not a year", league.season))?;
         let league_id = league.league_id.as_str();
         let mut warnings = Vec::new();
+        warnings.extend(stale_week);
 
         let (rosters, matchups, scores) = tokio::join!(
             self.client.rosters(league_id),

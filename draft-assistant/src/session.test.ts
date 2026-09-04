@@ -18,7 +18,7 @@ vi.mock("./api", () => ({ api: mocks }));
 
 import { useSeasonSession, type SeasonSession } from "./session";
 
-const view = (week: number) => ({ schema_version: "1.2", week }) as unknown as SeasonView;
+const view = (week: number) => ({ schema_version: "1.3", week }) as unknown as SeasonView;
 
 let pushUpdate: ((v: SeasonView) => void) | null = null;
 let pushHealth: ((h: PollHealth) => void) | null = null;
@@ -252,6 +252,26 @@ describe("a retry that fails too", () => {
     });
     await waitFor(() => expect(result.current.error).toMatch(/still down/));
     expect(result.current.season).toBeNull();
+  });
+
+  it("says so out loud when the screen already has last week's numbers on it", async () => {
+    // The screen only renders `error` while it has no view at all, so a retry
+    // that failed with a view still on screen changed nothing anyone could
+    // see: "Refresh data" looked like it had worked.
+    mocks.loadSeason
+      .mockResolvedValueOnce(view(2))
+      .mockRejectedValueOnce(new Error("sleeper is down"));
+    const said: string[] = [];
+    const { result } = renderHook(() =>
+      useSeasonSession(true, "1", (message) => void said.push(message)),
+    );
+    await waitFor(() => expect(result.current.season).not.toBeNull());
+
+    await settle(() => {
+      result.current.retry();
+    });
+
+    await waitFor(() => expect(said.some((t) => /sleeper is down/.test(t))).toBe(true));
   });
 });
 

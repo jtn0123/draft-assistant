@@ -13,12 +13,12 @@ import type { SeasonView } from "./season-types";
 import type { ChatReply, ChatRequest, ChatSettings } from "./chat-types";
 import { ReplayFeed, replaySource } from "./replay";
 
-// Kept in step with DRAFT_SCHEMA_VERSION in src-tauri/src/view.rs and
+// Kept in step with DRAFT_SCHEMA_VERSION in src-tauri/src/view_types.rs and
 // SEASON_SCHEMA_VERSION in src-tauri/src/season.rs. Bump both sides together
 // with the fixtures in public/ — src-tauri/tests/fixture_shape.rs fails if the
 // fixtures and the structs disagree about a single field.
 const DRAFT_VIEW_SCHEMA_VERSION = "1.4";
-const SEASON_VIEW_SCHEMA_VERSION = "1.2";
+const SEASON_VIEW_SCHEMA_VERSION = "1.3";
 
 export function validateDraftView(value: DraftView): DraftView {
   if (value.schema_version !== DRAFT_VIEW_SCHEMA_VERSION) {
@@ -69,7 +69,7 @@ export interface Api {
   /** Swap the code Yahoo showed the user for a token. */
   yahooFinishConnect(code: string, state: string): Promise<YahooStatus>;
   /** Forget the token. The saved credentials stay. */
-  yahooDisconnect(): Promise<YahooStatus>;
+  yahooDisconnect(forgetCredentials?: boolean): Promise<YahooStatus>;
   /** Every league the connected Yahoo account plays in. */
   yahooLeagues(): Promise<StoredLeague[]>;
   /** Drop a league from the picker's list; the one on screen is refused.
@@ -122,7 +122,8 @@ const tauriApi: Api = {
     invoke<YahooStatus>("yahoo_save_credentials", { clientId, clientSecret }),
   yahooBeginConnect: () => invoke<YahooConnectStart>("yahoo_begin_connect"),
   yahooFinishConnect: (code, state) => invoke<YahooStatus>("yahoo_finish_connect", { code, state }),
-  yahooDisconnect: () => invoke<YahooStatus>("yahoo_disconnect"),
+  yahooDisconnect: (forgetCredentials = false) =>
+    invoke<YahooStatus>("yahoo_disconnect", { forgetCredentials }),
   yahooLeagues: () => invoke<StoredLeague[]>("yahoo_leagues"),
   getState: () => invokeView("get_state"),
   refreshPicks: () => invokeView("refresh_picks"),

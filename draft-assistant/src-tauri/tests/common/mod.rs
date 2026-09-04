@@ -40,6 +40,12 @@ fn second_opinion_for(id: &str) -> Option<SecondOpinion> {
     let (positional_rank, overall_rank) = match id {
         "w6" => (14, 40),
         "r2" => (8, 20),
+        // One on a player nobody drafts, so the *available* array carries a
+        // populated example however the simulated picks fall. Without it, a
+        // change to the recommender that takes w6 inside the first twelve
+        // picks empties `available[].second_opinion` and reads to
+        // `fixture_shape` as the column having been dropped from the code.
+        "fa2" => (22, 45),
         _ => return None,
     };
     Some(SecondOpinion {
@@ -140,8 +146,8 @@ const PLAYERS: &[(&str, &str, &str, &str)] = &[
     ("q1", "Ace Passer", "QB", "ATL"),
     ("r1", "Lead Back", "RB", "ATL"),
     ("w1", "Alpha Wideout", "WR", "TB"),
-    ("w2", "Slot Wideout", "WR", "TB"),
-    ("r2", "Bench Back", "RB", "TB"),
+    ("w2", "Slot Wideout", "WR", "IND"),
+    ("r2", "Bench Back", "RB", "IND"),
     ("w5", "Bye Wideout", "WR", "DAL"),
     ("q2", "Rival Passer", "QB", "PIT"),
     ("r3", "Rival Back", "RB", "PIT"),

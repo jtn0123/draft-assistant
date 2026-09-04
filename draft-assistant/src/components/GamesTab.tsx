@@ -52,6 +52,9 @@ export function GamesTab({
   opponentName,
 }: {
   live: LiveSection;
+  /** The projection of the lineup actually playing, never the best-lineup
+   *  one: banked points come from the set lineup, so the share has to be
+   *  measured against the same lineup or the two halves disagree. */
   myProjected: number;
   oppProjected: number;
   opponentName: string | null;
@@ -96,8 +99,8 @@ export function GamesTab({
           <div className="live-fill is-theirs" style={{ width: `${oppShare}%` }} />
         </div>
         <span className="muted small">
-          {myShare}% of your {fmt(myProjected, 1)} projection banked · they're at {oppShare}% of{" "}
-          {fmt(oppProjected, 1)}
+          {myShare}% of your {fmt(myProjected, 1)} set-lineup projection banked · they're at{" "}
+          {oppShare}% of {fmt(oppProjected, 1)}
         </span>
       </div>
 

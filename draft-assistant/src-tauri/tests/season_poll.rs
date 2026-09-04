@@ -23,6 +23,11 @@ struct Flaky {
     failing: Cell<bool>,
     matchups: Vec<Matchup>,
     rosters: Vec<Roster>,
+    /// What `current_week` answers, and the season a rollover reload hands
+    /// back. `None` on the season means the reload itself fails.
+    week: Cell<u32>,
+    reloads: Cell<u32>,
+    reloaded: Option<LoadedSeason>,
 }
 
 impl SeasonLoader for Flaky {
@@ -32,7 +37,17 @@ impl SeasonLoader for Flaky {
         _my_user_id: Option<&str>,
         _force: bool,
     ) -> Result<LoadedSeason, String> {
-        Err("the poller never loads a season".to_string())
+        self.reloads.set(self.reloads.get() + 1);
+        self.reloaded
+            .clone()
+            .ok_or_else(|| "the whole season load failed".to_string())
+    }
+
+    async fn current_week(&self) -> Result<u32, String> {
+        if self.failing.get() {
+            return Err("request failed".to_string());
+        }
+        Ok(self.week.get())
     }
 
     async fn fetch_live(&self, _league_id: &str, _season: u32, _week: u32) -> LiveFetch {
@@ -68,6 +83,9 @@ impl Harness {
                 failing: Cell::new(false),
                 matchups: season.matchups.clone(),
                 rosters: season.rosters.clone(),
+                week: Cell::new(season.week),
+                reloads: Cell::new(0),
+                reloaded: None,
             },
             loaded: Mutex::new(Some(loaded)),
             season: Mutex::new(Some(season)),
@@ -216,6 +234,14 @@ impl SeasonLoader for Watcher {
         Err("the poller never loads a season".to_string())
     }
 
+    async fn current_week(&self) -> Result<u32, String> {
+        // The week this fixture is already on, so nothing reloads.
+        Ok(self
+            .season
+            .try_lock()
+            .map_or(1, |s| s.as_ref().map_or(1, |season| season.week)))
+    }
+
     async fn fetch_live(&self, _league_id: &str, _season: u32, _week: u32) -> LiveFetch {
         self.free_during_fetch
             .set(Some(self.season.try_lock().is_ok()));
@@ -250,5 +276,63 @@ async fn the_live_requests_run_with_the_season_mutex_free() {
         engine.free_during_fetch.get(),
         Some(true),
         "the season mutex was held across the network requests"
+    );
+}
+
+/// The bug: `nfl_state` was asked once, at load, and never again. An app left
+/// open across Tuesday's rollover kept scoring the previous week — the wrong
+/// matchup, the wrong projections, the wrong scoreboard — with nothing on
+/// screen to say so.
+#[tokio::test]
+async fn a_week_that_rolled_over_reloads_the_season_and_emits_the_new_one() {
+    let mut harness = Harness::new();
+    let was = harness.season.lock().await.as_ref().expect("loaded").week;
+
+    // First tick: the week has not moved, so nothing is reloaded.
+    harness.tick().await;
+    assert_eq!(harness.engine.reloads.get(), 0);
+
+    // The NFL moves on, and the loader is ready with the new week's season.
+    let mut next = harness
+        .season
+        .lock()
+        .await
+        .as_ref()
+        .expect("loaded")
+        .clone();
+    next.week = was + 1;
+    harness.engine.reloaded = Some(next);
+    harness.engine.week.set(was + 1);
+
+    // The ten-minute check is not due again yet, so the poller is still on the
+    // old week — a tick is thirty seconds and the rollover is a weekly event.
+    harness.tick().await;
+    assert_eq!(harness.engine.reloads.get(), 0, "the check is rate limited");
+
+    // Once it is due, the whole season is reloaded rather than live-refreshed:
+    // every roster, matchup and projection belongs to a different week.
+    harness.memory = SeasonPollMemory::new(20);
+    let tick = harness.tick().await;
+    assert_eq!(harness.engine.reloads.get(), 1);
+    assert_eq!(
+        harness.season.lock().await.as_ref().expect("loaded").week,
+        was + 1
+    );
+    let view = tick.view.expect("the new week has to reach the screen");
+    assert_eq!(view.week, was + 1);
+}
+
+/// A rollover check that cannot reach Sleeper leaves the week alone. Guessing
+/// would be worse than showing the week we know we have data for.
+#[tokio::test]
+async fn a_failed_week_check_changes_nothing() {
+    let mut harness = Harness::new();
+    let was = harness.season.lock().await.as_ref().expect("loaded").week;
+    harness.engine.failing.set(true);
+    harness.tick().await;
+    assert_eq!(harness.engine.reloads.get(), 0);
+    assert_eq!(
+        harness.season.lock().await.as_ref().expect("loaded").week,
+        was
     );
 }

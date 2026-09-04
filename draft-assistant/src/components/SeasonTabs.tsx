@@ -98,7 +98,10 @@ export function Standings({
           </span>
           <span className="right mid">{row.record}</span>
           <span className="right mid">{fmt(row.projected_points)}</span>
-          <span className="right mid">{pct(row.playoff_odds)}</span>
+          {/* Once the bracket is cut there is nothing left to simulate and
+              the percentage is a flat 100% or 0%. Say what happened instead
+              of dressing the standings up as a confident forecast. */}
+          <span className="right mid ellipsis">{row.playoff_status ?? pct(row.playoff_odds)}</span>
         </div>
       ))}
       <span className="muted small tab-foot">

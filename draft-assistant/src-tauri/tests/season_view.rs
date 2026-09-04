@@ -58,9 +58,34 @@ fn matchup_compares_my_best_lineup_against_their_set_one() {
     assert!(m.set_rows.iter().any(|r| r.opp_name == "Rival Passer"));
 }
 
+/// The bench back does outscore the flex; put both on Tampa Bay, whose game
+/// kicked off in the fixture's second quarter. Sleeper will not accept that
+/// swap any more, so the screen must not keep offering it — nor keep counting
+/// its two points as "on the table" above a panel with nothing in it.
 #[test]
-fn the_bench_back_outscoring_the_flex_is_exactly_one_call() {
-    let v = view();
+fn a_swap_between_two_players_already_on_the_field_is_not_offered() {
+    let (mut loaded, season, config) = common::fixture();
+    for player in loaded.board.iter_mut() {
+        if player.player_id == "r2" || player.player_id == "w2" {
+            player.team = Some("TB".to_string());
+        }
+    }
+    let v = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+    assert!(v.calls.is_empty(), "{:?}", v.calls);
+    assert_eq!(
+        v.points_on_table, 0.0,
+        "points nobody can move are not on the table"
+    );
+}
+
+/// The same fixture with the scoreboard cleared: nothing has kicked off, so
+/// the call the projections found stands, with its reason and its gain.
+#[test]
+fn the_bench_back_outscoring_the_flex_is_exactly_one_call_before_kickoff() {
+    let (loaded, mut season, config) = common::fixture();
+    season.scores.clear();
+    let v = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+
     assert_eq!(v.calls.len(), 1, "{:?}", v.calls);
     let call = &v.calls[0];
     assert_eq!(call.slot, "FLEX");
@@ -387,4 +412,42 @@ fn reused_analysis_reports_when_it_was_actually_built() {
     let rebuilt = build_season_view_cached(&loaded, &season, config.my_user_id.as_deref(), None);
     assert!(rebuilt.analysis_as_of_secs >= fresh.analysis_as_of_secs);
     assert!(rebuilt.analysis_as_of_secs > reused.analysis_as_of_secs);
+}
+
+/// The odds used to be priced off projections alone, so they read the same at
+/// midnight Sunday as they did on Saturday morning. The fixture's Tampa Bay
+/// game is in its second quarter with real points on the board, and that has
+/// to be worth something.
+#[test]
+fn live_scoring_moves_the_win_odds_away_from_the_pregame_reading() {
+    let (loaded, mut season, config) = common::fixture();
+    let live = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+    season.scores.clear();
+    let pregame = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+
+    // The projections themselves are untouched: only the pricing has moved.
+    assert!((live.header.my_projected - pregame.header.my_projected).abs() < 1e-9);
+    assert!((live.header.opp_projected - pregame.header.opp_projected).abs() < 1e-9);
+    assert!(
+        (live.header.win_odds_set - pregame.header.win_odds_set).abs() > 1e-6,
+        "live {} vs pregame {}",
+        live.header.win_odds_set,
+        pregame.header.win_odds_set
+    );
+}
+
+/// And the other half of the promise: with an empty scoreboard the odds are
+/// exactly what the projection-only model always gave.
+#[test]
+fn with_nothing_kicked_off_the_odds_are_the_pregame_ones() {
+    let (loaded, mut season, config) = common::fixture();
+    season.scores.clear();
+    let a = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+    let b = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+    assert_eq!(a.header.win_odds_set, b.header.win_odds_set);
+    assert!(
+        a.header.win_odds_set > 0.5,
+        "the fixture's better roster is favoured: {}",
+        a.header.win_odds_set
+    );
 }

@@ -9,7 +9,12 @@ use draft_assistant_lib::season::{build_season_view, SeasonView};
 
 /// The fixture view, with `player_id` listed at `status` on the board.
 fn view_with_injury(player_id: &str, status: Option<&str>) -> SeasonView {
-    let (mut loaded, season, config) = common::fixture();
+    // The scoreboard is cleared: the fixture's live game is already in its
+    // second quarter, and a start/sit call about two players on the field is
+    // dropped rather than offered. What this file is about is whether the
+    // solver believes a stale projection, which is decided before kickoff.
+    let (mut loaded, mut season, config) = common::fixture();
+    season.scores.clear();
     if let Some(status) = status {
         mark(&mut loaded, player_id, status);
     }

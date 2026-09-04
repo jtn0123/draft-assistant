@@ -20,8 +20,14 @@ pub struct SeasonHeader {
     /// is leaving points on the bench.
     pub win_odds_best: f64,
     pub win_odds_set: f64,
-    /// 0.0..=1.0 chance of making the playoff bracket.
+    /// 0.0..=1.0 chance of making the playoff bracket. Only a forecast during
+    /// the regular season: once `playoff_status` is set the bracket is cut and
+    /// the percentage is a flat 1 or 0, which the screen must not print.
     pub playoff_odds: f64,
+    /// "In the playoffs — seed 3" or "Missed the playoffs", once the regular
+    /// season is over. `None` while the percentage still means something.
+    #[serde(default)]
+    pub playoff_status: Option<String>,
     /// Epoch milliseconds of the next kickoff involving one of my starters.
     pub locks_in_ms: Option<i64>,
 }

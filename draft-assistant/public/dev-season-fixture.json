@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "generated_at": 1788127760,
   "analysis_as_of_secs": 1788127752,
   "league": {
@@ -99,7 +99,8 @@
     "win_odds_best": 0.7397615959880579,
     "win_odds_set": 0.7216708512204331,
     "playoff_odds": 0.76725,
-    "locks_in_ms": 1789086900000
+    "locks_in_ms": 1789086900000,
+    "playoff_status": null
   },
   "matchup": {
     "my_name": "Witzy\u2019s Blitzys",
@@ -407,7 +408,8 @@
       "points_for": 0.0,
       "projected_points": 1915.0300725206519,
       "playoff_odds": 0.93325,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 12,
@@ -420,7 +422,8 @@
       "points_for": 0.0,
       "projected_points": 1729.8977914644415,
       "playoff_odds": 0.7185,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 2,
@@ -433,7 +436,8 @@
       "points_for": 0.0,
       "projected_points": 1697.6085961707056,
       "playoff_odds": 0.76725,
-      "is_mine": true
+      "is_mine": true,
+      "playoff_status": null
     },
     {
       "roster_id": 4,
@@ -446,7 +450,8 @@
       "points_for": 0.0,
       "projected_points": 1690.5527602579082,
       "playoff_odds": 0.67075,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 14,
@@ -459,7 +464,8 @@
       "points_for": 0.0,
       "projected_points": 1656.8288356516887,
       "playoff_odds": 0.58975,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 9,
@@ -472,7 +478,8 @@
       "points_for": 0.0,
       "projected_points": 1654.3890052689862,
       "playoff_odds": 0.561,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 13,
@@ -485,7 +492,8 @@
       "points_for": 0.0,
       "projected_points": 1610.5611872227598,
       "playoff_odds": 0.4415,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 8,
@@ -498,7 +506,8 @@
       "points_for": 0.0,
       "projected_points": 1597.751126341969,
       "playoff_odds": 0.40925,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 10,
@@ -511,7 +520,8 @@
       "points_for": 0.0,
       "projected_points": 1545.9393606842925,
       "playoff_odds": 0.32325,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 1,
@@ -524,7 +534,8 @@
       "points_for": 0.0,
       "projected_points": 1487.1744917247024,
       "playoff_odds": 0.2995,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 11,
@@ -537,7 +548,8 @@
       "points_for": 0.0,
       "projected_points": 1432.72686929862,
       "playoff_odds": 0.112,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 6,
@@ -550,7 +562,8 @@
       "points_for": 0.0,
       "projected_points": 1380.9226713333833,
       "playoff_odds": 0.064,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 5,
@@ -563,7 +576,8 @@
       "points_for": 0.0,
       "projected_points": 1347.503810263527,
       "playoff_odds": 0.05975,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     },
     {
       "roster_id": 7,
@@ -576,7 +590,8 @@
       "points_for": 0.0,
       "projected_points": 1345.3893408199397,
       "playoff_odds": 0.05025,
-      "is_mine": false
+      "is_mine": false,
+      "playoff_status": null
     }
   ],
   "live": {

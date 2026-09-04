@@ -337,3 +337,14 @@ describe("Waivers", () => {
     expect(screen.getByText(/No free agent would crack your starting lineup/)).toBeInTheDocument();
   });
 });
+
+describe("CallsToMake once the games start", () => {
+  /** Calls whose players are already playing are dropped in Rust, so an empty
+   *  list on a Sunday afternoon does not mean the lineup is perfect. */
+  it("says the window has closed rather than claiming the lineup is optimal", () => {
+    render(<CallsToMake calls={[]} pointsOnTable={0} started />);
+    expect(screen.getByText("Nothing left to change")).toBeInTheDocument();
+    expect(screen.getByText(/already kicked off/)).toBeInTheDocument();
+    expect(screen.queryByText("Your lineup is already optimal")).not.toBeInTheDocument();
+  });
+});
