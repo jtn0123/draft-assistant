@@ -7,6 +7,7 @@
 //! Here they can be read, and tested, without the several hundred lines of
 //! view assembly they are called from.
 
+use crate::roster::RosterRules;
 use crate::view_types::PositionRun;
 use std::collections::HashMap;
 
@@ -53,6 +54,56 @@ pub fn survival_target(my_next_picks: &[u32], current_pick: u32, is_my_pick: boo
         Some(after) if next == current_pick + 1 => Some(after),
         _ => Some(next),
     }
+}
+
+/// Byes already stacked on the players who would actually *start*, keyed by
+/// week.
+///
+/// The recommender's line for this says "shared with N of your starters", and
+/// it meant it: a starting lineup with four men off in week 9 loses week 9,
+/// while four bench bodies sharing a bye is not a problem at all. The count
+/// fed to it was of the whole roster, so by round twelve it was reporting six
+/// starters on a bye out of a lineup of nine, and docking every candidate who
+/// shared that week for a clash that did not exist.
+///
+/// Who starts is read off the league's own slots, in the league's own order:
+/// each dedicated slot takes an unused player at its position, then each flex
+/// takes one of the players it accepts, earliest pick first — the same
+/// best-available-first shape `RosterRules::open_starting_slots` fills with.
+/// Approximate, because a real lineup is set weekly on form; but it is drawn
+/// from the roster the user actually has rather than from all of it.
+pub fn starter_byes<'a>(
+    rules: &RosterRules,
+    // (position, bye week), in the order the players were drafted.
+    roster: impl IntoIterator<Item = (&'a str, Option<u32>)>,
+) -> HashMap<u32, u32> {
+    let mut unused: Vec<(&str, Option<u32>)> = roster.into_iter().collect();
+    let mut byes: HashMap<u32, u32> = HashMap::new();
+    let mut take = |eligible: &dyn Fn(&str) -> bool, byes: &mut HashMap<u32, u32>| {
+        let Some(at) = unused.iter().position(|(pos, _)| eligible(pos)) else {
+            return;
+        };
+        let (_, bye) = unused.remove(at);
+        if let Some(bye) = bye {
+            *byes.entry(bye).or_insert(0) += 1;
+        }
+    };
+    // Dedicated slots first — a flex that swallowed the only tight end would
+    // leave the TE slot claiming a player the roster does not have.
+    for slot in rules.slots() {
+        if RosterRules::is_non_starting(slot) || RosterRules::flex_eligible(slot).is_some() {
+            continue;
+        }
+        let slot = slot.clone();
+        take(&|position| position == slot, &mut byes);
+    }
+    for slot in rules.slots() {
+        let Some(eligible) = RosterRules::flex_eligible(slot) else {
+            continue;
+        };
+        take(&|position| eligible.contains(&position), &mut byes);
+    }
+    byes
 }
 
 /// How many recent picks a positional run is judged over, and how many of them
@@ -120,6 +171,87 @@ mod reliability_tests {
         assert_eq!(survival_target(&[], 180, false), None);
         // A pair with nothing beyond it: the second half is all there is.
         assert_eq!(survival_target(&[12, 13], 12, true), Some(13));
+    }
+
+    fn standard_slots() -> RosterRules {
+        RosterRules::new(
+            &[
+                "QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "DEF", "BN", "BN",
+            ]
+            .iter()
+            .map(|slot| (*slot).to_string())
+            .collect::<Vec<_>>(),
+        )
+    }
+
+    #[test]
+    fn only_the_players_who_would_start_carry_a_bye_clash() {
+        let rules = standard_slots();
+        // A full starting nine, all off in week 9, plus two bench receivers
+        // who are also off in week 9. The lineup loses seven men, not nine.
+        let mut roster: Vec<(&str, Option<u32>)> = vec![
+            ("QB", Some(9)),
+            ("RB", Some(9)),
+            ("RB", Some(9)),
+            ("WR", Some(9)),
+            ("WR", Some(9)),
+            ("TE", Some(9)),
+            ("RB", Some(9)),
+            ("DEF", Some(9)),
+        ];
+        roster.push(("WR", Some(9)));
+        roster.push(("WR", Some(9)));
+        let byes = starter_byes(&rules, roster);
+        assert_eq!(byes.get(&9), Some(&8), "{byes:?}");
+    }
+
+    #[test]
+    fn a_bench_only_bye_is_not_a_lineup_problem() {
+        let rules = standard_slots();
+        // One starter at every slot on a clean week, and three spare backs
+        // all off in week 7. Nothing in the lineup is missing that week.
+        let roster: Vec<(&str, Option<u32>)> = vec![
+            ("QB", Some(5)),
+            ("RB", Some(5)),
+            ("RB", Some(5)),
+            ("WR", Some(5)),
+            ("WR", Some(5)),
+            ("TE", Some(5)),
+            ("DEF", Some(5)),
+            ("WR", Some(5)),
+            ("RB", Some(7)),
+            ("RB", Some(7)),
+            ("WR", Some(7)),
+        ];
+        let byes = starter_byes(&rules, roster);
+        assert_eq!(byes.get(&7), None, "{byes:?}");
+        assert_eq!(byes.get(&5), Some(&8));
+    }
+
+    #[test]
+    fn a_flex_does_not_eat_the_only_body_a_dedicated_slot_needs() {
+        let rules = standard_slots();
+        // The single tight end has to start at TE, not be swallowed by the
+        // FLEX that is listed before... after it — either way the dedicated
+        // slots are filled first, so the FLEX takes the spare back.
+        let roster: Vec<(&str, Option<u32>)> = vec![
+            ("TE", Some(11)),
+            ("RB", Some(3)),
+            ("RB", Some(3)),
+            ("RB", Some(11)),
+        ];
+        let byes = starter_byes(&rules, roster);
+        assert_eq!(byes.get(&11), Some(&2), "{byes:?}");
+        assert_eq!(byes.get(&3), Some(&2));
+    }
+
+    #[test]
+    fn a_player_with_no_known_bye_counts_against_no_week() {
+        let rules = standard_slots();
+        let roster: Vec<(&str, Option<u32>)> = vec![("QB", None), ("RB", Some(6))];
+        let byes = starter_byes(&rules, roster);
+        assert_eq!(byes.len(), 1);
+        assert_eq!(byes.get(&6), Some(&1));
     }
 
     #[test]

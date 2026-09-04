@@ -91,7 +91,12 @@ fn a_big_disagreement_in_the_players_favour_reaches_the_rec_card() {
             .unwrap_or_else(|| panic!("no second-opinion reason in {:?}", rec.reasons));
         assert_eq!(
             *reason,
-            format!("Clay has him {}9 — market is 9 rounds late", rec.position)
+            // The fixture league scores no receptions at all, so the imported
+            // half-PPR ranks are read at half weight and the line says so.
+            format!(
+                "Clay has him {}9 — market is 9 rounds late (half-PPR ranks)",
+                rec.position
+            )
         );
     }
 }

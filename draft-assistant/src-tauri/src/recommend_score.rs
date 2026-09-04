@@ -7,7 +7,15 @@
 
 use super::{Mode, RecommendInputs};
 use crate::board::AvailablePlayer;
+use crate::roster::RosterRules;
 use std::collections::{HashMap, HashSet};
+
+/// A pick-count threshold fitted on a twelve-team league, restated in this
+/// league's picks. Rounded, because a threshold measured in picks that lands
+/// on a fraction of one is a false precision.
+fn league_scaled(ctx: &Context, picks_at_twelve: f64) -> f64 {
+    (picks_at_twelve * ctx.inputs.teams.max(1) as f64 / 12.0).round()
+}
 
 /// A score being built, and what each reason contributed to it.
 pub(crate) struct Score {
@@ -36,9 +44,14 @@ impl Score {
         self.reasons.push((reason.into(), delta));
     }
 
-    /// A move the user does not need explained — it still counts.
-    fn add_silent(&mut self, delta: f64) {
-        self.total += delta;
+    /// What each reason was worth, for the test that the shown reasons and
+    /// the score are the same arithmetic. Nothing may move the total without
+    /// saying so: two terms used to (the early K/DEF veto and safe mode's
+    /// bonus-dependence discount), and a card whose reasons cannot be added
+    /// back up to its score is a card the user cannot audit.
+    #[cfg(test)]
+    pub(crate) fn weights(&self) -> Vec<f64> {
+        self.reasons.iter().map(|(_, delta)| *delta).collect()
     }
 
     /// Biggest mover first. The VORP line leads only when it is the biggest
@@ -137,6 +150,39 @@ fn need(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
     );
 }
 
+/// How many of a position this league actually starts in a slot of its own —
+/// its dedicated slots, plus SUPER_FLEX for a quarterback, which is what a
+/// superflex league *is*. The discipline below caps roster counts against it.
+fn dedicated_starters(rules: &RosterRules, position: &str) -> u32 {
+    rules
+        .slots()
+        .iter()
+        .filter(|slot| {
+            slot.as_str() == position || (position == "QB" && slot.as_str() == "SUPER_FLEX")
+        })
+        .count() as u32
+}
+
+/// How many of a position the league starts once flex slots are shared out —
+/// two RB slots plus a third of a FLEX is 2.33 running backs. Fractional on
+/// purpose: a FLEX is not two-thirds of a running back and one whole one, it
+/// is one body that three positions compete for, and the early-depth term
+/// below has to price a tight end's claim on it the same way it prices a
+/// receiver's.
+fn starting_demand(rules: &RosterRules, position: &str) -> f64 {
+    rules
+        .slots()
+        .iter()
+        .filter(|slot| !RosterRules::is_non_starting(slot))
+        .map(|slot| match RosterRules::flex_eligible(slot) {
+            Some(eligible) if eligible.contains(&position) => 1.0 / eligible.len() as f64,
+            Some(_) => 0.0,
+            None if slot.as_str() == position => 1.0,
+            None => 0.0,
+        })
+        .sum()
+}
+
 /// Positional discipline (fantasy-bot's documented failure modes, fixed):
 /// backups at onesie positions are near-worthless, and a second DEF is
 /// worthless outright. `None` disqualifies the candidate.
@@ -152,7 +198,13 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
             // a short draft or a mock, "two from the end" is a different
             // round every time and an absolute index reads it wrong.
             if ctx.rounds_left > 3 {
-                score.add_silent(-60.0); // never early either
+                score.add(
+                    -60.0,
+                    format!(
+                        "far too early for a {} — {} rounds still to draft",
+                        p.position, ctx.rounds_left
+                    ),
+                );
             } else {
                 score.add(
                     15.0,
@@ -160,20 +212,26 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
                 );
             }
         }
-        "QB" => {
-            if count >= 2 {
+        // The onesie positions — except that whether they are onesies is a
+        // property of the league, not of the position. A superflex league
+        // starts two quarterbacks and a TE-premium league sometimes starts
+        // two tight ends; keying the cap on the number one docked the second
+        // quarterback in a superflex draft twenty-five points for being a
+        // backup, when he was the single largest hole on the roster, and
+        // refused the third outright when he was ordinary depth.
+        "QB" | "TE" => {
+            let starters = dedicated_starters(ctx.inputs.rules, p.position.as_str()).max(1);
+            // One spare beyond what the league starts, and no more.
+            if count > starters {
                 return None;
             }
-            if count == 1 {
-                score.add(-25.0, "backup QB — only at extreme value");
-            }
-        }
-        "TE" => {
-            if count >= 2 {
-                return None; // a third TE is a wasted roster spot
-            }
-            if count == 1 {
-                score.add(-20.0, "backup TE — only at real value");
+            if count == starters {
+                let (penalty, reason) = if p.position == "QB" {
+                    (-25.0, "backup QB — only at extreme value")
+                } else {
+                    (-20.0, "backup TE — only at real value")
+                };
+                score.add(penalty, reason);
             }
         }
         _ => {
@@ -189,17 +247,32 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
                     ),
                 );
             }
-            if count < 3 {
-                score.add(
-                    3.0 * (3 - count) as f64,
-                    format!("thin at {} ({count} rostered)", p.position),
-                );
-            } else if count > 5 {
+            if count > 5 {
                 score.add(
                     -6.0 * (count - 5) as f64,
                     format!("already {count} {}s rostered", p.position),
                 );
             }
+        }
+    }
+
+    // Early depth, priced off what this league actually starts. The term it
+    // replaces was a flat +3 per body short of three, for running backs and
+    // receivers only — so a quarterback and a tight end began every draft
+    // nine points behind, in a scoring system where nine points is the whole
+    // gap between the top two cards, and no part of that head start had
+    // anything to do with the league's roster.
+    if !crate::board::is_late_only(&p.position) {
+        let demand = starting_demand(ctx.inputs.rules, p.position.as_str());
+        let short = (demand - count as f64).max(0.0);
+        if short > 0.05 {
+            score.add(
+                3.0 * short,
+                format!(
+                    "thin at {}: {count} rostered, the league starts {demand:.1}",
+                    p.position
+                ),
+            );
         }
     }
     Some(())
@@ -239,34 +312,57 @@ fn market(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
     let p = &a.player;
     // Classic definition: still available past their ADP = falling value;
     // drafting far ahead of ADP = a reach the market says can probably wait.
+    // Measured at the *market* pick, never the board's own pick number. ADP
+    // counts selections; a keeper is entered hours before anybody is on the
+    // clock and nobody ever selects at its number. With twenty-six keepers in
+    // the book, pick 30 is the fourth name called, and reading it as the
+    // thirtieth said an ADP-12 player had fallen eighteen picks past his
+    // market — a bargain bonus paid on every single card, all night.
+    //
+    // The thresholds themselves are league-sized: "eight picks past ADP" is
+    // two-thirds of a round in a twelve-team league and over four fifths of
+    // one in a ten, and the round is the unit a drafter actually feels.
     if let Some(adp) = p.adp {
-        let past_adp = ctx.inputs.current_pick as f64 - adp;
-        if past_adp > 8.0 {
+        let past_adp = ctx.inputs.market_pick as f64 - adp;
+        let falling = league_scaled(ctx, 8.0);
+        let ahead = league_scaled(ctx, 25.0);
+        if past_adp > falling {
             score.add(
                 5.0,
                 format!("falling: {past_adp:.0} picks past ADP {adp:.0}"),
             );
-        } else if past_adp < -25.0 {
+        } else if past_adp < -ahead {
             score.add(-3.0, format!("ahead of market (ADP {adp:.0})"));
         }
     }
 
     // An imported second opinion, in whichever direction it runs. Built next
     // to the rest of the reasons, in `second_opinion.rs`.
-    if let Some((delta, reason)) = crate::second_opinion::rec_adjustment(p, ctx.inputs.teams) {
+    if let Some((delta, reason)) =
+        crate::second_opinion::rec_adjustment(p, ctx.inputs.teams, ctx.inputs.points_per_reception)
+    {
         score.add(delta, reason);
     }
 
     if mode == Mode::Safe {
-        // Volatile bonus-heavy value is not what safe mode is buying.
-        score.add_silent(-(p.bonus_points / p.points.max(1.0)) * 40.0);
+        // Volatile bonus-heavy value is not what safe mode is buying. Said out
+        // loud: it is worth up to forty points and used to move the card
+        // without ever appearing on it.
+        let dependence = (p.bonus_points / p.points.max(1.0)) * 40.0;
+        if dependence > 0.0 {
+            let share = p.bonus_points / p.points.max(1.0) * 100.0;
+            score.add(
+                -dependence,
+                format!("{share:.0}% of his points are yardage bonuses"),
+            );
+        }
         if let Some(adp) = p.adp {
             // Stay close to market: the reach is how far ahead of his own ADP
             // this pick is, measured at the pick actually being made. The old
             // form compared his ADP with his rank on *this* board, which is a
             // measure of the two boards disagreeing and was signed so that it
             // penalised bargains and never once penalised a reach.
-            let reach = (adp - ctx.inputs.current_pick as f64).max(0.0);
+            let reach = (adp - ctx.inputs.market_pick as f64).max(0.0);
             if reach > 0.0 {
                 score.add(
                     -reach * 0.3,

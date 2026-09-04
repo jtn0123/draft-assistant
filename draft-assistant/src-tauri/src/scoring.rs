@@ -86,6 +86,40 @@ pub fn base_points(stats: &HashMap<String, f64>, scoring: &HashMap<String, f64>)
         .sum()
 }
 
+/// Per-position reception bonuses (`bonus_rec_te`, `bonus_rec_rb`,
+/// `bonus_rec_wr`) — the TE-premium knob, and the one scoring key a dot
+/// product structurally cannot see. It is a *scoring* key with no stat of the
+/// same name, so `base_points` walks the projected stat line, never finds
+/// anything called `bonus_rec_te`, and a league paying half a point extra per
+/// tight-end catch scored its tight ends exactly like a standard league did.
+/// The bonus is per reception, so it is `rec` times the weight, and only for
+/// players at that position.
+pub fn position_reception_bonus(
+    stats: &HashMap<String, f64>,
+    scoring: &HashMap<String, f64>,
+    position: &str,
+) -> f64 {
+    if position.is_empty() {
+        return 0.0;
+    }
+    let key = format!("bonus_rec_{}", position.to_ascii_lowercase());
+    let Some(&per_catch) = scoring.get(&key) else {
+        return 0.0;
+    };
+    per_catch * stats.get("rec").copied().unwrap_or(0.0)
+}
+
+/// `base_points` for a player whose position is known, so the per-position
+/// reception bonus counts. Callers that have no position call `base_points`
+/// and get the dot product alone.
+pub fn base_points_for(
+    stats: &HashMap<String, f64>,
+    scoring: &HashMap<String, f64>,
+    position: &str,
+) -> f64 {
+    base_points(stats, scoring) + position_reception_bonus(stats, scoring, position)
+}
+
 /// Expected season points from per-game yardage bonuses, computed from weekly
 /// per-game projected means. `weekly_stats` is one entry per projected game.
 pub fn bonus_points(weekly_stats: &[&HashMap<String, f64>], scoring: &HashMap<String, f64>) -> f64 {
@@ -153,6 +187,35 @@ mod tests {
         );
         assert!(b_small < 0.2, "expected ~0 for 30yd mean, got {b_small}");
         assert!(b_big < 4.0, "cannot exceed max bonus, got {b_big}");
+    }
+
+    #[test]
+    fn te_premium_pays_per_catch_and_only_the_premium_position() {
+        // A TE-premium league: half a point per tight-end reception on top of
+        // the PPR point everyone gets. Ninety catches is 45 points, and it is
+        // the whole difference between a premium TE and a standard one.
+        let mut scoring = scoring_fixture();
+        scoring.insert("bonus_rec_te".into(), 0.5);
+        let stats: HashMap<String, f64> =
+            HashMap::from([("rec".into(), 90.0), ("rec_yd".into(), 1000.0)]);
+        let plain = base_points(&stats, &scoring);
+        let te = base_points_for(&stats, &scoring, "TE");
+        assert!((te - plain - 45.0).abs() < 1e-9, "{te} vs {plain}");
+        // A wide receiver in the same league gets nothing from it.
+        assert!((base_points_for(&stats, &scoring, "WR") - plain).abs() < 1e-9);
+        // And a league without the key pays no premium to anyone.
+        let flat = base_points_for(&stats, &scoring_fixture(), "TE");
+        assert!((flat - plain).abs() < 1e-9);
+    }
+
+    #[test]
+    fn per_position_reception_bonus_needs_a_position() {
+        let mut scoring = scoring_fixture();
+        scoring.insert("bonus_rec_rb".into(), 0.25);
+        let stats: HashMap<String, f64> = HashMap::from([("rec".into(), 60.0)]);
+        assert!((position_reception_bonus(&stats, &scoring, "RB") - 15.0).abs() < 1e-9);
+        assert_eq!(position_reception_bonus(&stats, &scoring, ""), 0.0);
+        assert_eq!(position_reception_bonus(&stats, &scoring, "TE"), 0.0);
     }
 
     #[test]

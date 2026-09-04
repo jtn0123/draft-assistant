@@ -65,10 +65,14 @@ pub const ONESIE_RANK_DISCOUNT: f64 = 12.0;
 /// Spread of a player's weekly projections around their own mean, as a
 /// coefficient of variation. Bye weeks and any other blank week are left out;
 /// under four scoring weeks is too little to measure and reads as no signal.
-fn weekly_cv(weeks: &[&HashMap<String, f64>], scoring: &HashMap<String, f64>) -> Option<f64> {
+fn weekly_cv(
+    weeks: &[&HashMap<String, f64>],
+    scoring: &HashMap<String, f64>,
+    position: &str,
+) -> Option<f64> {
     let points: Vec<f64> = weeks
         .iter()
-        .map(|week| scoring::base_points(week, scoring))
+        .map(|week| scoring::base_points_for(week, scoring, position))
         .filter(|p| *p > 0.0)
         .collect();
     if points.len() < 4 {
@@ -122,6 +126,39 @@ pub fn adp_key(league: &League) -> &'static str {
     }
 }
 
+/// Sleeper publishes four ADP columns and they are not the same number: in a
+/// superflex league `adp_2qb` puts quarterbacks a round and a half ahead of
+/// where `adp_ppr` has them, and in a standard league receivers sit a round
+/// behind. A per-row fallback straight to `adp_ppr` therefore built a board
+/// where most players were priced in the league's own market and a scattered
+/// minority were priced in somebody else's — invisible, and worse than no ADP
+/// at all, because every downstream reader (survival, the reach discipline,
+/// the falling-value bonus) compares those numbers with each other.
+///
+/// So the fallback is put on the league's scale first: the median ratio
+/// between the two columns across every row that carries both. Identity when
+/// the league already drafts on `adp_ppr`, and identity when too few rows
+/// overlap to measure a ratio at all.
+fn adp_fallback_scale(rows: &[ProjectionRow], adp_key: &str) -> f64 {
+    if adp_key == "adp_ppr" {
+        return 1.0;
+    }
+    let usable = |adp: f64| adp > 0.0 && adp < 500.0;
+    let mut ratios: Vec<f64> = rows
+        .iter()
+        .filter_map(|row| {
+            let league = row.stat(adp_key).filter(|&a| usable(a))?;
+            let ppr = row.stat("adp_ppr").filter(|&a| usable(a))?;
+            Some(league / ppr)
+        })
+        .collect();
+    if ratios.len() < 20 {
+        return 1.0;
+    }
+    ratios.sort_by(f64::total_cmp);
+    ratios[ratios.len() / 2]
+}
+
 pub fn build_board(
     league: &League,
     _draft: &Draft,
@@ -133,6 +170,8 @@ pub fn build_board(
 ) -> BoardBuild {
     let scoring_map = &league.scoring_settings;
     let adp_key = adp_key(league);
+    let adp_scale = adp_fallback_scale(season_rows, adp_key);
+    let mut adp_borrowed = 0usize;
 
     // Positions this league actually rosters (K excluded automatically for
     // this league because there is no K slot).
@@ -230,7 +269,7 @@ pub fn build_board(
             .filter(|full| !full.trim().is_empty())
             .or_else(joined_name)
             .unwrap_or_else(|| row.player_id.clone());
-        let base = scoring::base_points(stats, scoring_map);
+        let base = scoring::base_points_for(stats, scoring_map, &position);
         let bonus = weekly_by_player
             .get(row.player_id.as_str())
             .map(|weeks| scoring::bonus_points(weeks, scoring_map))
@@ -256,8 +295,15 @@ pub fn build_board(
             overall_rank: 0,
             adp: row
                 .stat(adp_key)
-                .or_else(|| row.stat("adp_ppr"))
-                .filter(|&a| a > 0.0 && a < 500.0),
+                .filter(|&a| a > 0.0 && a < 500.0)
+                .or_else(|| {
+                    let borrowed = row
+                        .stat("adp_ppr")
+                        .filter(|&a| a > 0.0 && a < 500.0)
+                        .map(|ppr| ppr * adp_scale);
+                    adp_borrowed += usize::from(borrowed.is_some());
+                    borrowed
+                }),
             injury_status: player_meta
                 .get(&row.player_id)
                 .and_then(|m| m.injury_status.clone()),
@@ -265,8 +311,18 @@ pub fn build_board(
             second_opinion: None,
             weekly_cv: weekly_by_player
                 .get(row.player_id.as_str())
-                .and_then(|weeks| weekly_cv(weeks, scoring_map)),
+                .and_then(|weeks| weekly_cv(weeks, scoring_map, &position)),
         });
+    }
+
+    // Said out loud, because a board where some ADPs came off another column
+    // is a board whose market numbers are only as good as one median ratio.
+    // Silent when the ratio came out at one: nothing was actually restated,
+    // and a warning about a no-op is a warning the user learns to skip.
+    if adp_borrowed > 0 && (adp_scale - 1.0).abs() > 0.01 {
+        warnings.push(format!(
+            "{adp_borrowed} players have no {adp_key} ADP; theirs is PPR ADP rescaled by {adp_scale:.2}"
+        ));
     }
 
     if scored.is_empty() {
@@ -372,3 +428,7 @@ pub fn tier_alerts(available: &[AvailablePlayer], positions: Vec<String>) -> Vec
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "board_tests.rs"]
+mod tests;

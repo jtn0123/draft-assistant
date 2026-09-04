@@ -244,8 +244,10 @@ fn survival_is_judged_against_real_picks_not_keeper_slots() {
     assert_eq!(clean.draft.my_next_picks.first().copied(), Some(1));
     assert_eq!(clean.draft.my_next_picks.get(1).copied(), Some(8));
     // Pinned against the model itself, so no-keeper behaviour provably has
-    // not moved: pick 8 of the board is still position 8 of the market.
-    let pinned = draft_assistant_lib::draft::survival_probability(7.0, 8);
+    // not moved: pick 8 of the board is still position 8 of the market. Read
+    // at this league's own size, because the spread is a count of rounds and
+    // this fixture league is four teams, not the twelve it was fitted on.
+    let pinned = draft_assistant_lib::draft::survival_probability_in(7.0, 8, 4);
     assert!((survival_of(&clean, "q2") - pinned).abs() < 1e-12);
 
     // Now the same league with picks 2..=7 already in the book as keepers.
@@ -261,7 +263,7 @@ fn survival_is_judged_against_real_picks_not_keeper_slots() {
     assert_eq!(kept.draft.my_next_picks.get(1).copied(), Some(8));
     assert_eq!(
         survival_of(&kept, "q2"),
-        draft_assistant_lib::draft::survival_probability(7.0, 2)
+        draft_assistant_lib::draft::survival_probability_in(7.0, 2, 4)
     );
     // Six market positions of difference, read off a curve whose spread is
     // the ~20-40 picks the app's own draft actually showed: a real move, but

@@ -10,6 +10,7 @@
 //! exclusion cases below pin.
 
 use super::*;
+use crate::recommend::HALF_PPR;
 
 fn sample() -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -380,44 +381,83 @@ fn with_opinion(board_rank: u32, csv_rank: u32, adp: Option<f64>) -> BoardPlayer
 #[test]
 fn the_adjustment_runs_both_ways_and_scales_with_the_gap() {
     // Board WR21, Clay WR9: twelve spots the user's way, so a bump up.
-    let (delta, reason) = rec_adjustment(&with_opinion(21, 9, None), 12).expect("an adjustment");
+    let (delta, reason) =
+        rec_adjustment(&with_opinion(21, 9, None), 12, HALF_PPR).expect("an adjustment");
     assert!(reason.starts_with("Clay has him WR9"), "{reason}");
     assert!(reason.contains("this board has him WR21"), "{reason}");
     assert!((delta - 3.0).abs() < 1e-9, "{delta}");
 
     // The other direction is a warning, not silence: Clay has him thirty-odd
     // places behind where this board does.
-    let (delta, reason) = rec_adjustment(&with_opinion(9, 41, None), 12).expect("an adjustment");
+    let (delta, reason) =
+        rec_adjustment(&with_opinion(9, 41, None), 12, HALF_PPR).expect("an adjustment");
     assert!((delta + 8.0).abs() < 1e-9, "capped at -8: {delta}");
     assert!(reason.contains("behind this board's WR9"), "{reason}");
 
     // Bigger disagreement, bigger adjustment — up to the cap.
-    let small = rec_adjustment(&with_opinion(21, 9, None), 12).expect("a").0;
-    let large = rec_adjustment(&with_opinion(45, 9, None), 12).expect("a").0;
+    let small = rec_adjustment(&with_opinion(21, 9, None), 12, HALF_PPR)
+        .expect("a")
+        .0;
+    let large = rec_adjustment(&with_opinion(45, 9, None), 12, HALF_PPR)
+        .expect("a")
+        .0;
     assert!(large > small, "{large} vs {small}");
     assert!(large <= 8.0, "capped at +8: {large}");
 
     // A small disagreement is noise, whichever way it points.
-    assert!(rec_adjustment(&with_opinion(14, 9, None), 12).is_none());
-    assert!(rec_adjustment(&with_opinion(9, 14, None), 12).is_none());
+    assert!(rec_adjustment(&with_opinion(14, 9, None), 12, HALF_PPR).is_none());
+    assert!(rec_adjustment(&with_opinion(9, 14, None), 12, HALF_PPR).is_none());
     // A player with nothing imported says nothing.
-    assert!(rec_adjustment(&board_player("Someone", "WR", None, 21), 12).is_none());
+    assert!(rec_adjustment(&board_player("Someone", "WR", None, 21), 12, HALF_PPR).is_none());
+}
+
+#[test]
+fn ranks_built_for_another_format_are_worth_half_and_say_so() {
+    // The imported file's ranks are half-PPR. In a standard league a
+    // possession receiver is a different player at the same name, and in full
+    // PPR so is a pass-catching back — the file is still worth reading, but
+    // not at face value, and the card has to admit which ruler it used.
+    let half = rec_adjustment(&with_opinion(21, 9, None), 12, HALF_PPR).expect("a");
+    for format in [0.0, 1.0] {
+        let (delta, reason) = rec_adjustment(&with_opinion(21, 9, None), 12, format)
+            .unwrap_or_else(|| panic!("no adjustment at {format} per catch"));
+        assert!((delta - half.0 / 2.0).abs() < 1e-9, "{format}: {delta}");
+        assert!(reason.ends_with(" (half-PPR ranks)"), "{format}: {reason}");
+    }
+    // Half PPR itself is untouched, caveat and all.
+    assert!(!half.1.contains("half-PPR ranks"), "{}", half.1);
+    // The caveat rides on every one of the three lines, market lag included.
+    let (_, reason) = rec_adjustment(&with_opinion(21, 9, Some(58.0)), 12, 1.0).expect("a");
+    assert_eq!(
+        reason,
+        "Clay has him WR9 — market is 3 rounds late (half-PPR ranks)"
+    );
+    let (_, reason) = rec_adjustment(&with_opinion(9, 41, None), 12, 0.0).expect("a");
+    assert!(reason.ends_with(" (half-PPR ranks)"), "{reason}");
+    // The band is around half a point, not exactly it: a league paying 0.4
+    // is a half-PPR league by any reading that matters.
+    let (_, reason) = rec_adjustment(&with_opinion(21, 9, None), 12, 0.4).expect("a");
+    assert!(!reason.contains("half-PPR ranks"), "{reason}");
 }
 
 #[test]
 fn the_reason_counts_the_market_lag_in_rounds_when_there_is_an_adp() {
     // Clay's overall rank 22, ADP 58, twelve-team league: three rounds late.
-    let (_, reason) = rec_adjustment(&with_opinion(21, 9, Some(58.0)), 12).expect("a reason");
+    let (_, reason) =
+        rec_adjustment(&with_opinion(21, 9, Some(58.0)), 12, HALF_PPR).expect("a reason");
     assert_eq!(reason, "Clay has him WR9 — market is 3 rounds late");
     // One round reads as one round, not "1 rounds".
-    let (_, reason) = rec_adjustment(&with_opinion(21, 9, Some(36.0)), 12).expect("a reason");
+    let (_, reason) =
+        rec_adjustment(&with_opinion(21, 9, Some(36.0)), 12, HALF_PPR).expect("a reason");
     assert_eq!(reason, "Clay has him WR9 — market is 1 round late");
     // An ADP that is ahead of the source falls back to the plain comparison.
-    let (_, reason) = rec_adjustment(&with_opinion(21, 9, Some(10.0)), 12).expect("a reason");
+    let (_, reason) =
+        rec_adjustment(&with_opinion(21, 9, Some(10.0)), 12, HALF_PPR).expect("a reason");
     assert!(reason.contains("this board has him WR21"), "{reason}");
     // The market-lag line belongs to the direction that earns it: a source
     // that is *down* on the player never reads as the market being late.
-    let (_, reason) = rec_adjustment(&with_opinion(9, 41, Some(58.0)), 12).expect("a reason");
+    let (_, reason) =
+        rec_adjustment(&with_opinion(9, 41, Some(58.0)), 12, HALF_PPR).expect("a reason");
     assert!(!reason.contains("late"), "{reason}");
 }
 

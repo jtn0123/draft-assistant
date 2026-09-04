@@ -36,6 +36,11 @@ pub struct Recommendation {
     pub reasons: Vec<String>,
 }
 
+/// The reception value the imported second opinion's own ranks are built on.
+/// The default for a caller that has no league scoring to hand, because at
+/// this value the second opinion needs no discount at all.
+pub const HALF_PPR: f64 = 0.5;
+
 /// The three readings of the board, in the order the panel lays them out.
 pub const MODES: [&str; 3] = ["balanced", "safe", "upside"];
 
@@ -67,9 +72,22 @@ pub struct RecommendInputs<'a> {
     pub current_round: u32,
     pub total_rounds: u32,
     pub current_pick: u32,
+    /// Where `current_pick` sits in the market an ADP is measured in — the
+    /// count of selections, not of pick numbers. Every comparison against an
+    /// ADP has to be made here rather than at `current_pick`: a keeper league
+    /// enters twenty-six picks before anybody is on the clock, and reading
+    /// pick 30 as market position 30 told the recommender that an ADP-12
+    /// player had fallen eighteen picks when four names had been called.
+    /// Equal to `current_pick` in a league with no keepers.
+    pub market_pick: u32,
     /// League size, so the imported second opinion can say how many rounds
-    /// late the market is rather than how many picks.
+    /// late the market is rather than how many picks, and so the pick
+    /// thresholds that used to assume twelve teams scale with the real one.
     pub teams: u32,
+    /// What this league pays for a catch. The imported second opinion's ranks
+    /// are half-PPR; how far to trust them depends on how far the league is
+    /// from that.
+    pub points_per_reception: f64,
     /// The run under way, if any: four of a position in the last six picks.
     pub position_run: Option<&'a PositionRun>,
     /// Bye week -> how many of my starters already have it. Built by the
@@ -102,7 +120,9 @@ impl<'a> RecommendInputs<'a> {
             current_round,
             total_rounds,
             current_pick,
+            market_pick: current_pick,
             teams,
+            points_per_reception: HALF_PPR,
             position_run: None,
             my_byes: &NO_BYES,
             pre_draft: false,
@@ -246,3 +266,7 @@ mod tests;
 #[cfg(test)]
 #[path = "recommend_mode_tests.rs"]
 mod mode_tests;
+
+#[cfg(test)]
+#[path = "recommend_league_tests.rs"]
+mod league_tests;

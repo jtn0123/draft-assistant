@@ -110,11 +110,28 @@ pub struct TeamRoster {
 /// `market_pick` of the overall pick, never the overall pick itself — in a
 /// league with no keepers the two are the same number.
 pub fn survival_probability(adp: f64, at_pick: u32) -> f64 {
+    survival_probability_in(adp, at_pick, TWELVE_TEAM)
+}
+
+/// The league size the spread above was fitted on.
+pub const TWELVE_TEAM: u32 = 12;
+
+/// `survival_probability` in a league that is not twelve teams.
+///
+/// The 18-35 pick clamp is a *round* count wearing pick clothing: a pick and a
+/// half at the bottom and just under three rounds at the top, of a twelve-team
+/// round. In a ten-team league those same numbers are wider in rounds than
+/// they were fitted to be and every player reads as likelier to last; in a
+/// fourteen they are narrower and the board reads as picked over. Scaled by
+/// the real league size, the band means the same thing everywhere, and it is
+/// rounds, not raw pick counts, that a drafter waits through.
+pub fn survival_probability_in(adp: f64, at_pick: u32, teams: u32) -> f64 {
     if adp <= 0.0 || adp >= 500.0 {
         // No real ADP signal — assume safe.
         return 0.99;
     }
-    let sigma = (0.35 * adp).clamp(18.0, 35.0);
+    let size = teams.max(1) as f64 / TWELVE_TEAM as f64;
+    let sigma = (0.35 * adp).clamp((18.0 * size).round(), (35.0 * size).round());
     let z = (at_pick as f64 - adp) / sigma;
     (1.0 - crate::scoring::norm_cdf(z)).clamp(0.01, 0.99)
 }
@@ -296,6 +313,39 @@ mod tests {
                 "adp {adp} crosses 16% at pick {one_sigma}"
             );
         }
+    }
+
+    #[test]
+    fn the_spread_is_measured_in_rounds_not_in_twelve_team_picks() {
+        // The fitted band is 18-35 picks of a twelve-team round. Held fixed,
+        // it is nearly three rounds of a ten-team league at the top and barely
+        // two of a fourteen — the same clamp saying two different things.
+        // Scaled, the one-sigma point sits the same number of *rounds* past
+        // ADP whatever the league size is.
+        let rounds_to_one_sigma = |adp: f64, teams: u32| {
+            let pick = (1..500)
+                .find(|&pick| survival_probability_in(adp, pick, teams) < 0.159)
+                .expect("the curve crosses 16% somewhere") as f64;
+            (pick - adp) / teams as f64
+        };
+        for adp in [3.0, 12.0, 180.0] {
+            let ten = rounds_to_one_sigma(adp, 10);
+            let fourteen = rounds_to_one_sigma(adp, 14);
+            assert!(
+                (ten - fourteen).abs() < 0.2,
+                "adp {adp}: {ten} rounds at ten teams vs {fourteen} at fourteen"
+            );
+        }
+        // Twelve teams is exactly what it always was.
+        assert_eq!(
+            survival_probability_in(20.0, 27, 12),
+            survival_probability(20.0, 27)
+        );
+        // In picks, the band moves the other way, and that is the point: a
+        // ten-team round is ten picks, so the same round and a half of spread
+        // is fifteen picks rather than eighteen, and pick 30 is already deep
+        // into round three there.
+        assert!(survival_probability_in(12.0, 30, 10) < survival_probability_in(12.0, 30, 14));
     }
 
     #[test]

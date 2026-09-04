@@ -174,8 +174,10 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             .iter()
             .filter(|p| !taken.contains(p.player_id.as_str()))
             .map(|p| AvailablePlayer {
-                survival_next: survival_market_pick
-                    .and_then(|pick| p.adp.map(|adp| draft::survival_probability(adp, pick))),
+                survival_next: survival_market_pick.and_then(|pick| {
+                    p.adp
+                        .map(|adp| draft::survival_probability_in(adp, pick, teams))
+                }),
                 player: p.clone(),
             }),
     );
@@ -200,21 +202,25 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
     // Byes already stacked on my starters: which week, and how many of them.
     // Only the recommender can price this, and only the view can look a
-    // rostered player's bye week up on the board.
-    let mut my_byes: HashMap<u32, u32> = HashMap::new();
-    for player in my_roster.iter().flat_map(|roster| roster.players.iter()) {
-        if crate::board::is_late_only(&player.position) {
-            continue; // a kicker's bye is not a lineup problem
-        }
-        let bye = loaded
-            .board_index
-            .get(&player.player_id)
-            .and_then(|i| loaded.board.get(*i))
-            .and_then(|p| p.bye_week);
-        if let Some(bye) = bye {
-            *my_byes.entry(bye).or_insert(0) += 1;
-        }
-    }
+    // rostered player's bye week up on the board. Which of them start is
+    // `starter_byes`' problem — the count used to be of the whole roster,
+    // under a reason line that said "starters".
+    let my_bye_roster: Vec<(&str, Option<u32>)> = my_roster
+        .iter()
+        .flat_map(|roster| roster.players.iter())
+        // A kicker's or a defence's bye is a waiver-wire errand, not a
+        // lineup problem, so neither is worth pricing a candidate over.
+        .filter(|player| !crate::board::is_late_only(&player.position))
+        .map(|player| {
+            let bye = loaded
+                .board_index
+                .get(&player.player_id)
+                .and_then(|i| loaded.board.get(*i))
+                .and_then(|p| p.bye_week);
+            (player.position.as_str(), bye)
+        })
+        .collect();
+    let my_byes = crate::view_signals::starter_byes(&loaded.roster_rules, my_bye_roster);
     let recommendations = recommend(&RecommendInputs {
         available: &available,
         my_roster: my_roster.as_ref(),
@@ -222,7 +228,9 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         current_round,
         total_rounds: rounds,
         current_pick,
+        market_pick: draft::market_pick(current_pick, &keepers),
         teams,
+        points_per_reception: league.scoring_settings.get("rec").copied().unwrap_or(0.0),
         position_run: position_run.as_ref(),
         my_byes: &my_byes,
         pre_draft: draft.status == "pre_draft",
