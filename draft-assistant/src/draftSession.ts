@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { stableAvailable } from "./boardIdentity";
-import { platformOf } from "./leagues";
+import { platformName, platformOf } from "./leagues";
 import { problem } from "./format";
 import type { DraftView, PollHealth, StoredLeague } from "./types";
 
@@ -23,7 +23,7 @@ export interface DraftSession {
   view: DraftView | null;
   /** Take a freshly returned view as the current one. */
   applyView: (next: DraftView) => void;
-  /** Whether the backend is polling Sleeper. */
+  /** Whether the backend is polling the league's platform. */
   polling: boolean;
   /** How the backend poller's last attempt went, or null before the first. */
   pollHealth: PollHealth | null;
@@ -44,12 +44,17 @@ export interface DraftSession {
   setShowSetup: (show: boolean) => void;
   /** Try the restore again after a failure. */
   retry: () => void;
-  /** Turn the backend's Sleeper poller on. False when it would not start —
+  /** Turn the backend's poller on. False when it would not start —
    *  the toast has already said so, and nothing else should claim success. */
   startLive: () => Promise<boolean>;
   togglePolling: () => Promise<void>;
   /** Take back the last manually recorded pick. */
   undoLastPick: () => Promise<void>;
+  /** Ask for the draft's picks again right now, without waiting for the next
+   *  poll — the button beside the sync pill. */
+  refreshPicks: () => Promise<void>;
+  /** True while that re-pull is out. */
+  pullingPicks: boolean;
   /** Write the whole view out as JSON, and say where it went. */
   exportState: () => Promise<void>;
   switchLeague: (leagueId: string) => Promise<void>;
@@ -88,6 +93,7 @@ export function useDraftSession(
   // back does not mean going to find an ID again.
   const [leagues, setLeagues] = useState<StoredLeague[]>([]);
   const [hasAccount, setHasAccount] = useState(false);
+  const [pullingPicks, setPullingPicks] = useState(false);
 
   // Held in a ref so a caller that hands us a fresh closure on every render
   // cannot, by itself, re-run the restore below — `startLive` is one of its
@@ -96,6 +102,10 @@ export function useDraftSession(
   useEffect(() => {
     showToastRef.current = showToast;
   }, [showToast]);
+
+  // Which service the toasts should name. The view knows once there is one;
+  // before that the league being restored does, from the shape of its id.
+  const service = platformName(view?.league.platform ?? restoring?.platform ?? "sleeper");
 
   const applyView = useCallback((next: DraftView) => {
     // Hand the board back the array it has already sorted when the new view
@@ -196,7 +206,7 @@ export function useDraftSession(
         await api.stopPolling();
         setPolling(false);
       } else if (await startLive()) {
-        showToast("Live sync on — polling Sleeper every 3s");
+        showToast(`Live sync on — polling ${service} every 3s`);
       }
     } catch (e) {
       showToast(problem("Could not change live sync", e), () => void togglePolling());
@@ -209,6 +219,20 @@ export function useDraftSession(
       showToast("Last recorded pick undone");
     } catch (e) {
       showToast(problem("Could not undo the last recorded pick", e), () => void undoLastPick());
+    }
+  };
+
+  const refreshPicks = async () => {
+    if (pullingPicks) return;
+    setPullingPicks(true);
+    try {
+      const next = await api.refreshPicks();
+      applyView(next);
+      showToast(`Picks re-pulled from ${service} — ${next.draft.total_picks_made} in`);
+    } catch (e) {
+      showToast(problem("Could not re-pull the picks", e), () => void refreshPicks());
+    } finally {
+      setPullingPicks(false);
     }
   };
 
@@ -227,6 +251,7 @@ export function useDraftSession(
   // picks over the new view on its way out.
   const switchLeague = async (leagueId: string) => {
     setBusy(true);
+    const wasPolling = polling;
     try {
       if (polling) {
         await api.stopPolling();
@@ -243,6 +268,10 @@ export function useDraftSession(
         showToast(`Switched to ${next.league.name} — the last league is still in the list`);
       }
     } catch (e) {
+      // The league on screen is still the old one, and its poller was stopped
+      // on the way into a switch that never happened. Put it back before
+      // saying anything, or the board silently stops moving mid-draft.
+      if (wasPolling) await startLive();
       showToast(problem("Could not switch leagues", e), () => void switchLeague(leagueId));
     } finally {
       setBusy(false);
@@ -305,6 +334,8 @@ export function useDraftSession(
     startLive,
     togglePolling,
     undoLastPick,
+    refreshPicks,
+    pullingPicks,
     exportState,
     switchLeague,
     forgetLeague,

@@ -23,6 +23,22 @@ describe("SidePanel", () => {
     expect(screen.queryByText("Won't last to 2.13")).not.toBeInTheDocument();
   });
 
+  it("counts a back-to-back snake turn as one window, as the backend does", () => {
+    const view = fixture();
+    view.draft.teams = 12;
+    view.draft.current_pick = 12;
+    view.draft.is_my_pick = true;
+    // The turn at the end of round one: picks 12 and 13 are the same window,
+    // with nobody picking in between. Pricing survival against 13 said
+    // everyone survives, which read the board's most dangerous moment as its
+    // safest — `view_signals::survival_target` picks 36, and so must this.
+    view.draft.my_next_picks = [12, 13, 36, 37];
+
+    render(<SidePanel view={view} />);
+    expect(screen.getByText("Won't last to 3.12")).toBeInTheDocument();
+    expect(screen.queryByText("Won't last to 2.01")).not.toBeInTheDocument();
+  });
+
   it("uses the upcoming pick when it is not my turn", () => {
     const view = fixture();
     view.draft.teams = 14;

@@ -58,6 +58,25 @@ function SyncPill({
   );
 }
 
+function RepullIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M11.8 6.2a4.9 4.9 0 1 0-.5 3.4" />
+      <path d="M11.9 2.6v3.6H8.3" />
+    </svg>
+  );
+}
+
 function UndoIcon() {
   return (
     <svg
@@ -127,6 +146,8 @@ export function Header({
   onScreen,
   polling,
   pollHealth,
+  onRefreshPicks,
+  refreshingPicks,
   onUndo,
   chatOpen,
   onToggleChat,
@@ -144,6 +165,11 @@ export function Header({
   onScreen: (screen: Screen) => void;
   polling: boolean;
   pollHealth: PollHealth | null;
+  /** Ask the backend for the picks again now. Live sync gets there on its own
+   *  every few seconds; this is for the moment somebody is waiting on it. */
+  onRefreshPicks: () => void;
+  /** True while that re-pull is out, so it cannot be asked for twice. */
+  refreshingPicks: boolean;
   onUndo: () => void;
   chatOpen: boolean;
   onToggleChat: () => void;
@@ -281,6 +307,16 @@ export function Header({
 
         {screen === "draft" && (
           <>
+            <button
+              type="button"
+              className="btn-ghost btn-icon"
+              onClick={onRefreshPicks}
+              disabled={refreshingPicks}
+              title="Ask for the draft's picks again now"
+            >
+              <RepullIcon />
+              <span>{refreshingPicks ? "Pulling…" : "Re-pull picks"}</span>
+            </button>
             <button
               type="button"
               className="btn-ghost btn-icon"

@@ -1,4 +1,5 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { api } from "./api";
 import { setAvatarMode, useAvatarMode } from "./avatars";
 import { playChime } from "./chime";
@@ -7,6 +8,7 @@ import { setChime, setScreen, useChime, useScreen } from "./prefs";
 import { importNote, importSecondOpinion } from "./secondOpinionImport";
 import { useSeasonSession } from "./session";
 import type { SeasonView } from "./season-types";
+import type { DraftView } from "./types";
 import { Header, type SettingsRow } from "./components/Header";
 import { Chat, DraftScreen, ScreenFallback, SeasonScreen } from "./components/lazyScreens";
 import { LaunchScreen, Setup } from "./components/Panels";
@@ -15,6 +17,7 @@ import { YahooConnect } from "./components/YahooConnect";
 import { ConfirmDialog, Toast } from "./components/Overlays";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ordinal, pickLabel, age, problem, scoringFormat } from "./format";
+import { platformName } from "./leagues";
 import { cycleThemePreference, useAppliedTheme } from "./theme";
 import { useYahooStatus, yahooNote } from "./yahoo";
 // Only the sheets the shell itself paints with. The screen-specific ones are
@@ -29,6 +32,33 @@ import "./zoom.css";
 import "./yahoo.css";
 
 type Confirm = { playerId: string; name: string } | null;
+
+/** What the browser preview shows: it has no Tauri shell to ask, so this is
+ *  kept in step with package.json and tauri.conf.json by hand. */
+const PREVIEW_VERSION = "0.2.0";
+
+/** The running app's version, from the shell that knows it. */
+function useAppVersion(): string {
+  const [version, setVersion] = useState(PREVIEW_VERSION);
+  useEffect(() => {
+    let cancelled = false;
+    // Wrapped rather than called straight: outside Tauri this throws as it is
+    // called, not as it settles, and the preview must simply keep the
+    // fallback rather than take an unhandled rejection.
+    void (async () => {
+      try {
+        const running = await getVersion();
+        if (!cancelled) setVersion(running);
+      } catch {
+        // Not in the shell; PREVIEW_VERSION stands.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return version;
+}
 
 /** A line under the header. `retry` marks it as something gone wrong that the
  * user can have another go at — and that should wait for them. */
@@ -90,6 +120,8 @@ export default function App() {
     startLive,
     togglePolling,
     undoLastPick,
+    refreshPicks,
+    pullingPicks,
     exportState,
     switchLeague,
     forgetLeague,
@@ -110,6 +142,7 @@ export default function App() {
   // Asked once for the settings row and the picker's Yahoo lookup; the
   // connect dialog hands back every newer answer it is given.
   const yahoo = useYahooStatus();
+  const appVersion = useAppVersion();
 
   // Chime when the clock reaches you — the one moment worth interrupting for.
   useEffect(() => {
@@ -137,17 +170,52 @@ export default function App() {
 
   // ---------- screens without a league ----------
 
+  // A league has been loaded: leave the setup screen behind and go live on it.
+  const enterLeague = (loaded: DraftView) => {
+    applyView(loaded);
+    setShowSetup(false);
+    void refreshLeagues();
+    void startLive();
+  };
+
+  // The Yahoo dialog hands back an id, not a view, so this is the half the
+  // Sleeper form does for itself.
+  const loadLeague = async (leagueId: string) => {
+    try {
+      enterLeague(await api.addLeague(leagueId));
+    } catch (e) {
+      showToast(problem("Could not load that league", e), () => void loadLeague(leagueId));
+    }
+  };
+
   if (showSetup) {
     return (
       <div className="app">
-        <Setup
-          onReady={(v) => {
-            applyView(v);
-            setShowSetup(false);
-            void refreshLeagues();
-            void startLive();
-          }}
-        />
+        <Setup onReady={enterLeague} onConnectYahoo={() => setYahooOpen(true)} />
+        {toast !== null && (
+          <Toast
+            message={toast.text}
+            action={
+              toast.retry === undefined ? undefined : { label: "Try again", onClick: toast.retry }
+            }
+            onDismiss={() => setToast(null)}
+          />
+        )}
+        {yahooOpen && (
+          // The same dialog the settings menu opens, which already knows how
+          // to log in and list the account's leagues. Nothing here is on
+          // screen yet, so the league it picks is loaded rather than switched.
+          <YahooConnect
+            activeId={null}
+            busy={busy}
+            onSwitch={(id) => {
+              setYahooOpen(false);
+              void loadLeague(id);
+            }}
+            onStatus={yahoo.setStatus}
+            onClose={() => setYahooOpen(false)}
+          />
+        )}
       </div>
     );
   }
@@ -158,6 +226,7 @@ export default function App() {
         <LaunchScreen
           leagueName={restoring === null || restoring.name === "" ? null : restoring.name}
           leagueId={restoring?.league_id ?? null}
+          platform={restoring?.platform ?? "sleeper"}
           attempt={attempt}
           maxAttempts={MAX_RECONNECT_ATTEMPTS}
           lastError={busy ? null : launchError}
@@ -190,7 +259,7 @@ export default function App() {
       label: "Live sync",
       note: polling
         ? `Last sync ${age(pollHealth?.last_success_at ?? null)}`
-        : "Not polling Sleeper",
+        : `Not polling ${platformName(view.league.platform)}`,
       value: polling ? "On" : "Off",
       on: polling,
       onSelect: () => void togglePolling(),
@@ -272,6 +341,14 @@ export default function App() {
       // system -> light -> dark -> back to system
       onSelect: cycleThemePreference,
     },
+    {
+      label: "Version",
+      note: "Draft Assistant",
+      value: `v${appVersion}`,
+      on: false,
+      // Nothing to change; selecting it just puts the menu away.
+      onSelect: () => setSettingsOpen(false),
+    },
   ];
 
   return (
@@ -287,6 +364,8 @@ export default function App() {
             onScreen={setScreen}
             polling={polling}
             pollHealth={pollHealth}
+            onRefreshPicks={() => void refreshPicks()}
+            refreshingPicks={pullingPicks}
             onUndo={() => void undoLastPick()}
             chatOpen={chatOpen}
             onToggleChat={() => setChatOpen((c) => !c)}

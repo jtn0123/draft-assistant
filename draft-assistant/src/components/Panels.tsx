@@ -3,13 +3,23 @@
 
 import { useMemo, useState } from "react";
 import { api } from "../api";
-import type { DraftView, PickPrice, Recommendation } from "../types";
+import { platformName } from "../leagues";
+import type { DraftView, PickPrice, Platform, Recommendation } from "../types";
 import { fmt, pct, pickLabel, posRank, signed } from "../format";
 import { PlayerName, PosBadge, PanelHead, Empty } from "./bits";
 
 // ---------- setup ----------
 
-export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
+export function Setup({
+  onReady,
+  onConnectYahoo,
+}: {
+  onReady: (view: DraftView) => void;
+  /** Open the Yahoo connect dialog instead. A Yahoo player has no Sleeper
+   *  league id to paste, and this screen used to be the only way in — so the
+   *  app was unusable for them until a Sleeper league had been loaded first. */
+  onConnectYahoo: () => void;
+}) {
   const [username, setUsername] = useState("");
   const [leagueId, setLeagueId] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -35,8 +45,8 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
       <div className="card-screen-intro">
         <h1>Draft Assistant</h1>
         <p className="mid">
-          A read-only second screen for Sleeper. You draft in Sleeper; this tracks every pick and
-          says who to take.
+          A read-only second screen for Sleeper and Yahoo. You draft there; this tracks every pick
+          and says who to take.
         </p>
       </div>
       <label className="field">
@@ -57,14 +67,24 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
           placeholder="1389710366300200960"
         />
       </label>
-      <button
-        type="button"
-        className="btn-primary card-screen-submit"
-        disabled={!leagueId.trim() || busy !== null}
-        onClick={() => void submit()}
-      >
-        {busy ?? "Load league"}
-      </button>
+      <div className="launch-actions">
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={!leagueId.trim() || busy !== null}
+          onClick={() => void submit()}
+        >
+          {busy ?? "Load league"}
+        </button>
+        <button
+          type="button"
+          className="btn-ghost"
+          disabled={busy !== null}
+          onClick={onConnectYahoo}
+        >
+          Connect Yahoo instead
+        </button>
+      </div>
       <span className="muted small">
         First load pulls league, players and projections — about 10 seconds.
       </span>
@@ -78,6 +98,7 @@ export function Setup({ onReady }: { onReady: (view: DraftView) => void }) {
 export function LaunchScreen({
   leagueName,
   leagueId,
+  platform,
   attempt,
   maxAttempts,
   lastError,
@@ -86,6 +107,9 @@ export function LaunchScreen({
 }: {
   leagueName: string | null;
   leagueId: string | null;
+  /** Which service the league being restored is read from, so the screen
+   *  names the one it is actually waiting on. */
+  platform: Platform;
   attempt: number;
   maxAttempts: number;
   lastError: string | null;
@@ -93,6 +117,7 @@ export function LaunchScreen({
   onDifferentLeague: () => void;
 }) {
   const reconnecting = lastError === null;
+  const service = platformName(platform);
   return (
     <div className="card-screen">
       <h1>Draft Assistant</h1>
@@ -100,8 +125,8 @@ export function LaunchScreen({
         <span className="launch-dot" />
         <span>
           {reconnecting
-            ? "Connecting to Sleeper"
-            : `Reconnecting to Sleeper — attempt ${attempt} of ${maxAttempts}`}
+            ? `Connecting to ${service}`
+            : `Reconnecting to ${service} — attempt ${attempt} of ${maxAttempts}`}
         </span>
       </div>
       <span className="muted small launch-detail">
@@ -206,8 +231,7 @@ export function SidePanel({ view }: { view: DraftView }) {
   // Survival is judged at my next pick AFTER the one I'm making now, which is
   // what the backend computed `survival_next` against — the label has to name
   // the same pick, in the same round.pick form used everywhere else.
-  const survivalPick =
-    (view.draft.is_my_pick ? view.draft.my_next_picks[1] : view.draft.my_next_picks[0]) ?? null;
+  const survivalPick = survivalTargetPick(view.draft);
 
   return (
     <aside className="rail">
@@ -344,6 +368,24 @@ function PickMarket({ prices }: { prices: PickPrice[] }) {
 const PRICE_NOTE =
   "The median VORP taken in this round of this league's draft — what a pick " +
   "there has actually been worth, and who went at that price.";
+
+/**
+ * The pick the backend priced survival against, so the headline over the
+ * at-risk list names that pick and not another one.
+ *
+ * MIRRORS `view_signals::survival_target` in src-tauri, including the part
+ * that is easy to miss: at a snake turn I hold two picks with nothing in
+ * between, and those count as one window. Taking "the next one after this"
+ * literally named pick 1.13 while the backend had priced everything against
+ * 3.12 — the one moment the board is most dangerous, read as the safest.
+ */
+function survivalTargetPick(d: DraftView["draft"]): number | null {
+  const later = d.my_next_picks.filter((pick) => !d.is_my_pick || pick !== d.current_pick);
+  const next = later[0];
+  if (next === undefined) return null;
+  const after = later[1];
+  return after !== undefined && next === d.current_pick + 1 ? after : next;
+}
 
 /** The design only alarms a survival chance once it drops to a quarter. */
 function riskClass(survival: number | null): string {

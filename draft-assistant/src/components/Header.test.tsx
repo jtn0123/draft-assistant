@@ -24,10 +24,14 @@ function Harness({
   onSelect,
   onSwitchLeague = () => {},
   pollHealth = null,
+  onRefreshPicks = () => {},
+  refreshingPicks = false,
 }: {
   onSelect?: () => void;
   onSwitchLeague?: () => void;
   pollHealth?: PollHealth | null;
+  onRefreshPicks?: () => void;
+  refreshingPicks?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -41,6 +45,8 @@ function Harness({
         onScreen={() => {}}
         polling
         pollHealth={pollHealth}
+        onRefreshPicks={onRefreshPicks}
+        refreshingPicks={refreshingPicks}
         onUndo={() => {}}
         chatOpen={false}
         onToggleChat={() => {}}
@@ -195,6 +201,8 @@ describe("the sync pill", () => {
         onScreen={() => {}}
         polling={false}
         pollHealth={null}
+        onRefreshPicks={() => {}}
+        refreshingPicks={false}
         onUndo={() => {}}
         chatOpen={false}
         onToggleChat={() => {}}
@@ -243,5 +251,48 @@ describe("the chime button", () => {
       setChime(true);
     });
     expect(button()).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+describe("re-pulling the picks", () => {
+  it("asks the backend for the picks again, beside the sync pill", async () => {
+    const onRefreshPicks = vi.fn();
+    render(<Harness onRefreshPicks={onRefreshPicks} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Re-pull picks" }));
+
+    expect(onRefreshPicks).toHaveBeenCalledTimes(1);
+  });
+
+  it("cannot be asked twice while the first pull is still out", () => {
+    render(<Harness refreshingPicks />);
+
+    expect(screen.getByRole("button", { name: "Pulling…" })).toBeDisabled();
+  });
+
+  it("stays off the season screen, which has no picks to pull", () => {
+    render(
+      <Header
+        leagueName="Dynasty Warriors"
+        onSwitchLeague={() => {}}
+        subtitle="Week 3"
+        meta="14-team full-PPR"
+        screen="season"
+        onScreen={() => {}}
+        polling
+        pollHealth={null}
+        onRefreshPicks={() => {}}
+        refreshingPicks={false}
+        onUndo={() => {}}
+        chatOpen={false}
+        onToggleChat={() => {}}
+        settingsOpen={false}
+        onToggleSettings={() => {}}
+        settingsRows={rows()}
+        footerNote="read-only connection"
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Re-pull picks" })).not.toBeInTheDocument();
   });
 });

@@ -163,6 +163,10 @@ export function useSeasonSession(
       .catch((e) => {
         if (asked !== generation.current) return;
         setError(String(e));
+        // The screen only shows `error` while it has no view at all, so a
+        // retry that failed with last week's numbers still on it changed
+        // nothing anyone could see. Say it out loud instead.
+        onErrorRef.current(String(e));
       });
   }, []);
 

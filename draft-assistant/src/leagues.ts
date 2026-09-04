@@ -61,6 +61,14 @@ export function platformOf(leagueId: string): Platform {
   return leagueId.includes(".l.") ? "yahoo" : "sleeper";
 }
 
+/** What to call the service a league is read from, where a sentence names it
+ *  — "Connecting to Yahoo", "Not polling Sleeper". The mark on a league row
+ *  is `platformMark`: that one stays silent about the default platform, and
+ *  this one never can. */
+export function platformName(platform: Platform): string {
+  return platform === "yahoo" ? "Yahoo" : "Sleeper";
+}
+
 /** What the small mark on a league row says, or null for the platform that
  *  needs no explaining because everything else here is one. */
 export function platformMark(platform: Platform): string | null {

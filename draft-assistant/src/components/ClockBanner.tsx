@@ -2,7 +2,7 @@
 // upcoming pick queue.
 
 import { useMemo, useState } from "react";
-import type { DraftView, TeamRoster } from "../types";
+import type { DraftView, Platform, TeamRoster } from "../types";
 import { useNow } from "../clock";
 import { clockLabel, pickLabel, spanLabel } from "../format";
 
@@ -67,6 +67,24 @@ function useHeldSentence(key: string, sentence: string): string {
   return held.key === key ? held.sentence : sentence;
 }
 
+/**
+ * What to write where the clock would be, when there is no clock.
+ *
+ * Only Yahoo gets a line: a Sleeper draft between picks, or one that has not
+ * started, has nothing to say and the cell stays out of the way. A Yahoo
+ * draft never has a deadline to show at all, and silence there looked like a
+ * timer that had not started yet.
+ */
+function whyNoClock(
+  platform: Platform,
+  status: string,
+  complete: boolean,
+  preDraft: boolean,
+): string | null {
+  if (platform !== "yahoo" || complete || preDraft || status !== "drafting") return null;
+  return "no clock from Yahoo";
+}
+
 export function ClockBanner({ view }: { view: DraftView }) {
   const d = view.draft;
   const preDraft = d.status === "pre_draft" && d.total_picks_made === 0;
@@ -77,6 +95,11 @@ export function ClockBanner({ view }: { view: DraftView }) {
   // Everything that decides what the sentence says, and nothing that ticks.
   const situation = `${d.status}|${String(d.is_my_pick)}|${d.current_pick}|${d.on_clock_slot}`;
   const announcement = useHeldSentence(situation, clockSentence(d, secondsLeft(deadline, now)));
+  // Four picks and a "+n", the same shape the queue strip uses — the list used
+  // to stop at four and say nothing about the rest of the draft.
+  const shownPicks = d.my_next_picks.slice(0, COLLAPSED);
+  const morePicks = d.my_next_picks.length - shownPicks.length;
+  const noClock = whyNoClock(view.league.platform, d.status, complete, preDraft);
 
   return (
     <div className={d.is_my_pick ? "clock is-mine" : "clock"}>
@@ -118,19 +141,27 @@ export function ClockBanner({ view }: { view: DraftView }) {
           </>
         )}
       </div>
-      {clock !== null && (
+      {clock !== null ? (
         <div className="clock-cell">
           <span className="label">Clock</span>
           <span className="clock-big num clock-timer">{clock}</span>
         </div>
+      ) : (
+        noClock !== null && (
+          // Yahoo's draft feed carries no per-pick deadline, so the cell was
+          // simply missing there — and a missing clock reads as a clock that
+          // has not started rather than one that will never come.
+          <div className="clock-cell">
+            <span className="label">Clock</span>
+            <span className="mid clock-sub">{noClock}</span>
+          </div>
+        )
       )}
       <div className="clock-cell clock-next">
         <span className="label">Your picks</span>
         <span className="clock-next-list num">
-          {d.my_next_picks
-            .slice(0, 4)
-            .map((p) => pickLabel(p, d.teams))
-            .join(" · ") || "–"}
+          {shownPicks.map((p) => pickLabel(p, d.teams)).join(" · ") || "–"}
+          {morePicks > 0 && <span className="muted"> +{morePicks}</span>}
         </span>
       </div>
     </div>

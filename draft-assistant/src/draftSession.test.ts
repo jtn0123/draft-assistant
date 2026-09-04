@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   stopPolling: vi.fn(),
   onDraftUpdated: vi.fn(),
   onPollHealth: vi.fn(),
+  refreshPicks: vi.fn(),
 }));
 vi.mock("./api", () => ({ api: mocks }));
 
@@ -27,6 +28,7 @@ beforeEach(() => {
   mocks.addLeague.mockResolvedValue(view);
   mocks.startPolling.mockResolvedValue(undefined);
   mocks.stopPolling.mockResolvedValue(undefined);
+  mocks.refreshPicks.mockResolvedValue(view);
   mocks.onDraftUpdated.mockImplementation((handler: (v: DraftView) => void) => {
     void handler;
     return Promise.resolve(() => undefined);
@@ -93,6 +95,44 @@ describe("switching leagues", () => {
     expect(said.some((t) => /^Switched to /.test(t))).toBe(false);
   });
 
+  it("puts the old league's poller back when the switch failed", async () => {
+    // Polling is stopped on the way into a switch. A switch that then fails
+    // leaves the old league on screen with nothing feeding it, and the board
+    // silently stops moving in the middle of a draft.
+    const { said, showToast } = toasts();
+    const { result } = renderHook(() => useDraftSession(showToast));
+    await waitFor(() => expect(result.current.view).not.toBeNull());
+    expect(result.current.polling).toBe(true);
+
+    mocks.addLeague.mockRejectedValueOnce(new Error("no such league"));
+    await act(async () => {
+      await result.current.switchLeague("other");
+    });
+
+    expect(said.some((t) => /Could not switch leagues/.test(t))).toBe(true);
+    expect(result.current.polling).toBe(true);
+    // Once for the restore, once to put it back.
+    expect(mocks.startPolling).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves the poller off when it was off before the failed switch", async () => {
+    const { showToast } = toasts();
+    const { result } = renderHook(() => useDraftSession(showToast));
+    await waitFor(() => expect(result.current.view).not.toBeNull());
+    await act(async () => {
+      await result.current.togglePolling();
+    });
+    expect(result.current.polling).toBe(false);
+
+    mocks.addLeague.mockRejectedValueOnce(new Error("no such league"));
+    await act(async () => {
+      await result.current.switchLeague("other");
+    });
+
+    expect(result.current.polling).toBe(false);
+    expect(mocks.startPolling).toHaveBeenCalledTimes(1);
+  });
+
   it("says so when the whole switch went through", async () => {
     const { said, showToast } = toasts();
     const { result } = renderHook(() => useDraftSession(showToast));
@@ -117,5 +157,69 @@ describe("the restore on launch", () => {
     expect(mocks.getConfig).toHaveBeenCalledTimes(1);
     expect(mocks.addLeague).toHaveBeenCalledTimes(1);
     expect(mocks.startPolling).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("re-pulling the picks", () => {
+  it("asks the backend again and says what came back", async () => {
+    const { said, showToast } = toasts();
+    const { result } = renderHook(() => useDraftSession(showToast));
+    await waitFor(() => expect(result.current.view).not.toBeNull());
+
+    await act(async () => {
+      await result.current.refreshPicks();
+    });
+
+    expect(mocks.refreshPicks).toHaveBeenCalledTimes(1);
+    expect(said.some((t) => /^Picks re-pulled from Sleeper/.test(t))).toBe(true);
+    expect(result.current.pullingPicks).toBe(false);
+  });
+
+  it("offers the failure again rather than swallowing it", async () => {
+    mocks.refreshPicks.mockRejectedValue(new Error("network timeout"));
+    const said: string[] = [];
+    const retries: (() => void)[] = [];
+    const showToast = vi.fn((text: string, retry?: () => void) => {
+      said.push(text);
+      if (retry !== undefined) retries.push(retry);
+    });
+    const { result } = renderHook(() => useDraftSession(showToast));
+    await waitFor(() => expect(result.current.view).not.toBeNull());
+
+    await act(async () => {
+      await result.current.refreshPicks();
+    });
+
+    expect(said.some((t) => /Could not re-pull the picks/.test(t))).toBe(true);
+    expect(retries.length).toBeGreaterThan(0);
+    expect(result.current.pullingPicks).toBe(false);
+  });
+});
+
+describe("naming the service", () => {
+  it("says Yahoo for a Yahoo league rather than Sleeper for everything", async () => {
+    const yahoo = draftFixture();
+    yahoo.league.platform = "yahoo";
+    yahoo.league.league_id = "449.l.12345";
+    mocks.getConfig.mockResolvedValue(restoringConfig(yahoo));
+    mocks.addLeague.mockResolvedValue(yahoo);
+    mocks.refreshPicks.mockResolvedValue(yahoo);
+    const { said, showToast } = toasts();
+    const { result } = renderHook(() => useDraftSession(showToast));
+    await waitFor(() => expect(result.current.view).not.toBeNull());
+
+    await act(async () => {
+      await result.current.togglePolling();
+    });
+    await act(async () => {
+      await result.current.togglePolling();
+    });
+    await act(async () => {
+      await result.current.refreshPicks();
+    });
+
+    expect(said.some((t) => /polling Yahoo every 3s/.test(t))).toBe(true);
+    expect(said.some((t) => /Picks re-pulled from Yahoo/.test(t))).toBe(true);
+    expect(said.some((t) => /Sleeper/.test(t))).toBe(false);
   });
 });

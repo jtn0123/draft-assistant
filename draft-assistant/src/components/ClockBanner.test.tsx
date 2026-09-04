@@ -249,3 +249,55 @@ describe("what the strip says is coming", () => {
     expect(note(view)).toBe("3 picks ahead");
   });
 });
+
+describe("your picks and a draft with no clock", () => {
+  it("says how many more of your picks it is not showing", () => {
+    const view = fixture();
+    view.draft.teams = 12;
+    view.draft.my_next_picks = [12, 13, 36, 37, 60, 61];
+
+    render(<ClockBanner view={view} />);
+    // Four picks and a "+2": the list used to stop at four and say nothing
+    // about the rest of the draft, the way the queue strip already does.
+    expect(screen.getByText(/1\.12 · 2\.01 · 3\.12 · 4\.01/)).toBeInTheDocument();
+    expect(screen.getByText("+2")).toBeInTheDocument();
+  });
+
+  it("says nothing extra when every one of your picks is on screen", () => {
+    const view = fixture();
+    view.draft.teams = 12;
+    view.draft.my_next_picks = [12, 13];
+
+    render(<ClockBanner view={view} />);
+    expect(screen.queryByText(/^\+\d/)).not.toBeInTheDocument();
+  });
+
+  it("names Yahoo as the reason a live draft has no clock", () => {
+    const view = fixture();
+    view.league.platform = "yahoo";
+    view.draft.clock_deadline_ms = null;
+
+    render(<ClockBanner view={view} />);
+    // Leaving the cell out entirely read as a timer that had not started.
+    expect(screen.getByText("Clock")).toBeInTheDocument();
+    expect(screen.getByText("no clock from Yahoo")).toBeInTheDocument();
+  });
+
+  it("leaves the cell out for a Sleeper draft between picks", () => {
+    const view = fixture();
+    view.draft.clock_deadline_ms = null;
+
+    render(<ClockBanner view={view} />);
+    expect(screen.queryByText("Clock")).not.toBeInTheDocument();
+  });
+
+  it("says nothing about a clock once a Yahoo draft is over", () => {
+    const view = fixture();
+    view.league.platform = "yahoo";
+    view.draft.status = "complete";
+    view.draft.clock_deadline_ms = null;
+
+    render(<ClockBanner view={view} />);
+    expect(screen.queryByText("no clock from Yahoo")).not.toBeInTheDocument();
+  });
+});
