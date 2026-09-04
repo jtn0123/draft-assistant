@@ -278,7 +278,7 @@ fn early_depth_is_priced_off_the_slots_the_league_starts() {
     assert!(
         te.into_reasons()
             .iter()
-            .any(|r| r.contains("the league starts 2.3")),
+            .any(|r| r.contains("the league starts about 3 with flex")),
         "the term has to name the league's own number"
     );
     // A one-TE league prices the same empty room lower.

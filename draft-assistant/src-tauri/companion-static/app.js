@@ -31,6 +31,8 @@
     if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
     return `${Math.round(seconds / 86400)}d ago`;
   };
+  const modeLabel = (mode) =>
+    typeof mode === "string" && mode ? mode[0].toUpperCase() + mode.slice(1) : "";
   /** Class list for a position pill; an unknown position stays neutral. */
   const positionClass = (position) => {
     const key = String(position ?? "").toLowerCase();
@@ -38,7 +40,6 @@
   };
   /** Reconnect delay: one second, doubling to a thirty second ceiling. */
   const backoffDelay = (attempt) => Math.min(30000, 1000 * 2 ** Math.max(0, attempt));
-
   const formatCost = (usd) =>
     typeof usd === "number" && isFinite(usd) ? `$${usd.toFixed(usd < 0.01 ? 4 : 2)}` : null;
   /** "0:45" left on the pick clock, or null when no clock is running. */
@@ -137,6 +138,7 @@
     deviceGuess,
     relativeTime,
     positionClass,
+    modeLabel,
     backoffDelay,
     formatCost,
     formatClock,
@@ -186,7 +188,6 @@
     }
     return wrap;
   };
-
   function boot() {
     if (!document.getElementById("companion-root")) return;
     const $ = (id) => document.getElementById(id);
@@ -194,7 +195,6 @@
     let socket = null;
     let attempt = 0;
     let pingTimer = null;
-
     // Private browsing can refuse storage: the page works, it just forgets.
     const store = (key, value) => {
       try {
@@ -245,7 +245,6 @@
       dispatch({ type: "shared-chat", payload: seasonChat });
       connect();
     }
-
     // ---- pairing -------------------------------------------------------
     $("pair-device").value = load(DEVICE_KEY) || deviceGuess(navigator.userAgent);
     state.hostName = load(HOST_KEY);
@@ -353,6 +352,7 @@
       const recs = clear($("recs"));
       for (const rec of (view?.recommendations ?? []).slice(0, 5)) {
         const card = recs.appendChild(el("li", "card"));
+        if (rec.mode) card.appendChild(el("div", "card-mode", modeLabel(rec.mode)));
         const head = card.appendChild(el("div", "card-head"));
         spans(head, ["name", rec.name], [positionClass(rec.position), rec.position]);
         spans(head, ["muted", rec.team]);

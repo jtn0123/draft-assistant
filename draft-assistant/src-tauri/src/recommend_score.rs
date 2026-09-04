@@ -163,6 +163,14 @@ fn dedicated_starters(rules: &RosterRules, position: &str) -> u32 {
         .count() as u32
 }
 
+/// "2", or "about 3 with flex" for a fractional share ("2.7" read as a typo).
+fn starters_phrase(demand: f64) -> String {
+    match (demand - demand.round()).abs() < 0.05 {
+        true => format!("{demand:.0}"),
+        false => format!("about {} with flex", demand.ceil() as u32),
+    }
+}
+
 /// How many of a position the league starts once flex slots are shared out —
 /// two RB slots plus a third of a FLEX is 2.33 running backs. Fractional on
 /// purpose: a FLEX is not two-thirds of a running back and one whole one, it
@@ -269,8 +277,9 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
             score.add(
                 3.0 * short,
                 format!(
-                    "thin at {}: {count} rostered, the league starts {demand:.1}",
-                    p.position
+                    "thin at {}: {count} rostered, the league starts {}",
+                    p.position,
+                    starters_phrase(demand)
                 ),
             );
         }
@@ -357,16 +366,19 @@ fn market(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
             );
         }
         if let Some(adp) = p.adp {
-            // Stay close to market: the reach is how far ahead of his own ADP
-            // this pick is, measured at the pick actually being made. The old
-            // form compared his ADP with his rank on *this* board, which is a
-            // measure of the two boards disagreeing and was signed so that it
-            // penalised bargains and never once penalised a reach.
+            // Stay close to market: how far ahead of his own ADP this pick is,
+            // at the pick actually being made. (The old form compared ADP with
+            // his rank on *this* board and penalised bargains, never reaches.)
             let reach = (adp - ctx.inputs.market_pick as f64).max(0.0);
-            if reach > 0.0 {
+            // A fraction of a pick would read "0 picks ahead" — not a reason.
+            let picks = reach.round();
+            if picks >= 1.0 {
                 score.add(
                     -reach * 0.3,
-                    format!("a reach: {reach:.0} picks ahead of ADP {adp:.0}"),
+                    format!(
+                        "a reach: {picks:.0} {} ahead of ADP {adp:.0}",
+                        if picks == 1.0 { "pick" } else { "picks" }
+                    ),
                 );
             }
         }

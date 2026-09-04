@@ -49,6 +49,7 @@ interface Companion {
   deviceGuess(userAgent?: string): string;
   relativeTime(atMs: number, nowMs: number): string;
   positionClass(position: string | null): string;
+  modeLabel(mode: unknown): string;
   backoffDelay(attempt: number): number;
   formatCost(usd: number | null): string | null;
   formatClock(deadlineMs: number | null, nowMs: number): string | null;
@@ -82,6 +83,9 @@ describe("relative time", () => {
   const now = 1_700_000_000_000;
 
   it("rounds to the coarsest unit that still says something", () => {
+    expect(companion.modeLabel("balanced")).toBe("Balanced");
+    expect(companion.modeLabel("upside")).toBe("Upside");
+    expect(companion.modeLabel(null)).toBe("");
     expect(companion.relativeTime(now - 5_000, now)).toBe("just now");
     expect(companion.relativeTime(now - 44_000, now)).toBe("just now");
     expect(companion.relativeTime(now - 240_000, now)).toBe("4m ago");

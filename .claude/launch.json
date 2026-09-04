@@ -9,6 +9,24 @@
         "cd /Volumes/512Flash/Draft-app/draft-assistant && npm run dev"
       ],
       "port": 1420
+    },
+    {
+      "name": "desktop",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Volumes/512Flash/Draft-app/draft-assistant && npm run tauri dev"
+      ],
+      "port": 1420
+    },
+    {
+      "name": "companion",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Volumes/512Flash/Draft-app/draft-assistant/src-tauri && cargo run --bin companion_host -- 1400180817463881728 --port 7878"
+      ],
+      "port": 7878
     }
   ]
 }

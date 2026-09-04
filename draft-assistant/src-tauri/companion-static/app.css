@@ -209,6 +209,13 @@ button[disabled] {
   gap: 8px;
 }
 
+.card-mode {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
 .card-head {
   display: flex;
   align-items: center;
