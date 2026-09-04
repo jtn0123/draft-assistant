@@ -122,6 +122,11 @@ impl CompanionServer {
     pub fn url(&self) -> Option<String> {
         self.port().map(net::url_for)
     }
+
+    /// The same server over Tailscale, when this machine is on a tailnet.
+    pub fn tailscale_url(&self) -> Option<String> {
+        self.port().and_then(net::tailscale_url_for)
+    }
 }
 
 impl Srv {

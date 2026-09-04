@@ -51,6 +51,7 @@ export function CompanionPanel({ onClose }: { onClose: () => void }) {
   // an address it does not encode — including the moment after the server is
   // switched off, when the effect below simply has nothing to draw.
   const [qr, setQr] = useState<{ url: string; image: string } | null>(null);
+  const [tailQr, setTailQr] = useState<{ url: string; image: string } | null>(null);
   // What is in the name box while it is being edited; null while it is just
   // showing what the host is called.
   const [typedName, setTypedName] = useState<string | null>(null);
@@ -84,6 +85,24 @@ export function CompanionPanel({ onClose }: { onClose: () => void }) {
       cancelled = true;
     };
   }, [url]);
+
+  // Same again for the tailnet address, which a phone away from this Wi-Fi
+  // scans instead. Absent unless the Mac is on Tailscale.
+  const tailUrl = status?.enabled === true ? (status.tailscale_url ?? "") : "";
+  useEffect(() => {
+    if (tailUrl === "") return undefined;
+    let cancelled = false;
+    void QRCode.toDataURL(tailUrl, { margin: 1, width: 168 })
+      .then((image) => {
+        if (!cancelled) setTailQr({ url: tailUrl, image });
+      })
+      .catch(() => {
+        if (!cancelled) setTailQr(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tailUrl]);
 
   const on = status?.enabled ?? false;
   const hostName = status?.host_name ?? "";
@@ -145,6 +164,12 @@ export function CompanionPanel({ onClose }: { onClose: () => void }) {
             <div className="companion-join-text">
               <span className="eyebrow">Open this on the phone</span>
               <span className="companion-url">{status.url}</span>
+              {tailUrl !== "" && (
+                <>
+                  <span className="eyebrow">Or, over Tailscale, from anywhere</span>
+                  <span className="companion-url">{tailUrl}</span>
+                </>
+              )}
               <span className="eyebrow companion-code-label">Then enter this code</span>
               <span className="companion-code">{spacedCode(status.code)}</span>
               <button type="button" className="btn-ghost btn-row" disabled={busy} onClick={revoke}>
@@ -152,9 +177,14 @@ export function CompanionPanel({ onClose }: { onClose: () => void }) {
               </button>
               <span className="muted small">A new code unpairs everything already connected.</span>
             </div>
-            {qr !== null && qr.url === status.url && (
-              <img className="companion-qr" src={qr.image} alt={`QR code for ${status.url}`} />
-            )}
+            <div className="companion-qrs">
+              {qr !== null && qr.url === status.url && (
+                <img className="companion-qr" src={qr.image} alt={`QR code for ${status.url}`} />
+              )}
+              {tailQr !== null && tailQr.url === tailUrl && (
+                <img className="companion-qr" src={tailQr.image} alt={`QR code for ${tailUrl}`} />
+              )}
+            </div>
           </div>
         )}
 

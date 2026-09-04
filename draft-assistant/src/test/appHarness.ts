@@ -222,6 +222,7 @@ export function companionStatus(overrides: Partial<CompanionStatus> = {}): Compa
   return {
     enabled: false,
     url: "http://192.168.1.24:7878/",
+    tailscale_url: null,
     code: "418902",
     port: 7878,
     host_name: "Justin's Mac",

@@ -32,6 +32,43 @@ pub fn url_for(port: u16) -> String {
     format!("http://{}:{port}/", lan_ip())
 }
 
+/// This machine's Tailscale address, when it has one.
+///
+/// Tailscale hands every node an address in `100.64.0.0/10`, the carrier-grade
+/// NAT range nothing on a home LAN uses, so an interface carrying one is the
+/// tailnet. Read off `ifconfig` rather than a Tailscale CLI whose install
+/// path varies; a phone on the tailnet can reach this address from anywhere.
+pub fn tailscale_ip() -> Option<String> {
+    let output = std::process::Command::new("ifconfig").output().ok()?;
+    cgnat_address(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// The first `100.64.0.0/10` address in `ifconfig` text.
+pub fn cgnat_address(ifconfig: &str) -> Option<String> {
+    ifconfig
+        .lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            (words.next()? == "inet").then(|| words.next())?
+        })
+        .find(|ip| is_cgnat(ip))
+        .map(str::to_string)
+}
+
+fn is_cgnat(ip: &str) -> bool {
+    let mut parts = ip.split('.').map(|p| p.parse::<u8>().ok());
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(Some(100)), Some(Some(second)), Some(Some(_)), Some(Some(_)), None)
+            if (64..=127).contains(&second)
+    )
+}
+
+/// The tailnet URL for the same port, when this machine is on one.
+pub fn tailscale_url_for(port: u16) -> Option<String> {
+    tailscale_ip().map(|ip| format!("http://{ip}:{port}/"))
+}
+
 /// Bind `0.0.0.0` on the first free port from `first`, trying
 /// [`PORT_ATTEMPTS`] of them. The port actually taken comes back with the
 /// listener, because it is what the user has to type into their phone.
@@ -76,6 +113,22 @@ mod tests {
         assert_eq!(ip.split('.').count(), 4, "{ip}");
         assert!(url_for(DEFAULT_PORT).starts_with("http://"));
         assert!(url_for(7879).ends_with(":7879/"));
+    }
+
+    #[test]
+    fn only_a_carrier_grade_nat_address_counts_as_the_tailnet() {
+        let text = "en0: flags=8863<UP>\n\tinet 192.168.1.242 netmask 0xffffff00\n\
+                    utun4: flags=8051<UP>\n\tinet 100.101.102.103 --> 100.101.102.103 netmask 0xffffffff\n";
+        assert_eq!(
+            super::cgnat_address(text).as_deref(),
+            Some("100.101.102.103")
+        );
+        assert_eq!(
+            super::cgnat_address("inet 100.63.255.255\ninet 100.128.0.1\n"),
+            None
+        );
+        assert_eq!(super::cgnat_address("inet 10.0.0.5\n"), None);
+        assert_eq!(super::cgnat_address(""), None);
     }
 
     #[test]

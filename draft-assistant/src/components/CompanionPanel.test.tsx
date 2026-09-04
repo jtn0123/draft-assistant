@@ -65,6 +65,29 @@ describe("turning it on", () => {
     );
     expect(screen.getByRole("button", { name: "Turn off" })).toBeInTheDocument();
   });
+
+  it("adds the Tailscale address, with its own QR, when the Mac is on a tailnet", async () => {
+    api.companionEnable.mockResolvedValue(
+      companionStatus({ enabled: true, tailscale_url: "http://100.101.102.103:7878/" }),
+    );
+    open();
+    await userEvent.click(await screen.findByRole("button", { name: "Turn on" }));
+
+    expect(await screen.findByText("http://100.101.102.103:7878/")).toBeInTheDocument();
+    expect(screen.getByText(/over Tailscale/)).toBeInTheDocument();
+    // Both codes are on screen: the Wi-Fi one and the tailnet one.
+    await screen.findByRole("img", { name: /QR code for http:\/\/100\.101\.102\.103/ });
+    expect(screen.getAllByRole("img", { name: /QR code for/ })).toHaveLength(2);
+  });
+
+  it("shows no second address when there is no tailnet", async () => {
+    api.companionEnable.mockResolvedValue(companionStatus({ enabled: true }));
+    open();
+    await userEvent.click(await screen.findByRole("button", { name: "Turn on" }));
+    await screen.findByText("http://192.168.1.24:7878/");
+    expect(screen.queryByText(/over Tailscale/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: /QR code for/ })).toHaveLength(1);
+  });
 });
 
 describe("the code", () => {

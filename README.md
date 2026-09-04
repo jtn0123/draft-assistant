@@ -73,6 +73,8 @@ other directive stays exactly as strict as it was — `default-src 'self'`,
 never loads remote code; it only fetches JSON and images from a host the user
 paired with by typing a six-digit code.
 
+**Away from the Wi-Fi.** Install Tailscale on the Mac and on the phone (there is an iOS app), sign both into the same tailnet, and the settings panel shows a second address and QR code (`http://100.x.y.z:7878/`) that works from anywhere. Same pairing code; nothing else changes.
+
 ## Conventions
 
 - **Every file is 500 lines or fewer**, enforced by `scripts/check-loc.mjs`.

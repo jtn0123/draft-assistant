@@ -255,6 +255,8 @@ export interface CompanionStatus {
   enabled: boolean;
   /** `http://<ip>:<port>/` — what the QR encodes. Empty while off. */
   url: string;
+  /** The same server over Tailscale, when the Mac is on a tailnet. */
+  tailscale_url?: string | null;
   /** The six digits a client pairs with. Rotates on revoke. */
   code: string;
   port: number;

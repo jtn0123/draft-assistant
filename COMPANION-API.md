@@ -37,7 +37,7 @@ Server → client text frames: `{ "type": T, "payload": P }` with
 On connect the server sends the current `shared-chat` for both screens and `devices`. Client → server: `{ "type": "ping" }` every 25 s; the server answers `{ "type": "pong" }`.
 
 ## Desktop (Tauri) commands on the host
-- `companion_status()` → `{ enabled, url, code, port, host_name, devices: Device[] }`
+- `companion_status()` → `{ enabled, url, tailscale_url, code, port, host_name, devices: Device[] }` — `tailscale_url` is the same server on the Mac's `100.64.0.0/10` address when it has one, so a phone on the tailnet can pair from anywhere
 - `companion_enable()` → status · `companion_disable()` → status · `companion_revoke()` → status (new code, every client dropped with `revoked`)
 - `set_device_name(name)` → `String` (the host's own name in shared chat; default = the Mac's computer name)
 - `shared_chat_get(screen)` → `SharedChatThread` · `shared_chat_send(screen, text)` → `()` (attributed to the host device)

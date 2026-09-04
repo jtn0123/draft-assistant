@@ -13,6 +13,8 @@ pub struct CompanionStatus {
     pub enabled: bool,
     /// The address to show and put in the QR code, while the server is up.
     pub url: Option<String>,
+    /// The same address on the tailnet, for a phone that is not on this Wi-Fi.
+    pub tailscale_url: Option<String>,
     /// The six digits typed into the phone. Shown on the host's own screen
     /// only — it is what stands between the LAN and this app's data.
     pub code: String,
@@ -25,6 +27,7 @@ fn status_of(companion: &CompanionServer) -> CompanionStatus {
     CompanionStatus {
         enabled: companion.is_enabled(),
         url: companion.url(),
+        tailscale_url: companion.tailscale_url(),
         code: companion.hub.code(),
         port: companion.port(),
         host_name: companion.hub.host_name(),

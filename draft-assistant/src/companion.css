@@ -193,3 +193,9 @@
   color: var(--mid);
   font-size: 13px;
 }
+
+.companion-qrs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
