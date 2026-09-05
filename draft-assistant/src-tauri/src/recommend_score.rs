@@ -7,6 +7,7 @@
 
 use super::{Mode, RecommendInputs};
 use crate::board::AvailablePlayer;
+use crate::roster::RosterRules;
 use std::collections::{HashMap, HashSet};
 
 #[path = "recommend_demand.rs"]
@@ -90,6 +91,37 @@ pub(crate) struct Context<'a> {
     pub demand: HashMap<String, f64>,
 }
 
+impl Context<'_> {
+    /// Whether the league's own allocation still wants a body at `position`
+    /// on this roster. What decides which eligible position an open flex slot
+    /// actually belongs to.
+    fn short_of(&self, position: &str) -> f64 {
+        let demand = self.demand.get(position).copied().unwrap_or(0.0);
+        let have = self.have.get(position).copied().unwrap_or(0);
+        demand - f64::from(have)
+    }
+
+    /// Which eligible position an open flex slot is really for: the one this
+    /// roster is furthest short of, by the league's own allocation.
+    ///
+    /// A tie is not a claim. An open FLEX with neither a back nor a receiver
+    /// rostered is genuinely either, and naming one of them by list order
+    /// would quietly hand every empty flex in every draft to running backs.
+    fn flex_claimant(&self, slot: &str) -> Option<&'static str> {
+        let mut ranked: Vec<(&'static str, f64)> = RosterRules::flex_eligible(slot)?
+            .iter()
+            .map(|position| (*position, self.short_of(position)))
+            .collect();
+        ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let (best, short) = *ranked.first()?;
+        let runner_up = ranked.get(1).map_or(0.0, |(_, short)| *short);
+        // Half a body clear of the next claim, which is what separates the
+        // quarterback hole in a superflex league from a flex two positions
+        // both have a fair claim on.
+        (short > 0.05 && short - runner_up > 0.25).then_some(best)
+    }
+}
+
 /// `None` when the candidate is disqualified outright at this roster.
 pub(crate) fn score_candidate(ctx: &Context, a: &AvailablePlayer, mode: Mode) -> Option<Score> {
     let inputs = ctx.inputs;
@@ -115,7 +147,7 @@ pub(crate) fn score_candidate(ctx: &Context, a: &AvailablePlayer, mode: Mode) ->
     scarcity(a, tier_left, &mut score);
     market(ctx, a, mode, &mut score);
     strategy(ctx, a, tier_left, &mut score);
-    injury::injury(a, ctx.inputs.pre_draft, mode, &mut score);
+    injury::injury(a, ctx.inputs, mode, &mut score);
 
     if mode == Mode::Upside {
         upside(ctx, a, &mut score);
@@ -135,6 +167,20 @@ fn need(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
         return;
     }
     if let Some(slot) = open_slot {
+        // An open flex slot is not equally an opening for everybody eligible
+        // for it. The one open SUPER_FLEX on a superflex roster with one
+        // quarterback is a quarterback slot, and paying the same eight points
+        // for a fourth receiver left the two candidates tied and the pick to
+        // whichever had the larger VORP — which is always the receiver. So
+        // the slot is claimed the way the league's own allocation claims it:
+        // the best eligible position the roster is still short of.
+        if ctx.flex_claimant(slot) == Some(p.position.as_str()) {
+            score.add(
+                12.0 * ctx.need_pressure.min(2.0),
+                format!("the open {slot} slot is your {} hole", p.position),
+            );
+            return;
+        }
         score.add(
             8.0 * ctx.need_pressure.min(2.0),
             format!("fills an open {slot} slot"),
@@ -166,6 +212,16 @@ fn need(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
 fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<()> {
     let p = &a.player;
     let count = ctx.have.get(p.position.as_str()).copied().unwrap_or(0);
+    let demand = ctx.demand.get(p.position.as_str()).copied().unwrap_or(0.0);
+    // Whether the need layer above has already paid for the hole at this
+    // position. Three terms used to price the same empty slot — need, the
+    // thin-room warning, and the early-depth term below — so one open
+    // receiver slot was worth twelve, twenty and three all at once.
+    let already_paid = ctx
+        .inputs
+        .rules
+        .first_open_slot_for(&ctx.open, &p.position)
+        .is_some();
     match p.position.as_str() {
         "DEF" | "K" => {
             if count >= 1 {
@@ -197,7 +253,7 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
         // backup, when he was the single largest hole on the roster, and
         // refused the third outright when he was ordinary depth.
         "QB" | "TE" => {
-            let starters = dedicated_starters(ctx.inputs.rules, p.position.as_str()).max(1);
+            let starters = dedicated_starters(demand).max(1);
             // One spare beyond what the league starts, and no more.
             if count > starters {
                 return None;
@@ -220,11 +276,6 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
             // counted one empty starting slot twice, 20 here on top of
             // need's 12 times the pressure, which is how a fourth receiver
             // outbid a first-round back in round nine.
-            let already_paid = ctx
-                .inputs
-                .rules
-                .first_open_slot_for(&ctx.open, &p.position)
-                .is_some();
             if count < 2 && ctx.inputs.current_round > 8 && !already_paid {
                 score.add(
                     20.0,
@@ -249,8 +300,10 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
     // nine points behind, in a scoring system where nine points is the whole
     // gap between the top two cards, and no part of that head start had
     // anything to do with the league's roster.
-    if !crate::board::is_late_only(&p.position) {
-        let demand = ctx.demand.get(p.position.as_str()).copied().unwrap_or(0.0);
+    // Gated on the same already-paid test as the thin-room warning: an open
+    // starting slot is one hole, and it had been earning a need bonus, a
+    // thin-room bonus and this one, three reasons deep, for the same body.
+    if !crate::board::is_late_only(&p.position) && !already_paid {
         let short = (demand - count as f64).max(0.0);
         if short > 0.05 {
             score.add(
@@ -328,8 +381,14 @@ fn market(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
             );
         } else if past_adp < -ahead {
             let early = -past_adp;
+            // Safe mode reads a reach harder than balanced does, but it is
+            // one term and it is capped. It used to charge the reach twice —
+            // here, and again below with no cap at all — so pick five on an
+            // ADP-90 player came out twenty-five points under water on a card
+            // whose other reasons are worth single figures.
+            let weight = if mode == Mode::Safe { 2.0 } else { 1.0 };
             score.add(
-                -(early * 0.1).min(6.0),
+                -(early * 0.1 * weight).min(6.0 * weight),
                 format!("ahead of market: {early:.0} picks before ADP {adp:.0}"),
             );
         }
@@ -354,23 +413,6 @@ fn market(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
                 -dependence,
                 format!("{share:.0}% of his points are yardage bonuses"),
             );
-        }
-        if let Some(adp) = p.adp {
-            // Stay close to market: how far ahead of his own ADP this pick is,
-            // at the pick actually being made. (The old form compared ADP with
-            // his rank on *this* board and penalised bargains, never reaches.)
-            let reach = (adp - ctx.inputs.market_pick as f64).max(0.0);
-            // A fraction of a pick would read "0 picks ahead" — not a reason.
-            let picks = reach.round();
-            if picks >= 1.0 {
-                score.add(
-                    -reach * 0.3,
-                    format!(
-                        "a reach: {picks:.0} {} ahead of ADP {adp:.0}",
-                        if picks == 1.0 { "pick" } else { "picks" }
-                    ),
-                );
-            }
         }
     }
 }

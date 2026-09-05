@@ -74,48 +74,65 @@ pub fn tailscale_url_for(port: u16) -> Option<String> {
 /// while the app is being worked on.
 pub const FOLLOWER_ORIGINS: [&str; 2] = ["tauri://localhost", "http://localhost:1420"];
 
+/// Every `http://host:port` this server can actually be reached at.
+///
+/// Read off the machine's own interfaces when the server starts, so the
+/// cross-origin check and the page's `connect-src` name real addresses rather
+/// than "anything that looks private". Loopback is in the list because the
+/// host's own browser is a legitimate client.
+pub fn server_origins(port: u16) -> Vec<String> {
+    origins_from(port, &lan_ip(), tailscale_ip().as_deref())
+}
+
+/// The same list, over addresses the caller already has. Pure, so a test can
+/// say what this machine's addresses are.
+pub fn origins_from(port: u16, lan: &str, tailscale: Option<&str>) -> Vec<String> {
+    let mut origins = vec![
+        format!("http://127.0.0.1:{port}"),
+        format!("http://localhost:{port}"),
+        format!("http://[::1]:{port}"),
+    ];
+    for host in std::iter::once(lan).chain(tailscale) {
+        let origin = format!("http://{host}:{port}");
+        if !origins.contains(&origin) {
+            origins.push(origin);
+        }
+    }
+    origins
+}
+
+/// The same origins as WebSocket ones.
+///
+/// A browser reads `connect-src 'self'` as the page's own scheme, host and
+/// port, and `ws://` is not `http://`: without these spelled out the page
+/// could not open its own event socket. Listing them is what lets the policy
+/// drop the bare `ws:` scheme, which admitted a socket to any host at all.
+pub fn ws_origins(origins: &[String]) -> Vec<String> {
+    origins
+        .iter()
+        .map(|origin| {
+            origin
+                .strip_prefix("http://")
+                .map(|rest| format!("ws://{rest}"))
+                .unwrap_or_else(|| origin.replace("https://", "wss://"))
+        })
+        .collect()
+}
+
 /// Whether a browser that says it is `origin` may make a state-changing
-/// request of a server listening on `port`.
+/// request of this server.
 ///
 /// This is what stops a page on some other site the phone happens to have
 /// open from posting to the companion in the background: a request from a
-/// real origin has to be the phone page itself (same host and port as the
-/// server, on an address a home network actually hands out) or one of the
+/// real origin has to be this server's own address and port, or one of the
 /// follower origins. A request with no `Origin` at all is not a browser's
 /// cross-site request and is left to the bearer token.
-pub fn origin_allowed(origin: &str, port: Option<u16>) -> bool {
-    if FOLLOWER_ORIGINS.contains(&origin) {
-        return true;
-    }
-    let Some(port) = port else {
-        return false;
-    };
-    let Some(rest) = origin
-        .strip_prefix("http://")
-        .or_else(|| origin.strip_prefix("https://"))
-    else {
-        return false;
-    };
-    let Some((host, said_port)) = rest.rsplit_once(':') else {
-        return false;
-    };
-    said_port.parse::<u16>() == Ok(port) && is_local_address(host)
-}
-
-/// Whether a host is an address this server could be reached on: loopback, a
-/// private LAN range, or the tailnet.
-pub fn is_local_address(host: &str) -> bool {
-    let host = host.trim_start_matches('[').trim_end_matches(']');
-    if host == "localhost" {
-        return true;
-    }
-    match host.parse::<std::net::IpAddr>() {
-        Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback(),
-        Ok(std::net::IpAddr::V4(ip)) => {
-            ip.is_loopback() || ip.is_private() || ip.is_link_local() || is_cgnat(&ip.to_string())
-        }
-        Err(_) => false,
-    }
+///
+/// `origins` is what the server actually bound, not a range: a page served
+/// from another machine on the same LAN is somebody else's page, and used to
+/// be waved through because its address was private.
+pub fn origin_allowed(origin: &str, origins: &[String]) -> bool {
+    FOLLOWER_ORIGINS.contains(&origin) || origins.iter().any(|ours| ours == origin)
 }
 
 /// Bind `0.0.0.0` on the first free port from `first`, trying
@@ -182,22 +199,44 @@ mod tests {
 
     #[test]
     fn only_this_server_and_the_follower_may_post_across_origins() {
-        use super::origin_allowed;
+        use super::{origin_allowed, origins_from};
+        let ours = origins_from(7878, "192.168.1.24", Some("100.101.102.103"));
         // The phone page itself, however the phone reached the Mac.
-        assert!(origin_allowed("http://192.168.1.42:7878", Some(7878)));
-        assert!(origin_allowed("http://127.0.0.1:7878", Some(7878)));
-        assert!(origin_allowed("http://100.101.102.103:7878", Some(7878)));
+        assert!(origin_allowed("http://192.168.1.24:7878", &ours));
+        assert!(origin_allowed("http://127.0.0.1:7878", &ours));
+        assert!(origin_allowed("http://100.101.102.103:7878", &ours));
         // The follower desktop, which is its own origin and always will be.
-        assert!(origin_allowed("tauri://localhost", None));
-        assert!(origin_allowed("http://localhost:1420", None));
+        assert!(origin_allowed("tauri://localhost", &[]));
+        assert!(origin_allowed("http://localhost:1420", &[]));
+        // The failure this prevents: another machine on the same Wi-Fi is a
+        // private address too, and used to be allowed to post here.
+        assert!(!origin_allowed("http://192.168.1.99:7878", &ours));
+        assert!(!origin_allowed("http://10.0.0.5:7878", &ours));
         // A page on the internet that found the port is not the phone page.
-        assert!(!origin_allowed("https://evil.example.com", Some(7878)));
-        assert!(!origin_allowed("http://evil.example.com:7878", Some(7878)));
-        assert!(!origin_allowed("http://8.8.8.8:7878", Some(7878)));
+        assert!(!origin_allowed("https://evil.example.com", &ours));
+        assert!(!origin_allowed("http://evil.example.com:7878", &ours));
+        assert!(!origin_allowed("http://8.8.8.8:7878", &ours));
         // Nor is the right address on somebody else's port.
-        assert!(!origin_allowed("http://192.168.1.42:9999", Some(7878)));
-        assert!(!origin_allowed("http://192.168.1.42", Some(7878)));
-        assert!(!origin_allowed("null", Some(7878)));
+        assert!(!origin_allowed("http://192.168.1.24:9999", &ours));
+        assert!(!origin_allowed("http://192.168.1.24", &ours));
+        assert!(!origin_allowed("null", &ours));
+        // With nothing bound there is no origin of ours to match.
+        assert!(!origin_allowed("http://192.168.1.24:7878", &[]));
+    }
+
+    #[test]
+    fn the_socket_origins_are_the_http_ones_with_the_scheme_swapped() {
+        use super::{origins_from, ws_origins};
+        let ours = origins_from(7878, "192.168.1.24", None);
+        let sockets = ws_origins(&ours);
+        assert!(sockets.contains(&"ws://192.168.1.24:7878".to_string()));
+        assert!(sockets.contains(&"ws://127.0.0.1:7878".to_string()));
+        assert!(
+            sockets.iter().all(|o| o.starts_with("ws://")),
+            "{sockets:?}"
+        );
+        // A machine on no tailnet lists its LAN address once and nothing else.
+        assert_eq!(sockets.len(), ours.len());
     }
 
     #[test]

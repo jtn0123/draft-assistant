@@ -320,7 +320,7 @@ pub fn build_season_view_cached(
         trades,
         recent_trades,
         activity,
-        last_season: season.last_season.clone(),
+        last_season: season.last_season.as_ref().clone(),
         trends,
         team_avatars,
         data_health: SeasonHealth {

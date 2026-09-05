@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmDialog, Toast } from "./Overlays";
+import { useFocusTrap } from "./useFocusTrap";
 import type { Platform } from "../types";
 import { settle } from "../test/settle";
 
@@ -163,5 +164,72 @@ describe("naming the service", () => {
     expect(note).toHaveTextContent("does not draft them in Yahoo");
     expect(note).toHaveTextContent("live sync from Yahoo overrides it");
     expect(note).not.toHaveTextContent("Sleeper");
+  });
+});
+
+/** The dialog as the first-launch screen puts it on screen: no `.shell`
+ *  anywhere, because the app has no league yet and never renders one. */
+function SetupHarness() {
+  const dialog = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialog, () => undefined);
+  return (
+    <div className="app">
+      <div className="setup">
+        <button type="button">Load league</button>
+      </div>
+      <div className="scrim" role="presentation">
+        <div className="dialog" ref={dialog} role="dialog" aria-modal="true">
+          <button type="button">Join</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+describe("what the trap holds inert", () => {
+  it("covers a screen that has no shell to look for", () => {
+    // The trap used to look for `.shell`, which only the running app renders.
+    // On the very first launch — the one screen where the dialogs are the only
+    // thing to interact with — it found nothing and quietly did nothing.
+    render(<SetupHarness />);
+    expect(document.querySelector(".setup")).toHaveAttribute("inert");
+    expect(document.querySelector(".dialog")).not.toHaveAttribute("inert");
+  });
+
+  it("gives the page back when the dialog closes", async () => {
+    await openDialog();
+    expect(document.querySelector(".shell")).toHaveAttribute("inert");
+
+    await settle(() => {
+      screen.getByRole("button", { name: "Cancel" }).click();
+    });
+    expect(document.querySelector(".shell")).not.toHaveAttribute("inert");
+  });
+});
+
+describe("marking a player drafted twice", () => {
+  it("stops answering while the pick it already sent is out", () => {
+    // The dialog stayed live through the call, so a double tap sent two
+    // identical picks and the shell showed the refusal of the second as a
+    // failure of a pick that had in fact gone through.
+    const onConfirm = vi.fn();
+    render(
+      <div className="app">
+        <div className="shell" />
+        <ConfirmDialog
+          pickLabel="Pick 3.07 · slot 7"
+          playerName="Josh Downs"
+          platform="sleeper"
+          busy
+          onConfirm={onConfirm}
+          onCancel={() => undefined}
+        />
+      </div>,
+    );
+
+    const button = screen.getByRole("button", { name: "Marking…" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 });

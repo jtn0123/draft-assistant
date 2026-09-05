@@ -15,7 +15,13 @@ export default defineConfig({
       provider: "v8",
       // The floor, not the goal — raise these as coverage climbs. Enforced by
       // `npm run test:coverage`, which `npm run verify` (and therefore CI) runs.
-      thresholds: { lines: 80, statements: 80, functions: 75, branches: 70 },
+      //
+      // Set roughly five points under what the suite actually covers, so a
+      // change that quietly drops a screen's worth of tests trips the floor
+      // while ordinary movement does not. Left at 80/80/75/70 they were so
+      // far below the real figures (92/94/89/88) that a tenth of the suite
+      // could have gone missing without anything failing.
+      thresholds: { lines: 89, statements: 87, functions: 84, branches: 83 },
     },
   },
 });

@@ -14,7 +14,7 @@ use crate::board::BoardPlayer;
 use crate::engine::{Engine, LoadedLeague};
 use crate::sleeper::{PlayerMeta, ProjectionRow};
 use crate::weekly::WeeklyPoints;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// A refreshed dictionary and projection set, ready to be swapped in.
@@ -29,11 +29,49 @@ pub struct PlayerRefreshData {
     weekly_at: u64,
 }
 
+/// How much of the roster-and-board population a refreshed dictionary has to
+/// know before it is allowed to replace the loaded one.
+///
+/// Sleeper's dictionary answers with every player it has, so a response that
+/// knows only a fraction of the people actually in the league is a truncated
+/// or half-parsed one, not news. Eighty per cent leaves room for the handful
+/// of ids that legitimately go missing when a player is cut from the league
+/// entirely, and still refuses a body that lost most of itself in transit.
+const COVERAGE: f64 = 0.8;
+
+/// The players a refresh has to know about: everyone on a roster, plus
+/// everyone on the draft board the screen still renders names for.
+///
+/// Borrowed rather than owned so building one costs no allocation per id; the
+/// caller holds the league and the season while it checks.
+pub fn wanted_ids<'a>(
+    board_ids: impl Iterator<Item = &'a str>,
+    roster_ids: impl Iterator<Item = &'a str>,
+) -> HashSet<&'a str> {
+    board_ids.chain(roster_ids).collect()
+}
+
 impl PlayerRefreshData {
-    /// True when this is worth applying. An empty dictionary is what a failed
-    /// parse looks like, and swapping it in would blank every name on screen.
-    pub fn is_usable(&self) -> bool {
-        !self.players.is_empty()
+    /// True when this is worth applying.
+    ///
+    /// An empty dictionary is what a failed parse looks like, and swapping it
+    /// in would blank every name on screen. A *partial* one is the subtler
+    /// version of the same failure and used to pass this check: a truncated
+    /// body still deserialises, and applying it dropped every player it had
+    /// lost — names, injury tags and all — from the loaded league. So the
+    /// refresh also has to still know most of the people in this league.
+    pub fn is_usable(&self, wanted: &HashSet<&str>) -> bool {
+        if self.players.is_empty() {
+            return false;
+        }
+        if wanted.is_empty() {
+            return true;
+        }
+        let known = wanted
+            .iter()
+            .filter(|id| self.players.contains_key(**id))
+            .count();
+        known as f64 >= COVERAGE * wanted.len() as f64
     }
 
     /// Swap the refreshed halves into a loaded league.
@@ -63,11 +101,19 @@ impl PlayerRefreshData {
 /// to the dictionary, so swapping the dictionary alone would leave every
 /// drafted player — which is to say everyone who matters — stamped with the
 /// status he carried when the league was opened.
+///
+/// A player the dictionary says nothing about is left exactly as he was. The
+/// dictionary can be short of a few ids even when it is healthy enough to
+/// apply, and reading absence as "no longer injured" would quietly clear an
+/// Out tag and put the player back in the optimal lineup.
 fn restamp_injuries(board: &mut [BoardPlayer], players: &HashMap<String, PlayerMeta>) {
     for player in board.iter_mut() {
-        player.injury_status = players
-            .get(&player.player_id)
-            .and_then(|meta| meta.injury_status.clone())
+        let Some(meta) = players.get(&player.player_id) else {
+            continue;
+        };
+        player.injury_status = meta
+            .injury_status
+            .clone()
             .filter(|status| !status.trim().is_empty());
     }
 }
@@ -167,15 +213,47 @@ mod tests {
         );
     }
 
+    /// The bug: a dictionary short of most of the league still passed the
+    /// "not empty" check, and applying it dropped every player it had lost.
     #[test]
-    fn an_empty_dictionary_is_never_swapped_in() {
-        assert!(!refresh_from(HashMap::new(), 1, Vec::new(), 1).is_usable());
-        assert!(refresh_from(
-            HashMap::from([("rb1".to_string(), meta(None))]),
-            1,
-            Vec::new(),
-            1
-        )
-        .is_usable());
+    fn a_dictionary_missing_most_of_the_league_is_never_swapped_in() {
+        let full: HashMap<String, PlayerMeta> =
+            (0..10).map(|i| (format!("p{i}"), meta(None))).collect();
+        let ids: Vec<String> = (0..10).map(|i| format!("p{i}")).collect();
+        let wanted: HashSet<&str> = ids.iter().map(String::as_str).collect();
+
+        assert!(!refresh_from(HashMap::new(), 1, Vec::new(), 1).is_usable(&wanted));
+        assert!(refresh_from(full.clone(), 1, Vec::new(), 1).is_usable(&wanted));
+
+        let half: HashMap<String, PlayerMeta> = full
+            .iter()
+            .take(5)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        assert!(
+            !refresh_from(half, 1, Vec::new(), 1).is_usable(&wanted),
+            "a dictionary knowing half the league was swapped in"
+        );
+
+        let most: HashMap<String, PlayerMeta> = full
+            .iter()
+            .take(8)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        assert!(
+            refresh_from(most, 1, Vec::new(), 1).is_usable(&wanted),
+            "a dictionary missing two of ten is normal turnover, not a failure"
+        );
+    }
+
+    /// The bug: a player the refreshed dictionary had never heard of had his
+    /// injury tag cleared, which put a player listed Out back in the lineup.
+    #[test]
+    fn a_player_missing_from_the_refresh_keeps_the_status_he_had() {
+        let mut board = vec![board_player("rb1", Some("Out")), board_player("rb2", None)];
+        let players = HashMap::from([("rb2".to_string(), meta(Some("Q")))]);
+        restamp_injuries(&mut board, &players);
+        assert_eq!(board[0].injury_status.as_deref(), Some("Out"));
+        assert_eq!(board[1].injury_status.as_deref(), Some("Q"));
     }
 }

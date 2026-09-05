@@ -357,3 +357,63 @@ describe("what the host keeps", () => {
     );
   });
 });
+
+describe("a socket that is open but not listening", () => {
+  it("drops and reconnects once two pings go unanswered", async () => {
+    // The failure this prevents: a laptop that slept, or a host that was force
+    // quit, leaves a socket the browser goes on calling open. Nothing was read
+    // back off the ping, so the follower sat on a board that had stopped
+    // moving and the header still said it was connected.
+    vi.useFakeTimers();
+    await remoteApi(follow, () => undefined).onDraftUpdated(() => undefined);
+    const first = newest();
+    first.onopen?.();
+
+    await vi.advanceTimersByTimeAsync(25000);
+    await vi.advanceTimersByTimeAsync(25000);
+    expect(first.closed).toBe(false);
+    expect(getFollowStatus()).toBe("connected");
+
+    // The third tick finds two pings still unanswered.
+    await vi.advanceTimersByTimeAsync(25000);
+    expect(first.closed).toBe(true);
+    expect(getFollowStatus()).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeSocket.live).toHaveLength(2);
+  });
+
+  it("stays up for as long as the host keeps answering", async () => {
+    vi.useFakeTimers();
+    await remoteApi(follow, () => undefined).onDraftUpdated(() => undefined);
+    const socket = newest();
+    socket.onopen?.();
+
+    for (let i = 0; i < 6; i += 1) {
+      await vi.advanceTimersByTimeAsync(25000);
+      socket.push("pong");
+    }
+
+    expect(socket.closed).toBe(false);
+    expect(FakeSocket.live).toHaveLength(1);
+    expect(getFollowStatus()).toBe("connected");
+  });
+
+  it("re-reads the board when the window comes back or the network does", async () => {
+    // Counted through this window's own subscriber rather than the shared
+    // fetch mock: every other case in this file leaves a live follower behind,
+    // and they all answer these two events too.
+    fetchMock.mockResolvedValue(json(draftView));
+    const api = remoteApi(follow, () => undefined);
+    const boards: DraftView[] = [];
+    await api.onDraftUpdated((view) => boards.push(view));
+    newest().onopen?.();
+    await vi.waitFor(() => expect(boards).toHaveLength(1));
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => expect(boards).toHaveLength(2));
+
+    window.dispatchEvent(new Event("online"));
+    await vi.waitFor(() => expect(boards).toHaveLength(3));
+  });
+});

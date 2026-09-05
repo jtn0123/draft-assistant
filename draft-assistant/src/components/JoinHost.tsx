@@ -6,8 +6,8 @@
 // chat. The address box takes whatever the host showed: `192.168.1.5:7878`,
 // the `http://…/` line, or the URL out of the QR, pasted whole.
 
-import { useEffect, useRef, useState } from "react";
-import { pairWithHost, parseHostAddress, reason, saveFollow } from "../companion";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { pairWithHost, parseHostAddress, readFollow, reason, saveFollow } from "../companion";
 import type { FollowRecord } from "../types";
 import { useFocusTrap } from "./useFocusTrap";
 
@@ -29,6 +29,7 @@ export function JoinHost({
 }) {
   const dialog = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const addressField = useRef<HTMLInputElement>(null);
   const [address, setAddress] = useState("");
   const [code, setCode] = useState("");
   const [nickname, setNickname] = useState(DEFAULT_NICKNAME);
@@ -37,6 +38,11 @@ export function JoinHost({
 
   useEffect(() => {
     opener.current = document.activeElement as HTMLElement | null;
+    // Straight into the first field. On the very first launch this dialog is
+    // opened from a screen with no header and nothing else to tab to, and a
+    // modal that opens with focus still on the body leaves the keyboard with
+    // nowhere to start.
+    addressField.current?.focus();
     return () => {
       opener.current?.focus();
       opener.current = null;
@@ -62,6 +68,11 @@ export function JoinHost({
         origin,
         code,
         nickname.trim() === "" ? DEFAULT_NICKNAME : nickname,
+        "desktop",
+        // Read as the pairing is made rather than held from the first render:
+        // this is the id of whatever pairing is current now, which is what the
+        // host has to match against.
+        readFollow()?.device_id,
       );
       saveFollow(record);
       if (onJoined === undefined) window.location.reload();
@@ -70,6 +81,10 @@ export function JoinHost({
       setError(reason(e));
       setWorking(false);
     }
+  };
+
+  const onEnter = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !working) void join();
   };
 
   return (
@@ -96,14 +111,19 @@ export function JoinHost({
           and the budget; you get the board, the season and the shared chat.
         </span>
 
+        {/* Enter joins from any of the three, not only the last one. Typing an
+            address and pressing Enter did nothing at all, which reads as a
+            dialog that has hung rather than one that wanted the mouse. */}
         <div className="join-host-fields">
           <label className="field">
             Host address
             <input
               className="text-input"
+              ref={addressField}
               value={address}
               placeholder="192.168.1.5:7878"
               onChange={(e) => setAddress(e.target.value)}
+              onKeyDown={onEnter}
             />
           </label>
           <label className="field">
@@ -114,6 +134,7 @@ export function JoinHost({
               inputMode="numeric"
               placeholder="418902"
               onChange={(e) => setCode(e.target.value)}
+              onKeyDown={onEnter}
             />
           </label>
           <label className="field">
@@ -123,9 +144,7 @@ export function JoinHost({
               value={nickname}
               placeholder={DEFAULT_NICKNAME}
               onChange={(e) => setNickname(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void join();
-              }}
+              onKeyDown={onEnter}
             />
           </label>
         </div>

@@ -15,7 +15,7 @@ use crate::draft::{self, DraftOrder};
 use crate::sleeper::{Draft, SleeperClient, BASE};
 use crate::sleeper_error::SleeperError;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// One entry from `/draft/{id}/traded_picks`: the pick that roster
 /// `roster_id` was due in `round` now belongs to roster `owner_id`.
@@ -42,6 +42,74 @@ impl SleeperClient {
     }
 }
 
+/// Who owns each pick that changed hands: (round, the roster the pick started
+/// with) -> the roster that holds it now.
+///
+/// Ordered rather than hashed so two of these compare equal whatever order
+/// the API listed the trades in; the poll tick compares one tick's map with
+/// the last to decide whether the board has to be redrawn.
+pub type OwnedPicks = BTreeMap<(u32, u32), u32>;
+
+/// Where a pick ends up after every trade of it, following the
+/// `previous_owner_id` -> `owner_id` links out from the roster it started
+/// with.
+///
+/// A pick traded twice arrives as two rows for the same (round, roster), and
+/// the old code kept whichever came last in the array. Sleeper does not order
+/// that array, so a pick that went from roster 3 to roster 7 to roster 11 was
+/// as likely to be shown as roster 7's — the intermediate owner, a manager
+/// who no longer holds the pick at all — as roster 11's.
+///
+/// The walk is bounded by the number of links, so a list that loops back on
+/// itself stops rather than spinning.
+fn final_owner(origin: u32, links: &[(u32, u32)]) -> u32 {
+    if !links.iter().any(|(previous, _)| *previous == origin) {
+        // Nothing starts at the roster the pick came from, so the chain
+        // cannot be walked: keep the last row, which is what this did before
+        // chains were followed at all.
+        return links.last().map(|(_, owner)| *owner).unwrap_or(origin);
+    }
+    let mut current = origin;
+    for _ in 0..links.len() {
+        let Some(&(_, next)) = links.iter().find(|(previous, _)| *previous == current) else {
+            break;
+        };
+        current = next;
+    }
+    current
+}
+
+/// Resolve a `/traded_picks` list into who owns what now.
+///
+/// `season` is the draft's own season where it has one: the draft endpoint
+/// already scopes trades to this draft, and the check is belt and braces
+/// against a league-level list being passed.
+pub fn ownership_map(season: Option<&str>, traded: &[TradedPick]) -> OwnedPicks {
+    let mut links: BTreeMap<(u32, u32), Vec<(u32, u32)>> = BTreeMap::new();
+    for pick in traded
+        .iter()
+        .filter(|t| season.is_none_or(|s| s == t.season))
+    {
+        links
+            .entry((pick.round, pick.roster_id))
+            .or_default()
+            // A row with no previous owner is the pick's first trade, so it
+            // starts at the roster the pick came from.
+            .push((
+                pick.previous_owner_id.unwrap_or(pick.roster_id),
+                pick.owner_id,
+            ));
+    }
+    links
+        .into_iter()
+        .filter_map(|(key, links)| {
+            let owner = final_owner(key.1, &links);
+            // A pick traded away and back again is nobody's override.
+            (owner != key.1).then_some((key, owner))
+        })
+        .collect()
+}
+
 /// The snake order corrected for trades: pick number -> the slot whose
 /// manager makes it.
 #[derive(Debug, Clone)]
@@ -52,7 +120,7 @@ pub struct PickOwnership {
     slot_to_roster: HashMap<u32, u32>,
     roster_to_slot: HashMap<u32, u32>,
     /// (round, roster the pick started with) -> roster that owns it now.
-    traded: HashMap<(u32, u32), u32>,
+    traded: OwnedPicks,
 }
 
 impl PickOwnership {
@@ -73,13 +141,7 @@ impl PickOwnership {
             })
             .unwrap_or_default();
         let roster_to_slot = slot_to_roster.iter().map(|(s, r)| (*r, *s)).collect();
-        // The draft endpoint already scopes trades to this draft; the season
-        // check is belt and braces against a league-level list being passed.
-        let traded = traded
-            .iter()
-            .filter(|t| draft.season.as_deref().is_none_or(|s| s == t.season))
-            .map(|t| ((t.round, t.roster_id), t.owner_id))
-            .collect();
+        let traded = ownership_map(draft.season.as_deref(), traded);
         Self {
             teams,
             rounds,
@@ -101,7 +163,7 @@ impl PickOwnership {
             order,
             slot_to_roster: HashMap::new(),
             roster_to_slot: HashMap::new(),
-            traded: HashMap::new(),
+            traded: OwnedPicks::new(),
         }
     }
 
@@ -261,6 +323,91 @@ mod tests {
         // The seven even rounds, in full: with an even team count no pick in
         // a reversed round lands on the slot a forward round would give it.
         assert_eq!(overrides.len(), 7 * 14);
+    }
+
+    /// A pick traded twice arrived as two rows for the same (round, roster)
+    /// and the last one in the array won. Sleeper does not order that array,
+    /// so half the time the board named the intermediate owner — a manager
+    /// who had already traded the pick on.
+    #[test]
+    fn a_twice_traded_pick_names_the_final_owner_whichever_order_the_rows_arrive_in() {
+        // Round 11 started with roster 11 (slot 13), went to roster 2 (slot
+        // 5), and from there to roster 12 (slot 14).
+        let first = TradedPick {
+            previous_owner_id: Some(11),
+            ..traded(11, 11, 2)
+        };
+        let second = TradedPick {
+            previous_owner_id: Some(2),
+            ..traded(11, 11, 12)
+        };
+        for rows in [vec![first.clone(), second.clone()], vec![second, first]] {
+            let own = PickOwnership::from_draft(&league(), &rows, 14, 15, DraftOrder::SNAKE);
+            assert_eq!(
+                own.owner_slot(153),
+                Some(14),
+                "the last owner in the chain makes the pick, not the middle one"
+            );
+            assert!(own.picks_owned_by(5).is_empty() || !own.picks_owned_by(5).contains(&153));
+            assert!(own.picks_owned_by(14).contains(&153));
+        }
+    }
+
+    /// Three hops, and the rows shuffled, still resolve to the end of the
+    /// chain rather than wherever the array happened to stop.
+    #[test]
+    fn a_chain_resolves_from_the_roster_the_pick_started_with() {
+        let rows = [
+            TradedPick {
+                previous_owner_id: Some(2),
+                ..traded(11, 11, 12)
+            },
+            TradedPick {
+                previous_owner_id: Some(12),
+                ..traded(11, 11, 5)
+            },
+            TradedPick {
+                previous_owner_id: Some(11),
+                ..traded(11, 11, 2)
+            },
+        ];
+        assert_eq!(
+            ownership_map(Some("2026"), &rows),
+            OwnedPicks::from([((11, 11), 5)])
+        );
+        // Traded away and back again is nobody's override.
+        let round_trip = [
+            TradedPick {
+                previous_owner_id: Some(11),
+                ..traded(11, 11, 2)
+            },
+            TradedPick {
+                previous_owner_id: Some(2),
+                ..traded(11, 11, 11)
+            },
+        ];
+        assert!(ownership_map(Some("2026"), &round_trip).is_empty());
+    }
+
+    /// A list whose rows do not link back to the roster the pick came from
+    /// (no `previous_owner_id`, or a partial list) keeps the plain last-row
+    /// answer rather than pretending nothing was traded.
+    #[test]
+    fn a_single_row_with_no_previous_owner_still_moves_the_pick() {
+        let row = TradedPick {
+            previous_owner_id: None,
+            ..traded(11, 11, 2)
+        };
+        let own = PickOwnership::from_draft(&league(), &[row], 14, 15, DraftOrder::SNAKE);
+        assert_eq!(own.owner_slot(153), Some(5));
+        let orphan = TradedPick {
+            previous_owner_id: Some(9),
+            ..traded(11, 11, 2)
+        };
+        assert_eq!(
+            ownership_map(Some("2026"), &[orphan]),
+            OwnedPicks::from([((11, 11), 2)])
+        );
     }
 
     #[test]

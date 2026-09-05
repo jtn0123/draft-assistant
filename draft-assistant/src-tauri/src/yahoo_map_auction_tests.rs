@@ -165,3 +165,77 @@ fn a_return_touchdown_pays_the_returner_rather_than_a_defence() {
     }
     assert_eq!(scoring.len(), 1);
 }
+
+/// The budget is not on every auction league's settings, and an auction board
+/// with no budget cannot say what any bid is a share of. The failure this
+/// prevents: the only auction league anyone had recorded carried one, so the
+/// absent case was never exercised and reached the board as `null`.
+#[test]
+fn an_auction_with_no_budget_in_its_settings_falls_back_to_the_biggest_spend() {
+    let league = YahooLeague {
+        is_auction_draft: true,
+        draft_budget: None,
+        ..YahooLeague::default()
+    };
+    // Team one has spent $56, team two $71. Nobody started with less than the
+    // most anybody has spent, so $71 is the floor.
+    let results = vec![
+        YahooDraftPick {
+            cost: Some(55.0),
+            team_key: "449.l.1.t.1".into(),
+            ..result(1, "449.p.100")
+        },
+        YahooDraftPick {
+            cost: Some(1.0),
+            team_key: "449.l.1.t.1".into(),
+            ..result(2, "449.p.200")
+        },
+        YahooDraftPick {
+            cost: Some(70.5),
+            team_key: "449.l.1.t.2".into(),
+            ..result(3, "449.p.300")
+        },
+        YahooDraftPick {
+            cost: Some(0.5),
+            team_key: "449.l.1.t.2".into(),
+            ..result(4, "449.p.400")
+        },
+    ];
+    assert_eq!(derived_budget(&results), Some(71));
+    assert_eq!(auction(&league, &results).budget, Some(71));
+    let warning = derived_budget_warning(&league, &results).expect("the board says it guessed");
+    assert!(warning.contains("$71"), "{warning}");
+    assert!(warning.contains("no auction budget"), "{warning}");
+}
+
+#[test]
+fn a_budget_yahoo_did_send_is_never_second_guessed() {
+    let league = YahooLeague {
+        is_auction_draft: true,
+        draft_budget: Some(200),
+        ..YahooLeague::default()
+    };
+    let results = vec![YahooDraftPick {
+        cost: Some(55.0),
+        ..result(1, "449.p.100")
+    }];
+    assert_eq!(auction(&league, &results).budget, Some(200));
+    assert_eq!(
+        derived_budget_warning(&league, &results),
+        None,
+        "nothing was derived, so there is nothing to warn about"
+    );
+}
+
+#[test]
+fn a_snake_draft_derives_no_budget_at_all() {
+    // No pick has a cost, so there is no spend to take a maximum of, and the
+    // empty auction is still how a caller tells a snake league.
+    let league = YahooLeague::default();
+    let results = vec![result(1, "449.p.100"), result(2, "449.p.200")];
+    assert_eq!(derived_budget(&results), None);
+    assert_eq!(auction(&league, &results).budget, None);
+    assert_eq!(derived_budget_warning(&league, &results), None);
+    // An auction before its first sale is the same case.
+    assert_eq!(derived_budget(&[]), None);
+}

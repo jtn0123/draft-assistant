@@ -68,6 +68,37 @@ pub async fn get_chat(
 }
 
 #[derive(Deserialize)]
+pub struct ResetBody {
+    #[serde(default)]
+    screen: String,
+}
+
+/// Start the shared thread over.
+///
+/// Any paired device may do it, not just the host: the thread is shared, the
+/// phone is where most of it is read, and a thread nobody can clear is a
+/// thread that eventually stops being useful to everyone on it. The emptied
+/// thread goes out to every device the same way an answer does, so nobody is
+/// left looking at entries the host has forgotten.
+pub async fn reset_chat(
+    State(srv): State<Arc<Srv>>,
+    _auth: Auth,
+    Json(body): Json<ResetBody>,
+) -> Response {
+    let screen = match check_screen(&body.screen) {
+        Ok(screen) => screen,
+        Err(e) => return fail(StatusCode::BAD_REQUEST, &e),
+    };
+    let league_id = match active_league(&srv).await {
+        Ok(league_id) => league_id,
+        Err(e) => return fail(StatusCode::NOT_FOUND, &e),
+    };
+    let thread = srv.chat.reset(&league_id, screen).await;
+    srv.announce(&thread);
+    Json(thread).into_response()
+}
+
+#[derive(Deserialize)]
 pub struct AskBody {
     #[serde(default)]
     screen: String,

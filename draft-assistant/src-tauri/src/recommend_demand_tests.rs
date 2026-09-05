@@ -6,6 +6,7 @@ use super::score::{score_candidate, starting_demand};
 use super::tests::{entry, player, slots};
 use super::*;
 use crate::board::AvailablePlayer;
+use crate::draft::TeamRoster;
 
 fn rules(slots: &[&str]) -> RosterRules {
     RosterRules::new(
@@ -14,6 +15,14 @@ fn rules(slots: &[&str]) -> RosterRules {
             .map(|slot| (*slot).to_string())
             .collect::<Vec<_>>(),
     )
+}
+
+/// The position-and-points pairs the demand allocator reads.
+fn pool(board: &[AvailablePlayer]) -> Vec<(&str, f64)> {
+    board
+        .iter()
+        .map(|a| (a.player.position.as_str(), a.player.points))
+        .collect()
 }
 
 fn roster_with(positions: &[&str], open: &[(&str, u32)]) -> TeamRoster {
@@ -29,6 +38,23 @@ fn roster_with(positions: &[&str], open: &[(&str, u32)]) -> TeamRoster {
             .iter()
             .map(|(slot, n)| ((*slot).to_string(), *n))
             .collect(),
+    }
+}
+
+/// A roster whose open starting slots are the ones the roster rules actually
+/// work out, rather than a list written by hand in the test. Which slot is
+/// left open is half of what is under test here.
+fn roster_via_rules(rules: &RosterRules, positions: &[&str]) -> TeamRoster {
+    let open = rules.open_starting_slots(positions.iter().copied());
+    TeamRoster {
+        slot: 2,
+        display_name: None,
+        players: positions
+            .iter()
+            .enumerate()
+            .map(|(i, p)| entry(p, i as u32 + 1))
+            .collect(),
+        open_starters: open,
     }
 }
 
@@ -69,7 +95,7 @@ fn superflex_demand_goes_to_quarterbacks_not_a_quarter_to_each_position() {
         "SUPER_FLEX",
         "BN",
     ]);
-    let demand = starting_demand(&board, &superflex, 12);
+    let demand = starting_demand(pool(&board), &superflex, 12);
     assert!(
         demand["QB"] > 1.9,
         "a superflex league starts {} quarterbacks",
@@ -104,7 +130,7 @@ fn superflex_demand_goes_to_quarterbacks_not_a_quarter_to_each_position() {
 fn a_one_quarterback_league_does_not_want_a_second_one() {
     let board = deep_board();
     let one_qb = rules(&["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "BN"]);
-    let demand = starting_demand(&board, &one_qb, 12);
+    let demand = starting_demand(pool(&board), &one_qb, 12);
     assert!(
         (demand["QB"] - 1.0).abs() < 1e-9,
         "a one-QB league starts {}",
@@ -228,5 +254,182 @@ fn the_thin_room_bonus_defers_to_the_open_slot_that_already_paid_for_it() {
             .iter()
             .any(|r| r.contains("one injury from an empty")),
         "{thin_only:?}"
+    );
+}
+
+// ---------- whose hole an open flex slot is ----------
+
+#[test]
+fn an_open_superflex_slot_is_the_quarterbacks_hole_and_not_the_fourth_receivers() {
+    // One SUPER_FLEX left open on a roster with one quarterback and three
+    // receivers. Both candidates could legally go in it, so both were paid
+    // the same eight points for "an open SUPER_FLEX slot" and the pick fell
+    // to whoever had the bigger VORP, which at that point on the board is
+    // always the receiver.
+    let superflex = rules(&[
+        "QB",
+        "RB",
+        "RB",
+        "WR",
+        "WR",
+        "TE",
+        "FLEX",
+        "SUPER_FLEX",
+        "BN",
+    ]);
+    let mine = roster_via_rules(&superflex, &["QB", "RB", "RB", "WR", "WR", "WR", "TE"]);
+    assert_eq!(
+        mine.open_starters,
+        vec![("SUPER_FLEX".to_string(), 1)],
+        "the roster rules have to leave the superflex open for this to be the question"
+    );
+
+    let candidates = [player("qb2", "QB", 40.0), player("wr4", "WR", 40.0)];
+    let mut board = deep_board();
+    board.extend(candidates.iter().cloned());
+    let inputs = RecommendInputs::new(&board, Some(&mine), &superflex, 6, 15, 60, 12);
+    let ctx = context(
+        &inputs,
+        HashMap::from([("QB", 1), ("RB", 2), ("WR", 3), ("TE", 1)]),
+    );
+    let qb = score_candidate(&ctx, &candidates[0], Mode::Balanced).expect("a QB");
+    let wr = score_candidate(&ctx, &candidates[1], Mode::Balanced).expect("a WR");
+    assert!(qb.total > wr.total, "QB {} vs WR {}", qb.total, wr.total);
+    let said = qb.into_reasons();
+    assert!(
+        said.iter()
+            .any(|r| r.contains("SUPER_FLEX slot is your QB")),
+        "{said:?}"
+    );
+    let heard = wr.into_reasons();
+    assert!(
+        heard.iter().any(|r| r == "fills an open SUPER_FLEX slot"),
+        "{heard:?}"
+    );
+}
+
+// ---------- what the league starts in a slot of its own ----------
+
+/// A board where tight ends outscore receivers, which is what a TE-premium
+/// scoring table does to one.
+fn te_premium_board() -> Vec<AvailablePlayer> {
+    let mut board = Vec::new();
+    for (position, top) in [("QB", 380.0), ("RB", 300.0), ("WR", 290.0), ("TE", 400.0)] {
+        for i in 0..40 {
+            let points = top - 4.0 * f64::from(i);
+            let mut p = player(&format!("{position}{i}"), position, points - 150.0);
+            p.player.points = points;
+            p.player.adp = None;
+            board.push(p);
+        }
+    }
+    board
+}
+
+#[test]
+fn a_second_tight_end_is_not_a_backup_where_the_flex_allocation_wants_one() {
+    // Counting slots by name saw one slot spelt "TE" and called every tight
+    // end after the first a backup: twenty points off the second and the
+    // third refused outright. The league's own allocation gives this
+    // REC_FLEX to tight ends, so it starts two of them.
+    let te_premium = rules(&["QB", "RB", "RB", "WR", "WR", "TE", "REC_FLEX", "BN"]);
+    let board = te_premium_board();
+    let demand = starting_demand(pool(&board), &te_premium, 12);
+    assert!(
+        demand["TE"] > 1.9,
+        "the REC_FLEX went somewhere else: {demand:?}"
+    );
+
+    let candidates = [player("te2", "TE", 40.0), player("te3", "TE", 40.0)];
+    let mut board = board;
+    board.extend(candidates.iter().cloned());
+    let mine = roster_via_rules(&te_premium, &["QB", "RB", "RB", "WR", "WR", "TE"]);
+    let inputs = RecommendInputs::new(&board, Some(&mine), &te_premium, 8, 15, 90, 12);
+    let ctx = context(
+        &inputs,
+        HashMap::from([("QB", 1), ("RB", 2), ("WR", 2), ("TE", 1)]),
+    );
+    let te2 = score_candidate(&ctx, &candidates[0], Mode::Balanced).expect("a TE");
+    let said = te2.into_reasons();
+    assert!(
+        !said.iter().any(|r| r.contains("backup TE")),
+        "the second tight end is a starter here: {said:?}"
+    );
+
+    // And the third is ordinary depth rather than a candidate refused
+    // outright, which the name test did as soon as two were rostered.
+    let ctx = context(
+        &inputs,
+        HashMap::from([("QB", 1), ("RB", 2), ("WR", 2), ("TE", 2)]),
+    );
+    assert!(
+        score_candidate(&ctx, &candidates[1], Mode::Balanced).is_some(),
+        "a third tight end in a two-TE league is depth, not a disqualification"
+    );
+}
+
+// ---------- demand is a property of the league, not of what is left ----------
+
+#[test]
+fn superflex_demand_holds_up_after_the_quarterbacks_have_gone() {
+    // Allocated against the remaining pool, a superflex slot stopped going to
+    // quarterbacks the moment the pool ran shorter than the demand index, and
+    // the roster that most needed a second quarterback was told the league
+    // started one.
+    let superflex = rules(&["QB", "RB", "RB", "WR", "WR", "TE", "SUPER_FLEX", "BN"]);
+    let board = deep_board();
+    let full: Vec<crate::board::BoardPlayer> = board.iter().map(|a| a.player.clone()).collect();
+    // Twenty quarterbacks off the board, which is a normal round eight in a
+    // twelve-team superflex league.
+    let left: Vec<AvailablePlayer> = board
+        .iter()
+        .filter(|a| {
+            !a.player.player_id.starts_with("QB")
+                || a.player.player_id["QB".len()..]
+                    .parse::<u32>()
+                    .is_ok_and(|n| n >= 20)
+        })
+        .cloned()
+        .collect();
+
+    let mut inputs = RecommendInputs::new(&left, None, &superflex, 8, 15, 90, 12);
+    let thin = starting_demand(inputs.demand_pool(), &superflex, 12);
+    inputs.full_board = &full;
+    let whole = starting_demand(inputs.demand_pool(), &superflex, 12);
+    assert!(
+        whole["QB"] > 1.9,
+        "the league still starts two quarterbacks: {whole:?}"
+    );
+    assert!(
+        thin["QB"] < whole["QB"],
+        "this test is guarding nothing if the remaining pool gives the same answer"
+    );
+}
+
+// ---------- one hole, one reason ----------
+
+#[test]
+fn one_open_starting_slot_is_paid_for_once() {
+    // Three terms priced the same empty receiver room: the need bonus, the
+    // thin-room warning, and the early-depth term. Two of them are gated on
+    // the need bonus having fired; the third was not.
+    let available = vec![player("wr", "WR", 10.0)];
+    let standard = RosterRules::new(&slots());
+    let mine = roster_with(&["QB", "RB", "RB", "TE"], &[("WR", 1)]);
+    let inputs = RecommendInputs::new(&available, Some(&mine), &standard, 4, 15, 40, 12);
+    let ctx = context(
+        &inputs,
+        HashMap::from([("QB", 1), ("RB", 2), ("WR", 0), ("TE", 1)]),
+    );
+    let reasons = score_candidate(&ctx, &available[0], Mode::Balanced)
+        .expect("a receiver")
+        .into_reasons();
+    let need_reasons = reasons
+        .iter()
+        .filter(|r| r.contains("starter slot") || r.contains("thin at") || r.contains("empty slot"))
+        .count();
+    assert_eq!(
+        need_reasons, 1,
+        "one hole, {need_reasons} reasons: {reasons:?}"
     );
 }

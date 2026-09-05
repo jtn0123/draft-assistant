@@ -327,3 +327,30 @@ describe("the dialog itself", () => {
     expect(onClose).toHaveBeenCalledTimes(3);
   });
 });
+
+describe("what a failure sounds like", () => {
+  it("announces the message, once, without the Error prefix", async () => {
+    // `String(e)` gave "Error: Yahoo rejected those credentials", and the
+    // block it went into was a plain div nothing would read out.
+    await open();
+    mocks.yahooSaveCredentials.mockRejectedValue(new Error("Yahoo rejected those credentials"));
+
+    await userEvent.type(screen.getByLabelText(/Client ID/i), "id-1");
+    await userEvent.type(screen.getByLabelText(/Client secret/i), "secret-1");
+    await settle(() => {
+      screen.getByRole("button", { name: /Save/i }).click();
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Yahoo rejected those credentials");
+    expect(alert.textContent).not.toMatch(/^Error:/);
+  });
+
+  it("puts the keyboard on the first control of the step it opened on", async () => {
+    // This dialog can be the whole of the first-launch screen, where there is
+    // nothing else to tab from.
+    await open();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true);
+  });
+});

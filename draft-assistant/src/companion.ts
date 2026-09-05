@@ -108,12 +108,19 @@ function pairProblem(status: number): string {
 
 /**
  * Swap a six-digit code for a token. `origin` comes from `parseHostAddress`.
+ *
+ * The id from the last pairing goes back up with the request. Without it the
+ * host has no way to tell a device it already knows from a new one with the
+ * same nickname, so re-pairing after a token expiry left the settings dialog
+ * listing "This Mac" and "This Mac 2" for one machine — and revoking the wrong
+ * one did nothing. The id the host answers with is kept for the same reason.
  */
 export async function pairWithHost(
   origin: string,
   code: string,
   deviceName: string,
   kind: DeviceKind = "desktop",
+  previousDeviceId?: string,
 ): Promise<FollowRecord> {
   // The failure is handled as a value rather than caught: a fetch that cannot
   // connect says only "Failed to fetch", and the useful half of the sentence
@@ -121,7 +128,17 @@ export async function pairWithHost(
   const response = await fetch(`${origin}/api/pair`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code: code.trim(), device_name: deviceName.trim(), kind }),
+    body: JSON.stringify({
+      code: code.trim(),
+      device_name: deviceName.trim(),
+      kind,
+      // Omitted rather than sent as null on a first pairing: the host reads
+      // any id it does not know as a new device anyway, and there is nothing
+      // to say yet.
+      ...(previousDeviceId === undefined || previousDeviceId === ""
+        ? {}
+        : { device_id: previousDeviceId }),
+    }),
   }).then(
     (answer) => answer,
     () => null,
@@ -132,11 +149,22 @@ export async function pairWithHost(
     );
   }
   if (!response.ok) throw new Error(pairProblem(response.status));
-  const body = (await response.json()) as { token?: string; host_name?: string };
+  const body = (await response.json()) as {
+    token?: string;
+    host_name?: string;
+    device_id?: string;
+  };
   if (typeof body.token !== "string" || body.token === "") {
     throw new Error("The host paired but sent no token.");
   }
-  return { url: origin, token: body.token, host_name: body.host_name ?? "the host" };
+  return {
+    url: origin,
+    token: body.token,
+    host_name: body.host_name ?? "the host",
+    ...(typeof body.device_id === "string" && body.device_id !== ""
+      ? { device_id: body.device_id }
+      : {}),
+  };
 }
 
 /**

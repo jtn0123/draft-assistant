@@ -259,26 +259,44 @@ export function useDraftSession(
     setBusy(true);
     const wasPolling = polling;
     try {
-      if (polling) {
-        await api.stopPolling();
-        setPolling(false);
+      let next: DraftView;
+      try {
+        if (polling) {
+          await api.stopPolling();
+          setPolling(false);
+        }
+        next = await api.addLeague(leagueId);
+      } catch (e) {
+        // Nothing switched: the league on screen is still the old one, and its
+        // poller was stopped on the way into a switch that never happened. Put
+        // it back before saying anything, or the board silently stops moving
+        // mid-draft.
+        if (wasPolling) await startLive();
+        showToast(problem("Could not switch leagues", e), () => void switchLeague(leagueId));
+        return;
       }
-      const next = await api.addLeague(leagueId);
+
+      // Past this line the backend has switched and nothing here can un-switch
+      // it. A failure below is therefore never "could not switch leagues" with
+      // a retry that would switch a second time — the whole toast used to be a
+      // lie whenever it was only the league list that failed to re-read.
       applyView(next);
-      const config = await api.getConfig();
-      setLeagues(config.leagues);
-      setHasAccount(config.my_user_id !== null);
-      // The league did switch either way; only the live-sync half may have
-      // failed, and that failure has already had its own toast with a retry.
-      if (await startLive()) {
-        showToast(`Switched to ${next.league.name} — the last league is still in the list`);
+      let listed = true;
+      try {
+        const config = await api.getConfig();
+        setLeagues(config.leagues);
+        setHasAccount(config.my_user_id !== null);
+      } catch {
+        listed = false;
       }
-    } catch (e) {
-      // The league on screen is still the old one, and its poller was stopped
-      // on the way into a switch that never happened. Put it back before
-      // saying anything, or the board silently stops moving mid-draft.
-      if (wasPolling) await startLive();
-      showToast(problem("Could not switch leagues", e), () => void switchLeague(leagueId));
+      // Live sync failing has already had its own toast with its own retry, so
+      // it only decides whether there is anything left to say here.
+      if (!(await startLive())) return;
+      showToast(
+        listed
+          ? `Switched to ${next.league.name} — the last league is still in the list`
+          : `Switched to ${next.league.name} — the league list could not be re-read`,
+      );
     } finally {
       setBusy(false);
     }

@@ -18,6 +18,7 @@ import type { SeasonView } from "./season-types";
 import type {
   AppConfig,
   CompanionDevice,
+  Diagnostics,
   DraftView,
   FollowRecord,
   PollHealth,
@@ -33,6 +34,10 @@ export const REVOKED_KEY = "da.companion.revoked";
  *  repeats for as long as the host stays away. */
 const BACKOFF_MS = [1000, 2000, 5000, 10000];
 const PING_MS = 25000;
+
+/** How many pings may go unanswered before the socket counts as dead. Two
+ *  rather than one so a single slow answer over a busy Wi-Fi is not a drop. */
+const MISSED_PONGS_ALLOWED = 2;
 
 /** Frames the host sends down the socket. */
 type Frame = { type: string; payload?: unknown };
@@ -71,6 +76,10 @@ class HostSocket {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private ping: ReturnType<typeof setInterval> | undefined;
   private closed = false;
+  /** Pings sent since the last pong came back. The host answers every one, so
+   *  a run of them is the only sign this window has that a socket the browser
+   *  still calls open is talking to nobody. */
+  private missedPongs = 0;
   /** Run on every open, including each reconnection. Set by `remoteApi`
    *  after construction so the re-read can name the socket it belongs to. */
   onOpen: () => void = () => undefined;
@@ -95,8 +104,22 @@ class HostSocket {
     this.socket = socket;
     socket.onopen = () => {
       this.attempt = 0;
+      this.missedPongs = 0;
       setFollowStatus("connected");
-      this.ping = setInterval(() => socket.send(JSON.stringify({ type: "ping" })), PING_MS);
+      // A sleeping laptop, a Wi-Fi that moved, a host that was force quit: all
+      // of them leave a socket the browser goes on calling open, with a board
+      // that has quietly stopped moving. Nothing was ever read back off the
+      // ping, so the follower sat on last hour's picks and said "connected".
+      // Two unanswered pings and the socket is dropped, which puts the header
+      // on "reconnecting" and starts the backoff that gets it back.
+      this.ping = setInterval(() => {
+        if (this.missedPongs >= MISSED_PONGS_ALLOWED) {
+          socket.close();
+          return;
+        }
+        this.missedPongs += 1;
+        socket.send(JSON.stringify({ type: "ping" }));
+      }, PING_MS);
       this.onOpen();
     };
     socket.onmessage = (event: MessageEvent) => this.deliver(String(event.data));
@@ -137,6 +160,12 @@ class HostSocket {
     } catch {
       return;
     }
+    // The answer to our own keep-alive. Nothing on screen wants it; the point
+    // is only that it arrived.
+    if (frame.type === "pong") {
+      this.missedPongs = 0;
+      return;
+    }
     if (frame.type === "revoked") {
       this.stop();
       this.onRevoked();
@@ -150,6 +179,21 @@ class HostSocket {
     const wait = BACKOFF_MS[Math.min(this.attempt, BACKOFF_MS.length - 1)] ?? 10000;
     this.attempt += 1;
     this.timer = setTimeout(() => this.open(), wait);
+  }
+
+  /**
+   * Try the host again now instead of at the end of the backoff.
+   *
+   * Something outside — the window coming back to the front, the machine
+   * finding a network — knows more than the timer does. Waiting out a ten
+   * second backoff after the user has already looked at the screen is the
+   * kind of delay that reads as a broken app.
+   */
+  wake(): void {
+    if (this.closed || this.socket !== null) return;
+    clearTimeout(this.timer);
+    this.attempt = 0;
+    this.open();
   }
 
   stop(): void {
@@ -240,7 +284,7 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
   // tell how old the host it joined is, so it asks either way. A failure is
   // dropped on purpose: nothing here is worth a toast, and the socket is
   // already live for whatever comes next.
-  socket.onOpen = () => {
+  const refresh = () => {
     if (socket.wants("draft-updated")) {
       void state().then(
         (view) => socket.emit("draft-updated", view),
@@ -254,6 +298,23 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
       );
     }
   };
+  socket.onOpen = refresh;
+
+  // The same re-read, for the two moments the browser tells us this window is
+  // back: a tab brought to the front after the machine slept, and a network
+  // that has just come up. Either way the socket may still be sitting on a
+  // dead connection whose ping timeout has not run yet, so it is nudged as
+  // well as re-read. These listeners are never removed on purpose: `remoteApi`
+  // is built once per window, and they should live exactly that long.
+  if (typeof window !== "undefined") {
+    const back = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      socket.wake();
+      refresh();
+    };
+    window.addEventListener("online", back);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", back);
+  }
 
   return {
     // ---------- reads ----------
@@ -306,6 +367,18 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
       if (response.status === 429) throw new Error("That's a lot of questions. Give it a minute.");
       if (!response.ok) throw new Error(`${follow.host_name} answered ${response.status}`);
     },
+    sharedChatReset: async (screen) => {
+      const response = await fetch(`${follow.url}/api/chat/reset`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${follow.token}`, "content-type": "application/json" },
+        body: JSON.stringify({ screen }),
+      });
+      if (response.status === 401) {
+        revoked();
+        throw new Error("The host revoked this device");
+      }
+      if (!response.ok) throw new Error(`${follow.host_name} answered ${response.status}`);
+    },
     onSharedChat: (handler) => listen<SharedChatThread>("shared-chat", handler),
     onCompanionDevices: (handler) => listen<CompanionDevice[]>("devices", handler),
 
@@ -344,6 +417,32 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
     companionDisable: refused,
     companionRevoke: refused,
     setDeviceName: refused,
+
+    // ---------- diagnostics ----------
+    // A follower has no log of its own: the host writes one, and reading it
+    // over the wire would mean handing every paired phone the host's error
+    // history. So this reports what this window knows and says who to ask.
+    diagnostics: async () => {
+      const view = await state().catch(() => null);
+      return {
+        app_version: "",
+        platform: `following ${follow.host_name}`,
+        league_id: view?.league.league_id ?? null,
+        league_name: view?.league.name ?? null,
+        draft_id: null,
+        platform_name: view?.league.platform ?? null,
+        polling: view !== null,
+        poll: null,
+        companion_enabled: false,
+        companion_devices: 0,
+        log_path: null,
+        log_tail: [],
+      } satisfies Diagnostics;
+    },
+    openLogFolder: refused,
+    // The host's log is the host's. Reporting into it from here would let any
+    // paired device write lines the host cannot account for.
+    logFrontendError: () => Promise.resolve(),
 
     // ---------- nothing to ask, nothing to fail ----------
     sleeperLeagues: () => Promise.resolve([]),

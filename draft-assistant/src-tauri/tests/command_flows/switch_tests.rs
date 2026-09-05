@@ -208,13 +208,22 @@ fn a_pick_list_that_vanishes_mid_draft_does_not_wipe_the_board() {
     // From here Sleeper answers /picks with null, which parses as no picks at
     // all. Mid-draft that is a lost response, not a cleared board.
     PICKS_VANISHED.store(true, Ordering::SeqCst);
-    let refreshed = s.ok("refresh_picks", json!({}));
+    // A pull that pulled nothing is not a successful pull. This used to
+    // answer Ok with the unchanged view, so the toast said "picks re-pulled —
+    // 1 in" over an answer that had none.
+    let error = s.err("refresh_picks", json!({}));
+    assert!(
+        error.contains("empty") && error.contains("already on the board"),
+        "the toast has to say what happened: {error}"
+    );
+
+    let kept = s.ok("get_state", json!({}));
     assert_eq!(
-        refreshed["recent_picks"].as_array().expect("picks").len(),
+        kept["recent_picks"].as_array().expect("picks").len(),
         1,
         "an empty answer wiped the picks off the board"
     );
-    let health = &refreshed["data_health"];
+    let health = &kept["data_health"];
     assert_eq!(health["poll_consecutive_failures"], 1);
     let reported = health["poll_last_error"].as_str().unwrap_or_default();
     assert!(

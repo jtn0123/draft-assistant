@@ -161,22 +161,43 @@ pub async fn chat_settings(state: State<'_, AppState>) -> Result<ChatSettings, S
 const MAX_TURNS: usize = 60;
 const MAX_THREAD_BYTES: usize = 200_000;
 
-/// Refuse a thread that is too long to send, with a message the panel can show.
-fn check_thread_size(messages: &[ChatMessage]) -> Result<(), String> {
-    if messages.len() > MAX_TURNS {
+/// The tail of a conversation that is short enough to send.
+///
+/// A thread over the limit used to be refused outright, which left the shared
+/// thread with no way out: it keeps two hundred entries, every device adds to
+/// the same one, and a phone has no "new chat" button, so a league that asked
+/// sixty questions on draft night could never ask a sixty-first. What goes to
+/// the model is a window over the end of the thread instead — the last
+/// [`MAX_TURNS`] turns that fit inside [`MAX_THREAD_BYTES`], trimmed from the
+/// front and started on a user turn, because a conversation that opens on an
+/// assistant turn is a 400.
+fn window(messages: &[ChatMessage]) -> Result<&[ChatMessage], String> {
+    if messages.is_empty() {
+        return Err("nothing to ask".to_string());
+    }
+    let bytes_from = |from: usize| {
+        messages[from..]
+            .iter()
+            .map(|m| m.content.len())
+            .sum::<usize>()
+    };
+    let mut start = messages.len().saturating_sub(MAX_TURNS);
+    while start < messages.len() && bytes_from(start) > MAX_THREAD_BYTES {
+        start += 1;
+    }
+    while start < messages.len() && messages[start].role != "user" {
+        start += 1;
+    }
+    let windowed = &messages[start..];
+    if windowed.is_empty() {
+        // Nothing survived the trim: one turn on its own is over the byte
+        // limit, and no window of the thread can carry it.
         return Err(format!(
-            "this conversation is {} turns long — start a new chat to keep asking",
-            messages.len()
+            "that question is too long to send ({} KB) — ask a shorter one",
+            bytes_from(messages.len() - 1) / 1024
         ));
     }
-    let bytes: usize = messages.iter().map(|m| m.content.len()).sum();
-    if bytes > MAX_THREAD_BYTES {
-        return Err(format!(
-            "this conversation is too long to send ({} KB) — start a new chat",
-            bytes / 1024
-        ));
-    }
-    Ok(())
+    Ok(windowed)
 }
 
 /// The cap a screen's chat runs under until the user sets one of their own.
@@ -265,6 +286,19 @@ pub fn spend_key(screen: &str, league_id: Option<&str>) -> String {
     format!("{screen}.{}", league_id.unwrap_or("none"))
 }
 
+/// The league a turn is billed to: the one whose board the question is about.
+///
+/// The panel reads its "spent on this screen" figure under the league it is
+/// showing — the loaded one, which is also the league the context below is
+/// built from. The backend used to file the spend under
+/// `config.active_league_id`, which is a record of what was last loaded rather
+/// than what is loaded now; while a league is being switched the two disagree,
+/// and the cap was then drawn down under a key the panel was not reading. Both
+/// sides go through this one function so they cannot drift again.
+fn charged_league<'a>(loaded: Option<&'a str>, active: Option<&'a str>) -> Option<&'a str> {
+    loaded.or(active)
+}
+
 /// What a turn is billed at.
 ///
 /// The requested model is what the panel picked; the reported one is what
@@ -286,7 +320,19 @@ pub async fn ask_claude(
     effort: String,
     messages: Vec<ChatMessage>,
 ) -> Result<ChatReply, String> {
-    answer(&state, &screen, &model, &effort, messages).await
+    let league = {
+        let loaded = state.loaded.lock().await;
+        loaded
+            .as_ref()
+            .map(|l| l.league.league_id.clone())
+            .unwrap_or_default()
+    };
+    answer(&state, &screen, &model, &effort, messages)
+        .await
+        .map_err(crate::applog::failing(
+            "ask_claude",
+            crate::applog::context(&[("screen", &screen), ("league", &league)]),
+        ))
 }
 
 /// One answered turn, provider choice, budget and all.
@@ -305,16 +351,23 @@ pub(crate) async fn answer(
     // The whole thread is forwarded to Anthropic or written to the CLI's
     // stdin, so it is bounded here rather than discovered as a bill or a
     // rejected request.
-    check_thread_size(&messages)?;
+    let messages = window(&messages)?;
     check_screen(screen)?;
     let cli = chat_cli::find_cli();
     let config = state.config.lock().await.clone();
     let api_key = state.engine.api_key(&config).await;
     let provider = resolve_provider(&config, api_key.is_some(), cli.is_some());
+    let loaded_league = {
+        let loaded = state.loaded.lock().await;
+        loaded.as_ref().map(|l| l.league.league_id.clone())
+    };
     // The cap is enforced here rather than in the panel, which cannot be the
     // authority on money: it knows only the conversation in front of it, and
     // it prices turns it did not pay for.
-    let key = spend_key(screen, config.active_league_id.as_deref());
+    let key = spend_key(
+        screen,
+        charged_league(loaded_league.as_deref(), config.active_league_id.as_deref()),
+    );
     let spent = config.chat_spend_usd.get(&key).copied().unwrap_or(0.0);
     check_budget(spent, budget_of(&config), screen)?;
     // The cap above is read before the turn and written after it, so two
@@ -334,19 +387,19 @@ pub(crate) async fn answer(
             &state.last_season_view,
         )
         .await?;
-        chat_context::season_context(&view)
+        chat_context::season_split(&view)
     } else {
         let loaded = state.loaded.lock().await;
         let loaded = loaded.as_ref().ok_or("no league loaded")?;
         let config = state.config.lock().await;
-        chat_context::draft_context(&view_from(loaded, &config))
+        chat_context::draft_split(&view_from(loaded, &config))
     };
 
     let model = ChatModel::parse(model);
     let effort = Effort::parse(effort);
     let mut reply = if provider == PROVIDER_CLI {
         let cli = cli.ok_or("Claude Code CLI not found — install it or add an API key")?;
-        chat_cli::ask(&cli, model, effort, &context, &messages).await?
+        chat_cli::ask(&cli, model, effort, &context.joined(), messages).await?
     } else {
         let api_key = api_key.ok_or("no Anthropic API key set — add one in Settings")?;
         chat::ask(
@@ -357,7 +410,7 @@ pub(crate) async fn answer(
             model,
             effort,
             &context,
-            &messages,
+            messages,
         )
         .await?
     };

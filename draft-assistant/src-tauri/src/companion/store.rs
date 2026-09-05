@@ -99,7 +99,10 @@ mod tests {
     }
 
     #[test]
-    fn what_was_written_comes_back_and_a_device_is_never_still_connected() {
+    /// Only the round trip. Whether a restored device counts as connected is
+    /// the hub's business, not the file's -- the hub clears the flag when it
+    /// reads this back, and `hub_tests` is where that is asserted.
+    fn every_field_of_a_paired_device_survives_the_round_trip() {
         let path = path_in(&dir("roundtrip"));
         assert!(load(&path).is_none(), "nothing has been written yet");
         save(&path, &sample());
@@ -107,7 +110,15 @@ mod tests {
         assert_eq!(back.code, "424242");
         assert_eq!(back.devices.len(), 1);
         assert_eq!(back.devices[0].token, "tok");
-        assert_eq!(back.devices[0].device.name, "Rob's iPhone");
+        let device = &back.devices[0].device;
+        assert_eq!(device.device_id, "dev");
+        assert_eq!(device.name, "Rob's iPhone");
+        assert_eq!(device.kind, "phone");
+        assert_eq!(device.paired_at_ms, 7);
+        assert_eq!(device.last_seen_ms, 8);
+        // The file records what was true when it was written; nothing here
+        // reinterprets it.
+        assert!(device.connected);
     }
 
     #[test]

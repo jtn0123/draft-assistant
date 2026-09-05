@@ -3,6 +3,8 @@
 //! Helpers come from `recommend_tests.rs`, which is the other half of this
 //! module's tests — split only to stay inside the file-length cap.
 
+use super::league_tests::context;
+use super::score::score_candidate;
 use super::tests::{of_mode, player, recs, roster, slots};
 use super::*;
 use crate::board::AvailablePlayer;
@@ -108,6 +110,37 @@ fn safe_mode_penalises_a_reach_and_not_a_bargain() {
     );
 }
 
+#[test]
+fn safe_mode_charges_a_reach_once_and_caps_it() {
+    // Safe mode priced the same reach twice: the shared ahead-of-market term,
+    // and a second one of its own with no cap at all. Pick five on a player
+    // the market takes at ninety came out twenty-five points under water, on
+    // a card whose other reasons are worth single figures.
+    let mut early = player("early", "WR", 30.0);
+    early.player.adp = Some(90.0);
+    let available = vec![early];
+    let mine = roster(&["QB"]);
+    let rules = RosterRules::new(&slots());
+    let inputs = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 5, 12);
+    let ctx = context(&inputs, HashMap::from([("QB", 1)]));
+    let safe = score_candidate(&ctx, &available[0], Mode::Safe).expect("a receiver");
+    let reach_terms: Vec<f64> = safe
+        .weights()
+        .iter()
+        .copied()
+        .filter(|w| *w <= -6.0)
+        .collect();
+    assert!(
+        reach_terms.len() <= 1,
+        "the reach was charged {} times: {reach_terms:?}",
+        reach_terms.len()
+    );
+    assert!(
+        reach_terms.iter().all(|w| *w >= -12.0 - 1e-9),
+        "uncapped: {reach_terms:?}"
+    );
+}
+
 // ---------- injuries ----------
 
 fn with_tag(id: &str, tag: Option<&str>) -> AvailablePlayer {
@@ -144,10 +177,19 @@ fn injuries_are_priced_by_what_the_tag_means() {
     let picked = recs(&available, Some(&mine), &rules, 3, 15, 30);
     assert_eq!(of_mode(&picked, "safe").player_id, "better", "{picked:?}");
 
-    // "Out" is a different matter and safe mode weights it harder still.
+    // "Out" is a ruling for one game, so it costs one week of the season and
+    // not a quarter of it. Priced at a quarter it took thirteen points off a
+    // 42-VORP card and handed the pick to a man twelve VORP worse.
     let mut hurt = with_tag("hurt", Some("Out"));
     hurt.player.vorp = 42.0;
     hurt.player.points = 192.0;
+    let available = vec![hurt.clone(), with_tag("fit", None)];
+    let picked = recs(&available, Some(&mine), &rules, 3, 15, 30);
+    assert_eq!(of_mode(&picked, "safe").player_id, "hurt", "{picked:?}");
+
+    // A season-ending tag on the same man is a different matter, and there
+    // safe mode does hand the pick to the healthy body.
+    hurt.player.injury_status = Some("IR".into());
     let available = vec![hurt, with_tag("fit", None)];
     let picked = recs(&available, Some(&mine), &rules, 3, 15, 30);
     assert_eq!(of_mode(&picked, "safe").player_id, "fit", "{picked:?}");

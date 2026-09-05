@@ -34,9 +34,12 @@ pub const DRAFT_LIVE: &str = "2000000000000000016";
 /// The league the background poller is watching when a test switches away.
 pub const LEAGUE_TICK: &str = "1000000000000000017";
 pub const DRAFT_TICK: &str = "2000000000000000017";
+/// The league that agrees a pick trade in the middle of its own draft.
+pub const LEAGUE_TRADE: &str = "1000000000000000018";
+pub const DRAFT_TRADE: &str = "2000000000000000018";
 
 /// Every league this stub serves, with the draft it points at.
-const LEAGUES: [(&str, &str); 7] = [
+const LEAGUES: [(&str, &str); 8] = [
     (LEAGUE_ID, DRAFT_ID),
     (LEAGUE_SWITCH, DRAFT_SWITCH),
     (LEAGUE_VANISH, DRAFT_VANISH),
@@ -44,6 +47,7 @@ const LEAGUES: [(&str, &str); 7] = [
     (LEAGUE_REBUILD, DRAFT_REBUILD),
     (LEAGUE_LIVE, DRAFT_LIVE),
     (LEAGUE_TICK, DRAFT_TICK),
+    (LEAGUE_TRADE, DRAFT_TRADE),
 ];
 
 /// One endpoint a test can stop mid-answer.
@@ -105,6 +109,15 @@ pub static PICKS_VANISHED: AtomicBool = AtomicBool::new(false);
 /// Set once `LEAGUE_BROKEN` has been loaded: from then on its draft reports
 /// zero teams and zero rounds.
 pub static DRAFT_IS_BROKEN: AtomicBool = AtomicBool::new(false);
+/// Set once `LEAGUE_TRADE` has been loaded: from then on its traded-pick list
+/// carries the trade the managers agreed while the draft was running.
+pub static TRADE_AGREED: AtomicBool = AtomicBool::new(false);
+
+/// Slot 1's third-round pick, sold to slot 2's roster mid-draft. Rosters are
+/// deliberately not equal to slots (slot 1 is roster 10, slot 2 is roster 20)
+/// so a stub that confused the two would fail.
+const MID_DRAFT_TRADE: &str = r#"[{"season": "2026", "round": 3, "roster_id": 10,
+                                   "owner_id": 20, "previous_owner_id": 10}]"#;
 
 fn league_json(league_id: &str, draft_id: &str) -> String {
     format!(
@@ -119,10 +132,13 @@ fn league_json(league_id: &str, draft_id: &str) -> String {
 }
 
 fn draft_json(draft_id: &str, teams: u32, rounds: u32) -> String {
+    // The slot-to-roster map is what a traded pick is translated through, so
+    // every draft here carries one.
     format!(
         r#"{{"draft_id": "{draft_id}", "status": "drafting", "type": "snake",
              "settings": {{"teams": {teams}, "rounds": {rounds}}},
-             "draft_order": {{"{USER_ID}": 1}}, "season": "2026"}}"#
+             "draft_order": {{"{USER_ID}": 1}}, "season": "2026",
+             "slot_to_roster_id": {{"1": 10, "2": 20}}}}"#
     )
 }
 
@@ -208,7 +224,10 @@ fn draft_reply(draft_id: &str, rest: &str) -> Option<stub::Reply> {
             DRAFT_VANISH => ok(ONE_PICK.to_string()),
             _ => ok("[]".to_string()),
         },
-        "/traded_picks" => ok("[]".to_string()),
+        "/traded_picks" => match draft_id {
+            DRAFT_TRADE if TRADE_AGREED.load(Ordering::SeqCst) => ok(MID_DRAFT_TRADE.to_string()),
+            _ => ok("[]".to_string()),
+        },
         _ => None,
     }
 }

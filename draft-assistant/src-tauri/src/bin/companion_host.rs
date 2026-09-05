@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+#[derive(Debug, PartialEq)]
 struct Args {
     league_id: String,
     username: Option<String>,
@@ -32,34 +33,42 @@ fn usage() -> ! {
     std::process::exit(2);
 }
 
-fn parse_args() -> Args {
+/// Where the default data directory goes when `--data-dir` says nothing. A
+/// scratch one, so a throwaway host never writes into the real app's cache.
+fn default_data_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("draft-assistant-companion-host")
+}
+
+/// The command line, read without touching the process. `None` is "nothing
+/// usable was given" -- no league, or a flag left without its value -- which
+/// the caller turns into the usage message and exit 2.
+fn parse_args_from<I: IntoIterator<Item = String>>(args: I) -> Option<Args> {
     let mut positional: Vec<String> = Vec::new();
     let mut port = draft_assistant_lib::companion::net::DEFAULT_PORT;
-    let mut data_dir = std::env::temp_dir().join("draft-assistant-companion-host");
+    let mut data_dir = default_data_dir();
     let mut chat_cli = false;
-    let mut args = std::env::args().skip(1);
+    let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--port" => {
-                port = args
-                    .next()
-                    .and_then(|n| n.parse().ok())
-                    .unwrap_or_else(|| usage())
-            }
-            "--data-dir" => data_dir = args.next().map(Into::into).unwrap_or_else(|| usage()),
+            "--port" => port = args.next()?.parse().ok()?,
+            "--data-dir" => data_dir = args.next()?.into(),
             "--chat-cli" => chat_cli = true,
             _ => positional.push(arg),
         }
     }
-    let Some(league_id) = positional.first().cloned() else {
-        usage();
-    };
-    Args {
-        league_id,
+    Some(Args {
+        league_id: positional.first().cloned()?,
         username: positional.get(1).cloned(),
         port,
         data_dir,
         chat_cli,
+    })
+}
+
+fn parse_args() -> Args {
+    match parse_args_from(std::env::args().skip(1)) {
+        Some(args) => args,
+        None => usage(),
     }
 }
 
@@ -135,4 +144,63 @@ async fn main() {
     // Runs until the process is killed; there is nothing to tidy up that the
     // listener's own drop does not cover.
     std::future::pending::<()>().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{default_data_dir, parse_args_from};
+    use draft_assistant_lib::companion::net::DEFAULT_PORT;
+
+    fn args(words: &[&str]) -> Option<super::Args> {
+        parse_args_from(words.iter().map(|w| w.to_string()))
+    }
+
+    /// With no league there is nothing to serve, and a host that started
+    /// anyway would show a pairing code for an empty board.
+    #[test]
+    fn a_command_line_with_no_league_is_refused() {
+        assert_eq!(args(&[]), None);
+        assert_eq!(args(&["--chat-cli"]), None);
+    }
+
+    #[test]
+    fn a_league_on_its_own_takes_every_default() {
+        let parsed = args(&["123"]).expect("a league is enough");
+        assert_eq!(parsed.league_id, "123");
+        assert_eq!(parsed.username, None);
+        assert_eq!(parsed.port, DEFAULT_PORT);
+        assert_eq!(parsed.data_dir, default_data_dir());
+        assert!(!parsed.chat_cli);
+    }
+
+    #[test]
+    fn the_second_bare_word_is_the_username_and_the_flags_are_read_around_it() {
+        let parsed = args(&[
+            "123",
+            "mcsleeper26",
+            "--port",
+            "9000",
+            "--data-dir",
+            "/tmp/scratch",
+            "--chat-cli",
+        ])
+        .expect("parsed");
+        assert_eq!(parsed.league_id, "123");
+        assert_eq!(parsed.username.as_deref(), Some("mcsleeper26"));
+        assert_eq!(parsed.port, 9000);
+        assert_eq!(parsed.data_dir, std::path::PathBuf::from("/tmp/scratch"));
+        assert!(parsed.chat_cli);
+    }
+
+    /// A flag left dangling, or given something that is not a port, is a typo
+    /// rather than an instruction. Read as a positional it used to become the
+    /// league id, and the run failed several seconds later with "league not
+    /// found" instead of with the usage line.
+    #[test]
+    fn a_flag_without_a_usable_value_is_refused_rather_than_guessed_at() {
+        assert_eq!(args(&["123", "--port"]), None);
+        assert_eq!(args(&["123", "--port", "not-a-port"]), None);
+        assert_eq!(args(&["123", "--port", "99999"]), None);
+        assert_eq!(args(&["123", "--data-dir"]), None);
+    }
 }

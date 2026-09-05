@@ -87,7 +87,7 @@ fn apply_refresh(
     let mut errors = Vec::new();
     match matchups {
         Ok(value) => {
-            season.matchups = value;
+            season.matchups = std::sync::Arc::new(value);
             season.sources.matchups.succeeded(now);
         }
         Err(error) => {
@@ -97,7 +97,7 @@ fn apply_refresh(
     }
     match scores {
         Ok(value) => {
-            season.scores = value;
+            season.scores = std::sync::Arc::new(value);
             season.sources.scores.succeeded(now);
         }
         Err(error) => {
@@ -107,7 +107,7 @@ fn apply_refresh(
     }
     match rosters {
         Ok(value) => {
-            season.rosters = value;
+            season.rosters = std::sync::Arc::new(value);
             season.sources.rosters.succeeded(now);
         }
         Err(error) => {

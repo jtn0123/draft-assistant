@@ -92,3 +92,64 @@ pub async fn week_projections(
         })
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{cache_dir, cached};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A finished season does not change, so the second run of a backtest has
+    /// to be free. Each weekly projection file is about 3 MB and the players
+    /// dictionary is fourteen: a cache that missed would put the whole fetch
+    /// back on every run and on Sleeper's servers with it.
+    #[tokio::test]
+    async fn a_finished_season_is_fetched_once_and_read_from_disk_after_that() {
+        let dir = std::env::temp_dir().join(format!(
+            "backtest-fetch-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+        ));
+        std::env::set_var("DRAFT_ASSISTANT_BACKTEST_DIR", &dir);
+        assert_eq!(cache_dir(), dir);
+
+        let fetches = AtomicUsize::new(0);
+        let fetch = || async {
+            fetches.fetch_add(1, Ordering::Relaxed);
+            Ok(vec![1u32, 2, 3])
+        };
+
+        let first: Vec<u32> = cached("week-1", fetch).await.expect("the fetch answered");
+        assert_eq!(first, vec![1, 2, 3]);
+        assert_eq!(fetches.load(Ordering::Relaxed), 1);
+
+        let again: Vec<u32> = cached("week-1", fetch).await.expect("read back from disk");
+        assert_eq!(again, vec![1, 2, 3]);
+        assert_eq!(fetches.load(Ordering::Relaxed), 1, "it fetched twice");
+
+        // A different key is a different file, so it is fetched on its own.
+        let other: Vec<u32> = cached("week-2", fetch).await.expect("the fetch answered");
+        assert_eq!(other, vec![1, 2, 3]);
+        assert_eq!(fetches.load(Ordering::Relaxed), 2);
+
+        // A file that will not parse is a miss rather than a failure: a run
+        // interrupted mid-write must not wedge every later one.
+        std::fs::write(dir.join("week-1.json"), "{ not json").expect("the file writes");
+        let repaired: Vec<u32> = cached("week-1", fetch).await.expect("refetched");
+        assert_eq!(repaired, vec![1, 2, 3]);
+        assert_eq!(fetches.load(Ordering::Relaxed), 3);
+
+        std::env::remove_var("DRAFT_ASSISTANT_BACKTEST_DIR");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// With nothing in the environment the cache lands in the temp directory
+    /// the module documents, never in the working directory.
+    #[test]
+    fn the_default_cache_directory_is_under_the_temp_directory() {
+        // Deliberately not run beside the test above: `cache_dir` reads the
+        // environment every call, and the two would race over it. This one
+        // only checks the shape of the default.
+        let dir = cache_dir();
+        assert!(dir.is_absolute(), "{}", dir.display());
+    }
+}

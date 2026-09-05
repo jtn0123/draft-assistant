@@ -9,11 +9,15 @@
 
 // The stub routes live beside this file rather than in `tests/stub`, so the
 // other wire tests do not carry (and warn about) fixtures they never use.
+#[path = "command_flows/poll_tests.rs"]
+mod poll_tests;
 #[path = "command_flows/routes.rs"]
 mod routes;
 mod stub;
 #[path = "command_flows/switch_tests.rs"]
 mod switch_tests;
+#[path = "command_flows/trade_tests.rs"]
+mod trade_tests;
 
 use draft_assistant_lib::commands_chat as chat;
 use draft_assistant_lib::commands_draft as draft;
@@ -28,7 +32,7 @@ use std::sync::Arc;
 use tauri::ipc::{CallbackFn, InvokeBody, InvokeResponseBody};
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
 use tauri::webview::InvokeRequest;
-use tauri::{Listener, Manager, WebviewWindowBuilder};
+use tauri::{Manager, WebviewWindowBuilder};
 use tokio::sync::Mutex;
 
 /// The app on Tauri's mock runtime, with the same state `lib.rs` installs and
@@ -56,6 +60,7 @@ fn session(label: &str) -> Session {
             draft::refresh_data,
             draft::record_manual_pick,
             draft::undo_manual_pick,
+            draft::clear_keepers,
             draft::export_state,
             draft::start_polling,
             draft::stop_polling,
@@ -364,75 +369,67 @@ fn the_chat_settings_report_what_this_machine_can_actually_do() {
     s.finish();
 }
 
+/// Lane H, appended: `clear_keepers` had no behaviour test anywhere above the
+/// engine's own file. The store is covered in `keepers.rs`; what was not was
+/// the command — that it refuses without a league, that it really deletes the
+/// remembered set, and that the view it hands back has the keepers gone from
+/// it rather than needing a relaunch to notice.
+///
+/// The keeper judgement is never revisited on its own, because the evidence
+/// disappears the moment the draft passes the slot. A league branded from one
+/// bad `/picks` answer stayed branded through every relaunch, and this button
+/// is the only way out of it.
 #[test]
-fn stopping_a_poll_that_never_started_is_not_an_error() {
-    let s = session("stop-poll");
-    s.ok("stop_polling", json!({}));
-    s.ok("stop_season_polling", json!({}));
-    s.finish();
-}
+fn clearing_keepers_forgets_them_on_disk_and_in_the_view_it_hands_back() {
+    use draft_assistant_lib::keepers::KeeperStore;
 
-/// Wait for `event` to be emitted, up to two seconds. Returns its payload.
-fn await_event(app: &tauri::App<tauri::test::MockRuntime>, event: &str) -> Option<String> {
-    let seen: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let heard = seen.clone();
-    app.listen_any(event.to_string(), move |event| {
-        if let Ok(mut slot) = heard.try_lock() {
-            *slot = Some(event.payload().to_string());
-        }
-    });
-    for _ in 0..200 {
-        if let Ok(slot) = seen.try_lock() {
-            if slot.is_some() {
-                return slot.clone();
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    None
-}
+    let s = session("clear-keepers");
+    // Nothing to clear, and nothing loaded to clear it from.
+    let error = s.err("clear_keepers", json!({}));
+    assert!(error.contains("no league loaded"), "{error}");
 
-#[test]
-fn the_draft_poller_reports_its_health_on_every_tick() {
-    let s = session("draft-poll");
     s.ok("add_league", json!({"leagueId": LEAGUE_ID, "force": true}));
-    s.ok("start_polling", json!({"intervalSecs": 2}));
 
-    let health = await_event(&s.app, "poll-health").expect("the first tick reports in");
-    let health: Value = serde_json::from_str(&health).expect("the payload is JSON");
-    // The stub answers, so the badge must say the feed is working rather than
-    // sitting on whatever it said at load.
-    assert_eq!(health["consecutive_failures"], 0, "{health}");
-    assert!(health["last_success_at"].is_number(), "{health}");
+    // Remember two keepers the way a load would have, through the same store
+    // the engine writes, then reload so the league is holding them.
+    let side_engine = Engine::new(s.data_dir.clone());
+    side_engine
+        .save_keepers(routes::DRAFT_ID, &[3, 4].into_iter().collect())
+        .expect("the keeper file is written");
+    let keeper_file = s
+        .data_dir
+        .join(format!("keepers_{}.json", routes::DRAFT_ID));
+    assert!(keeper_file.exists(), "the keeper file was not written");
 
-    s.ok("stop_polling", json!({}));
-    s.finish();
-}
+    let view = s.ok("add_league", json!({"leagueId": LEAGUE_ID, "force": true}));
+    let remembered = view["draft"]["keeper_picks"]
+        .as_array()
+        .expect("the view lists keeper picks");
+    assert!(
+        remembered.contains(&json!(3)) && remembered.contains(&json!(4)),
+        "a reloaded league did not pick the remembered keepers up: {remembered:?}"
+    );
 
-#[test]
-fn the_season_poller_reports_its_health_too() {
-    let s = session("season-poll");
-    s.ok("add_league", json!({"leagueId": LEAGUE_ID, "force": true}));
-    s.ok("load_season", json!({"force": true}));
-    s.ok("start_season_polling", json!({"intervalSecs": 10}));
+    let cleared = s.ok("clear_keepers", json!({}));
+    assert_eq!(
+        cleared["draft"]["keeper_picks"],
+        json!([]),
+        "the view handed back still shows keepers"
+    );
+    assert!(!keeper_file.exists(), "the keeper file survived the clear");
+    assert!(
+        side_engine.load_keepers(routes::DRAFT_ID).is_empty(),
+        "the remembered set survived the clear"
+    );
 
-    let health = await_event(&s.app, "season-poll-health").expect("the first tick reports in");
-    let health: Value = serde_json::from_str(&health).expect("the payload is JSON");
-    // Health is emitted before any view, so a failing feed still says so.
-    assert!(health.is_object(), "{health}");
+    // The board is still a board: clearing keepers re-judges it, it does not
+    // empty it.
+    assert!(!cleared["available"]
+        .as_array()
+        .expect("the view carries the board")
+        .is_empty());
 
-    s.ok("stop_season_polling", json!({}));
-    s.finish();
-}
-
-#[test]
-fn a_poller_started_before_a_league_is_open_simply_waits_for_one() {
-    // Starting the poll is not something that can go wrong: the screen calls
-    // it on mount, which is often before a league has finished loading.
-    let s = session("early-poll");
-    s.ok("start_polling", json!({}));
-    s.ok("start_season_polling", json!({}));
-    s.ok("stop_polling", json!({}));
-    s.ok("stop_season_polling", json!({}));
+    // And a second clear, with nothing left to clear, is not an error.
+    s.ok("clear_keepers", json!({}));
     s.finish();
 }

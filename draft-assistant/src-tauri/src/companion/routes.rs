@@ -32,6 +32,7 @@ pub fn router(srv: Arc<Srv>) -> Router {
             "/api/chat",
             get(super::routes_chat::get_chat).post(super::routes_chat::post_chat),
         )
+        .route("/api/chat/reset", post(super::routes_chat::reset_chat))
         .route("/api/events", get(super::ws::events))
         .layer(axum::middleware::from_fn_with_state(srv.clone(), gate))
         .with_state(srv)
@@ -44,8 +45,21 @@ pub fn router(srv: Arc<Srv>) -> Router {
 /// origin, and `data:` for the placeholder), and the WebSocket. Nothing else
 /// is reachable, so a string that somehow became markup has nowhere to send
 /// what it found and no third-party script to run.
-pub const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; \
-     img-src 'self' data:; connect-src 'self' ws: wss:; base-uri 'none'; form-action 'none'";
+/// `connect-src` names this server's own socket origins rather than the bare
+/// `ws:` scheme, which admitted a socket to any host on the network: a
+/// browser reads `'self'` as the page's scheme, so `ws://` has to be spelled
+/// out. `frame-ancestors 'none'` keeps the page out of anyone else's iframe.
+pub fn csp_for(ws_origins: &[String]) -> String {
+    let mut connect = String::from("'self'");
+    for origin in ws_origins {
+        connect.push(' ');
+        connect.push_str(origin);
+    }
+    format!(
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; \
+         connect-src {connect}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    )
+}
 
 /// CORS, the page's security headers, and the cross-origin check.
 ///
@@ -61,6 +75,9 @@ async fn gate(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
+    // Built once per request off what the server actually bound: an origin
+    // list that is empty (the server is down) leaves the policy at 'self'.
+    let csp = csp_for(&super::net::ws_origins(&srv.hub.origins()));
     let allow = |mut response: Response| {
         let headers = response.headers_mut();
         headers.insert(
@@ -75,10 +92,9 @@ async fn gate(
             header::ACCESS_CONTROL_ALLOW_METHODS,
             "GET, POST, OPTIONS".parse().expect("static"),
         );
-        headers.insert(
-            header::CONTENT_SECURITY_POLICY,
-            CSP.parse().expect("static"),
-        );
+        if let Ok(policy) = csp.parse() {
+            headers.insert(header::CONTENT_SECURITY_POLICY, policy);
+        }
         headers.insert(
             header::X_CONTENT_TYPE_OPTIONS,
             "nosniff".parse().expect("static"),
@@ -115,7 +131,7 @@ fn origin_is_ours(request: &axum::extract::Request, srv: &Srv) -> bool {
     let Ok(origin) = origin.to_str() else {
         return false;
     };
-    super::net::origin_allowed(origin, srv.hub.port())
+    super::net::origin_allowed(origin, &srv.hub.origins())
 }
 
 /// Every failure this server produces: a status and `{ "error": … }`, which
@@ -330,6 +346,22 @@ mod tests {
             );
         }
         request.body(()).expect("the request builds").into_parts().0
+    }
+
+    #[test]
+    fn the_policy_names_this_server_s_own_socket_and_no_other() {
+        use super::csp_for;
+        let policy = csp_for(&["ws://192.168.1.24:7878".to_string()]);
+        assert!(
+            policy.contains("connect-src 'self' ws://192.168.1.24:7878;"),
+            "{policy}"
+        );
+        // A bare scheme here let the page open a socket to anything at all.
+        assert!(!policy.contains("connect-src 'self' ws:;"), "{policy}");
+        assert!(!policy.contains(" wss:;"), "{policy}");
+        assert!(policy.contains("frame-ancestors 'none'"), "{policy}");
+        // With nothing bound the page may still reach its own origin.
+        assert!(csp_for(&[]).contains("connect-src 'self';"));
     }
 
     #[test]

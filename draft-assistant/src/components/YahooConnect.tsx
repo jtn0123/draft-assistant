@@ -15,14 +15,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { describeError } from "../errorText";
 import type { StoredLeague, YahooStatus } from "../types";
 import { LeagueRow } from "./LeagueRow";
 import { useFocusTrap } from "./useFocusTrap";
 
-/** Errors arrive from the backend as strings; this is how the picker reads
- *  them out, and this dialog reads them the same way. */
+/** Errors arrive from the backend as strings and from `fetch` as Errors; one
+ *  module knows how to read either, so "Error: Error:" cannot come back. */
 function reason(e: unknown): string {
-  return String(e).replace(/^Error:\s*/, "");
+  return describeError(e);
 }
 
 export function YahooConnect({
@@ -63,6 +64,15 @@ export function YahooConnect({
   }, []);
 
   useFocusTrap(dialog, onClose);
+
+  // The first control of whichever step is showing, as soon as the status says
+  // which step that is. This dialog can be opened from the first-launch screen,
+  // where there is nothing else on the page to tab from, so a modal that never
+  // takes focus leaves the keyboard stranded on the document body.
+  useEffect(() => {
+    if (status === null) return;
+    dialog.current?.querySelector<HTMLElement>("input, button")?.focus();
+  }, [status]);
 
   // Nothing is set synchronously here: the first status lands from the
   // promise, and until it does the dialog says it is still asking.
@@ -200,7 +210,11 @@ export function YahooConnect({
           />
         )}
 
-        {error !== null && <div className="error">{error}</div>}
+        {error !== null && (
+          <div className="error" role="alert">
+            {error}
+          </div>
+        )}
 
         <div className="dialog-actions">
           <button type="button" className="btn-ghost" onClick={onClose}>

@@ -21,6 +21,7 @@ use futures_util::StreamExt;
 use rows::{merge_transactions, pairs_from};
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Live scoring windows move fast; everything else can lag a little.
 const LIVE_TTL_SECS: u64 = 30;
@@ -31,25 +32,35 @@ const WEEK_SWEEP_TTL_SECS: u64 = 6 * 3600;
 const NFL_STATE_CACHE: &str = "nfl_state.json";
 pub(crate) const LAST_SEASON_TTL_SECS: u64 = 30 * 24 * 3600;
 
+/// week -> the (home_roster_id, away_roster_id) pairings played that week.
+pub type WeekPairings = Vec<(u32, Vec<(u32, u32)>)>;
+
 /// Everything in-season, already fetched.
+///
+/// The big collections are behind `Arc` because this struct is cloned on every
+/// poll tick: the tick copies its inputs out from under the mutexes so the
+/// build can run with nothing locked, and a deep copy of fifteen weeks of
+/// matchups, a season of transactions and the whole Trends history every
+/// thirty seconds is megabytes of pure waste. Nothing downstream of the copy
+/// writes to any of them; the live refresh replaces them wholesale instead.
 #[derive(Clone, Default)]
 pub struct LoadedSeason {
     pub week: u32,
     pub season: u32,
-    pub rosters: Vec<Roster>,
+    pub rosters: Arc<Vec<Roster>>,
     /// This week's matchup rows, one per roster.
-    pub matchups: Vec<Matchup>,
+    pub matchups: Arc<Vec<Matchup>>,
     /// week -> (home_roster_id, away_roster_id) pairings, all regular-season
     /// weeks. Future weeks feed the playoff simulation.
-    pub schedule: Vec<(u32, Vec<(u32, u32)>)>,
+    pub schedule: Arc<WeekPairings>,
     /// player_id -> fantasy points scored so far this season.
-    pub season_points: HashMap<String, f64>,
-    pub transactions: Vec<Transaction>,
-    pub scores: Vec<ScoreGame>,
-    pub last_season: Vec<LastSeasonRow>,
+    pub season_points: Arc<HashMap<String, f64>>,
+    pub transactions: Arc<Vec<Transaction>>,
+    pub scores: Arc<Vec<ScoreGame>>,
+    pub last_season: Arc<Vec<LastSeasonRow>>,
     /// Strength-over-time snapshots for the Trends tab; filled in by the
     /// command layer after a load, empty in headless contexts.
-    pub history: History,
+    pub history: Arc<History>,
     pub fetched_at: u64,
     pub warnings: Vec<String>,
     /// When each live source last answered, and why it last did not.
@@ -58,7 +69,7 @@ pub struct LoadedSeason {
 
 /// The full-season matchup sweep, assembled from the per-week caches.
 struct WeekSweep {
-    schedule: Vec<(u32, Vec<(u32, u32)>)>,
+    schedule: WeekPairings,
     season_points: HashMap<String, f64>,
 }
 
@@ -212,6 +223,42 @@ impl Engine {
         Self::live_age(season) >= LIVE_TTL_SECS
     }
 
+    /// Every roster in a league, from the network when it answers and from the
+    /// last good copy on disk when it does not.
+    ///
+    /// This was the one request in the whole load with no fallback, so a
+    /// season that could otherwise have opened from cache — the week, the
+    /// matchups, the sweep, last season, all on disk — failed outright on a
+    /// train with no signal. Rosters barely move between waiver runs, so
+    /// yesterday's copy with a staleness warning beats no screen at all.
+    async fn rosters_or_cached(
+        &self,
+        league_id: &str,
+    ) -> Result<(Vec<Roster>, Option<String>), String> {
+        let name = Self::season_cache_name(league_id, "rosters");
+        match self.client.rosters(league_id).await {
+            Ok(rosters) => {
+                self.write_cache_off_thread(&name, &rosters).await;
+                Ok((rosters, None))
+            }
+            Err(error) => {
+                let error = to_message(error);
+                let Some((at, rosters)) =
+                    self.read_cache_any_off_thread::<Vec<Roster>>(&name).await
+                else {
+                    return Err(error);
+                };
+                let age_hours = now_secs().saturating_sub(at) / 3600;
+                Ok((
+                    rosters,
+                    Some(format!(
+                        "rosters could not be refreshed ({error}) \u{2014} showing the ones last seen {age_hours}h ago"
+                    )),
+                ))
+            }
+        }
+    }
+
     /// Where the NFL is, from the network when it answers and from the last
     /// good copy on disk when it does not.
     ///
@@ -270,16 +317,23 @@ impl SeasonLoader for Engine {
         warnings.extend(stale_week);
 
         let (rosters, matchups, scores) = tokio::join!(
-            self.client.rosters(league_id),
+            self.rosters_or_cached(league_id),
             self.client.matchups(league_id, week),
             self.client.nfl_scores(season, week)
         );
-        let rosters = rosters.map_err(to_message)?;
+        let (rosters, stale_rosters) = rosters?;
         // The same per-source bookkeeping the live poll keeps, so the health
         // badge starts out honest rather than waiting for the first refresh.
         let loaded_at = now_secs();
         let mut sources = SourceHealth::default();
-        sources.rosters.succeeded(loaded_at);
+        match &stale_rosters {
+            // Rosters served from disk are not a live source, and the badge
+            // has to say so or it would vouch for a lineup that may be a day
+            // out of date.
+            Some(note) => sources.rosters.failed(note.clone()),
+            None => sources.rosters.succeeded(loaded_at),
+        }
+        warnings.extend(stale_rosters);
         let matchups = match matchups {
             Ok(matchups) => {
                 sources.matchups.succeeded(loaded_at);
@@ -343,14 +397,14 @@ impl SeasonLoader for Engine {
         Ok(LoadedSeason {
             week,
             season,
-            rosters,
-            matchups,
-            schedule: sweep.schedule,
-            season_points: sweep.season_points,
-            transactions,
-            scores,
-            last_season,
-            history: History::default(),
+            rosters: Arc::new(rosters),
+            matchups: Arc::new(matchups),
+            schedule: Arc::new(sweep.schedule),
+            season_points: Arc::new(sweep.season_points),
+            transactions: Arc::new(transactions),
+            scores: Arc::new(scores),
+            last_season: Arc::new(last_season),
+            history: Arc::new(History::default()),
             fetched_at: loaded_at,
             warnings,
             sources,

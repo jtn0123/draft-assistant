@@ -23,6 +23,7 @@ use tokio::sync::Mutex;
 const USER_LEAGUES: &str = include_str!("../fixtures/yahoo/user_leagues.json");
 const LEAGUE: &str = include_str!("../fixtures/yahoo/league_settings.json");
 const TEAMS: &str = include_str!("../fixtures/yahoo/teams.json");
+const ROSTERS: &str = include_str!("../fixtures/yahoo/teams_rosters.json");
 const PARTIAL: &str = include_str!("../fixtures/yahoo/draft_results_partial.json");
 const COMPLETE: &str = include_str!("../fixtures/yahoo/draft_results_complete.json");
 const PLAYERS_0: &str = include_str!("../fixtures/yahoo/players_page_0.json");
@@ -71,6 +72,12 @@ fn yahoo_route(request: &Request, advanced: &AtomicBool, pool_calls: &AtomicU64)
             true => Reply::ok(AUCTION_LEAGUE),
             false => Reply::ok(LEAGUE),
         };
+    }
+    // The keeper flags come off `teams;out=roster`, which is a different
+    // resource from the plain team list even though the path starts the same
+    // way. Answering the team list to both would leave every roster empty.
+    if path.ends_with("/teams;out=roster") {
+        return Reply::ok(ROSTERS);
     }
     if path.ends_with("/teams") {
         return Reply::ok(TEAMS);

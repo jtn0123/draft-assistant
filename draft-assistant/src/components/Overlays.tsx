@@ -9,6 +9,7 @@ export function ConfirmDialog({
   pickLabel,
   playerName,
   platform,
+  busy = false,
   onConfirm,
   onCancel,
 }: {
@@ -17,6 +18,10 @@ export function ConfirmDialog({
   /** Which service the league is read from. The sentence below names it, and
    *  it said "Sleeper" to Yahoo players until this was handed in. */
   platform: Platform;
+  /** A pick is already on its way to the backend. The button says so and stops
+   *  answering, because a second tap used to send a second identical pick and
+   *  the shell then showed the refusal of it as a failure. */
+  busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -68,8 +73,14 @@ export function ConfirmDialog({
           {service} overrides it.
         </span>
         <div className="dialog-actions">
-          <button type="button" className="btn-primary" onClick={onConfirm} ref={confirmRef}>
-            Mark drafted
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={onConfirm}
+            disabled={busy}
+            ref={confirmRef}
+          >
+            {busy ? "Marking…" : "Mark drafted"}
           </button>
           <button type="button" className="btn-ghost" onClick={onCancel}>
             Cancel

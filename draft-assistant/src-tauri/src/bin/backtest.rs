@@ -201,33 +201,49 @@ async fn replay(client: &SleeperClient, league_id: &str, max_week: u32) -> Resul
     Ok(out)
 }
 
+#[derive(Debug, PartialEq)]
 struct Args {
     league_id: String,
     max_week: u32,
     out_path: Option<String>,
 }
 
-fn parse_args() -> Args {
-    let mut args = std::env::args().skip(1);
+const USAGE: &str = "usage: backtest <league_id> [--weeks N] [--out calib.json]";
+/// Every regular-season week plus the playoffs, which is "no limit" here.
+const ALL_WEEKS: u32 = 18;
+
+/// The command line, read without touching the process or the environment, so
+/// what the flags mean is a thing a test can ask rather than a thing only a
+/// run can show.
+fn parse_args_from<I: IntoIterator<Item = String>>(args: I) -> Option<Args> {
+    let mut args = args.into_iter();
     let mut league_id = None;
-    let mut max_week = 18u32;
+    let mut max_week = ALL_WEEKS;
     let mut out_path = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--weeks" => max_week = args.next().and_then(|w| w.parse().ok()).unwrap_or(18),
+            "--weeks" => {
+                max_week = args
+                    .next()
+                    .and_then(|w| w.parse().ok())
+                    .unwrap_or(ALL_WEEKS)
+            }
             "--out" => out_path = args.next(),
             _ => league_id = Some(arg),
         }
     }
-    let Some(league_id) = league_id else {
-        eprintln!("usage: backtest <league_id> [--weeks N] [--out calib.json]");
-        std::process::exit(2);
-    };
-    Args {
-        league_id,
+    Some(Args {
+        league_id: league_id?,
         max_week,
         out_path,
-    }
+    })
+}
+
+fn parse_args() -> Args {
+    parse_args_from(std::env::args().skip(1)).unwrap_or_else(|| {
+        eprintln!("{USAGE}");
+        std::process::exit(2);
+    })
 }
 
 #[tokio::main]
@@ -247,5 +263,179 @@ async fn main() {
     let fits = report::positions(&season.weeks);
     if let Some(path) = args.out_path {
         report::write_json(&path, &args.league_id, as_set, as_best, &fits);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(words: &[&str]) -> Option<Args> {
+        parse_args_from(words.iter().map(|w| w.to_string()))
+    }
+
+    /// Without a league there is nothing to replay, and the binary says so
+    /// rather than starting a run against an empty id.
+    #[test]
+    fn a_command_line_with_no_league_is_no_command_line_at_all() {
+        assert_eq!(args(&[]), None);
+        assert_eq!(args(&["--weeks", "4"]), None);
+    }
+
+    #[test]
+    fn the_first_bare_word_is_the_league_and_the_flags_are_optional() {
+        let parsed = args(&["123"]).expect("a league is enough");
+        assert_eq!(parsed.league_id, "123");
+        assert_eq!(parsed.max_week, ALL_WEEKS);
+        assert_eq!(parsed.out_path, None);
+    }
+
+    #[test]
+    fn the_flags_are_read_wherever_they_appear() {
+        let parsed = args(&["--out", "calib.json", "123", "--weeks", "6"]).expect("parsed");
+        assert_eq!(parsed.league_id, "123");
+        assert_eq!(parsed.max_week, 6);
+        assert_eq!(parsed.out_path.as_deref(), Some("calib.json"));
+    }
+
+    /// A typo in the week count used to be read as the league id, and the run
+    /// then failed much later with "league not found". It falls back to the
+    /// whole season instead, and the league is still the league.
+    #[test]
+    fn a_week_count_that_is_not_a_number_falls_back_to_the_whole_season() {
+        let parsed = args(&["123", "--weeks", "lots"]).expect("parsed");
+        assert_eq!(parsed.league_id, "123");
+        assert_eq!(parsed.max_week, ALL_WEEKS);
+    }
+
+    fn meta(position: &str, team: &str) -> PlayerMeta {
+        PlayerMeta {
+            full_name: None,
+            first_name: None,
+            last_name: None,
+            position: Some(position.to_string()),
+            team: Some(team.to_string()),
+            fantasy_positions: None,
+            injury_status: None,
+            years_exp: None,
+            age: None,
+        }
+    }
+
+    fn roster() -> HashMap<String, PlayerMeta> {
+        HashMap::from([
+            ("4034".to_string(), meta("RB", "TEN")),
+            ("6794".to_string(), meta("WR", "MIN")),
+        ])
+    }
+
+    /// Sleeper files a defence under its team abbreviation rather than a
+    /// numeric id, so it is absent from the player dictionary entirely. Read
+    /// as "unknown position" it dropped out of every lineup the backtest
+    /// scored.
+    #[test]
+    fn a_team_defence_is_recovered_from_its_key_rather_than_the_dictionary() {
+        let players = roster();
+        assert_eq!(position_of(&players, "4034").as_deref(), Some("RB"));
+        assert_eq!(position_of(&players, "DET").as_deref(), Some("DEF"));
+        // A defence *is* its NFL team, so it stacks with its own kicker.
+        assert_eq!(team_of(&players, "DET").as_deref(), Some("DET"));
+        assert_eq!(team_of(&players, "4034").as_deref(), Some("TEN"));
+        // A numeric id nobody has heard of is still nobody.
+        assert_eq!(position_of(&players, "99999"), None);
+        assert_eq!(team_of(&players, "99999"), None);
+    }
+
+    fn matchup(roster_id: u32, matchup_id: Option<u32>, points: f64) -> Matchup {
+        Matchup {
+            roster_id,
+            matchup_id,
+            points,
+            custom_points: None,
+            starters: Some(vec!["4034".to_string(), "0".to_string(), "DET".to_string()]),
+            players: Some(vec![
+                "4034".to_string(),
+                "6794".to_string(),
+                "DET".to_string(),
+            ]),
+            players_points: Some(HashMap::from([
+                ("4034".to_string(), 21.0),
+                ("6794".to_string(), 3.0),
+            ])),
+        }
+    }
+
+    /// "0" is Sleeper's empty slot. Counted as a starter it added a
+    /// zero-point player to every lineup and dragged the projection down.
+    #[test]
+    fn an_empty_lineup_slot_is_not_a_starter() {
+        let players = roster();
+        let projections: WeekProjections =
+            HashMap::from([("4034".to_string(), 14.5), ("DET".to_string(), 7.0)]);
+        let starters = set_starters(&matchup(1, Some(9), 100.0), &projections, &players);
+        assert_eq!(starters.len(), 2, "the '0' slot is not a player");
+        assert_eq!(starters[0].position, "RB");
+        assert_eq!(starters[0].points, 14.5);
+        // A week is scored before it is played, so all of it is unsettled.
+        assert_eq!(starters[0].uncertain, 14.5);
+        assert_eq!(starters[1].position, "DEF");
+    }
+
+    /// A bye week has a matchup entry with no `matchup_id`, and pairing on a
+    /// `None` would have matched every bye in the league to every other.
+    #[test]
+    fn only_entries_sharing_a_matchup_id_are_paired_and_byes_are_left_out() {
+        let week = vec![
+            matchup(1, Some(9), 101.0),
+            matchup(2, Some(9), 99.0),
+            matchup(3, None, 88.0),
+            matchup(4, None, 77.0),
+        ];
+        let paired = pairs(&week);
+        assert_eq!(paired.len(), 1);
+        assert_eq!((paired[0].0.roster_id, paired[0].1.roster_id), (1, 2));
+    }
+
+    #[test]
+    fn a_game_row_carries_both_sides_of_the_result_it_was_asked_about() {
+        let players = roster();
+        let projections: WeekProjections =
+            HashMap::from([("4034".to_string(), 14.5), ("DET".to_string(), 7.0)]);
+        let a = matchup(1, Some(9), 101.0);
+        let b = matchup(2, Some(9), 99.0);
+        let sa = set_starters(&a, &projections, &players);
+        let sb = set_starters(&b, &projections, &players);
+        let row = game_row(5, (&a, &sa), (&b, &sb));
+        assert_eq!((row.week, row.roster_a, row.roster_b), (5, 1, 2));
+        assert_eq!(row.actual_a, 101.0);
+        assert_eq!(row.actual_b, 99.0);
+        assert_eq!(row.projected_a, 21.5);
+        assert_eq!(row.projected_b, 21.5);
+        // Evenly matched projections are a coin flip, whatever happened.
+        assert!((row.p_a - 0.5).abs() < 1e-3, "p_a was {}", row.p_a);
+        assert!(row.sigma > 0.0);
+    }
+
+    /// The per-position fit needs both halves of a player's week. A starter
+    /// with a projection but no result, or a result but no projection, is
+    /// skipped rather than counted as a miss of the whole projection.
+    #[test]
+    fn only_starters_with_both_a_projection_and_a_result_reach_the_spread_fit() {
+        let players = roster();
+        let projections: WeekProjections =
+            HashMap::from([("4034".to_string(), 14.5), ("DET".to_string(), 7.0)]);
+        let mut out = Season::default();
+        collect_weeks(
+            &mut out,
+            &[matchup(1, Some(9), 101.0)],
+            &projections,
+            &players,
+        );
+        // "4034" has both; "DET" was projected but never scored; "0" is not a
+        // player at all.
+        assert_eq!(out.weeks.len(), 1);
+        assert_eq!(out.weeks[0].position, "RB");
+        assert_eq!(out.weeks[0].projected, 14.5);
+        assert_eq!(out.weeks[0].actual, 21.0);
     }
 }

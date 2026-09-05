@@ -9,7 +9,9 @@
 
 mod season_loop;
 
-pub use season_loop::{season_tick, SeasonPollMemory, SeasonTick};
+pub use season_loop::{
+    refresh_or_roll, reload_for_week, season_tick, SeasonPollMemory, SeasonTick,
+};
 
 use crate::engine::{now_secs, LoadedLeague};
 use crate::season::{SeasonAnalysis, SeasonView};
@@ -246,8 +248,21 @@ impl AnalysisCache {
 
     /// Throw the held analysis away, so the next tick builds a fresh one.
     /// Used when the ground has moved under it — a new week, most of all.
+    ///
+    /// The tick counter goes back to zero with it. It used to keep running,
+    /// so an invalidation landing a tick or two before the scheduled rebuild
+    /// threw away the analysis the very next tick had just built: a week
+    /// rollover at tick 19 of 20 meant the fresh week's odds, waivers and
+    /// trades were computed twice in a row for nothing.
     pub fn invalidate(&mut self) {
         self.held = None;
+        self.ticks = 0;
+    }
+
+    /// True when the next build has to compute the expensive half from
+    /// scratch, which is a change worth emitting whatever the scoreboard says.
+    pub fn is_stale(&self) -> bool {
+        self.held.is_none()
     }
 
     /// Take the reusable parts out of a freshly built view, and count the tick
@@ -257,6 +272,16 @@ impl AnalysisCache {
             self.held = Some(SeasonAnalysis::of(view));
             self.generation = self.generation.wrapping_add(1);
         }
+        self.count_tick();
+    }
+
+    /// Count a tick that built nothing at all.
+    ///
+    /// A quiet tick still has to move the rebuild clock, or a season screen
+    /// left open overnight would reach Wednesday morning with the analysis it
+    /// held on Tuesday: nothing scores, so nothing is built, so the counter
+    /// that expires the cache never advances.
+    pub fn count_tick(&mut self) {
         self.ticks = self.ticks.saturating_add(1);
         if self.ticks.is_multiple_of(self.rebuild_every) {
             self.held = None;

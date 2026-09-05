@@ -1,9 +1,10 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { getVersion } from "@tauri-apps/api/app";
+import { Suspense, useState } from "react";
 import { api } from "./api";
+import { useAppVersion } from "./appVersion";
 import { setAvatarMode, useAvatarMode } from "./avatars";
-import { playChime } from "./chime";
 import { MAX_RECONNECT_ATTEMPTS, useDraftSession } from "./draftSession";
+import { useMarkDrafted } from "./markDrafted";
+import { usePickChime } from "./pickChime";
 import { setChime, setScreen, useChime, useScreen } from "./prefs";
 import { importSecondOpinion } from "./secondOpinionImport";
 import { clearFollow, readFollow, useCompanionEnabled, useFollowStatus } from "./companion";
@@ -19,6 +20,7 @@ import { LeaguePicker } from "./components/LeaguePicker";
 import { YahooConnect } from "./components/YahooConnect";
 import { ConfirmDialog, Toast } from "./components/Overlays";
 import { CompanionPanel } from "./components/CompanionPanel";
+import { Diagnostics } from "./components/Diagnostics";
 import { JoinHost } from "./components/JoinHost";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ordinal, pickLabel, problem, scoringFormat } from "./format";
@@ -35,40 +37,10 @@ import "./components.css";
 import "./zoom.css";
 import "./yahoo.css";
 
-type Confirm = { playerId: string; name: string } | null;
-
-/** What the browser preview shows: it has no Tauri shell to ask, so this is
- *  kept in step with package.json and tauri.conf.json by hand. */
-const PREVIEW_VERSION = "0.2.0";
-
-/** The running app's version, from the shell that knows it. */
-function useAppVersion(): string {
-  const [version, setVersion] = useState(PREVIEW_VERSION);
-  useEffect(() => {
-    let cancelled = false;
-    // Wrapped rather than called straight: outside Tauri this throws as it is
-    // called, not as it settles, and the preview must simply keep the
-    // fallback rather than take an unhandled rejection.
-    void (async () => {
-      try {
-        const running = await getVersion();
-        if (!cancelled) setVersion(running);
-      } catch {
-        // Not in the shell; PREVIEW_VERSION stands.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return version;
-}
-
 export default function App() {
   // Remembered between sessions, along with the rest of the preferences.
   const screen = useScreen();
   const avatars = useAvatarMode();
-  const [confirm, setConfirm] = useState<Confirm>(null);
   // Read once, as the window opens: `api` chose its backend off the same
   // record, so a change to it mid-session would leave the two disagreeing.
   const [follow] = useState(readFollow);
@@ -77,27 +49,19 @@ export default function App() {
   // Whether this follower can still hear its host, for the line beside the
   // "Hosted by" pill. A host that is not following anyone has no state to show.
   const followStatus = useFollowStatus();
-  // Stable across renders so the memoised board rows are not invalidated by a
-  // fresh closure on every 3-second poll. A follower has nothing to record —
-  // the host keeps the picks — so it is told who does rather than being shown
-  // a dialog whose only outcome is a refusal.
-  const askToDraft = useCallback(
-    (playerId: string, name: string) => {
-      if (follow !== null) showToast(`${follow.host_name} records the picks`);
-      else setConfirm({ playerId, name });
-    },
-    [follow, showToast],
-  );
   const [leaguePicker, setLeaguePicker] = useState(false);
   const [companionOpen, setCompanionOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [yahooOpen, setYahooOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   // Reads the stored choice, keeps the page painted in it, and follows the OS
   // while the choice is "system".
   const { preference, theme } = useAppliedTheme();
-  const wasMyPick = useRef(false);
+  // True when the setup screen was reached from the launch screen rather than
+  // because there is no league at all, which is the case that needs a way back.
+  const [setupFromLaunch, setSetupFromLaunch] = useState(false);
 
   // The draft's own data lifecycle: restores the last league on launch, keeps
   // it live off the backend's poller, and owns every action that replaces the
@@ -137,6 +101,15 @@ export default function App() {
     retry: retrySeason,
   } = useSeasonSession(screen === "season", view?.league.league_id ?? null, showToast);
   const chime = useChime();
+  // The confirm dialog and the one call behind it, including the guard that
+  // stops a double tap sending the pick twice.
+  const {
+    confirm,
+    ask: askToDraft,
+    cancel: cancelDraft,
+    confirmDraft,
+    drafting,
+  } = useMarkDrafted(applyView, showToast, follow?.host_name ?? null);
   // Asked once for the settings row and the picker's Yahoo lookup; the
   // connect dialog hands back every newer answer it is given.
   const yahoo = useYahooStatus();
@@ -146,28 +119,9 @@ export default function App() {
   const companionOn = useCompanionEnabled(follow === null, companionOpen);
 
   // Chime when the clock reaches you — the one moment worth interrupting for.
-  useEffect(() => {
-    const isMine = view?.draft.is_my_pick ?? false;
-    if (isMine && !wasMyPick.current && chime) {
-      playChime();
-    }
-    wasMyPick.current = isMine;
-  }, [view?.draft.is_my_pick, chime, view]);
+  usePickChime(view, chime);
 
   // ---------- actions ----------
-
-  const doDraft = async (playerId: string, name: string) => {
-    try {
-      applyView(await api.recordManualPick(playerId));
-    } catch (e) {
-      showToast(
-        problem(`Could not mark ${name} as drafted`, e),
-        () => void doDraft(playerId, name),
-      );
-    } finally {
-      setConfirm(null);
-    }
-  };
 
   // Forget what the app decided about this draft's keepers and judge them
   // again. A league branded from one bad pick list stayed branded for ever.
@@ -184,6 +138,7 @@ export default function App() {
   // A league has been loaded: leave the setup screen behind and go live on it.
   const enterLeague = (loaded: DraftView) => {
     applyView(loaded);
+    setSetupFromLaunch(false);
     setShowSetup(false);
     void refreshLeagues();
     void startLive();
@@ -202,6 +157,24 @@ export default function App() {
   if (showSetup) {
     return (
       <div className="app">
+        {setupFromLaunch && (
+          // Asking for a different league is not a decision you are stuck with:
+          // this screen had no way out at all, so a mis-click on the launch
+          // screen meant quitting the app to get the saved league back.
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => {
+              setSetupFromLaunch(false);
+              setShowSetup(false);
+            }}
+          >
+            Back to{" "}
+            {restoring?.name === undefined || restoring.name === ""
+              ? "the saved league"
+              : restoring.name}
+          </button>
+        )}
         <Setup
           onReady={enterLeague}
           onConnectYahoo={() => setYahooOpen(true)}
@@ -247,7 +220,10 @@ export default function App() {
           maxAttempts={MAX_RECONNECT_ATTEMPTS}
           lastError={busy ? null : launchError}
           onRetry={retry}
-          onDifferentLeague={() => setShowSetup(true)}
+          onDifferentLeague={() => {
+            setSetupFromLaunch(true);
+            setShowSetup(true);
+          }}
         />
       </div>
     );
@@ -315,6 +291,14 @@ export default function App() {
       setSettingsOpen(false);
       void clearKeepers();
     },
+    // The username field lives on the setup screen and nowhere else; the
+    // roster panel tells a Sleeper user to set it, so Settings has to be able
+    // to get there after the first launch, with a way back.
+    onSetUsername: () => {
+      setSettingsOpen(false);
+      setSetupFromLaunch(true);
+      setShowSetup(true);
+    },
     onAvatars: setAvatarMode,
     onAppearance: cycleThemePreference,
     onCompanion: () => {
@@ -326,6 +310,10 @@ export default function App() {
       setJoinOpen(true);
     },
     onLeaveHost: leaveHost,
+    onDiagnostics: () => {
+      setSettingsOpen(false);
+      setDiagnosticsOpen(true);
+    },
     onDismiss: () => setSettingsOpen(false),
   });
 
@@ -393,7 +381,7 @@ export default function App() {
               </Suspense>
             </ErrorBoundary>
           ) : seasonError !== null ? (
-            <div className="season-loading is-error">
+            <div className="season-loading is-error" role="alert">
               <span>{seasonError}</span>
               <button type="button" className="btn-primary" onClick={retrySeason}>
                 Try again
@@ -461,13 +449,18 @@ export default function App() {
 
       {joinOpen && <JoinHost onClose={() => setJoinOpen(false)} />}
 
+      {diagnosticsOpen && (
+        <Diagnostics appVersion={appVersion} onClose={() => setDiagnosticsOpen(false)} />
+      )}
+
       {confirm && (
         <ConfirmDialog
           pickLabel={`Pick ${pickLabel(d.current_pick, d.teams)} · slot ${d.on_clock_slot}`}
           playerName={confirm.name}
           platform={view.league.platform}
-          onConfirm={() => void doDraft(confirm.playerId, confirm.name)}
-          onCancel={() => setConfirm(null)}
+          busy={drafting}
+          onConfirm={confirmDraft}
+          onCancel={cancelDraft}
         />
       )}
     </div>

@@ -278,3 +278,140 @@ fn phone_again() -> EntryDevice {
         kind: "phone".to_string(),
     }
 }
+
+/// A reply that costs nothing, standing in for one the model gave. The harness
+/// has no key and no CLI, so a turn that "works" is filed the way the
+/// answering task files one rather than fetched.
+fn good_reply(text: &str) -> draft_assistant_lib::chat::ChatReply {
+    draft_assistant_lib::chat::ChatReply {
+        text: text.to_string(),
+        thinking: None,
+        model: "claude-opus-5".to_string(),
+        refused: false,
+        truncated: false,
+        input_tokens: 10,
+        output_tokens: 20,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        provider: "api".to_string(),
+        cost_usd: 0.0,
+        screen_spend_usd: 0.0,
+    }
+}
+
+/// One failure used to break the thread for good: the error entry was left out
+/// of what the model is sent and the question that caused it was not, so every
+/// later request opened with two user turns in a row and was refused.
+#[tokio::test]
+async fn a_question_after_a_failed_one_is_sent_as_an_alternating_thread() {
+    let host = host("chat-after-failure").await;
+    make_answers_fail(&host).await;
+    let paired = host.pair_ok("Rob's iPhone", "phone").await;
+    let (status, _) = host
+        .post(
+            "/api/chat",
+            &paired.token,
+            serde_json::json!({ "screen": "draft", "text": "the one that fails" }),
+        )
+        .await;
+    assert_eq!(status, 202);
+    let thread = wait_for_answer(&host, &paired.token).await;
+    assert!(thread["entries"][1]["error"].is_string(), "{thread}");
+
+    // The next question is accepted, and answered.
+    let srv = host.companion.srv().expect("the companion is attached");
+    let asker = EntryDevice {
+        name: "Rob's iPhone".to_string(),
+        kind: "phone".to_string(),
+    };
+    srv.chat
+        .post("league-1", "draft", asker.clone(), "the one that works")
+        .await
+        .expect("the thread is not stuck");
+    draft_assistant_lib::companion::routes_chat::finish_within(
+        srv.clone(),
+        "draft",
+        "league-1".to_string(),
+        asker,
+        std::time::Duration::from_secs(30),
+        async { Ok(good_reply("Take the RB.")) },
+    )
+    .await;
+
+    let messages = srv.chat.messages("league-1", "draft").await;
+    let roles: Vec<&str> = messages.iter().map(|m| m.role.as_str()).collect();
+    assert_eq!(roles, vec!["user", "assistant"], "{messages:?}");
+    assert_eq!(messages[0].content, "the one that works");
+    // Roles alternate all the way down, whatever the thread has been through.
+    assert!(
+        messages.windows(2).all(|pair| pair[0].role != pair[1].role),
+        "{roles:?}"
+    );
+}
+
+/// Sixty turns used to be the end of a shared thread: it is one thread per
+/// league per screen, it keeps two hundred entries, and no device had a way to
+/// start a new one.
+#[tokio::test]
+async fn any_paired_device_can_start_the_shared_thread_over() {
+    let host = host("chat-reset").await;
+    make_answers_fail(&host).await;
+    let paired = host.pair_ok("Rob's iPhone", "phone").await;
+    host.post(
+        "/api/chat",
+        &paired.token,
+        serde_json::json!({ "screen": "draft", "text": "forget this one" }),
+    )
+    .await;
+    wait_for_answer(&host, &paired.token).await;
+
+    let (status, thread) = host
+        .post(
+            "/api/chat/reset",
+            &paired.token,
+            serde_json::json!({ "screen": "draft" }),
+        )
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        thread["entries"].as_array().expect("entries").len(),
+        0,
+        "{thread}"
+    );
+    let (_, thread) = host.get("/api/chat?screen=draft", &paired.token).await;
+    assert_eq!(thread["entries"].as_array().expect("entries").len(), 0);
+    // Every device is told, the same way it is told about an answer.
+    assert!(
+        host.emitted_kinds()
+            .iter()
+            .filter(|k| *k == "shared-chat")
+            .count()
+            >= 3,
+        "the emptied thread was not announced"
+    );
+    // And the thread still works afterwards.
+    let (status, _) = host
+        .post(
+            "/api/chat",
+            &paired.token,
+            serde_json::json!({ "screen": "draft", "text": "starting again" }),
+        )
+        .await;
+    assert_eq!(status, 202);
+}
+
+#[tokio::test]
+async fn a_reset_of_a_screen_that_is_not_one_is_refused() {
+    let host = host("chat-reset-screen").await;
+    let paired = host.pair_ok("Rob's iPhone", "phone").await;
+    for screen in ["settings", "", "Draft"] {
+        let (status, _) = host
+            .post(
+                "/api/chat/reset",
+                &paired.token,
+                serde_json::json!({ "screen": screen }),
+            )
+            .await;
+        assert_eq!(status, 400, "{screen}");
+    }
+}

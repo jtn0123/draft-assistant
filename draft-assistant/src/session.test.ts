@@ -371,3 +371,64 @@ describe("switching leagues", () => {
     expect(result.current.season?.week).toBe(9);
   });
 });
+
+describe("stopping and starting the live poller", () => {
+  it("does not start again until the stop before it has landed", async () => {
+    // The failure: leaving the season screen and coming straight back — a tab
+    // click, or a league switch — sent stop and start in the same turn, and
+    // the backend answered them in whichever order they landed. When the stop
+    // landed second it cancelled the poller that had just been started, and
+    // the screen sat there not updating with nothing to say so.
+    mocks.loadSeason.mockResolvedValue(view(2));
+    let releaseStop: () => void = () => undefined;
+    mocks.stopSeasonPolling.mockReturnValue(
+      new Promise<void>((resolve) => {
+        releaseStop = resolve;
+      }),
+    );
+
+    const { rerender } = renderHook(
+      ({ active }) => useSeasonSession(active, "1", () => undefined),
+      { initialProps: { active: true } },
+    );
+    await waitFor(() => expect(mocks.startSeasonPolling).toHaveBeenCalledTimes(1));
+
+    await settle(() => rerender({ active: false }));
+    expect(mocks.stopSeasonPolling).toHaveBeenCalledTimes(1);
+
+    await settle(() => rerender({ active: true }));
+    expect(mocks.startSeasonPolling).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      releaseStop();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(mocks.startSeasonPolling).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not start a poller for a screen that has already gone again", async () => {
+    mocks.loadSeason.mockResolvedValue(view(2));
+    let releaseStop: () => void = () => undefined;
+    mocks.stopSeasonPolling.mockReturnValue(
+      new Promise<void>((resolve) => {
+        releaseStop = resolve;
+      }),
+    );
+
+    const { rerender } = renderHook(
+      ({ active }) => useSeasonSession(active, "1", () => undefined),
+      { initialProps: { active: true } },
+    );
+    await waitFor(() => expect(mocks.startSeasonPolling).toHaveBeenCalledTimes(1));
+
+    await settle(() => rerender({ active: false }));
+    await settle(() => rerender({ active: true }));
+    await settle(() => rerender({ active: false }));
+
+    await act(async () => {
+      releaseStop();
+      await Promise.resolve();
+    });
+    expect(mocks.startSeasonPolling).toHaveBeenCalledTimes(1);
+  });
+});

@@ -143,6 +143,38 @@ describe("switching leagues", () => {
     });
     expect(said.some((t) => /^Switched to /.test(t))).toBe(true);
   });
+
+  it("keeps the switch when only the league list could not be re-read", async () => {
+    // The failure: the config read sat inside the same try as the switch, so a
+    // league that had genuinely switched — new board on screen and all — was
+    // reported as "Could not switch leagues", with a Try again that would have
+    // switched to it a second time.
+    const { said, showToast } = toasts();
+    const { result } = renderHook(() => useDraftSession(showToast));
+    await waitFor(() => expect(result.current.view).not.toBeNull());
+
+    mocks.getConfig.mockRejectedValueOnce(new Error("config file is locked"));
+    await act(async () => {
+      await result.current.switchLeague("other");
+    });
+
+    expect(said.some((t) => /Could not switch leagues/.test(t))).toBe(false);
+    expect(said.some((t) => /the league list could not be re-read/.test(t))).toBe(true);
+    // And the switch stands: the poller is running against the new league.
+    expect(result.current.polling).toBe(true);
+  });
+
+  it("has the new league list before the new board goes on screen", async () => {
+    const { showToast } = toasts();
+    const { result } = renderHook(() => useDraftSession(showToast));
+    await waitFor(() => expect(result.current.view).not.toBeNull());
+
+    await act(async () => {
+      await result.current.switchLeague("other");
+    });
+    // Two reads: the restore on launch, and the one this switch made.
+    expect(mocks.getConfig).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("the restore on launch", () => {

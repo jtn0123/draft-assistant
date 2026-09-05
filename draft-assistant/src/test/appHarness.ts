@@ -14,6 +14,7 @@ import type {
   AppConfig,
   CompanionDevice,
   CompanionStatus,
+  Diagnostics,
   DraftView,
   PollHealth,
   SharedChatThread,
@@ -74,8 +75,12 @@ const METHODS: Record<keyof Api, true> = {
   setDeviceName: true,
   sharedChatGet: true,
   sharedChatSend: true,
+  sharedChatReset: true,
   onSharedChat: true,
   onCompanionDevices: true,
+  diagnostics: true,
+  openLogFolder: true,
+  logFrontendError: true,
 };
 
 const METHOD_NAMES = Object.keys(METHODS) as (keyof Api)[];
@@ -138,6 +143,9 @@ function build(): Harness {
       Promise.resolve({ league_id: "1", screen, busy: false, entries: [] }),
     );
     api.sharedChatSend.mockResolvedValue(undefined);
+    api.logFrontendError.mockResolvedValue(undefined);
+    api.openLogFolder.mockResolvedValue("/tmp/logs");
+    api.diagnostics.mockResolvedValue(diagnostics());
     api.sleeperLeagues.mockResolvedValue([]);
     api.yahooLeagues.mockResolvedValue([]);
     api.yahooStatus.mockResolvedValue({
@@ -228,6 +236,26 @@ export function companionStatus(overrides: Partial<CompanionStatus> = {}): Compa
     port: 7878,
     host_name: "Justin's Mac",
     devices: [],
+    ...overrides,
+  };
+}
+
+/** The backend's diagnostics as the harness reports them: a healthy desktop
+ *  app with a league open and a couple of lines in its log. */
+export function diagnostics(overrides: Partial<Diagnostics> = {}): Diagnostics {
+  return {
+    app_version: "0.2.0",
+    platform: "macos aarch64",
+    league_id: "1",
+    league_name: "Dynasty Warriors",
+    draft_id: "d1",
+    platform_name: "sleeper",
+    polling: true,
+    poll: { last_success_at: 1788452521, consecutive_failures: 0, last_error: null },
+    companion_enabled: false,
+    companion_devices: 0,
+    log_path: "/Users/x/Library/Application Support/draft-assistant/draft-assistant.log",
+    log_tail: ["2026-09-03T16:22:01Z INFO polling started every 3s"],
     ...overrides,
   };
 }

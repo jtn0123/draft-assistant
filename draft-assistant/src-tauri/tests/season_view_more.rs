@@ -170,8 +170,8 @@ fn an_unidentified_user_still_gets_league_wide_panels() {
 fn a_bye_week_matchup_faces_an_empty_opponent() {
     let (loaded, mut season, config) = common::fixture();
     // Only my row remains and it belongs to no game.
-    season.matchups.truncate(1);
-    season.matchups[0].matchup_id = None;
+    std::sync::Arc::make_mut(&mut season.matchups).truncate(1);
+    std::sync::Arc::make_mut(&mut season.matchups)[0].matchup_id = None;
     let v = build_season_view(&loaded, &season, config.my_user_id.as_deref());
 
     let m = v.matchup.expect("my matchup row still exists");
@@ -192,7 +192,7 @@ fn a_bye_week_matchup_faces_an_empty_opponent() {
 #[test]
 fn with_no_matchups_the_roster_assumes_the_optimal_lineup() {
     let (loaded, mut season, config) = common::fixture();
-    season.matchups.clear();
+    std::sync::Arc::make_mut(&mut season.matchups).clear();
     let v = build_season_view(&loaded, &season, config.my_user_id.as_deref());
 
     assert!(v.matchup.is_none());
@@ -215,7 +215,7 @@ fn with_no_matchups_the_roster_assumes_the_optimal_lineup() {
 #[test]
 fn a_team_without_an_owner_gets_a_fallback_name() {
     let (loaded, mut season, config) = common::fixture();
-    season.rosters[1].owner_id = None;
+    std::sync::Arc::make_mut(&mut season.rosters)[1].owner_id = None;
     let v = build_season_view(&loaded, &season, config.my_user_id.as_deref());
     let m = v.matchup.expect("matchup still pairs rosters 1 and 2");
     assert_eq!(m.opp_name, "Team 2");

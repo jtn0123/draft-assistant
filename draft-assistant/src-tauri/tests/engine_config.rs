@@ -49,6 +49,7 @@ fn config_without_key() -> AppConfig {
         chat_spend_usd: Default::default(),
         device_name: None,
         companion_port: None,
+        companion_enabled: false,
     }
 }
 

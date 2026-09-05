@@ -62,6 +62,11 @@ export function useSeasonSession(
   // whole lifecycle down and build it again.
   const loadedRef = useRef(false);
 
+  // Every start and stop of the live poller, in the order they were asked for.
+  // Each link waits for the one before it to settle, so a start can never
+  // overtake the stop that was meant to precede it.
+  const pollChain = useRef<Promise<unknown>>(Promise.resolve());
+
   // Bumped every time the league changes, so an answer can be checked against
   // the question that is still worth answering. A fetch in flight when the
   // user switches comes back carrying another league's standings, and the
@@ -137,17 +142,32 @@ export function useSeasonSession(
   // keep its schedule instead of being cancelled and recreated on every tick.
   useEffect(() => {
     if (!active || !ready) return undefined;
-    api.startSeasonPolling(LIVE_INTERVAL).catch((e) => {
-      // A poller that never started looks exactly like a screen that quietly
-      // stopped moving, so say it out loud rather than leaving the numbers to
-      // go stale in silence.
-      onErrorRef.current(`Live updates are not running: ${describeError(e)}`);
+    let live = true;
+    // Chained rather than fired off: leaving the screen and coming straight
+    // back — a tab click, or a league switch — used to call stop and start in
+    // the same turn, and the backend answered them in whichever order the two
+    // commands happened to land in. When the stop landed second it cancelled
+    // the poller that had just been started and the season screen sat there
+    // not updating, with nothing on screen to say so.
+    pollChain.current = pollChain.current.then(() => {
+      // The screen went away again while the stop before us was still out.
+      // Starting now would be starting a poller nobody is watching.
+      if (!live) return undefined;
+      return api.startSeasonPolling(LIVE_INTERVAL).catch((e: unknown) => {
+        // A poller that never started looks exactly like a screen that quietly
+        // stopped moving, so say it out loud rather than leaving the numbers to
+        // go stale in silence.
+        onErrorRef.current(`Live updates are not running: ${describeError(e)}`);
+      });
     });
     return () => {
       // Stop polling as soon as the screen is not showing: nothing renders it.
       // A failure here is not worth a message — the screen is on its way out,
       // and the next time it opens it starts a fresh poller anyway.
-      api.stopSeasonPolling().catch(() => undefined);
+      live = false;
+      pollChain.current = pollChain.current.then(() =>
+        api.stopSeasonPolling().catch(() => undefined),
+      );
     };
   }, [active, ready, leagueId]);
 

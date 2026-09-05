@@ -129,23 +129,91 @@ fn turn(content: &str) -> ChatMessage {
     }
 }
 
-#[test]
-fn an_ordinary_conversation_goes_through() {
-    let thread: Vec<ChatMessage> = (0..10).map(|i| turn(&format!("question {i}"))).collect();
-    assert!(check_thread_size(&thread).is_ok());
+fn answer_turn(content: &str) -> ChatMessage {
+    ChatMessage {
+        role: "assistant".into(),
+        content: content.into(),
+    }
 }
 
 #[test]
-fn too_many_turns_is_refused_with_something_the_user_can_act_on() {
-    let thread: Vec<ChatMessage> = (0..=MAX_TURNS).map(|_| turn("hi")).collect();
-    let error = check_thread_size(&thread).unwrap_err();
-    assert!(error.contains("new chat"), "unhelpful: {error}");
+fn an_ordinary_conversation_goes_through_whole() {
+    let thread: Vec<ChatMessage> = (0..10).map(|i| turn(&format!("question {i}"))).collect();
+    assert_eq!(window(&thread).expect("it fits").len(), thread.len());
+}
+
+/// A thread past the limit used to be refused, and the shared thread has no
+/// way to start a new one from a phone: the two hundredth question on draft
+/// night could never be asked. The end of the thread is sent instead.
+#[test]
+fn a_thread_past_the_limit_sends_its_tail_rather_than_being_refused() {
+    let mut thread: Vec<ChatMessage> = Vec::new();
+    for i in 0..MAX_TURNS {
+        thread.push(turn(&format!("question {i}")));
+        thread.push(answer_turn(&format!("answer {i}")));
+    }
+    let sent = window(&thread).expect("the tail is sendable");
+    assert!(sent.len() <= MAX_TURNS, "{} turns sent", sent.len());
+    // The window opens on a question and ends on the newest turn there is.
+    assert_eq!(sent[0].role, "user");
+    assert_eq!(
+        sent.last().expect("a last turn").content,
+        thread.last().expect("a last turn").content
+    );
+}
+
+/// Trimming by count alone still sent the bytes: a window of sixty pasted
+/// rosters is over the request limit however few turns it is.
+#[test]
+fn a_window_that_is_still_too_many_bytes_keeps_trimming() {
+    let big = "x".repeat(MAX_THREAD_BYTES / 4);
+    let mut thread: Vec<ChatMessage> = Vec::new();
+    for _ in 0..10 {
+        thread.push(turn(&big));
+        thread.push(answer_turn(&big));
+    }
+    let sent = window(&thread).expect("something fits");
+    let bytes: usize = sent.iter().map(|m| m.content.len()).sum();
+    assert!(bytes <= MAX_THREAD_BYTES, "{bytes} bytes sent");
+    assert_eq!(sent[0].role, "user");
 }
 
 #[test]
 fn one_enormous_turn_is_refused_even_though_the_count_is_small() {
     let thread = vec![turn(&"x".repeat(MAX_THREAD_BYTES + 1))];
-    assert!(check_thread_size(&thread).is_err());
+    let error = window(&thread).unwrap_err();
+    assert!(error.contains("shorter"), "unhelpful: {error}");
+}
+
+/// The API refuses a conversation that opens on an assistant turn, which is
+/// exactly what trimming from the front produces every other time.
+#[test]
+fn the_window_never_opens_on_an_answer() {
+    let mut thread: Vec<ChatMessage> = Vec::new();
+    for i in 0..MAX_TURNS {
+        thread.push(answer_turn(&format!("answer {i}")));
+        thread.push(turn(&format!("question {i}")));
+    }
+    let sent = window(&thread).expect("the tail is sendable");
+    assert_eq!(sent[0].role, "user");
+}
+
+/// The panel files its conversations and reads its spend figure under the
+/// league on screen; the backend used to charge the turn to the league the
+/// config was last told about, and the two disagree mid-switch.
+#[test]
+fn the_turn_is_billed_to_the_league_the_question_is_about() {
+    assert_eq!(
+        charged_league(Some("loaded"), Some("stale")),
+        Some("loaded")
+    );
+    assert_eq!(
+        spend_key("draft", charged_league(Some("loaded"), Some("stale"))),
+        "draft.loaded"
+    );
+    // Nothing loaded yet: the config's league is better than no league at all.
+    assert_eq!(charged_league(None, Some("stale")), Some("stale"));
+    assert_eq!(charged_league(None, None), None);
 }
 
 #[test]

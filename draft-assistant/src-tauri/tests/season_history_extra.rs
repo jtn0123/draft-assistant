@@ -127,14 +127,14 @@ fn season(week: u32, rosters: Vec<Roster>, fetched_at: u64) -> LoadedSeason {
     LoadedSeason {
         week,
         season: 2025,
-        rosters,
-        matchups: Vec::new(),
-        schedule: Vec::new(),
-        season_points: HashMap::new(),
-        transactions: Vec::new(),
-        scores: Vec::new(),
-        last_season: Vec::new(),
-        history: History::default(),
+        rosters: std::sync::Arc::new(rosters),
+        matchups: std::sync::Arc::new(Vec::new()),
+        schedule: std::sync::Arc::new(Vec::new()),
+        season_points: std::sync::Arc::new(HashMap::new()),
+        transactions: std::sync::Arc::new(Vec::new()),
+        scores: std::sync::Arc::new(Vec::new()),
+        last_season: std::sync::Arc::new(Vec::new()),
+        history: std::sync::Arc::new(History::default()),
         fetched_at,
         warnings: Vec::new(),
         sources: Default::default(),
@@ -280,7 +280,7 @@ fn trends_and_standings_field_the_same_lineup_when_board_and_metadata_disagree()
     let lookup = Lookup { loaded: &loaded };
     let mut season = season(1, vec![roster(&["swap1"])], 0);
     // Week 1 is in the books, so both screens are looking at week 2 alone.
-    season.scores = final_scoreboard(1);
+    season.scores = std::sync::Arc::new(final_scoreboard(1));
 
     // The board wins: swap1 fills the QB slot, and 8 points in each of weeks
     // 1 and 2 average to 8 per remaining week.
@@ -318,7 +318,7 @@ fn the_last_regular_week_is_still_played_rather_than_already_decided() {
         vec![roster_with_id(1, &["qb1"]), roster_with_id(2, &["wr1"])],
         0,
     );
-    season.schedule = vec![(2, vec![(1, 2)])];
+    season.schedule = std::sync::Arc::new(vec![(2, vec![(1, 2)])]);
 
     // Sunday: the game is on, and neither team is in or out yet.
     let live = standings_rows(&loaded, &season, &lookup, None, &|id| format!("Team {id}"));
@@ -333,7 +333,7 @@ fn the_last_regular_week_is_still_played_rather_than_already_decided() {
     }
 
     // Tuesday: every game is over, and now the standings are the answer.
-    season.scores = final_scoreboard(2);
+    season.scores = std::sync::Arc::new(final_scoreboard(2));
     let settled = standings_rows(&loaded, &season, &lookup, None, &|id| format!("Team {id}"));
     assert!(settled.iter().any(|r| r.playoff_odds == 1.0), "{settled:?}");
     assert!(settled.iter().any(|r| r.playoff_odds == 0.0), "{settled:?}");

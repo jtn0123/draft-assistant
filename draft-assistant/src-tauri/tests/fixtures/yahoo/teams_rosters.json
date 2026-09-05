@@ -1,0 +1,218 @@
+{
+  "fantasy_content": {
+    "xml:lang": "en-US",
+    "yahoo:uri": "/fantasy/v2/league/449.l.12345/teams;out=roster",
+    "league": [
+      {
+        "league_key": "449.l.12345",
+        "league_id": "12345",
+        "name": "Wire Wednesday",
+        "draft_status": "draft",
+        "num_teams": 3,
+        "scoring_type": "head",
+        "season": "2026"
+      },
+      {
+        "teams": {
+          "0": {
+            "team": [
+              [
+                { "team_key": "449.l.12345.t.1" },
+                { "team_id": "1" },
+                { "name": "Ada's Autos" },
+                { "is_owned_by_current_login": 1 },
+                { "draft_position": 1 },
+                {
+                  "managers": [
+                    {
+                      "manager": {
+                        "manager_id": "1",
+                        "nickname": "Ada",
+                        "guid": "WIREGUID000000000000000000",
+                        "is_current_login": "1"
+                      }
+                    }
+                  ]
+                }
+              ],
+              {
+                "roster": {
+                  "coverage_type": "date",
+                  "date": "2026-09-10",
+                  "is_editable": 1,
+                  "players": {
+                    "0": {
+                      "player": [
+                        [
+                          { "player_key": "449.p.30977" },
+                          { "player_id": "30977" },
+                          {
+                            "name": {
+                              "full": "Ja'Marr Chase",
+                              "first": "Ja'Marr",
+                              "last": "Chase",
+                              "ascii_first": "Ja'Marr",
+                              "ascii_last": "Chase"
+                            }
+                          },
+                          { "editorial_team_abbr": "Cin" },
+                          { "bye_weeks": { "week": "10" } },
+                          { "uniform_number": "1" },
+                          { "display_position": "WR" },
+                          {
+                            "is_keeper": { "status": null, "cost": null, "kept": null }
+                          },
+                          { "position_type": "O" },
+                          {
+                            "eligible_positions": [
+                              { "position": "WR" },
+                              { "position": "W/R/T" }
+                            ]
+                          }
+                        ],
+                        {
+                          "selected_position": [
+                            { "coverage_type": "date", "date": "2026-09-10" },
+                            { "position": "WR" },
+                            { "is_flex": 0 }
+                          ]
+                        }
+                      ]
+                    },
+                    "count": 1
+                  }
+                }
+              }
+            ]
+          },
+          "1": {
+            "team": [
+              [
+                { "team_key": "449.l.12345.t.2" },
+                { "team_id": "2" },
+                { "name": "Bo's Bots" },
+                { "draft_position": 2 },
+                {
+                  "managers": [
+                    {
+                      "manager": {
+                        "manager_id": "2",
+                        "nickname": "Bo",
+                        "guid": "BOGUID00000000000000000000"
+                      }
+                    }
+                  ]
+                }
+              ],
+              {
+                "roster": {
+                  "coverage_type": "date",
+                  "date": "2026-09-10",
+                  "is_editable": 1,
+                  "players": {
+                    "0": {
+                      "player": [
+                        [
+                          { "player_key": "449.p.31883" },
+                          { "player_id": "31883" },
+                          {
+                            "name": {
+                              "full": "Bijan Robinson",
+                              "first": "Bijan",
+                              "last": "Robinson",
+                              "ascii_first": "Bijan",
+                              "ascii_last": "Robinson"
+                            }
+                          },
+                          { "editorial_team_abbr": "Atl" },
+                          { "bye_weeks": { "week": "5" } },
+                          { "uniform_number": "7" },
+                          { "display_position": "RB" },
+                          { "status": "Q" },
+                          { "position_type": "O" },
+                          {
+                            "eligible_positions": [
+                              { "position": "RB" },
+                              { "position": "W/R/T" }
+                            ]
+                          }
+                        ],
+                        {
+                          "selected_position": [
+                            { "coverage_type": "date", "date": "2026-09-10" },
+                            { "position": "RB" }
+                          ]
+                        }
+                      ]
+                    },
+                    "count": 1
+                  }
+                }
+              }
+            ]
+          },
+          "2": {
+            "team": [
+              [
+                { "team_key": "449.l.12345.t.3" },
+                { "team_id": "3" },
+                { "name": "Late Joiners" },
+                {
+                  "managers": [
+                    {
+                      "manager": {
+                        "manager_id": "4",
+                        "nickname": "--hidden--",
+                        "guid": "DIGUID00000000000000000000"
+                      }
+                    }
+                  ]
+                }
+              ],
+              {
+                "roster": {
+                  "coverage_type": "date",
+                  "date": "2026-09-10",
+                  "is_editable": 1,
+                  "players": {
+                    "0": {
+                      "player": [
+                        [
+                          { "player_key": "449.p.100002" },
+                          { "player_id": "100002" },
+                          {
+                            "name": {
+                              "full": "Wire Passer",
+                              "first": "Wire",
+                              "last": "Passer",
+                              "ascii_first": "Wire",
+                              "ascii_last": "Passer"
+                            }
+                          },
+                          { "editorial_team_abbr": "Sea" },
+                          { "bye_weeks": { "week": "8" } },
+                          { "display_position": "QB" },
+                          { "is_keeper": { "status": "1", "cost": "12", "kept": "1" } },
+                          { "position_type": "O" },
+                          { "eligible_positions": [{ "position": "QB" }] }
+                        ],
+                        {
+                          "selected_position": [
+                            { "coverage_type": "date", "date": "2026-09-10" },
+                            { "position": "QB" }
+                          ]
+                        }
+                      ]
+                    },
+                    "count": 1
+                  }
+                }
+              }
+            ]
+          },
+          "count": 3
+        }
+      }
+    ]
+  }
+}

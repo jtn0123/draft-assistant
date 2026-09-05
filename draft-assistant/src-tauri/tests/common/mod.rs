@@ -303,7 +303,7 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
     let season = LoadedSeason {
         week: WEEK,
         season: 2025,
-        rosters: vec![
+        rosters: std::sync::Arc::new(vec![
             roster(
                 1,
                 "u1",
@@ -336,8 +336,8 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
                 0,
                 190.0,
             ),
-        ],
-        matchups: vec![
+        ]),
+        matchups: std::sync::Arc::new(vec![
             {
                 let mut m = matchup(1, 1, &["q1", "r1", "w1", "w2"]);
                 m.players_points = Some(HashMap::from([("q1".to_string(), 21.5)]));
@@ -346,20 +346,20 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
             matchup(2, 1, &["q2", "r3", "w3", "w4"]),
             matchup(3, 2, &["q3", "r5", "w6", "0"]),
             matchup(4, 2, &["q4", "r6", "w7", "w8"]),
-        ],
-        schedule: vec![
+        ]),
+        schedule: std::sync::Arc::new(vec![
             (1, vec![(1, 2), (3, 4)]),
             (2, vec![(1, 2), (3, 4)]),
             (3, vec![(1, 4), (2, 3)]),
-        ],
-        season_points: HashMap::from([
+        ]),
+        season_points: std::sync::Arc::new(HashMap::from([
             ("q1".to_string(), 40.0),
             ("r1".to_string(), 30.0),
             ("w1".to_string(), 25.0),
             ("w2".to_string(), 20.0),
             ("r2".to_string(), 22.0),
-        ]),
-        transactions: vec![
+        ])),
+        transactions: std::sync::Arc::new(vec![
             Transaction {
                 transaction_id: "trade-1".into(),
                 kind: "trade".into(),
@@ -395,8 +395,8 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
                     waiver_bid: Some(12),
                 }),
             },
-        ],
-        scores: vec![
+        ]),
+        scores: std::sync::Arc::new(vec![
             ScoreGame {
                 game_id: Some("g-live".into()),
                 status: Some("in_game".into()),
@@ -426,16 +426,16 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
                     ..GameMeta::default()
                 }),
             },
-        ],
-        last_season: vec![LastSeasonRow {
+        ]),
+        last_season: std::sync::Arc::new(vec![LastSeasonRow {
             place: 1,
             name: "User Two".into(),
             record: "10\u{2013}4".into(),
             points: 1500.5,
             tag: Some("Champ".into()),
             is_mine: false,
-        }],
-        history: History {
+        }]),
+        history: std::sync::Arc::new(History {
             snapshots: vec![
                 Snapshot {
                     taken_at: SNAP_AT,
@@ -458,7 +458,7 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
                     ],
                 },
             ],
-        },
+        }),
         fetched_at: SNAP_AT_2,
         warnings: vec!["fixture warning".into()],
         sources: Default::default(),
@@ -474,6 +474,7 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
         chat_spend_usd: Default::default(),
         device_name: None,
         companion_port: None,
+        companion_enabled: false,
     };
     (loaded, season, config)
 }

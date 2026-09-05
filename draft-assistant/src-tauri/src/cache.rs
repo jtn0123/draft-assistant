@@ -117,6 +117,55 @@ pub(crate) fn envelope_json<T: Serialize>(fetched_at: u64, data: &T) -> Result<S
     serde_json::to_string(&Cached { fetched_at, data }).map_err(|e| format!("serialize: {e}"))
 }
 
+/// The same envelope, serialized without stalling the async runtime.
+///
+/// The players dictionary is ~15 MB of JSON and `serde_json` spends a good
+/// fraction of a second on it. Done inline on a runtime thread, that fraction
+/// is a turn missed by every other task on it: the poll tick, the companion's
+/// sockets and the window's own commands all stop for the length of the
+/// encode. `block_in_place` moves the calling thread out of the async pool for
+/// the duration, so the rest of the runtime keeps running while this works.
+///
+/// A current-thread runtime has no pool to hand the work to and
+/// `block_in_place` panics there, so tests and the `dump_*` binaries encode
+/// inline — where there is nothing else on the thread to hold up anyway.
+pub(crate) fn envelope_json_off_runtime<T: Serialize>(
+    fetched_at: u64,
+    data: &T,
+) -> Result<String, String> {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current().map(|handle| handle.runtime_flavor()) {
+        Ok(RuntimeFlavor::MultiThread) => {
+            tokio::task::block_in_place(|| envelope_json(fetched_at, data))
+        }
+        _ => envelope_json(fetched_at, data),
+    }
+}
+
+/// Keep the previous copy of a file before it is replaced.
+///
+/// The config backup used to be a `std::fs::copy(..).ok()`: a full disk, a
+/// read-only directory or a permission problem left an old `config.json.bak`
+/// sitting there looking current, and nothing anywhere said so. The bytes are
+/// flushed as well, because a backup that only reached the page cache is no
+/// backup against the power cut it exists for, and the copy is narrowed to its
+/// owner because a config carries the Anthropic API key.
+pub(crate) fn back_up(live: &Path, backup: &Path) {
+    if let Err(error) = copy_synced(live, backup) {
+        crate::applog::warn(format!(
+            "could not keep a backup at {}: {error}",
+            backup.display()
+        ));
+    }
+}
+
+fn copy_synced(live: &Path, backup: &Path) -> std::io::Result<()> {
+    let bytes = std::fs::read(live)?;
+    write_synced(backup, &bytes)?;
+    owner_only(backup);
+    Ok(())
+}
+
 /// Lock a freshly written cache file down to its owner.
 ///
 /// Cache files hold league rosters, member names and Sleeper user ids. The
@@ -330,6 +379,77 @@ mod tests {
         owner_only_dir(&dir);
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700, "cache dir mode was {:o}", mode & 0o777);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The encode has to produce the same bytes wherever it happens to run,
+    /// and it has to run at all: `block_in_place` panics on a current-thread
+    /// runtime, so the flavour check is the whole of this test.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stepping_off_the_runtime_to_encode_gives_the_same_envelope() {
+        let payload = vec![1u32, 2, 3];
+        assert_eq!(
+            envelope_json_off_runtime(9, &payload).unwrap(),
+            envelope_json(9, &payload).unwrap()
+        );
+    }
+
+    /// The same call on the runtime the tests and the `dump_*` binaries use,
+    /// which has no blocking pool to step onto.
+    #[tokio::test]
+    async fn encoding_on_a_current_thread_runtime_works_rather_than_panicking() {
+        let payload = vec![4u32];
+        assert_eq!(
+            envelope_json_off_runtime(1, &payload).unwrap(),
+            envelope_json(1, &payload).unwrap()
+        );
+    }
+
+    /// Outside any runtime at all — a plain `write_cache` from a sync caller.
+    #[test]
+    fn encoding_outside_a_runtime_works_too() {
+        assert_eq!(
+            envelope_json_off_runtime(2, &"x").unwrap(),
+            envelope_json(2, &"x").unwrap()
+        );
+    }
+
+    /// The backup used to be a `copy(..).ok()`. It now copies the bytes, and
+    /// leaves the copy no more readable than the config it came from, which
+    /// carries the Anthropic API key.
+    #[test]
+    fn a_backup_holds_the_previous_bytes_and_is_no_more_readable_than_the_original() {
+        let dir = temp("backup");
+        let live = dir.join("config.json");
+        let backup = dir.join("config.json.bak");
+        std::fs::write(&live, br#"{"leagues":[]}"#).unwrap();
+        back_up(&live, &backup);
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            r#"{"leagues":[]}"#
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&backup).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "backup mode was {:o}", mode & 0o777);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A backup that cannot be written is a warning, never a panic and never a
+    /// failed save: the config the user just edited still has to land.
+    #[test]
+    fn a_backup_that_cannot_be_written_is_survivable() {
+        let dir = temp("backup-fail");
+        let live = dir.join("config.json");
+        std::fs::write(&live, b"{}").unwrap();
+        // A directory cannot be opened as a file, so this is a write that
+        // fails for a reason nothing has to simulate.
+        let backup = dir.join("occupied");
+        std::fs::create_dir(&backup).unwrap();
+        back_up(&live, &backup);
+        assert!(backup.is_dir(), "the failed copy left the target alone");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

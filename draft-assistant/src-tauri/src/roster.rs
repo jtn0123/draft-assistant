@@ -52,6 +52,24 @@ impl RosterRules {
             .collect()
     }
 
+    /// Which eligible position a flex slot goes to, out of the ones `wants`
+    /// says are still in the market for it.
+    ///
+    /// The eligibility lists above are written best-first, so the answer is
+    /// simply the first one that wants it: a SUPER_FLEX goes to the
+    /// quarterback whenever a quarterback is in play, because a second
+    /// quarterback in a superflex league is worth more in that slot than any
+    /// receiver is. The rule this replaces was "whichever position has the
+    /// most spare bodies", which is a count and not a value, and would hand a
+    /// superflex slot to a fourth receiver over a second quarterback purely
+    /// because there were more receivers lying around.
+    pub fn flex_claimant(slot: &str, wants: impl Fn(&str) -> bool) -> Option<&'static str> {
+        Self::flex_eligible(slot)?
+            .iter()
+            .copied()
+            .find(|position| wants(position))
+    }
+
     pub fn open_starting_slots<'a>(
         &self,
         player_positions: impl IntoIterator<Item = &'a str>,
@@ -81,12 +99,10 @@ impl RosterRules {
             .collect::<Vec<_>>();
         flex_slots.sort_by_key(|slot| Self::flex_eligible(slot).map_or(0, <[&str]>::len));
         for slot in flex_slots {
-            let eligible = Self::flex_eligible(slot).expect("filtered flex slot");
-            let best = eligible
-                .iter()
-                .filter(|position| remaining.get(**position).copied().unwrap_or(0) > 0)
-                .max_by_key(|position| remaining.get(**position).copied().unwrap_or(0));
-            if let Some(position) = best {
+            let claimant = Self::flex_claimant(slot, |position| {
+                remaining.get(position).copied().unwrap_or(0) > 0
+            });
+            if let Some(position) = claimant {
                 *remaining.entry(position).or_insert(0) -= 1;
             } else {
                 *open.entry(slot.clone()).or_insert(0) += 1;
@@ -146,6 +162,22 @@ mod tests {
         assert!(!rules(&["QB", "FLEX", "BN"])
             .draftable_positions()
             .contains(&"K".to_string()));
+    }
+
+    #[test]
+    fn a_superflex_slot_goes_to_the_quarterback_not_to_the_deepest_pile() {
+        // Spare bodies at three positions, receivers the most numerous of
+        // them. Counting bodies handed the slot to a receiver; what the slot
+        // is worth says quarterback.
+        let spare = |position: &str| matches!(position, "QB" | "WR" | "TE");
+        assert_eq!(RosterRules::flex_claimant("SUPER_FLEX", spare), Some("QB"));
+        // And a flex a quarterback cannot fill still goes by value order.
+        assert_eq!(RosterRules::flex_claimant("FLEX", spare), Some("WR"));
+        assert_eq!(
+            RosterRules::flex_claimant("REC_FLEX", |p| p == "TE"),
+            Some("TE")
+        );
+        assert_eq!(RosterRules::flex_claimant("QB", spare), None);
     }
 
     #[test]

@@ -6,6 +6,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { reportError } from "../errorReport";
+
+// The boundary's job here is to call the reporter, not to reach the backend;
+// what the reporter itself does is `errorReport.test.ts`'s problem.
+vi.mock("../errorReport", () => ({ reportError: vi.fn() }));
 
 function Boom(): never {
   throw new Error("chunk missing");
@@ -67,6 +72,32 @@ describe("the error boundary", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: "Reload" }));
     expect(reload).toHaveBeenCalled();
+  });
+
+  it("reports the failure so it survives the dismissed screen", () => {
+    render(
+      <ErrorBoundary>
+        <Boom />
+      </ErrorBoundary>,
+    );
+    expect(reportError).toHaveBeenCalledWith("Error: chunk missing", "render");
+  });
+
+  it("hands over the details to be pasted somewhere useful", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+
+    render(
+      <ErrorBoundary>
+        <Boom />
+      </ErrorBoundary>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Copy details" }));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    // The message, not just "something went wrong": the whole point of the
+    // button is that the person reading the paste learns something.
+    expect(String(writeText.mock.calls[0]?.[0])).toContain("chunk missing");
   });
 
   it("stays out of the way when nothing is wrong", () => {

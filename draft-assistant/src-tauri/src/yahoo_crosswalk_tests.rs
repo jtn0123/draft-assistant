@@ -242,3 +242,81 @@ fn a_dictionary_row_with_no_position_is_skipped_rather_than_indexed() {
     ))];
     assert_eq!(build(&pool, &sleeper).unmatched, 1);
 }
+
+#[test]
+fn a_defence_matches_across_the_two_spellings_of_one_franchise() {
+    // The failure this prevents: Yahoo writes Jacksonville as JAC and Sleeper
+    // as JAX, so that league's defence found no Sleeper row, sat on the board
+    // with no projection and was counted as an unmatched player. Washington
+    // (WSH/WAS) and Las Vegas (LVR/LV) did the same.
+    let sleeper = dictionary(&[
+        ("JAX", sleeper_defence("Jacksonville", "Jaguars", "JAX")),
+        ("WAS", sleeper_defence("Washington", "Commanders", "WAS")),
+        ("LV", sleeper_defence("Las Vegas", "Raiders", "LV")),
+    ]);
+    let pool = vec![
+        player(&yahoo(
+            "449.p.100010",
+            "Jacksonville",
+            "Jacksonville",
+            "",
+            "Jac",
+            "DEF",
+        )),
+        player(&yahoo(
+            "449.p.100011",
+            "Washington",
+            "Washington",
+            "",
+            "WSH",
+            "DEF",
+        )),
+        player(&yahoo(
+            "449.p.100012",
+            "Las Vegas",
+            "Las",
+            "Vegas",
+            "LVR",
+            "DEF",
+        )),
+    ];
+    let crosswalk = build(&pool, &sleeper);
+    assert_eq!(crosswalk.id_for("449.p.100010"), Some("JAX"));
+    assert_eq!(crosswalk.id_for("449.p.100011"), Some("WAS"));
+    assert_eq!(crosswalk.id_for("449.p.100012"), Some("LV"));
+    assert_eq!(crosswalk.unmatched, 0);
+}
+
+#[test]
+fn a_defence_with_no_team_abbreviation_is_found_by_its_name() {
+    // Yahoo leaves `editorial_team_abbr` off the odd defence row, and the
+    // abbreviation was the only thing a defence was ever matched on.
+    let sleeper = dictionary(&[("BAL", sleeper_defence("Baltimore", "Ravens", "BAL"))]);
+    let pool = vec![player(&yahoo(
+        "449.p.100013",
+        "Baltimore Ravens",
+        "Baltimore",
+        "Ravens",
+        "",
+        "DEF",
+    ))];
+    let crosswalk = build(&pool, &sleeper);
+    assert_eq!(crosswalk.id_for("449.p.100013"), Some("BAL"));
+    assert_eq!(crosswalk.unmatched, 0);
+}
+
+#[test]
+fn a_skill_player_whose_team_is_spelled_the_other_way_still_matches_exactly() {
+    // The abbreviation folding is not a defence-only fix: an exact match is
+    // name, team and position, and JAC never equalled JAX on any of them.
+    let sleeper = dictionary(&[("9999", sleeper_row("Travis Etienne", "RB", "JAX"))]);
+    let pool = vec![player(&yahoo(
+        "449.p.32700",
+        "Travis Etienne",
+        "Travis",
+        "Etienne",
+        "Jac",
+        "RB",
+    ))];
+    assert_eq!(build(&pool, &sleeper).id_for("449.p.32700"), Some("9999"));
+}

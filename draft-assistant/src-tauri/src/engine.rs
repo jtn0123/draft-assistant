@@ -5,9 +5,7 @@
 //! and the model can see.
 
 use crate::board::BoardPlayer;
-use crate::cache::{
-    envelope_json, fresh_enough, read_cached, replace_file, temp_sibling, write_atomic,
-};
+use crate::cache::{fresh_enough, read_cached, replace_file, temp_sibling, write_atomic};
 use crate::engine_assemble::AssemblyParts;
 use crate::mock_league::synthesize_league;
 use crate::roster::RosterRules;
@@ -67,11 +65,12 @@ pub struct AppConfig {
     /// machine's own computer name is used.
     #[serde(default)]
     pub device_name: Option<String>,
-    /// The port the phone / second-screen server last listened on, so the URL
-    /// a user bookmarked keeps working across restarts. Unset means the
-    /// default, 7878.
+    /// The port the phone server last took, so a bookmarked URL keeps working.
     #[serde(default)]
     pub companion_port: Option<u16>,
+    /// Whether it was on when the app last closed; see COMPANION-API.md.
+    #[serde(default)]
+    pub companion_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,12 +269,14 @@ impl Engine {
         fresh_enough(self.read_cache_any_off_thread(name).await, ttl)
     }
 
-    /// `write_cache` off the async runtime. Takes the value by reference and
-    /// serializes it here, then hands only the finished bytes to the blocking
-    /// pool, so callers keep ownership of what they just fetched.
+    /// `write_cache` off the async runtime. Takes the value by reference —
+    /// every caller still needs it afterwards — and encodes it through
+    /// `envelope_json_off_runtime`, which steps off the async pool for the
+    /// encode rather than blocking every other task on the thread. Only the
+    /// finished bytes go to the blocking pool for the write itself.
     pub(crate) async fn write_cache_off_thread<T: Serialize>(&self, name: &str, data: &T) -> u64 {
         let fetched_at = now_secs();
-        let Ok(json) = envelope_json(fetched_at, data) else {
+        let Ok(json) = crate::cache::envelope_json_off_runtime(fetched_at, data) else {
             return fetched_at;
         };
         let final_path = self.cache_path(name);
@@ -349,7 +350,7 @@ impl Engine {
             .map_err(|e| format!("could not save your settings to {}: {e}", tmp.display()))?;
         crate::cache::owner_only(&tmp);
         if live.exists() {
-            std::fs::copy(&live, self.cache_path("config.json.bak")).ok();
+            crate::cache::back_up(&live, &self.cache_path("config.json.bak"));
         }
         std::fs::rename(&tmp, &live)
             .map_err(|e| format!("could not save your settings to {}: {e}", live.display()))

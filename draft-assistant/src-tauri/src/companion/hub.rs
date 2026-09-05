@@ -7,48 +7,22 @@
 //! and off only swaps what is in [`HubInner::running`].
 
 use super::names::{display_name, unique_name};
+use super::pairing::{Lockout, Paired};
 use super::rand;
 use super::store::{self, StoredDevice, StoredHub};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::net::IpAddr;
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
+
+pub use super::pairing::{Device, PairAttempt, PairOutcome};
 
 /// How anything in here reaches the host's own webview. A closure rather than
 /// an `AppHandle` so nothing below this line is generic over the Tauri
 /// runtime, and so the tests can stand a hub up with no Tauri at all.
 pub type Emit = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
 
-/// A paired phone or follower desktop, as the contract describes it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Device {
-    pub device_id: String,
-    pub name: String,
-    /// "phone" or "desktop".
-    pub kind: String,
-    pub paired_at_ms: u64,
-    pub last_seen_ms: u64,
-    pub connected: bool,
-}
-
-/// One paired device plus the secret nobody outside this module sees.
-#[derive(Debug, Clone)]
-struct Paired {
-    token: String,
-    device: Device,
-    /// Open WebSockets for this device. `connected` is this being non-zero.
-    sockets: u32,
-    /// When this device posted its recent chat questions, for the per-minute cap.
-    posts: Vec<u64>,
-}
-
-/// Five wrong codes inside this window locks that one address out.
-const PAIR_WINDOW_MS: u64 = 60_000;
-const PAIR_MAX_FAILURES: usize = 5;
-const PAIR_LOCKOUT_MS: u64 = 60_000;
 /// How long a code nobody has used stays on screen before it is replaced.
 pub const CODE_MAX_AGE_MS: u64 = 10 * 60_000;
 /// Questions one device may post per minute.
@@ -69,13 +43,15 @@ struct HubInner {
     /// When the code on screen was made, for the idle rotation.
     code_at_ms: u64,
     devices: Vec<Paired>,
-    /// Times of the recent wrong codes, and when a lockout ends, per address.
-    /// Keyed by peer so one guesser on the network cannot lock the phone in
-    /// the owner's hand out of its own house.
-    failures: HashMap<IpAddr, Vec<u64>>,
-    locked_until_ms: HashMap<IpAddr, u64>,
+    lockout: Lockout,
     /// The port the server is listening on, when it is.
     port: Option<u16>,
+    /// The `http://host:port` origins this server is actually reachable at,
+    /// filled in when it starts listening. The cross-origin check and the
+    /// page's `connect-src` are both built from this rather than from "any
+    /// private address", so a page on another machine's LAN address cannot
+    /// name itself into the allow-list.
+    origins: Vec<String>,
     host_name: String,
     /// Set once at startup. Absent in the tests, which have no webview.
     emit: Option<Emit>,
@@ -85,32 +61,12 @@ struct HubInner {
 pub struct CompanionHub {
     inner: Mutex<HubInner>,
     events: broadcast::Sender<String>,
+    /// Tokens that have stopped being valid while a socket still held them.
+    /// A socket authenticated with one of these closes itself when it hears
+    /// its own token here.
+    closes: broadcast::Sender<String>,
     /// Where the pairings are written so a restart does not forget them.
     store_path: PathBuf,
-}
-
-/// One attempt to pair, as the route hands it over.
-pub struct PairAttempt<'a> {
-    pub code: &'a str,
-    pub name: &'a str,
-    pub kind: &'a str,
-    /// The address the attempt came from; the lockout is counted per address.
-    pub peer: IpAddr,
-    /// The id this client was given last time, when it has one. Only a client
-    /// that proves it is the same device replaces its old entry; anyone else
-    /// pairing under the same name gets a name of its own.
-    pub previous_device_id: Option<&'a str>,
-}
-
-/// The outcome of an attempt to pair.
-pub enum PairOutcome {
-    Ok {
-        token: String,
-        device_id: String,
-        host_name: String,
-    },
-    WrongCode,
-    LockedOut,
 }
 
 impl CompanionHub {
@@ -120,6 +76,7 @@ impl CompanionHub {
     /// thing this must never have.
     pub fn new(host_name: String, data_dir: PathBuf) -> Result<Self, String> {
         let (events, _) = broadcast::channel(EVENT_BACKLOG);
+        let (closes, _) = broadcast::channel(EVENT_BACKLOG);
         let store_path = store::path_in(&data_dir);
         let stored = store::load(&store_path).unwrap_or_default();
         let code = if stored.code.len() == 6 {
@@ -147,13 +104,14 @@ impl CompanionHub {
                 code,
                 code_at_ms: now_ms(),
                 devices,
-                failures: HashMap::new(),
-                locked_until_ms: HashMap::new(),
+                lockout: Lockout::default(),
                 port: None,
+                origins: Vec::new(),
                 host_name,
                 emit: None,
             }),
             events,
+            closes,
             store_path,
         })
     }
@@ -197,10 +155,15 @@ impl CompanionHub {
     /// are untouched: this changes what a *new* device would have to type,
     /// which is the only thing a code on a screen all afternoon is worth.
     /// Returns whether it rotated, so a test can say so without a wall clock.
+    ///
+    /// Rotation does not care whether anything is paired. A host with a phone
+    /// already on it used to leave the same six digits on screen for the whole
+    /// draft, which is the case where somebody else in the room has had the
+    /// longest to read them.
     pub fn rotate_if_idle(&self, now: u64) -> bool {
         let stale = {
             let inner = self.lock();
-            inner.devices.is_empty() && now.saturating_sub(inner.code_at_ms) >= CODE_MAX_AGE_MS
+            now.saturating_sub(inner.code_at_ms) >= CODE_MAX_AGE_MS
         };
         if !stale {
             return false;
@@ -251,6 +214,15 @@ impl CompanionHub {
         self.lock().port = port;
     }
 
+    /// The `http://…` origins this server answers on. Empty while it is down.
+    pub fn origins(&self) -> Vec<String> {
+        self.lock().origins.clone()
+    }
+
+    pub fn set_origins(&self, origins: Vec<String>) {
+        self.lock().origins = origins;
+    }
+
     pub fn is_running(&self) -> bool {
         self.lock().port.is_some()
     }
@@ -263,8 +235,7 @@ impl CompanionHub {
             inner.code = code.clone();
             inner.code_at_ms = now_ms();
             inner.devices.clear();
-            inner.failures.clear();
-            inner.locked_until_ms.clear();
+            inner.lockout.clear();
         }
         self.persist();
         // The sockets themselves are closed by the WebSocket task, which
@@ -281,23 +252,17 @@ impl CompanionHub {
         let now = now_ms();
         let token = rand::token()?;
         let fresh_id = rand::device_id()?;
+        let mut replaced: Vec<String> = Vec::new();
         let outcome = {
             let mut inner = self.lock();
-            if now
-                < inner
-                    .locked_until_ms
-                    .get(&attempt.peer)
-                    .copied()
-                    .unwrap_or(0)
-            {
+            if inner.lockout.locked(attempt.peer, now) {
                 return Ok(PairOutcome::LockedOut);
             }
             if !rand::secrets_match(attempt.code, &inner.code) {
-                note_failure(&mut inner, attempt.peer, now);
+                inner.lockout.note_failure(attempt.peer, now);
                 return Ok(PairOutcome::WrongCode);
             }
-            inner.failures.remove(&attempt.peer);
-            inner.locked_until_ms.remove(&attempt.peer);
+            inner.lockout.forgive(attempt.peer);
             let kind = if attempt.kind == "desktop" {
                 "desktop"
             } else {
@@ -308,6 +273,13 @@ impl CompanionHub {
             // silently evicting the first one and killing its token.
             let device_id = match attempt.previous_device_id {
                 Some(id) if inner.devices.iter().any(|d| d.device.device_id == id) => {
+                    replaced.extend(
+                        inner
+                            .devices
+                            .iter()
+                            .filter(|d| d.device.device_id == id)
+                            .map(|d| d.token.clone()),
+                    );
                     inner.devices.retain(|d| d.device.device_id != id);
                     id.to_string()
                 }
@@ -344,6 +316,12 @@ impl CompanionHub {
                 host_name: inner.host_name.clone(),
             }
         };
+        // A re-pair leaves the same `device_id` in the list, so nothing else
+        // tells the socket the old token opened that it is finished. Without
+        // this it went on reading the draft on a token the host has replaced.
+        for token in replaced {
+            self.close_token(token);
+        }
         self.persist();
         self.publish_devices();
         Ok(outcome)
@@ -426,6 +404,18 @@ impl CompanionHub {
         self.events.subscribe()
     }
 
+    /// A receiver for tokens that have stopped working. The socket task
+    /// listens on this so a token replaced under it closes its connection
+    /// rather than leaving the old holder reading on.
+    pub fn subscribe_closes(&self) -> broadcast::Receiver<String> {
+        self.closes.subscribe()
+    }
+
+    /// Tell any socket holding this token that it is finished.
+    fn close_token(&self, token: String) {
+        let _ = self.closes.send(token);
+    }
+
     /// Fan one `{type, payload}` frame out to every open socket. Nothing is
     /// sent when nobody is listening, and a full channel is not an error —
     /// the events are a live feed, not a queue anyone replays.
@@ -455,18 +445,6 @@ impl CompanionHub {
             Ok(value) => self.to_webview("companion-devices", value),
             Err(e) => crate::applog::warn(format!("companion: could not list the devices: {e}")),
         }
-    }
-}
-
-/// Count one wrong code against the address it came from, and lock that
-/// address out once it has spent five inside the window.
-fn note_failure(inner: &mut HubInner, peer: IpAddr, now: u64) {
-    let recent = inner.failures.entry(peer).or_default();
-    recent.retain(|at| now.saturating_sub(*at) < PAIR_WINDOW_MS);
-    recent.push(now);
-    if recent.len() >= PAIR_MAX_FAILURES {
-        recent.clear();
-        inner.locked_until_ms.insert(peer, now + PAIR_LOCKOUT_MS);
     }
 }
 

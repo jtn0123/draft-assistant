@@ -9,6 +9,15 @@
 
 use super::*;
 
+/// A context to send. What it says does not matter to these tests; that it is
+/// the two-halves shape the request builder takes does.
+fn context() -> crate::chat_context::SplitContext {
+    crate::chat_context::SplitContext {
+        stable: "the board".to_string(),
+        volatile: "the clock\n".to_string(),
+    }
+}
+
 /// Serve `body` with `status` to exactly one request, and return the URL to
 /// send it to. The thread ends with the response.
 fn stub_server(status: u16, body: &'static str) -> String {
@@ -129,7 +138,7 @@ fn ask_stub(status: u16, body: &'static str) -> Result<ChatReply, String> {
         "sk-ant-test",
         ChatModel::Opus5,
         Effort::High,
-        "context",
+        &context(),
         &[ChatMessage {
             role: "user".into(),
             content: "Walker or Bowers?".into(),
@@ -150,7 +159,9 @@ fn a_real_response_off_the_wire_becomes_a_reply() {
     .expect("a 200 is a reply");
     // Text blocks join with a blank line; the panel splits paragraphs on it.
     assert_eq!(reply.text, "Take Bowers.\n\nHe is a tier ahead.");
-    assert_eq!(reply.thinking.as_deref(), Some("weighing tiers"));
+    // A summary is no longer asked for, and one that arrives anyway is not
+    // kept: nothing renders it, and it was paid for on every turn.
+    assert_eq!(reply.thinking, None);
     assert_eq!(reply.model, "claude-opus-5");
     assert_eq!((reply.input_tokens, reply.output_tokens), (1200, 80));
     assert!(!reply.refused);
@@ -159,16 +170,19 @@ fn a_real_response_off_the_wire_becomes_a_reply() {
     assert_eq!(reply.cost_usd, 0.0);
 }
 
+/// A thinking block in the response is skipped rather than joined into the
+/// answer: the text the panel shows is the text blocks and nothing else.
 #[test]
-fn empty_thinking_blocks_do_not_become_an_empty_summary() {
+fn a_thinking_block_never_leaks_into_the_answer() {
     let reply = ask_stub(
         200,
         r#"{"model":"claude-opus-5","stop_reason":"end_turn",
-            "content":[{"type":"thinking","thinking":"  "},
+            "content":[{"type":"thinking","thinking":"weighing tiers"},
                        {"type":"text","text":"Take Bowers."}],
             "usage":{"input_tokens":5,"output_tokens":5}}"#,
     )
     .expect("a 200 is a reply");
+    assert_eq!(reply.text, "Take Bowers.");
     assert_eq!(reply.thinking, None);
 }
 
@@ -288,7 +302,7 @@ fn a_dead_endpoint_reads_as_a_connection_problem() {
         "sk-ant-test",
         ChatModel::Opus5,
         Effort::High,
-        "context",
+        &context(),
         &[ChatMessage {
             role: "user".into(),
             content: "hi".into(),
@@ -367,7 +381,7 @@ fn sent_request() -> (String, serde_json::Value) {
         "sk-ant-test",
         ChatModel::Opus5,
         Effort::High,
-        "context",
+        &context(),
         &[ChatMessage {
             role: "user".into(),
             content: "Walker or Bowers?".into(),
@@ -405,20 +419,27 @@ fn the_key_rides_in_x_api_key_and_nowhere_else() {
     assert!(!body.to_string().contains("sk-ant-test"));
 }
 
-/// The breakpoint has to sit on the *last* system block. On the first alone,
-/// the cacheable prefix was the ~450-token guidance — under the 512-token
-/// minimum — so nothing was ever written and every turn paid full price.
+/// Where the breakpoint sits, on the wire.
+///
+/// It has to cover the guidance *and* the half of the context that a single
+/// pick does not rewrite: the guidance alone is around 450 tokens, under the
+/// minimum a prefix must reach before anything is cached at all, so a
+/// breakpoint on it cached nothing. It must equally not cover the clock,
+/// which every pick rewrites — with the breakpoint on the last block, the
+/// cached prefix was thrown away on every pick and each question paid the
+/// 1.25x write again.
 #[test]
-fn the_cache_breakpoint_covers_the_guidance_and_the_context_together() {
+fn the_cache_breakpoint_covers_the_guidance_and_the_stable_context_only() {
     let (_, body) = sent_request();
     let system = body["system"].as_array().expect("system blocks");
-    assert_eq!(system.len(), 2, "{system:?}");
+    assert_eq!(system.len(), 3, "{system:?}");
     assert!(
         system[0].get("cache_control").is_none(),
         "the guidance alone is too short a prefix to cache"
     );
+    assert_eq!(system[1]["text"], "the board");
     assert_eq!(system[1]["cache_control"]["type"], "ephemeral");
-    // Order matters as much as placement: the marker caches everything before
-    // it, so the volatile board must be inside the prefix, not after it.
-    assert_eq!(system[1]["text"], "context");
+    // The clock renders after the marker, where rewriting it is free.
+    assert_eq!(system[2]["text"], "the clock\n");
+    assert!(system[2].get("cache_control").is_none(), "{system:?}");
 }

@@ -32,7 +32,11 @@ pub async fn events(
         // why. [`REVOKED_CLOSE`] is what sends it back to the pairing screen.
         return upgrade.on_upgrade(close_as_revoked);
     };
-    upgrade.on_upgrade(move |socket| run(srv, device, socket))
+    // The token is kept for the life of the socket, not just to open it: a
+    // re-pair replaces it while the device id stays the same, and this is
+    // what lets the hub tell this one connection it is finished.
+    let token = query.token;
+    upgrade.on_upgrade(move |socket| run(srv, device, token, socket))
 }
 
 /// The close code a client reads as "this token is no good any more". Above
@@ -40,15 +44,20 @@ pub async fn events(
 pub const REVOKED_CLOSE: u16 = 4401;
 
 async fn close_as_revoked(mut socket: WebSocket) {
+    let _ = send_revoked(&mut socket).await;
+}
+
+async fn send_revoked(socket: &mut WebSocket) -> Result<(), axum::Error> {
     let frame = axum::extract::ws::CloseFrame {
         code: REVOKED_CLOSE,
         reason: "revoked".into(),
     };
-    let _ = socket.send(Message::Close(Some(frame))).await;
+    socket.send(Message::Close(Some(frame))).await
 }
 
-async fn run(srv: Arc<Srv>, device: Device, mut socket: WebSocket) {
+async fn run(srv: Arc<Srv>, device: Device, token: String, mut socket: WebSocket) {
     let mut events = srv.hub.subscribe();
+    let mut closes = srv.hub.subscribe_closes();
     srv.hub.socket_changed(&device.device_id, true);
     // What the client needs before the first update arrives, so a phone that
     // connects mid-draft is not blank until something changes.
@@ -60,6 +69,17 @@ async fn run(srv: Arc<Srv>, device: Device, mut socket: WebSocket) {
     }
     loop {
         tokio::select! {
+            // A token this socket authenticated with that has been replaced
+            // or revoked. Without this a phone that paired again went on
+            // reading the draft over the socket its old token opened.
+            dropped = closes.recv() => match dropped {
+                Ok(dead) if dead == token => {
+                    let _ = send_revoked(&mut socket).await;
+                    break;
+                }
+                Ok(_) | Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            },
             event = events.recv() => match event {
                 Ok(frame) => {
                     let revoked = frame_kind(&frame).as_deref() == Some("revoked");
@@ -120,7 +140,19 @@ async fn answer_client(srv: &Srv, device: &Device, socket: &mut WebSocket, text:
 /// a board minutes out of date until the next pick moved, and a phone that
 /// reconnects between picks could sit on one all round.
 async fn opening_frames(srv: &Srv) -> Vec<String> {
-    let mut frames = vec![frame("devices", serde_json::to_value(srv.hub.devices()))];
+    // The host's clock, so a phone whose own clock is minutes out does not
+    // show a pick timer that is minutes wrong. The page keeps the difference
+    // and applies it wherever it counts something down.
+    let mut frames = vec![
+        frame(
+            "hello",
+            Ok(serde_json::json!({
+                "server_now_ms": super::hub::now_ms(),
+                "host_name": srv.hub.host_name(),
+            })),
+        ),
+        frame("devices", serde_json::to_value(srv.hub.devices())),
+    ];
     if let Some(view) = draft_view(srv).await {
         frames.push(frame("draft-updated", serde_json::to_value(view)));
     }

@@ -13,6 +13,9 @@
 //! - **Defences by team.** Sleeper writes a defence's name as the city and
 //!   the mascot in two fields; Yahoo writes "Baltimore". Neither normalises
 //!   to the other, and neither has to: there is exactly one `DEF` per team.
+//!   The abbreviations still have to be spelled the same way, and they are
+//!   not — `crate::yahoo_crosswalk_teams` folds JAC onto JAX and WSH onto
+//!   WAS, and puts the city and mascot words behind that as a last try.
 //! - **A team-blind second try.** A player traded since the dictionary was
 //!   written has the right name and the wrong team on one side. Matching him
 //!   to the wrong player is impossible — the fallback is only consulted when
@@ -23,6 +26,7 @@
 
 use crate::second_opinion::{normalize_name, normalize_position};
 use crate::sleeper::PlayerMeta;
+use crate::yahoo_crosswalk_teams::{canonical_team, team_words};
 use crate::yahoo_map::MappedPlayer;
 use std::collections::{HashMap, HashSet};
 
@@ -77,7 +81,7 @@ fn sleeper_key(meta: &PlayerMeta) -> Option<(String, String, String)> {
     }
     Some((
         name,
-        meta.team.clone().unwrap_or_default().to_ascii_uppercase(),
+        canonical_team(meta.team.as_deref().unwrap_or_default()),
         position,
     ))
 }
@@ -89,8 +93,14 @@ struct Index<'a> {
     /// (name, position) -> Sleeper id, dropped as soon as it is ambiguous.
     nameless_team: HashMap<(String, String), &'a str>,
     ambiguous: HashSet<(String, String)>,
-    /// team -> the Sleeper id of that team's defence.
+    /// team -> the Sleeper id of that team's defence, keyed by the canonical
+    /// abbreviation so JAC and JAX are one team.
     defences: HashMap<String, &'a str>,
+    /// A word out of a defence's name ("jacksonville", "jaguars") -> that
+    /// defence, for the rows Yahoo sends with no team abbreviation at all.
+    /// Dropped as soon as two franchises share a word.
+    defence_words: HashMap<String, &'a str>,
+    ambiguous_words: HashSet<String>,
 }
 
 impl<'a> Index<'a> {
@@ -100,6 +110,8 @@ impl<'a> Index<'a> {
             nameless_team: HashMap::new(),
             ambiguous: HashSet::new(),
             defences: HashMap::new(),
+            defence_words: HashMap::new(),
+            ambiguous_words: HashSet::new(),
         };
         // Sorted so that two rows competing for one key resolve the same way
         // on every run; a HashMap's order would make the board move about.
@@ -109,8 +121,11 @@ impl<'a> Index<'a> {
             let Some((name, team, position)) = sleeper_key(meta) else {
                 continue;
             };
-            if position == "DEF" && !team.is_empty() {
-                index.defences.entry(team.clone()).or_insert(id);
+            if position == "DEF" {
+                if !team.is_empty() {
+                    index.defences.entry(team.clone()).or_insert(id);
+                }
+                index.add_defence_words(meta, id);
                 continue;
             }
             index
@@ -131,10 +146,40 @@ impl<'a> Index<'a> {
         index
     }
 
+    /// File one defence under each word of its name, and un-file any word two
+    /// defences claim: a word that names two teams names neither.
+    fn add_defence_words(&mut self, meta: &PlayerMeta, id: &'a str) {
+        let name = format!(
+            "{} {}",
+            sleeper_name(meta),
+            meta.last_name.clone().unwrap_or_default()
+        );
+        for word in team_words(&name) {
+            if self.ambiguous_words.contains(&word) {
+                continue;
+            }
+            match self.defence_words.insert(word.clone(), id) {
+                Some(other) if other != id => {
+                    self.defence_words.remove(&word);
+                    self.ambiguous_words.insert(word);
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn find(&self, player: &MappedPlayer) -> Option<&'a str> {
         let (name, team, position) = player.crosswalk_key();
         if position == "DEF" {
-            return self.defences.get(&team).copied();
+            // The abbreviation first, then the name. Yahoo leaves the
+            // abbreviation off the odd defence row, and a defence with no
+            // Sleeper row is a starting lineup slot with no projection behind
+            // it.
+            return self.defences.get(&team).copied().or_else(|| {
+                team_words(&player.meta.full_name.clone().unwrap_or_default())
+                    .into_iter()
+                    .find_map(|word| self.defence_words.get(&word).copied())
+            });
         }
         if let Some(id) = self.exact.get(&(name.clone(), team, position.clone())) {
             return Some(id);

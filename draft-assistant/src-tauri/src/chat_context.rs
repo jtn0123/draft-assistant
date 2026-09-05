@@ -7,6 +7,30 @@
 
 use crate::chat_rules::{league_rules, LeagueRules};
 
+/// The system prompt in two halves, so the cache breakpoint has somewhere
+/// stable to sit.
+///
+/// A prompt cache is a byte-exact prefix match. The breakpoint used to sit on
+/// a block that carried the current pick number, the round and whose clock it
+/// was, so every pick rewrote the cached prefix: each question paid the 1.25x
+/// cache write and hardly any of them read a thing back. Everything that only
+/// moves when the board does lives in `stable`, and the clock renders after
+/// the breakpoint, where changing it costs nothing.
+pub struct SplitContext {
+    /// The league, how it scores, the roster, the house rules and the board.
+    pub stable: String,
+    /// The clock: rewritten on every pick, so it goes last.
+    pub volatile: String,
+}
+
+impl SplitContext {
+    /// Both halves as one block, for the Claude Code route and the tests —
+    /// neither has a cache breakpoint to place.
+    pub fn joined(&self) -> String {
+        format!("{}{}", self.stable, self.volatile)
+    }
+}
+
 /// A comma-separated pick list, clipped so a manager who traded half a draft
 /// away cannot push the board out of the prompt.
 fn pick_list(picks: &[u32]) -> String {
@@ -104,14 +128,23 @@ fn roster_shape(league: &crate::view::LeagueSummary) -> String {
     format!("Roster: {shape}\n")
 }
 
-/// The draft screen's context block.
+/// The draft screen's context, split around the cache breakpoint.
+pub fn draft_split(view: &crate::view::DraftView) -> SplitContext {
+    SplitContext {
+        stable: draft_stable(view),
+        volatile: draft_clock(view),
+    }
+}
+
+/// The draft screen's context block, both halves together.
 pub fn draft_context(view: &crate::view::DraftView) -> String {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "League: {} ({} teams, {} rounds, season {})\n",
-        view.league.name, view.draft.teams, view.draft.rounds, view.league.season
-    ));
-    out.push_str(&format!(
+    draft_split(view).joined()
+}
+
+/// Where the draft has got to. The one part of the prompt that a single pick
+/// rewrites, which is why it is kept out of the cached prefix.
+fn draft_clock(view: &crate::view::DraftView) -> String {
+    format!(
         "Now: round {}, pick {}, on the clock {}. Your slot: {}. Your next picks: {:?}\n",
         view.draft.current_round,
         view.draft.current_pick,
@@ -121,6 +154,16 @@ pub fn draft_context(view: &crate::view::DraftView) -> String {
             .map(|s| s.to_string())
             .unwrap_or_else(|| "unknown".into()),
         view.draft.my_next_picks.iter().take(4).collect::<Vec<_>>()
+    )
+}
+
+/// Everything a question reads that the next pick does not rewrite line by
+/// line: the league, the rules, the roster and the board.
+fn draft_stable(view: &crate::view::DraftView) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "League: {} ({} teams, {} rounds, season {})\n",
+        view.league.name, view.draft.teams, view.draft.rounds, view.league.season
     ));
     out.push_str(&scoring_line(&view.league));
     out.push_str(&roster_shape(&view.league));
@@ -291,6 +334,18 @@ pub(crate) fn lineup_block(matchup: &crate::season::MatchupView, points_on_table
         ));
     }
     out
+}
+
+/// The season screen's context, split the same way the draft's is.
+///
+/// Nothing in a week is a clock: the whole block is rewritten together when
+/// the projections refresh and is identical between two questions asked in
+/// the same minute, so all of it sits in the cached half.
+pub fn season_split(view: &crate::season::SeasonView) -> SplitContext {
+    SplitContext {
+        stable: season_context(view),
+        volatile: String::new(),
+    }
 }
 
 /// The season screen's equivalent context.

@@ -251,7 +251,7 @@ fn matchup_rows(lookup: &Lookup, mine: &[LineupSlot], theirs: &[LineupSlot]) -> 
 }
 
 /// The lineup a roster currently has set, slot by slot, in league slot order.
-fn current_lineup(
+pub(crate) fn current_lineup(
     loaded: &LoadedLeague,
     starters: &[String],
     points_of: &impl Fn(&str) -> f64,

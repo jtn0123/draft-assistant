@@ -23,7 +23,7 @@ fn context() -> String {
 /// about the advice has to be taken at a moment the advice can be acted on.
 fn context_before_kickoff() -> String {
     let (loaded, mut season, config) = common::fixture();
-    season.scores.clear();
+    std::sync::Arc::make_mut(&mut season.scores).clear();
     let view = build_season_view(&loaded, &season, config.my_user_id.as_deref());
     season_context(&view)
 }

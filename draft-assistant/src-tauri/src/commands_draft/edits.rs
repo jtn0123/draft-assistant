@@ -15,6 +15,7 @@ use crate::keepers::{self, KeeperStore};
 use crate::picks;
 use crate::sleeper::Pick;
 use crate::state::AppState;
+use crate::traded_picks::PickOwnership;
 use crate::view::{self, DraftView};
 use std::collections::HashSet;
 use tauri::State;
@@ -45,23 +46,36 @@ pub async fn record_manual_pick(
     let pick_no = view::next_open_pick(&picks, teams, rounds)
         .ok_or_else(|| "draft is complete".to_string())?;
     let (order, _) = draft::DraftOrder::from_draft(&loaded.draft);
-    loaded.manual_picks.push(Pick {
+    // The slot that *owns* this pick, not the one the snake started it on.
+    // The plain snake wrote a traded pick down under its original slot, so a
+    // reload — which reads `draft_slot` straight off the file — put the pick
+    // on the wrong manager's roster, and `recent_picks` named the wrong
+    // manager whenever the ownership map could not be rebuilt. This is the
+    // same `owner_slot` the view and the simulator use.
+    let slot = PickOwnership::from_draft(&loaded.draft, &loaded.traded_picks, teams, rounds, order)
+        .owner_slot(pick_no)
+        .unwrap_or(1);
+    let entered = Pick {
         round: (pick_no - 1) / teams + 1,
         pick_no,
-        draft_slot: draft::slot_for_pick(pick_no, teams, order).unwrap_or(1),
+        draft_slot: slot,
         player_id,
         picked_by: None,
         metadata: None,
         is_keeper: None,
-    });
+    };
+    loaded.manual_picks.push(entered.clone());
     let (draft_id, picks) = (loaded.draft.draft_id.clone(), loaded.manual_picks.clone());
     drop(guard);
     // The file write happens with nothing locked: on a slow or busy disk it
     // is tens of milliseconds during which the poll loop, every command and
     // every view build would otherwise be stopped dead.
     if let Err(error) = save_picks_off_lock(&state.engine, draft_id.clone(), picks).await {
-        undo_pick_in_memory(&state, &draft_id).await;
-        return Err(error);
+        undo_pick_in_memory(&state, &draft_id, &entered).await;
+        return Err(crate::applog::failing(
+            "record_manual_pick",
+            crate::applog::context(&[("draft", &draft_id)]),
+        )(error));
     }
     view_now(&state).await
 }

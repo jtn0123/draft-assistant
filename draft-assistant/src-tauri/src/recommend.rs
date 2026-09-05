@@ -9,7 +9,7 @@
 //! The scoring itself lives next door in `recommend_score.rs`; this file is
 //! the inputs, the candidate pool and the loop over the modes.
 
-use crate::board::AvailablePlayer;
+use crate::board::{AvailablePlayer, BoardPlayer};
 use crate::draft::TeamRoster;
 use crate::roster::RosterRules;
 use crate::view_types::PositionRun;
@@ -94,9 +94,22 @@ pub struct RecommendInputs<'a> {
     /// caller, which is the only place that can look a rostered player's bye
     /// up on the board.
     pub my_byes: &'a HashMap<u32, u32>,
-    /// The draft has not started. Weekly practice tags ("Questionable") are
-    /// left over from last season and mean nothing yet.
+    /// The draft has not started. Weekly practice tags ("Questionable" and
+    /// "Doubtful") are left over from last season and mean nothing yet.
     pub pre_draft: bool,
+    /// Every player the board knows, drafted or not. The starting demand is
+    /// worked out from this rather than from `available`, because demand is a
+    /// property of the league and not of what is left: allocating a superflex
+    /// slot against the remaining pool quietly stopped giving it to
+    /// quarterbacks once twenty of them were gone, and the roster that most
+    /// needed a second quarterback was told the league started one.
+    /// Empty for callers that only have a board of available players; then
+    /// `available` stands in.
+    pub full_board: &'a [BoardPlayer],
+    /// Weeks of the season still to be played. What a week costs is a share
+    /// of what is left, so a player ruled out of one of eighteen weeks loses
+    /// a lot less than a quarter of a season.
+    pub weeks_left: u32,
 }
 
 impl<'a> RecommendInputs<'a> {
@@ -126,7 +139,25 @@ impl<'a> RecommendInputs<'a> {
             position_run: None,
             my_byes: &NO_BYES,
             pre_draft: false,
+            full_board: &[],
+            weeks_left: crate::board::WEEKS,
         }
+    }
+
+    /// The pool the starting demand is allocated over: the whole board when
+    /// the caller has it, and what is still available when it does not.
+    pub(crate) fn demand_pool(&self) -> Vec<(&str, f64)> {
+        if self.full_board.is_empty() {
+            return self
+                .available
+                .iter()
+                .map(|a| (a.player.position.as_str(), a.player.points))
+                .collect();
+        }
+        self.full_board
+            .iter()
+            .map(|p| (p.position.as_str(), p.points))
+            .collect()
     }
 }
 
@@ -199,7 +230,7 @@ pub fn recommend(inputs: &RecommendInputs) -> Vec<Recommendation> {
         // Asked of the replacement model rather than split evenly between the
         // positions a flex is open to, so the need model and the VORP a
         // candidate is judged on are talking about the same league.
-        demand: score::starting_demand(inputs.available, inputs.rules, inputs.teams),
+        demand: score::starting_demand(inputs.demand_pool(), inputs.rules, inputs.teams),
     };
 
     for mode in [Mode::Balanced, Mode::Safe, Mode::Upside] {

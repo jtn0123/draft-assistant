@@ -89,8 +89,16 @@ fn the_epoch_arithmetic_matches_known_dates() {
 }
 
 #[test]
-fn the_fast_policy_tests_use_still_retries_the_same_number_of_times() {
+fn the_fast_policy_retries_a_known_number_of_times_and_waits_in_milliseconds() {
     let fast = RetryPolicy::fast();
+    // The count is what the retry tests count against, so it is asserted here
+    // rather than assumed: a change to `fast()` that silently added or
+    // dropped an attempt would move every "tried N times" assertion with it.
+    assert_eq!(fast.attempts, 3);
+    assert!(
+        fast.attempts < RetryPolicy::default().attempts,
+        "the shipped policy is the patient one"
+    );
     assert!(fast.wait(3, None) <= Duration::from_millis(50));
     assert!(!fast.jitter, "a test asserting on a sleep wants no jitter");
 }

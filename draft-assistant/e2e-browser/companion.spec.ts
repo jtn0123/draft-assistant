@@ -18,10 +18,13 @@ import { dump } from "./fixtures";
  */
 
 // The exact policy `companion/routes.rs` sets, so anything inline that ever
-// crept into the page fails here the way it would fail on a phone.
+// crept into the page fails here the way it would fail on a phone. The socket
+// origin is spelled out because a browser reads `connect-src 'self'` as the
+// page's own scheme, and `ws://` is not `http://`.
 const CSP =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-  "connect-src 'self' ws: wss:; base-uri 'none'; form-action 'none'";
+  "connect-src 'self' ws://127.0.0.1:7878 ws://localhost:7878; base-uri 'none'; " +
+  "form-action 'none'; frame-ancestors 'none'";
 const staticDir = new URL("../src-tauri/companion-static/", import.meta.url);
 const asset = (name: string) => readFileSync(fileURLToPath(new URL(name, staticDir)), "utf8");
 
@@ -337,6 +340,39 @@ test("the page pings the host every twenty-five seconds", async ({ page }) => {
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __sent: string[] }).__sent))
     .toContainEqual(JSON.stringify({ type: "ping" }));
+});
+
+test("a ping the host never answers drops the socket and says so", async ({ page }) => {
+  await serve(page, backend());
+  await page.clock.install();
+  await pair(page);
+  await page.clock.runFor(100);
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __socketUrl: string }).__socketUrl))
+    .toContain("/api/events?token=tok-1");
+  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  await expect(page.locator("#reconnect-pill")).toBeHidden();
+  // The failure this prevents: the page pinged and never read the reply, so a
+  // socket the phone's network had quietly dropped stayed "open" for ever and
+  // the page went on showing a draft that had stopped arriving.
+  await page.evaluate(() => {
+    (window as unknown as { __stayDown: boolean }).__stayDown = true;
+  });
+  await page.clock.runFor(3 * 25_000 + 1_000);
+  await expect(page.locator("#reconnect-pill")).toBeVisible();
+});
+
+test("the pick clock counts down by the host's clock, not the phone's", async ({ page }) => {
+  await serve(page, backend());
+  await pair(page);
+  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  // This phone is four minutes behind the host. Without the offset the 45
+  // second pick clock would read as long over.
+  const board = dump("dev-fixture.json") as { draft: Record<string, unknown> };
+  await emit(page, { type: "hello", payload: { server_now_ms: Date.now() + 240_000 } });
+  board.draft.clock_deadline_ms = Date.now() + 240_000 + 45_000;
+  await emit(page, { type: "draft-updated", payload: board });
+  await expect(page.locator("#clock-strip")).toContainText("0:4");
 });
 
 test("the Week tab appears only once the host has a season loaded", async ({ page }) => {

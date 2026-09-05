@@ -7,6 +7,10 @@ mod harness;
 // helper that group does not happen to use.
 #[path = "companion/chat_tests.rs"]
 mod chat_tests;
+#[path = "companion/headers_tests.rs"]
+mod headers_tests;
+#[path = "companion/lifecycle_tests.rs"]
+mod lifecycle_tests;
 #[path = "companion/ws_tests.rs"]
 mod ws_tests;
 
@@ -295,90 +299,6 @@ async fn another_origin_is_allowed_to_call_the_api() {
             .map(|v| v.to_str().unwrap_or("")),
         Some("*")
     );
-}
-
-/// Every response the phone loads the page from carries the policy, so a
-/// string that somehow became markup has no script to run and nowhere to send
-/// what it found.
-#[tokio::test]
-async fn the_page_is_served_under_a_content_security_policy() {
-    let host = host("csp").await;
-    for path in ["/", "/static/app.js", "/static/app.css", "/static/clock.js"] {
-        let response = host
-            .http
-            .get(format!("{}{path}", host.base))
-            .send()
-            .await
-            .expect("the request goes through");
-        let header = |name: &str| {
-            response
-                .headers()
-                .get(name)
-                .map(|v| v.to_str().unwrap_or("").to_string())
-                .unwrap_or_default()
-        };
-        let csp = header("content-security-policy");
-        assert!(csp.contains("default-src 'none'"), "{path}: {csp}");
-        assert!(csp.contains("script-src 'self'"), "{path}: {csp}");
-        assert!(csp.contains("img-src 'self' data:"), "{path}: {csp}");
-        assert!(csp.contains("connect-src 'self' ws: wss:"), "{path}: {csp}");
-        assert!(csp.contains("base-uri 'none'"), "{path}: {csp}");
-        assert!(csp.contains("form-action 'none'"), "{path}: {csp}");
-        assert_eq!(header("x-content-type-options"), "nosniff", "{path}");
-        assert_eq!(header("referrer-policy"), "no-referrer", "{path}");
-    }
-}
-
-/// The failure this prevents: a page the phone has open in another tab
-/// posting to the host in the background, on a token the browser will happily
-/// attach to a request the user never made.
-#[tokio::test]
-async fn a_page_on_another_site_cannot_post_to_the_host() {
-    let host = host("origin").await;
-    let paired = host.pair_ok("Rob's iPhone", "phone").await;
-    let post = |origin: &'static str| {
-        let http = host.http.clone();
-        let base = host.base.clone();
-        let token = paired.token.clone();
-        async move {
-            http.post(format!("{base}/api/chat"))
-                .bearer_auth(token)
-                .header("origin", origin)
-                .json(&serde_json::json!({ "screen": "draft", "text": "hello?" }))
-                .send()
-                .await
-                .expect("the request goes through")
-                .status()
-                .as_u16()
-        }
-    };
-    assert_eq!(post("https://evil.example.com").await, 403);
-    // The follower desktop and the dev server are the two other origins that
-    // are ours, and they must go on working.
-    assert_ne!(post("tauri://localhost").await, 403);
-    assert_ne!(post("http://localhost:1420").await, 403);
-    // The phone page itself: its own origin is this server.
-    let port = host.companion.port().expect("a port");
-    let same = host
-        .http
-        .post(format!("{}/api/chat", host.base))
-        .bearer_auth(&paired.token)
-        .header("origin", format!("http://127.0.0.1:{port}"))
-        .json(&serde_json::json!({ "screen": "draft", "text": "hello?" }))
-        .send()
-        .await
-        .expect("the request goes through");
-    assert_ne!(same.status().as_u16(), 403);
-    // A read is not a change, and stays open to anyone holding the token.
-    let read = host
-        .http
-        .get(format!("{}/api/devices", host.base))
-        .bearer_auth(&paired.token)
-        .header("origin", "https://evil.example.com")
-        .send()
-        .await
-        .expect("the request goes through");
-    assert_eq!(read.status(), 200);
 }
 
 /// The whole failure: the host process restarts and every phone in the house

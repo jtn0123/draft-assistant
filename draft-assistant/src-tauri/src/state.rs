@@ -199,6 +199,13 @@ impl SeasonInputs {
     pub fn league(&self) -> &LoadedLeague {
         &self.league
     }
+
+    /// The season this build will read. Exposed for the same reason: every
+    /// large collection on it is behind an `Arc`, and a test can hold the
+    /// copy against the original to prove nothing was duplicated.
+    pub fn season(&self) -> &LoadedSeason {
+        &self.season
+    }
 }
 
 /// Copy the build's inputs, taking the three mutexes in the order the rest of

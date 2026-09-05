@@ -36,15 +36,25 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     // keeper league opens with picks already in the book at 11, 20, 177 …,
     // and counting them puts the clock several rounds ahead of itself.
     let open_pick = next_open_pick(&picks, teams, rounds);
-    let current_pick = open_pick.unwrap_or(teams * rounds);
+    let last_pick = teams.saturating_mul(rounds).max(1);
+    // Past the end of the board once the draft is done, not parked on the
+    // final pick. Everything below asks "has this pick happened yet?" as
+    // `pick_no < current_pick`, so parking on the last pick left that one
+    // pick permanently un-happened: the winning selection of the night never
+    // reached the activity feed, never counted towards a position run and
+    // never showed on a roster's recent list.
+    let current_pick = open_pick.unwrap_or_else(|| last_pick.saturating_add(1));
     let draft_over = open_pick.is_none();
-    let current_round = (current_pick - 1) / teams + 1;
+    let current_round = (current_pick - 1) / teams.max(1) + 1;
     let keepers = crate::keepers::known_keepers(loaded, teams, rounds);
     let (order, order_warning) = draft::DraftOrder::from_draft(draft);
     // Who actually picks where: the snake (third-round reversal included),
     // corrected for picks that changed hands.
     let ownership = PickOwnership::from_draft(draft, &loaded.traded_picks, teams, rounds, order);
-    let on_clock_slot = ownership.owner_slot(current_pick);
+    // The clock rests on the final pick of a finished draft rather than on
+    // the phantom pick after it, so the banner still names the manager who
+    // closed the draft out.
+    let on_clock_slot = ownership.owner_slot(open_pick.unwrap_or(last_pick));
 
     // Slot display names: draft_order user ids resolved via league users.
     let mut slot_names: HashMap<u32, String> = HashMap::new();
@@ -236,6 +246,8 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         position_run: position_run.as_ref(),
         my_byes: &my_byes,
         pre_draft: draft.status == "pre_draft",
+        full_board: &loaded.board,
+        weeks_left: crate::board::WEEKS,
     });
 
     let recent_picks: Vec<RecentPick> = happened

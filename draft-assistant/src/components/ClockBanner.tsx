@@ -36,9 +36,7 @@ function secondsLeft(deadlineMs: number | null, nowMs: number): number | null {
  */
 function clockSentence(d: DraftView["draft"], left: number | null): string {
   if (d.status === "complete") return "The draft is finished.";
-  if (d.status === "pre_draft" && d.total_picks_made === 0) {
-    return "The draft has not started yet.";
-  }
+  if (notStarted(d)) return "The draft has not started yet.";
   // A paused draft still names a manager and a pick, and both are stale: the
   // timer is stopped and nobody can act. Saying whose turn it is invited
   // people to wonder why that manager was taking so long.
@@ -52,6 +50,22 @@ function clockSentence(d: DraftView["draft"], left: number | null): string {
       ? ""
       : ` ${d.picks_until_mine} pick${d.picks_until_mine === 1 ? "" : "s"} until your turn.`;
   return `${who} is on the clock — ${pick}${time}.${wait}`;
+}
+
+/**
+ * True while the draft has yet to begin.
+ *
+ * The status is the whole answer. This once also demanded that no picks had
+ * been made, which is true of an empty draft and false of a keeper league:
+ * keepers are written into the pick list before anyone sits down, so a keeper
+ * draft in `pre_draft` counted as under way and the banner named a manager as
+ * being on the clock hours before the draft opened.
+ */
+function notStarted(d: DraftView["draft"]): boolean {
+  // Status alone is not enough: a Sleeper mock draft reports `pre_draft`
+  // while picks are flying. Pick count alone is not enough either: keepers
+  // sit in the book before anyone can act. Not started means both.
+  return d.status === "pre_draft" && d.total_picks_made <= d.keeper_picks.length;
 }
 
 /**
@@ -91,7 +105,7 @@ function whyNoClock(
 
 export function ClockBanner({ view }: { view: DraftView }) {
   const d = view.draft;
-  const preDraft = d.status === "pre_draft" && d.total_picks_made === 0;
+  const preDraft = notStarted(d);
   const complete = d.status === "complete";
   // Nothing counts down while the draft is stopped. The backend already
   // withholds the deadline, and this makes the banner right even against an
@@ -109,7 +123,10 @@ export function ClockBanner({ view }: { view: DraftView }) {
   const noClock = whyNoClock(view.league.platform, d.status, complete, preDraft);
 
   return (
-    <div className={d.is_my_pick ? "clock is-mine" : "clock"}>
+    // The green frame means "act now". A pause lands on whoever was up, so
+    // is_my_pick stays true while nothing can be done; glowing through it
+    // contradicts the "Draft paused" text two lines down.
+    <div className={d.is_my_pick && !d.paused ? "clock is-mine" : "clock"}>
       <div className="clock-cell">
         <span className="label">Round</span>
         <span className="clock-big">{d.current_round}</span>
@@ -244,7 +261,12 @@ export function SnakeStrip({ view }: { view: DraftView }) {
   // The queue is 24 picks of snake arithmetic and as many roster lookups, and
   // this strip re-renders every second while the clock runs.
   const queue = useMemo(
-    () => buildQueue(draft, rosters, new Set(draft.keeper_picks)),
+    () =>
+      // A finished draft has no picks ahead of it. `current_pick` stays where
+      // the last pick left it, so building from it drew a chip marked "on the
+      // clock" — and, in a draft whose last pick is still numbered, a whole
+      // queue of picks nobody would ever make.
+      draft.status === "complete" ? [] : buildQueue(draft, rosters, new Set(draft.keeper_picks)),
     [draft, rosters],
   );
   if (queue.length === 0) return null;
@@ -266,8 +288,11 @@ export function SnakeStrip({ view }: { view: DraftView }) {
             ? "through your next picks"
             : untilMine === null
               ? // The queue stops at QUEUE_MAX, so a full one is a floor
-                // rather than the count of everything still to come.
-                `${queue.length}${queue.length === QUEUE_MAX ? "+" : ""} picks ahead`
+                // rather than the count of everything still to come. The last
+                // pick of a draft is one pick, not "1 picks".
+                `${queue.length}${queue.length === QUEUE_MAX ? "+" : ""} pick${
+                  queue.length === 1 ? "" : "s"
+                } ahead`
               : untilMine === 0
                 ? "you are on the clock"
                 : `${untilMine} ahead of you`}

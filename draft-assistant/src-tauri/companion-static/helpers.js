@@ -129,6 +129,8 @@
     health: null,
     seasonHealth: null,
     connection: "online",
+    /** How far the host's clock is ahead of this one, in milliseconds. */
+    offset: 0,
   });
   /** The whole client state machine, one pure function per action. */
   const ACTIONS = {
@@ -149,6 +151,7 @@
     tab: (s, a) =>
       TABS.includes(a.tab) && (a.tab !== "week" || s.season) ? { ...s, tab: a.tab } : s,
     connection: (s, a) => ({ ...s, connection: a.status }),
+    "clock-offset": (s, a) => ({ ...s, offset: a.offset }),
   };
   const reduce = (state, action) => ACTIONS[action.type]?.(state, action) ?? state;
   window.Companion = {

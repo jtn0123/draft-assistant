@@ -7,7 +7,7 @@
 //! a fixed penalty, it is a share of the season: what an injury takes away is
 //! the games, and the games are what the VORP was counting.
 
-use super::{Mode, Score};
+use super::{Mode, RecommendInputs, Score};
 use crate::board::AvailablePlayer;
 
 /// The floor under a season-ending tag, in score points. A replacement-level
@@ -26,7 +26,7 @@ enum Tag {
     Weekly(f64),
 }
 
-fn classify(status: &str) -> Option<Tag> {
+fn classify(status: &str, weeks_left: u32) -> Option<Tag> {
     let code = status.trim().to_ascii_uppercase();
     match code.as_str() {
         "" => None,
@@ -35,9 +35,16 @@ fn classify(status: &str) -> Option<Tag> {
             0.9,
             format!("on {status}: most of the season gone"),
         )),
-        // Out now, back later: a suspension has a length and so does the
-        // injury that has a man ruled out rather than filed away.
-        "OUT" | "SUS" | "COV" => Some(Tag::Missing(
+        // "Out" is a ruling for one game. Pricing it at a quarter of the
+        // season charged a man eighteen times what his absence costs, and in
+        // week fifteen it charged him for weeks that will never be played.
+        "OUT" => Some(Tag::Missing(
+            1.0 / f64::from(weeks_left.max(1)),
+            format!("tagged {status}: a week of the season gone"),
+        )),
+        // A suspension and a reserve list both have a length, and it is
+        // measured in weeks rather than in Sundays.
+        "SUS" | "COV" => Some(Tag::Missing(
             0.25,
             format!("tagged {status}: several weeks of the season gone"),
         )),
@@ -48,6 +55,15 @@ fn classify(status: &str) -> Option<Tag> {
     }
 }
 
+/// A practice-report tag, which before a draft is left over from last season
+/// and says nothing about the one being drafted. "Doubtful" is one of these
+/// exactly as much as "Questionable" is — dropping only the latter left a
+/// stale August "Doubtful" taking nine points off a safe-mode card.
+fn is_practice_report(status: &str) -> bool {
+    let code = status.trim().to_ascii_uppercase();
+    matches!(code.as_str(), "QUESTIONABLE" | "DOUBTFUL")
+}
+
 /// Injuries, priced by what the tag actually takes away.
 ///
 /// Both modes read them: balanced ignoring them entirely put men who will not
@@ -55,14 +71,14 @@ fn classify(status: &str) -> Option<Tag> {
 /// three of the top five over practice-report "Questionable" — a tag that in
 /// August is not about this season at all, which is why it is dropped outright
 /// before the draft starts.
-pub(crate) fn injury(a: &AvailablePlayer, pre_draft: bool, mode: Mode, score: &mut Score) {
+pub(crate) fn injury(a: &AvailablePlayer, inputs: &RecommendInputs, mode: Mode, score: &mut Score) {
     let Some(status) = a.player.injury_status.as_deref() else {
         return;
     };
-    if pre_draft && status.trim().eq_ignore_ascii_case("questionable") {
+    if inputs.pre_draft && is_practice_report(status) {
         return;
     }
-    let Some(tag) = classify(status) else {
+    let Some(tag) = classify(status, inputs.weeks_left) else {
         return;
     };
     // Safe mode buys the games it can count on, so it reads every tag harder.

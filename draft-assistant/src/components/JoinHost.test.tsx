@@ -4,7 +4,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseHostAddress, readFollow } from "../companion";
+import { parseHostAddress, readFollow, saveFollow } from "../companion";
 import { fakeStorage } from "../test/appHarness";
 import { JoinHost } from "./JoinHost";
 
@@ -113,5 +113,51 @@ describe("joining", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Could not reach http://192.168.1.9:7878",
     );
+  });
+});
+
+describe("the keyboard", () => {
+  it("opens with the address box focused", () => {
+    // Opened from the first-launch screen there is nothing else on the page to
+    // tab from, so a dialog that never takes focus strands the keyboard.
+    render(<JoinHost onClose={() => undefined} onJoined={() => undefined} />);
+    expect(screen.getByLabelText("Host address")).toHaveFocus();
+  });
+
+  it("joins on Enter from any field, not only the last one", async () => {
+    fetchMock.mockResolvedValue(json({ token: "tok-9", host_name: "Justin's Mac" }));
+    const joined = vi.fn();
+    render(<JoinHost onClose={() => undefined} onJoined={joined} />);
+
+    await userEvent.type(screen.getByLabelText("Host address"), "192.168.1.5:7878");
+    await userEvent.type(screen.getByLabelText("Code"), "418902{Enter}");
+
+    await waitFor(() => expect(joined).toHaveBeenCalled());
+  });
+});
+
+describe("this device's identity", () => {
+  it("names the pairing it already has so the host replaces it", async () => {
+    // Re-pairing without an id left the host listing "This Mac" and
+    // "This Mac 2" for one machine, with no way to tell which was live.
+    saveFollow({
+      url: "http://192.168.1.5:7878",
+      token: "old",
+      host_name: "Justin's Mac",
+      device_id: "dev-1",
+    });
+    fetchMock.mockResolvedValue(
+      json({ token: "tok-9", host_name: "Justin's Mac", device_id: "dev-1" }),
+    );
+    render(<JoinHost onClose={() => undefined} onJoined={() => undefined} />);
+
+    await fill("192.168.1.5:7878", "418902");
+
+    await waitFor(() => expect(readFollow()?.token).toBe("tok-9"));
+    const sent = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, { body: string }])[1].body,
+    ) as Record<string, unknown>;
+    expect(sent.device_id).toBe("dev-1");
+    expect(readFollow()?.device_id).toBe("dev-1");
   });
 });

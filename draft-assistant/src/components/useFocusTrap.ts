@@ -48,14 +48,36 @@ export function useFocusTrap(
     return () => window.removeEventListener("keydown", onKey);
   }, [container, onEscape, active]);
 
-  // Belt and braces for the trap above: while the overlay is up, the app
-  // behind it is inert, so nothing in there can be tabbed to, clicked or read
-  // out even if a stray control slips past the key handler.
+  // Belt and braces for the trap above: while the overlay is up, everything
+  // behind it is inert, so nothing back there can be tabbed to, clicked or
+  // read out even if a stray control slips past the key handler.
+  //
+  // This used to look for `.shell`, which only the running app renders. The
+  // two dialogs a brand new install sees first — "Join another Draft
+  // Assistant" and "Connect Yahoo Fantasy" — open over the setup screen, which
+  // has no shell, so the trap silently did nothing on the one screen where
+  // there is nothing else to tab to. Walking up from the dialog and inerting
+  // what sits beside it at each level works against whatever root is there.
   useEffect(() => {
     if (!active) return undefined;
-    const shell = document.querySelector<HTMLElement>(".shell");
-    if (shell === null || shell.contains(container.current)) return undefined;
-    shell.setAttribute("inert", "");
-    return () => shell.removeAttribute("inert");
+    const dialog = container.current;
+    if (dialog === null) return undefined;
+    const root = document.getElementById("root") ?? document.body;
+    const inerted: HTMLElement[] = [];
+    let node: HTMLElement | null = dialog;
+    while (node !== null && node !== root && node !== document.body) {
+      for (const sibling of Array.from(node.parentElement?.children ?? [])) {
+        // Already inert means an outer dialog put it that way and is going to
+        // want it back; taking it off here would undo that overlay's trap.
+        if (sibling === node || !(sibling instanceof HTMLElement)) continue;
+        if (sibling.hasAttribute("inert")) continue;
+        sibling.setAttribute("inert", "");
+        inerted.push(sibling);
+      }
+      node = node.parentElement;
+    }
+    return () => {
+      for (const element of inerted) element.removeAttribute("inert");
+    };
   }, [container, active]);
 }

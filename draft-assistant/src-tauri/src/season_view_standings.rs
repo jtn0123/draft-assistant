@@ -6,13 +6,14 @@
 //! is why the live poller hands back a cached copy instead of rebuilding it.
 
 use crate::engine::LoadedLeague;
-use crate::season_api::{matchup_for, Roster};
+use crate::season_api::{matchup_for, opponent_of, Matchup, Roster};
 use crate::season_engine::LoadedSeason;
-use crate::season_lineup::{candidates_for, optimal_lineup, weekly_lineup_outlook};
+use crate::season_lineup::weekly_lineup_outlook;
 use crate::season_lookup::Lookup;
 use crate::season_odds::{self, ScheduledGame, StandingsRow, TeamSeason};
 use crate::season_spread;
-use crate::season_view_matchup::live_score;
+use crate::season_view_matchup::{current_lineup, live_score};
+use std::collections::HashMap;
 
 /// True when every NFL game the scoreboard knows of this week has finished.
 ///
@@ -63,17 +64,40 @@ pub fn standings_rows(
     // than off its projection alone. The lineup is the same best-available one
     // `weekly_lineup_outlook` solves for the same week, so with no game
     // started this returns exactly what the outlook already said.
-    let live_week = |roster: &Roster| {
-        let candidates =
-            candidates_for(roster.player_ids(), &position_of, &sidelined, weekly, week);
-        let lineup = optimal_lineup(rules, &candidates);
-        let banked = matchup_for(&season.matchups, roster.roster_id);
-        let live_of = |id: &str| live_score(banked, &remaining, &team_of, id);
+    // What a starter is still worth this week. A player already ruled out is
+    // worth nothing more, exactly as `candidates_for` scores him in every
+    // other solve.
+    let still_to_come = |id: &str| {
+        if sidelined(id) {
+            0.0
+        } else {
+            weekly.get_or_zero(id, week)
+        }
+    };
+    let live_week = |roster: &Roster| -> Option<(f64, f64)> {
+        let banked = matchup_for(&season.matchups, roster.roster_id)?;
+        // The lineup this roster actually has set, not the one it should
+        // have. Banked points are read off the matchup by player, and solving
+        // for the optimal lineup first meant a 30-point player left on the
+        // bench was picked into the lineup and then credited with every one
+        // of those points: the odds banked a score nobody had.
+        let lineup = current_lineup(loaded, banked.starter_ids(), &still_to_come);
+        let live_of = |id: &str| live_score(Some(banked), &remaining, &team_of, id);
         let starters = season_spread::live_starters(&lineup, &position_of, &team_of, &live_of);
-        (
+        Some((
             season_spread::total_points(&starters),
             season_spread::team_sigma(&starters),
-        )
+        ))
+    };
+
+    // What each roster's record already accounts for. Sleeper's standings lag
+    // the scoreboard by hours on a Monday night: every game is final and
+    // `settings.wins` still has not moved. Counting the finished week off the
+    // matchups fills that gap; see `finished_week_result`.
+    let just_finished = if current_week_is_over(season) {
+        finished_week_result(season)
+    } else {
+        HashMap::new()
     };
 
     let teams: Vec<TeamSeason> = season
@@ -107,16 +131,19 @@ pub fn standings_rows(
             // is also the plainest guarantee that a Saturday reading is
             // untouched by any of this.
             if first_open == week && !remaining.is_empty() {
-                let (points, sigma) = live_week(r);
-                replace_week(&mut weekly_projection, week, points);
-                replace_week(&mut weekly_sigma, week, sigma);
+                if let Some((points, sigma)) = live_week(r) {
+                    replace_week(&mut weekly_projection, week, points);
+                    replace_week(&mut weekly_sigma, week, sigma);
+                }
             }
+            let counted = just_finished.get(&r.roster_id).copied();
+            let result = counted.filter(|_| games_counted(r) < week);
             TeamSeason {
                 roster_id: r.roster_id,
-                wins: r.settings.wins,
-                losses: r.settings.losses,
-                ties: r.settings.ties,
-                points_for: r.settings.points_for(),
+                wins: r.settings.wins + u32::from(result == Some(WeekResult::Won)),
+                losses: r.settings.losses + u32::from(result == Some(WeekResult::Lost)),
+                ties: r.settings.ties + u32::from(result == Some(WeekResult::Tied)),
+                points_for: r.settings.points_for() + points_this_week(season, r, result.is_some()),
                 weekly_projection,
                 weekly_sigma,
             }
@@ -165,6 +192,51 @@ pub fn standings_rows(
         }
     }
     rows
+}
+
+/// How the week just played came out for one roster.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WeekResult {
+    Won,
+    Lost,
+    Tied,
+}
+
+/// How many games each roster's record already accounts for. A week counts
+/// once it has a win, a loss or a tie against it.
+fn games_counted(roster: &Roster) -> u32 {
+    roster.settings.wins + roster.settings.losses + roster.settings.ties
+}
+
+/// Who won this week, read off the matchup scores rather than the standings.
+///
+/// Sleeper posts a roster's win hours after the last whistle. In between, the
+/// week simply vanished: the simulation had skipped it because every game was
+/// final, and the standings had not yet counted it, so a Monday-night win
+/// showed up nowhere at all and the playoff odds quietly priced the season as
+/// one game shorter than it is.
+fn finished_week_result(season: &LoadedSeason) -> HashMap<u32, WeekResult> {
+    let mut out = HashMap::new();
+    for mine in season.matchups.iter() {
+        let Some(theirs) = opponent_of(&season.matchups, mine) else {
+            continue;
+        };
+        let result = match mine.scored().total_cmp(&theirs.scored()) {
+            std::cmp::Ordering::Greater => WeekResult::Won,
+            std::cmp::Ordering::Less => WeekResult::Lost,
+            std::cmp::Ordering::Equal => WeekResult::Tied,
+        };
+        out.insert(mine.roster_id, result);
+    }
+    out
+}
+
+/// This week's points for a roster, when they are not in its total yet.
+fn points_this_week(season: &LoadedSeason, roster: &Roster, uncounted: bool) -> f64 {
+    if !uncounted {
+        return 0.0;
+    }
+    matchup_for(&season.matchups, roster.roster_id).map_or(0.0, Matchup::scored)
 }
 
 /// Overwrite one week's entry in a (week, value) list, leaving the rest alone.

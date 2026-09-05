@@ -4,6 +4,7 @@ import type {
   AppConfig,
   CompanionDevice,
   CompanionStatus,
+  Diagnostics,
   DraftView,
   PollHealth,
   SecondOpinionImport,
@@ -135,8 +136,24 @@ export interface Api {
   /** Ask on the shared thread as this device. The answer arrives on the
    *  `shared-chat` event, not here. */
   sharedChatSend(screen: string, text: string): Promise<void>;
+  /** Empty the shared thread for one screen. Every device sees the emptied
+   *  thread on the `shared-chat` event. */
+  sharedChatReset(screen: string): Promise<void>;
   onSharedChat(handler: (thread: SharedChatThread) => void): Promise<UnlistenFn>;
   onCompanionDevices(handler: (devices: CompanionDevice[]) => void): Promise<UnlistenFn>;
+
+  // ---------- diagnostics ----------
+
+  /** Everything Settings -> "Diagnostics…" shows, including the tail of the
+   *  log. Safe to paste: no code, no token, no key. */
+  diagnostics(): Promise<Diagnostics>;
+  /** Show the log's folder in the file manager. Resolves to the path either
+   *  way, so a machine with no opener can still be told where to look. */
+  openLogFolder(): Promise<string>;
+  /** Put a page-level failure -- a render error, a rejected promise -- into
+   *  the same log as everything else. Best effort: never worth a toast, and
+   *  never worth failing over. */
+  logFrontendError(message: string, source: string): Promise<void>;
 }
 
 const tauriApi: Api = {
@@ -194,10 +211,14 @@ const tauriApi: Api = {
   setDeviceName: (name) => invoke<string>("set_device_name", { name }),
   sharedChatGet: (screen) => invoke<SharedChatThread>("shared_chat_get", { screen }),
   sharedChatSend: (screen, text) => invoke<void>("shared_chat_send", { screen, text }),
+  sharedChatReset: (screen) => invoke<void>("shared_chat_reset", { screen }),
   onSharedChat: (handler) =>
     listen<SharedChatThread>("shared-chat", (event) => handler(event.payload)),
   onCompanionDevices: (handler) =>
     listen<CompanionDevice[]>("companion-devices", (event) => handler(event.payload)),
+  diagnostics: () => invoke<Diagnostics>("diagnostics"),
+  openLogFolder: () => invoke<string>("open_log_folder"),
+  logFrontendError: (message, source) => invoke<void>("log_frontend_error", { message, source }),
 };
 
 /**
@@ -358,8 +379,29 @@ function browserApi(): Api {
       entries: [],
     }),
     sharedChatSend: () => readOnly("the shared chat needs the desktop app"),
+    sharedChatReset: () => readOnly("the shared chat needs the desktop app"),
     onSharedChat: () => Promise.resolve(() => undefined),
     onCompanionDevices: () => Promise.resolve(() => undefined),
+    // The preview has no log and no file manager, so the dialog is shown with
+    // what the page itself knows and its log actions stay hidden.
+    diagnostics: async () => ({
+      app_version: "browser preview",
+      platform: "browser",
+      league_id: (await fixture()).league.league_id,
+      league_name: (await fixture()).league.name,
+      draft_id: null,
+      platform_name: (await fixture()).league.platform,
+      polling: false,
+      poll: null,
+      companion_enabled: previewEnabled,
+      companion_devices: 0,
+      log_path: null,
+      log_tail: [],
+    }),
+    openLogFolder: () => readOnly("the log lives with the desktop app"),
+    // Nowhere to send it, and a preview that threw here would turn one page
+    // error into two.
+    logFrontendError: () => Promise.resolve(),
   };
 }
 

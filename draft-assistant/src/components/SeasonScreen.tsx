@@ -193,6 +193,28 @@ function LocksIn({ ms }: { ms: number | null }) {
   return <HeaderStat label="Locks in" value={untilLabel(ms, now * 1000)} sub={lockLabel(ms)} />;
 }
 
+/**
+ * True when no lineup change is possible any more: every starter I have set is
+ * already on the field, so there is nobody left to bench and nobody left to
+ * bench them for.
+ *
+ * This used to read "a game has kicked off and there are no calls to make",
+ * which is true at the Thursday night kickoff of any week whose lineup is
+ * already the best one available. From 8:20pm Thursday the header quoted the
+ * set lineup's odds as "locked" and the best/set toggle disappeared, three
+ * days before a single Sunday starter had taken the field and while every one
+ * of those swaps was still there to be made.
+ *
+ * Bench players do not enter into it. A swap needs both halves benchable, so
+ * once every starter is playing there is no swap left however free the bench
+ * is. A week with nothing of mine on the scoreboard at all — a bye, or a
+ * scoreboard that has not loaded — is never locked.
+ */
+function lineupLocked(view: SeasonView): boolean {
+  const mine = view.live.games.flatMap((game) => game.chips.filter((chip) => chip.is_mine));
+  return mine.length > 0 && mine.every((chip) => chip.state !== "pre");
+}
+
 export function SeasonScreen({
   view,
   pollHealth = null,
@@ -241,11 +263,7 @@ export function SeasonScreen({
   // number on the screen. Lead with what has actually been scored, and keep the
   // projection beside it as the thing still to come.
   const anyStarted = view.live.games.some((game) => game.state !== "pre");
-  // Nothing left to change: every game has kicked off and every swap worth
-  // making involves a player already on the field, so the calls list is empty.
-  // Quoting best-lineup odds from here on is quoting a lineup nobody can set —
-  // the header said "74% to win" off a bench the user could no longer touch.
-  const locked = anyStarted && view.calls.length === 0;
+  const locked = lineupLocked(view);
   const choice: LineupChoice = locked ? "Set" : lineup;
   const best = choice === "Best";
   const myProjected = best ? header.my_projected : header.my_set_projected;

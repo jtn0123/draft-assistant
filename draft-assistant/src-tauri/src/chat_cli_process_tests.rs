@@ -160,6 +160,25 @@ async fn a_cli_that_prints_nonsense_says_so_rather_than_answering() {
     remove(&cli);
 }
 
+/// The contents of a file the child writes, once it is there.
+///
+/// The kill and the child's own first instructions run at the same time, and
+/// on a machine with every core busy the child can lose that race: the file
+/// appears a moment after `ask_within` has already returned. Bounded, so a
+/// script that never writes it fails the assertion rather than hanging.
+#[cfg(unix)]
+fn wait_for_file(path: &Path) -> Option<String> {
+    for _ in 0..100 {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            if !text.trim().is_empty() {
+                return Some(text);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    None
+}
+
 /// True once the process is gone — reaped, or sitting as a zombie waiting to
 /// be. Polled, because a kill and its reaping are not instantaneous.
 #[cfg(unix)]
@@ -184,10 +203,17 @@ fn process_is_gone(pid: &str) -> bool {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_run_that_outlives_its_timeout_is_killed_rather_than_left_running() {
+    // The pid is written before anything else and moved into place, so the
+    // file either does not exist or holds a whole pid. Recording it after
+    // draining stdin -- as this did -- raced the kill: an 800ms deadline on a
+    // loaded machine fired while the script was still in `cat`, and the test
+    // failed on a missing pid.txt rather than on a surviving process.
     let cli = fake_cli(
         "timeout",
-        r#"cat > /dev/null
-echo $$ > "$(dirname "$0")/pid.txt"
+        r#"here=$(dirname "$0")
+echo $$ > "$here/pid.tmp"
+mv "$here/pid.tmp" "$here/pid.txt"
+cat > /dev/null
 exec sleep 30"#,
     );
     let err = ask_within(
@@ -202,7 +228,7 @@ exec sleep 30"#,
     .expect_err("the script never answers");
     assert!(err.contains("took too long"), "{err}");
 
-    let pid = std::fs::read_to_string(cli.parent().expect("scratch dir").join("pid.txt"))
+    let pid = wait_for_file(&cli.parent().expect("scratch dir").join("pid.txt"))
         .expect("the script recorded its pid");
     let pid = pid.trim();
     assert!(

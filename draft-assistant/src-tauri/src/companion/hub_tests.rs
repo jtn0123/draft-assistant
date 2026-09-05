@@ -2,6 +2,7 @@
 //! side of all of this is in `tests/companion_wire.rs`.
 
 use super::*;
+use std::net::IpAddr;
 
 fn scratch(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -219,8 +220,10 @@ fn a_used_code_is_spent_and_an_idle_one_is_replaced_after_ten_minutes() {
         before,
         "the code that paired a phone was reused"
     );
-    // With something paired the code is in use, so idleness does not apply.
-    assert!(!hub.rotate_if_idle(now_ms() + CODE_MAX_AGE_MS * 2));
+    // A paired device does not freeze the code: the digits on a host that
+    // has been up all afternoon are the ones somebody else has had longest
+    // to read, and rotating them costs the paired phone nothing.
+    assert!(hub.rotate_if_idle(now_ms() + CODE_MAX_AGE_MS * 2));
 
     let idle = hub_in(scratch("idle"));
     let first = idle.code();
@@ -264,4 +267,31 @@ fn a_name_that_is_taken_gets_a_number_and_one_that_is_free_does_not() {
     assert_eq!(unique_name("iPhone", &["iPhone"]), "iPhone 2");
     assert_eq!(unique_name("iPhone", &["iPhone", "iPhone 2"]), "iPhone 3");
     assert_eq!(unique_name("iPad", &["iPhone"]), "iPad");
+}
+
+#[test]
+fn rotating_the_code_never_costs_a_paired_phone_its_token() {
+    let hub = hub();
+    let (token, device_id) = paired(&hub);
+    assert!(hub.rotate_if_idle(now_ms() + CODE_MAX_AGE_MS + 1));
+    // The whole point of rotating: what a *new* device would have to type
+    // changes, and what an already paired one holds does not.
+    assert!(hub.device_for(&token).is_some());
+    assert!(hub.still_paired(&device_id));
+}
+
+#[test]
+fn the_token_a_re_pair_replaced_is_announced_so_its_socket_can_close() {
+    let hub = hub();
+    let mut closes = hub.subscribe_closes();
+    let (first_token, first_id) = paired(&hub);
+    assert!(closes.try_recv().is_err(), "nothing was replaced yet");
+    let (second_token, _) = paired_as(&hub, "Phone", Some(&first_id));
+    // The failure this prevents: the device id is unchanged, so nothing else
+    // tells the socket opened on the old token that the host has replaced it.
+    assert_eq!(
+        closes.try_recv().ok().as_deref(),
+        Some(first_token.as_str())
+    );
+    assert!(hub.device_for(&second_token).is_some());
 }

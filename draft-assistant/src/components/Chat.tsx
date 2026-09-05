@@ -7,6 +7,7 @@ import { api } from "../api";
 import type { ChatMessage, ChatSettings, ThreadEntry } from "../chat-types";
 import { formatUsd, overBudget, setChatBudget, useChatBudget } from "../chatCost";
 import { chatScope } from "../chatSessions";
+import { describeError } from "../errorText";
 import type { Screen } from "../prefs";
 import { ChatControls } from "./ChatControls";
 import { ChatKeyForm } from "./ChatKeyForm";
@@ -14,6 +15,7 @@ import { ChatSessionBar } from "./ChatSessionBar";
 import { Markdown } from "./Markdown";
 import { SharedChat } from "./SharedChat";
 import { beginChat, useChatSessions } from "./useChatSessions";
+import { useRevealOnMount } from "./useRevealOnMount";
 
 // Ship with this chunk, not with the window. live.css owns the pulsing dot
 // this panel borrows while an answer is on its way.
@@ -241,7 +243,7 @@ export function Chat({
       // The failed turn must not stay in history, or every retry resends it.
       const failed = [
         ...asked,
-        { id: nextId.current++, kind: "error" as const, lines: [String(e)] },
+        { id: nextId.current++, kind: "error" as const, lines: [describeError(e)] },
       ];
       setHistory(history);
       setEntries(failed);
@@ -257,7 +259,7 @@ export function Chat({
     api
       .setChatProvider(id)
       .then(() => setSettingsToken((n) => n + 1))
-      .catch((e: unknown) => add({ kind: "error", lines: [String(e)] }));
+      .catch((e: unknown) => add({ kind: "error", lines: [describeError(e)] }));
   };
 
   const startFresh = () => {
@@ -277,7 +279,7 @@ export function Chat({
   const composerOff = showKeyForm || sending;
 
   return (
-    <aside className="chat">
+    <aside className="chat" ref={useRevealOnMount<HTMLElement>()}>
       <div className="chat-head">
         <div className="chat-head-titles">
           <span className="chat-title">Ask Claude</span>

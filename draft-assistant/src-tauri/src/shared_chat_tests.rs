@@ -203,3 +203,100 @@ async fn forgetting_what_is_in_memory_still_reads_the_thread_back() {
     chat.forget().await;
     assert_eq!(chat.thread("l", "draft").await.entries.len(), 2);
 }
+
+/// A failed turn used to leave its question in the thread with the error
+/// entry filtered out, so the next request carried two user turns in a row.
+/// The API refuses that, so one failure broke the league's shared thread for
+/// good — and no device had any way to clear it.
+#[tokio::test]
+async fn a_failed_turn_does_not_leave_two_questions_in_a_row() {
+    let chat = SharedChat::new(scratch("alternate"));
+    chat.post("l", "draft", phone(), "first question")
+        .await
+        .expect("posted");
+    chat.finish("l", "draft", phone(), Err("no API key".to_string()))
+        .await;
+    chat.post("l", "draft", phone(), "second question")
+        .await
+        .expect("posted");
+
+    let messages = chat.messages("l", "draft").await;
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].role, "user");
+    assert_eq!(messages[0].content, "second question");
+
+    // And once that one is answered, the turn after it alternates too.
+    chat.finish("l", "draft", phone(), Ok(reply("Take the RB.", 0.02)))
+        .await;
+    chat.post("l", "draft", phone(), "third question")
+        .await
+        .expect("posted");
+    let roles: Vec<&str> = chat
+        .messages("l", "draft")
+        .await
+        .iter()
+        .map(|m| m.role.clone())
+        .map(|r| if r == "user" { "user" } else { "assistant" })
+        .collect();
+    assert_eq!(roles, vec!["user", "assistant", "user"]);
+}
+
+#[tokio::test]
+async fn a_thread_that_starts_with_an_answer_does_not_send_one_first() {
+    let chat = SharedChat::new(scratch("assistant-first"));
+    // An answer landing in a thread that was just emptied, which is what a
+    // reset in the middle of an answer leaves behind.
+    chat.finish("l", "draft", phone(), Ok(reply("orphan", 0.0)))
+        .await;
+    assert!(chat.messages("l", "draft").await.is_empty());
+    chat.post("l", "draft", phone(), "and now?")
+        .await
+        .expect("posted");
+    let messages = chat.messages("l", "draft").await;
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].role, "user");
+}
+
+#[tokio::test]
+async fn a_reset_empties_one_screen_and_leaves_the_others_alone() {
+    let chat = SharedChat::new(scratch("reset"));
+    for screen in ["draft", "season"] {
+        chat.post("l", screen, phone(), "q").await.expect("posted");
+        chat.finish("l", screen, phone(), Ok(reply("a", 0.01)))
+            .await;
+    }
+    chat.post("other", "draft", phone(), "q")
+        .await
+        .expect("posted");
+    chat.finish("other", "draft", phone(), Ok(reply("a", 0.01)))
+        .await;
+
+    let emptied = chat.reset("l", "draft").await;
+    assert!(emptied.entries.is_empty());
+    assert!(chat.thread("l", "draft").await.entries.is_empty());
+    assert_eq!(chat.thread("l", "season").await.entries.len(), 2);
+    assert_eq!(chat.thread("other", "draft").await.entries.len(), 2);
+
+    // The emptying is on disk, not only in memory: the next launch of the
+    // app must not read the forgotten thread back.
+    chat.forget().await;
+    assert!(chat.thread("l", "draft").await.entries.is_empty());
+    assert_eq!(chat.thread("l", "season").await.entries.len(), 2);
+}
+
+/// A reset while an answer is running must not let a second question in: the
+/// running answer still holds the screen, and `finish` is what clears it.
+#[tokio::test]
+async fn a_reset_does_not_free_a_screen_that_is_mid_answer() {
+    let chat = SharedChat::new(scratch("reset-busy"));
+    chat.post("l", "draft", phone(), "who?")
+        .await
+        .expect("posted");
+    assert!(chat.reset("l", "draft").await.busy);
+    assert_eq!(
+        chat.post("l", "draft", phone(), "me too")
+            .await
+            .unwrap_err(),
+        PostError::Busy
+    );
+}

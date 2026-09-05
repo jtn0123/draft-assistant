@@ -117,3 +117,65 @@ fn the_reasons_still_add_up_to_the_score_with_a_tag_on_the_card() {
         }
     }
 }
+
+#[test]
+fn a_doubtful_tag_before_the_draft_is_last_seasons_news() {
+    // The pre-draft gate dropped "Questionable" and left "Doubtful" standing,
+    // so an August practice report left over from January took nine points
+    // off a safe-mode card.
+    let available = vec![
+        tagged("doubtful", "WR", 40.0, Some("Doubtful")),
+        tagged("fit", "WR", 40.0, None),
+    ];
+    let mine = roster(&["QB", "RB"]);
+    let rules = RosterRules::new(&slots());
+    let mut inputs = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 1, 12);
+    inputs.pre_draft = true;
+    let ctx = context(&inputs, HashMap::from([("QB", 1), ("RB", 1)]));
+    let hurt = score_candidate(&ctx, &available[0], Mode::Safe).expect("a WR");
+    let fit = score_candidate(&ctx, &available[1], Mode::Safe).expect("a WR");
+    assert!(
+        (hurt.total - fit.total).abs() < 1e-9,
+        "a pre-draft practice tag cost {}",
+        fit.total - hurt.total
+    );
+    // Once the draft is live the same tag counts again.
+    let inputs = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 1, 12);
+    let ctx = context(&inputs, HashMap::from([("QB", 1), ("RB", 1)]));
+    let live = score_candidate(&ctx, &available[0], Mode::Safe).expect("a WR");
+    assert!(live.total < fit.total, "{} vs {}", live.total, fit.total);
+}
+
+#[test]
+fn being_out_for_a_week_costs_a_week_and_not_a_quarter_of_the_season() {
+    // "Out" is a ruling for one game. Priced at a quarter of the season it
+    // cost a 90-VORP back thirteen points, more than any other term on his
+    // card, for missing one Sunday out of eighteen.
+    let available = vec![
+        tagged("out", "RB", 90.0, Some("Out")),
+        tagged("fit", "RB", 90.0, None),
+    ];
+    let mine = roster(&["QB", "WR"]);
+    let rules = RosterRules::new(&slots());
+    let inputs = RecommendInputs::new(&available, Some(&mine), &rules, 4, 15, 40, 12);
+    let ctx = context(&inputs, HashMap::from([("QB", 1), ("WR", 1)]));
+    let out = score_candidate(&ctx, &available[0], Mode::Balanced).expect("an RB");
+    let fit = score_candidate(&ctx, &available[1], Mode::Balanced).expect("an RB");
+    let cost = fit.total - out.total;
+    assert!(
+        (0.0..=5.0).contains(&cost),
+        "one week out of eighteen cost {cost}"
+    );
+
+    // And it is a share of what is left: with two weeks to play, the same tag
+    // takes a ninth of the season rather than an eighteenth.
+    let mut inputs = RecommendInputs::new(&available, Some(&mine), &rules, 4, 15, 40, 12);
+    inputs.weeks_left = 2;
+    let ctx = context(&inputs, HashMap::from([("QB", 1), ("WR", 1)]));
+    let late = score_candidate(&ctx, &available[0], Mode::Balanced).expect("an RB");
+    assert!(
+        fit.total - late.total > cost,
+        "a week is a bigger share of two weeks: {} vs {cost}",
+        fit.total - late.total
+    );
+}

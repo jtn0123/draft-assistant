@@ -70,6 +70,25 @@ describe("the shared wall clock", () => {
     expect(result.current).toBe(NOW);
   });
 
+  it("hands back the same reading twice for one render pass", () => {
+    // `getSnapshot` used to read the system clock and write it back to the
+    // store as it went. React calls it while it is deciding whether anything
+    // changed — twice in a row, and again during render — so a value could
+    // move between two reads of the same pass, which is the "getSnapshot
+    // should be cached" loop. The refresh belongs in `subscribe`, which is an
+    // effect and is allowed to write.
+    const complaints = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const idle = renderHook(() => useNow(false));
+    const first = idle.result.current;
+
+    vi.setSystemTime(NOW + 5000);
+    idle.rerender();
+    idle.rerender();
+
+    expect(idle.result.current).toBe(first);
+    expect(complaints).not.toHaveBeenCalled();
+  });
+
   it("reads the clock afresh when it has been sitting idle", () => {
     const idle = renderHook(() => useNow(false));
     expect(idle.result.current).toBe(NOW);

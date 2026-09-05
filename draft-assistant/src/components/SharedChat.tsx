@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { formatUsd } from "../chatCost";
+import { describeError } from "../errorText";
 import { Markdown } from "./Markdown";
 import type { SharedChatEntry, SharedChatThread } from "../types";
 
@@ -49,6 +50,9 @@ export function SharedChat({ screen, compact }: { screen: string; compact: boole
   const [thread, setThread] = useState<SharedChatThread>({ ...EMPTY, screen });
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Emptying the thread empties it for every device, so it takes two clicks:
+  // the first asks, the second does it.
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +62,7 @@ export function SharedChat({ screen, compact }: { screen: string; compact: boole
         if (!cancelled) setThread(next);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(String(e));
+        if (!cancelled) setError(describeError(e));
       });
     return () => {
       cancelled = true;
@@ -87,8 +91,23 @@ export function SharedChat({ screen, compact }: { screen: string; compact: boole
     try {
       await api.sharedChatSend(screen, text);
     } catch (e) {
-      setError(String(e));
+      setError(describeError(e));
       setDraft(text);
+    }
+  };
+
+  // Start over. The thread has a ceiling and only one of them per screen, and
+  // a phone has no saved-conversations picker to open a new one from, so
+  // without this a thread that had gone somewhere unhelpful stayed there.
+  const newThread = async () => {
+    setConfirming(false);
+    setError(null);
+    try {
+      await api.sharedChatReset(screen);
+      // The emptied thread comes back on the `shared-chat` event, the same
+      // way an answer does, so there is nothing to set here.
+    } catch (e) {
+      setError(describeError(e));
     }
   };
 
@@ -143,6 +162,16 @@ export function SharedChat({ screen, compact }: { screen: string; compact: boole
         </div>
         <span className="muted chat-foot">
           Shared with every paired device · answered by the host, on the host&rsquo;s budget
+          <button
+            type="button"
+            className="link-btn"
+            disabled={thread.busy || thread.entries.length === 0}
+            title="Empty this thread for every device and start a new one"
+            onClick={() => (confirming ? void newThread() : setConfirming(true))}
+            onBlur={() => setConfirming(false)}
+          >
+            {confirming ? "Empty it for everyone?" : "New thread"}
+          </button>
         </span>
       </div>
     </>

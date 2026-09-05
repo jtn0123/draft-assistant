@@ -1,0 +1,43 @@
+/* Settings -> "Diagnostics…". Only the parts the shared dialog classes do not
+   already cover: the fact table, and the log tail's scroll box. */
+
+.diag-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  margin: 10px 0 4px;
+  font-size: 12px;
+}
+
+.diag-key {
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.diag-value {
+  /* A log path and a league id are both long and both worth reading in full,
+     so they wrap rather than being clipped by the dialog's width. */
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.diag-log {
+  max-height: 220px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  /* Every line is one line: a wrapped timestamp reads as two entries, which
+     is exactly the confusion a log tail must not add. */
+  white-space: pre;
+}
+
+.diag-empty {
+  color: var(--faint);
+  font-size: 12px;
+}

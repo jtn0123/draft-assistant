@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { api } from "../api";
+import { describeError } from "../errorText";
 
 /** Where the key actually ends up, said plainly — "stored locally" is not the
  *  same promise as "in the Keychain", and the user is entitled to know which
@@ -33,7 +34,7 @@ export function ChatKeyForm({
       setKey("");
       onSaved();
     } catch (e) {
-      setError(String(e));
+      setError(describeError(e));
     } finally {
       setBusy(false);
     }
@@ -69,7 +70,11 @@ export function ChatKeyForm({
       >
         {busy ? "Saving…" : "Save key"}
       </button>
-      {error && <div className="error">{error}</div>}
+      {error && (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      )}
     </div>
   );
 }

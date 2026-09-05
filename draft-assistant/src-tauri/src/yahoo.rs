@@ -418,6 +418,24 @@ impl YahooClient {
         Ok(crate::yahoo_parse::players(&value))
     }
 
+    /// Every team's roster in one call, which is where a keeper is flagged.
+    ///
+    /// `draftresults` carries `is_keeper` on some leagues and simply omits it
+    /// on others — the live resource sends the pick, the round, the team and
+    /// the player and nothing else — so reading the draft alone had a keeper
+    /// league's kept players drawn as ordinary picks. The roster row is the
+    /// one place Yahoo always says, as `is_keeper: {status, cost, kept}`.
+    pub async fn league_rosters(
+        &self,
+        league_key: &str,
+    ) -> Result<Vec<crate::yahoo_types::YahooPlayer>, YahooError> {
+        check_key("league", league_key)?;
+        let value = self
+            .get_value(&format!("/league/{league_key}/teams;out=roster"))
+            .await?;
+        Ok(crate::yahoo_parse::rosters(&value))
+    }
+
     /// The players currently on one team.
     pub async fn team_roster(
         &self,

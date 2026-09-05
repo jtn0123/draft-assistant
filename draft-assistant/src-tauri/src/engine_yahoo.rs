@@ -29,6 +29,15 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::future::Future;
 
+/// What the board says about pick ownership in a Yahoo league.
+///
+/// Every load says it, because there is no cheap way to tell a league that
+/// trades picks from one that does not without the resource this does not
+/// read yet.
+pub const TRADED_PICKS_UNREAD: &str =
+    "Yahoo traded picks are not read yet, so the board shows every pick in \
+     its original snake order";
+
 /// How long a league's settings and its team list are served from disk. Short:
 /// the draft order and the draft status both live in them and both move.
 pub(crate) const YAHOO_LEAGUE_TTL_SECS: u64 = 300;
@@ -140,12 +149,13 @@ impl Engine {
         // Everything else is independent: three Yahoo reads and the three
         // Sleeper ones the board is scored from, all in flight together.
         let teams_name = cache_name(league_key, "teams");
-        let (teams, pool, results, sleeper) = tokio::join!(
+        let (teams, pool, results, rosters, sleeper) = tokio::join!(
             self.yahoo_cached(&teams_name, YAHOO_LEAGUE_TTL_SECS, force, "teams", || {
                 client.league_teams(league_key)
             },),
             self.yahoo_pool(client, league_key, force),
             client.draft_results(league_key),
+            client.league_rosters(league_key),
             self.sleeper_inputs(season, force),
         );
         let (teams, teams_warning): (Vec<YahooTeam>, _) = teams?;
@@ -157,17 +167,36 @@ impl Engine {
 
         // A draft that has not started answers with an empty list rather than
         // an error, so only a real failure is worth reporting.
-        let (results, poll_last_success_at, poll_consecutive_failures, poll_last_error) =
+        let (mut results, poll_last_success_at, poll_consecutive_failures, poll_last_error) =
             match results {
                 Ok(results) => (results, Some(crate::engine::now_secs()), 0, None),
                 Err(error) => (Vec::new(), None, 1, Some(error.to_string())),
             };
 
+        let mut warnings = Vec::new();
+        // Keepers come off the rosters, not off the draft: `draftresults`
+        // sends no `is_keeper` at all on most leagues. Losing this call costs
+        // the keeper flags and nothing else, so it is a warning rather than a
+        // failed load.
+        match rosters {
+            Ok(rows) => {
+                let flags = crate::engine_yahoo_keepers::keeper_flags(&rows);
+                crate::engine_yahoo_keepers::apply_keeper_flags(&mut results, &flags);
+                // The poll tick re-reads the draft alone; without these on
+                // disk every kept pick reverted to "not a keeper" on the
+                // first tick after the load.
+                self.save_yahoo_rosters(league_key, &rows).await;
+            }
+            Err(error) => warnings.push(format!(
+                "Yahoo rosters did not load ({error}), so any player kept rather than \
+                 drafted is drawn as an ordinary pick"
+            )),
+        }
+
         let mapped = yahoo_map::players(&pool);
         let crosswalk = crate::yahoo_crosswalk::build(&mapped, &sleeper_players);
         let api_picks = picks_for(&results, &teams, &pool, &crosswalk);
 
-        let mut warnings = Vec::new();
         warnings.extend(league_warning);
         warnings.extend(teams_warning);
         warnings.extend(pool_warning);
@@ -175,6 +204,15 @@ impl Engine {
         warnings.extend(projections_warning);
         warnings.extend(weekly_warning);
         warnings.extend(crosswalk.warning());
+        // Yahoo has a traded-pick resource and this app does not read it, so a
+        // league that has traded picks is drawn in plain snake order with the
+        // picks in the wrong hands. Silently: the board looks right and is
+        // wrong, which is the worst way for it to be wrong.
+        warnings.push(TRADED_PICKS_UNREAD.to_string());
+        // An auction with no budget in its settings is measured against the
+        // biggest roster anybody has bought so far, which is a floor rather
+        // than the number.
+        warnings.extend(yahoo_map::derived_budget_warning(&yahoo_league, &results));
         // A stat this app cannot score is silently worth zero to every player,
         // which is invisible on the board and changes the ranking; saying so is
         // the difference between a board that is wrong and one that is wrong

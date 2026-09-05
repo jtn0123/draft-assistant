@@ -1,11 +1,12 @@
 //! Starting and stopping the companion HTTP server, and the handle everything
 //! else reaches it through.
 
-use super::hub::{CompanionHub, Emit};
+use super::hub::{now_ms, CompanionHub, Emit};
 use super::net;
 use crate::shared_chat::SharedChat;
 use crate::state::AppState;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 use tokio::sync::oneshot;
 
 /// The companion as a whole: the state that outlives the socket, plus the
@@ -109,6 +110,11 @@ impl CompanionServer {
         });
         *self.running() = Some(Running { port, shutdown });
         self.hub.set_port(Some(port));
+        // What the CSP and the cross-origin check are built from, read once
+        // here: `tailscale_ip` shells out, and doing that per request would
+        // put a process spawn in front of every page load.
+        self.hub.set_origins(net::server_origins(port));
+        spawn_rotation(self.hub.clone(), ROTATE_EVERY, now_ms);
         Ok(port)
     }
 
@@ -120,6 +126,7 @@ impl CompanionServer {
             let _ = running.shutdown.send(());
         }
         self.hub.set_port(None);
+        self.hub.set_origins(Vec::new());
     }
 
     /// The URL to show, when there is one.
@@ -131,6 +138,39 @@ impl CompanionServer {
     pub fn tailscale_url(&self) -> Option<String> {
         self.port().and_then(net::tailscale_url_for)
     }
+}
+
+/// How often an idle pairing code is looked at.
+pub const ROTATE_EVERY: Duration = Duration::from_secs(60);
+
+/// Keep the pairing code from sitting on the host's screen all afternoon.
+///
+/// [`CompanionHub::rotate_if_idle`] only ever ran when somebody asked for the
+/// code, so a host whose Settings panel was closed showed the same six digits
+/// until it was reopened. This is the thing that makes the ten minute life of
+/// a code real. `clock` is the current time in milliseconds, injected so a
+/// test can age a code without waiting ten minutes for one.
+///
+/// The task ends with the server: it stops as soon as the hub has no port.
+pub fn spawn_rotation<C>(
+    hub: Arc<CompanionHub>,
+    every: Duration,
+    clock: C,
+) -> tokio::task::JoinHandle<()>
+where
+    C: Fn() -> u64 + Send + 'static,
+{
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(every);
+        // The first tick of a tokio interval is immediate, and a code made a
+        // moment ago is not stale; skipping it keeps the log of what happened
+        // when honest.
+        ticker.tick().await;
+        while hub.is_running() {
+            ticker.tick().await;
+            hub.rotate_if_idle(clock());
+        }
+    })
 }
 
 impl Srv {

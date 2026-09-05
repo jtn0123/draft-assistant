@@ -165,6 +165,13 @@ pub async fn persist_tokens_for(engine: &Engine, yahoo: &YahooState, client: &Ya
 /// which draft slot that is. The player ids are the ones the load's crosswalk
 /// settled on, carried on the loaded league — rebuilding the crosswalk every
 /// three seconds would mean re-indexing the whole Sleeper dictionary.
+///
+/// The players themselves come off the load's own caches rather than the
+/// wire. A tick used to build its picks against an empty player map, so the
+/// name, position and team on every pick made after the load were `None` and
+/// so was the keeper flag: the board finished loading correctly and then, on
+/// the first tick three seconds later, replaced its picks with a set that had
+/// forgotten who they were.
 pub async fn yahoo_picks(
     engine: &Engine,
     yahoo: &YahooState,
@@ -172,15 +179,16 @@ pub async fn yahoo_picks(
     ids: &std::collections::HashMap<String, String>,
 ) -> Result<Vec<Pick>, String> {
     let client = client_from(engine, yahoo).await?;
-    let (results, teams) = tokio::join!(
+    let (results, teams, players) = tokio::join!(
         client.draft_results(league_key),
-        client.league_teams(league_key)
+        client.league_teams(league_key),
+        engine.yahoo_pick_context(league_key),
     );
     // Even a failed call may have spent a refresh token getting there.
     persist_tokens_for(engine, yahoo, &client).await;
     let results = results.map_err(|error| error.to_string())?;
     let teams = teams.map_err(|error| error.to_string())?;
-    let mut picks = crate::yahoo_map::picks(&results, &teams, &std::collections::HashMap::new());
+    let mut picks = crate::yahoo_map::picks(&results, &teams, &players);
     for pick in &mut picks {
         if let Some(id) = ids.get(&pick.player_id) {
             pick.player_id = id.clone();
@@ -224,8 +232,12 @@ pub async fn yahoo_save_credentials(
 /// the code.
 #[tauri::command]
 pub async fn yahoo_begin_connect(state: State<'_, AppState>) -> Result<YahooConnectStart, String> {
-    let store = store_for(state.engine.data_dir.clone(), state.yahoo.keychain).await?;
-    let (credentials, _) = read_secrets(store).await?;
+    let store = store_for(state.engine.data_dir.clone(), state.yahoo.keychain)
+        .await
+        .map_err(crate::applog::failing("yahoo_begin_connect", String::new()))?;
+    let (credentials, _) = read_secrets(store)
+        .await
+        .map_err(crate::applog::failing("yahoo_begin_connect", String::new()))?;
     let credentials = credentials.ok_or(
         "Yahoo is not set up — paste your Yahoo app's client id and secret in Settings first",
     )?;
@@ -281,12 +293,17 @@ pub async fn yahoo_finish_connect(
             // take another try at the code rather than sending them round the
             // browser again.
             app.yahoo.expect_state(&expected).await;
-            return Err(match error {
+            // The error itself carries whatever Yahoo said back, code and all,
+            // which is exactly why it goes through the redacting log.
+            return Err(crate::applog::failing(
+                "yahoo_finish_connect",
+                String::new(),
+            )(match error {
                 AuthError::Transport(_) => {
                     format!("could not reach Yahoo to finish signing in — {error}")
                 }
                 _ => "Yahoo rejected that code — check it and try again".to_string(),
-            });
+            }));
         }
     };
     tokio::task::spawn_blocking(move || yahoo_secrets::save_tokens(store.as_ref(), &tokens))

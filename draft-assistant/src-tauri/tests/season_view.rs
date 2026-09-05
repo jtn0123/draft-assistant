@@ -85,7 +85,7 @@ fn a_swap_between_two_players_already_on_the_field_is_not_offered() {
 #[test]
 fn the_bench_back_outscoring_the_flex_is_exactly_one_call_before_kickoff() {
     let (loaded, mut season, config) = common::fixture();
-    season.scores.clear();
+    season.scores = std::sync::Arc::new(Vec::new());
     let v = build_season_view(&loaded, &season, config.my_user_id.as_deref());
 
     assert_eq!(v.calls.len(), 1, "{:?}", v.calls);
@@ -204,7 +204,7 @@ fn a_suboptimal_set_lineup_is_given_worse_odds_than_the_best_one() {
 fn an_already_optimal_lineup_is_priced_the_same_either_way() {
     let (loaded, mut season, config) = common::fixture();
     // Start the bench back in the flex: now the set lineup is the best one.
-    for matchup in &mut season.matchups {
+    for matchup in std::sync::Arc::make_mut(&mut season.matchups) {
         if matchup.roster_id == 1 {
             let starters = matchup.starters.as_mut().expect("fixture sets starters");
             for id in starters.iter_mut() {
@@ -424,7 +424,7 @@ fn reused_analysis_reports_when_it_was_actually_built() {
 fn live_scoring_moves_the_win_odds_away_from_the_pregame_reading() {
     let (loaded, mut season, config) = common::fixture();
     let live = build_season_view(&loaded, &season, config.my_user_id.as_deref());
-    season.scores.clear();
+    season.scores = std::sync::Arc::new(Vec::new());
     let pregame = build_season_view(&loaded, &season, config.my_user_id.as_deref());
 
     // The projections themselves are untouched: only the pricing has moved.
@@ -443,7 +443,7 @@ fn live_scoring_moves_the_win_odds_away_from_the_pregame_reading() {
 #[test]
 fn with_nothing_kicked_off_the_odds_are_the_pregame_ones() {
     let (loaded, mut season, config) = common::fixture();
-    season.scores.clear();
+    season.scores = std::sync::Arc::new(Vec::new());
     let a = build_season_view(&loaded, &season, config.my_user_id.as_deref());
     let b = build_season_view(&loaded, &season, config.my_user_id.as_deref());
     assert_eq!(a.header.win_odds_set, b.header.win_odds_set);

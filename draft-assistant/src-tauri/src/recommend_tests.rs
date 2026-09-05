@@ -33,6 +33,22 @@ pub(super) fn player(id: &str, pos: &str, vorp: f64) -> AvailablePlayer {
     }
 }
 
+/// A board deep enough for a twelve-team league to allocate its flex slots
+/// against: forty bodies a position, at the levels those positions really
+/// score at. The demand model reads the whole board, so a test that asks it
+/// what a league starts has to give it one.
+pub(super) fn deep_full_board() -> Vec<BoardPlayer> {
+    let mut board = Vec::new();
+    for (position, top) in [("QB", 380.0), ("RB", 300.0), ("WR", 295.0), ("TE", 220.0)] {
+        for i in 0..40 {
+            let mut p = player(&format!("deep_{position}{i}"), position, 0.0).player;
+            p.points = top - 4.0 * f64::from(i);
+            board.push(p);
+        }
+    }
+    board
+}
+
 pub(super) fn entry(pos: &str, n: u32) -> RosterEntry {
     RosterEntry {
         player_id: format!("{pos}{n}"),
@@ -85,6 +101,32 @@ pub(super) fn recs(
         current_pick,
         12,
     ))
+}
+
+/// The same call with the whole board in hand. What a league starts is
+/// worked out from every player the board knows, so any test that turns on
+/// that number has to hand one over rather than leaning on the two players it
+/// happens to be comparing.
+pub(super) fn recs_on_board(
+    available: &[AvailablePlayer],
+    full_board: &[BoardPlayer],
+    mine: Option<&TeamRoster>,
+    rules: &RosterRules,
+    current_round: u32,
+    total_rounds: u32,
+    current_pick: u32,
+) -> Vec<Recommendation> {
+    let mut inputs = RecommendInputs::new(
+        available,
+        mine,
+        rules,
+        current_round,
+        total_rounds,
+        current_pick,
+        12,
+    );
+    inputs.full_board = full_board;
+    recommend(&inputs)
 }
 
 pub(super) fn of_mode<'a>(recs: &'a [Recommendation], mode: &str) -> &'a Recommendation {

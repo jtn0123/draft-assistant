@@ -197,3 +197,57 @@ describe("Board sorting", () => {
     expect(survival[2].className).toContain("muted");
   });
 });
+
+// The board fell back to points for the render but left `sortKey` naming the
+// column that had gone. Clicking the Pts head then counted as "you are already
+// on this column, flip it", the flip landed on a direction the render was not
+// reading, and the header the footer pointed at was the one head on the board
+// that did nothing at all.
+describe("Board sorting after the imported column goes away", () => {
+  const imported = (rank: number) => ({
+    positional_rank: rank,
+    overall_rank: rank,
+    source: "Clay",
+  });
+  const pool = (withOpinion: boolean) => [
+    player("a", "Alpha", "WR", {
+      points: 300,
+      second_opinion: withOpinion ? imported(3) : null,
+    }),
+    player("b", "Bravo", "RB", {
+      points: 100,
+      second_opinion: withOpinion ? imported(1) : null,
+    }),
+    player("c", "Charlie", "QB", {
+      points: 200,
+      second_opinion: withOpinion ? imported(2) : null,
+    }),
+  ];
+
+  it("lets the fallback column be clicked once the import is gone", () => {
+    const props = (withOpinion: boolean) => ({
+      players: pool(withOpinion),
+      positions: ["QB", "RB", "WR"] as const,
+      loading: false,
+      boardSize: 3,
+      onDraft: vi.fn(),
+    });
+    const view = render(<Board {...props(true)} positions={["QB", "RB", "WR"]} />);
+    const names = () =>
+      [...view.container.querySelectorAll(".board-body")].map(
+        (row) => row.querySelector(".board-player .ellipsis")?.textContent,
+      );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Clay, / }));
+    expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
+
+    view.rerender(<Board {...props(false)} positions={["QB", "RB", "WR"]} />);
+    expect(names()).toEqual(["Alpha", "Charlie", "Bravo"]);
+
+    // The board now says it is sorted by points, high to low, so clicking the
+    // Pts head has to turn it around.
+    fireEvent.click(screen.getByRole("button", { name: /^Pts, / }));
+    expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
+    expect(screen.getByText(/Sorted by points, low to high/)).toBeInTheDocument();
+  });
+});

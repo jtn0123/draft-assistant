@@ -125,6 +125,18 @@ describe("the live sync row", () => {
   });
 });
 
+describe("the Sleeper username row", () => {
+  it("opens the setup screen, where the username lives, with a way back", async () => {
+    // The roster panel tells a Sleeper user to set their username, and until
+    // now nothing after the first launch could reach the field.
+    await loaded();
+    await chooseSetting(/Sleeper username/);
+    expect(await screen.findByLabelText("Sleeper username")).toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Back to/ })).toBeInTheDocument();
+  });
+});
+
 describe("the export row", () => {
   it("names the file it wrote, and closes the menu on the way", async () => {
     await loaded();

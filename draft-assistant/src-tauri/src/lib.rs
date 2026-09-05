@@ -13,6 +13,7 @@ pub mod chat_fixtures;
 pub mod chat_rules;
 pub mod commands_chat;
 pub mod commands_companion;
+pub mod commands_diag;
 pub mod commands_draft;
 pub mod commands_season;
 pub mod commands_second_opinion;
@@ -22,6 +23,7 @@ pub mod draft;
 pub mod engine;
 pub mod engine_assemble;
 pub mod engine_yahoo;
+pub mod engine_yahoo_keepers;
 pub mod engine_yahoo_pool;
 pub mod headshots;
 pub mod keepers;
@@ -76,6 +78,7 @@ pub mod view_types;
 pub mod weekly;
 pub mod yahoo;
 pub mod yahoo_crosswalk;
+pub mod yahoo_crosswalk_teams;
 pub mod yahoo_map;
 pub mod yahoo_oauth;
 pub mod yahoo_parse;
@@ -89,8 +92,9 @@ use commands_chat::{
 };
 use commands_companion::{
     companion_disable, companion_enable, companion_revoke, companion_status, set_device_name,
-    shared_chat_get, shared_chat_send,
+    shared_chat_get, shared_chat_reset, shared_chat_send,
 };
+use commands_diag::{diagnostics, log_frontend_error, open_log_folder};
 use commands_draft::{
     add_league, clear_keepers, export_state, get_config, get_state, record_manual_pick,
     refresh_data, refresh_picks, set_my_username, start_polling, stop_polling, undo_manual_pick,
@@ -126,6 +130,9 @@ pub fn run() {
             // until this runs, `applog::warn` falls back to a stderr that a
             // double-clicked .app does not have.
             applog::init(data_dir.clone());
+            // From here on a panic leaves a line behind. Before this, a panic
+            // in a double-clicked .app killed the window and wrote nothing.
+            applog::install_panic_hook();
             let engine = Engine::new(data_dir.clone());
             let config = engine.load_config();
             // The name this Mac introduces itself by, and the port its phone
@@ -134,6 +141,7 @@ pub fn run() {
                 .device_name
                 .clone()
                 .unwrap_or_else(commands_companion::default_host_name);
+            let restart_companion_on = commands_companion::autostart_port(&config);
             let state = AppState {
                 engine: Arc::new(engine),
                 loaded: Arc::new(Mutex::new(None)),
@@ -158,6 +166,7 @@ pub fn run() {
                     handle.emit(kind, payload).ok();
                 }),
             );
+            commands_companion::autostart(&companion, restart_companion_on);
             app.manage(state);
             app.manage(companion);
             Ok(())
@@ -217,7 +226,11 @@ pub fn run() {
             companion_revoke,
             set_device_name,
             shared_chat_get,
+            shared_chat_reset,
             shared_chat_send,
+            diagnostics,
+            log_frontend_error,
+            open_log_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,14 +1,16 @@
 //! Tauri commands for the in-season screen.
 
+mod poller;
+
 use crate::engine::{Engine, LoadedLeague};
 use crate::headshots::ImageCache;
-use crate::poll::{season_tick, SeasonPollMemory};
+use crate::poll::refresh_or_roll;
 use crate::season::SeasonView;
 use crate::season_engine::{LoadedSeason, SeasonLoader};
 use crate::season_history::HistoryStore;
 use crate::state::{season_view_from, AppState};
 use std::sync::atomic::Ordering;
-use tauri::{Emitter, State};
+use tauri::State;
 use tokio::sync::Mutex;
 
 /// Fetch the in-season picture for the active league. Idempotent: a second
@@ -27,7 +29,11 @@ pub async fn load_season(
     let mut fresh = state
         .engine
         .load_season(&league, my_user_id.as_deref(), force)
-        .await?;
+        .await
+        .map_err(crate::applog::failing(
+            "load_season",
+            crate::applog::context(&[("league", &league.league_id)]),
+        ))?;
     // The load above took a few seconds with no lock held. If the user
     // switched leagues in that window, this data belongs to the old one:
     // writing it would file league A's roster snapshot under league B.
@@ -66,7 +72,7 @@ async fn adopt_load(
     fresh: &mut LoadedSeason,
 ) -> Result<(), String> {
     let loaded = same_league(loaded, loaded_for)?;
-    fresh.history = engine.record_history(loaded, fresh).await;
+    fresh.history = std::sync::Arc::new(engine.record_history(loaded, fresh).await);
     Ok(())
 }
 
@@ -113,44 +119,9 @@ pub async fn get_season(state: State<'_, AppState>) -> Result<SeasonView, String
 /// Re-pull the fast-moving slice (this week's scoring and the NFL scoreboard).
 #[tauri::command]
 pub async fn refresh_season(state: State<'_, AppState>) -> Result<SeasonView, String> {
-    let league_id = {
-        let loaded = state.loaded.lock().await;
-        loaded
-            .as_ref()
-            .ok_or("no league loaded")?
-            .league
-            .league_id
-            .clone()
-    };
-    let watching = {
-        let season = state.season.lock().await;
-        let season = season.as_ref().ok_or("season data not loaded")?;
-        (season.season, season.week)
-    };
-    // Fetched with nothing locked: three requests with retries behind them can
-    // run for tens of seconds, and everything else that needs the season would
-    // be waiting the whole time.
-    let fetched = state
-        .engine
-        .fetch_live(&league_id, watching.0, watching.1)
-        .await;
-    {
-        // Locks in the usual order, loaded then season. The league is checked
-        // again here because the fetch ran unlocked: folding this week's
-        // scoring into whatever season happens to be loaded now would show
-        // one league's live points on another league's screen.
-        let loaded = state.loaded.lock().await;
-        same_league(loaded.as_ref(), &league_id)?;
-        let mut season = state.season.lock().await;
-        let season = season.as_mut().ok_or("season data not loaded")?;
-        fetched.apply(season, crate::engine::now_secs())?;
-    }
+    refresh_or_roll(&*state.engine, &state.loaded, &state.season, &state.config).await?;
     season_view_from(&state).await
 }
-
-/// How many polls to reuse the cached analysis before rebuilding it. At the
-/// default 30s interval that is roughly ten minutes.
-const ANALYSIS_EVERY: u32 = 20;
 
 /// Poll live scoring every `interval_secs` (default 30). Emits "season-updated"
 /// with a fresh SeasonView whenever the totals move, and "season-poll-health"
@@ -167,44 +138,16 @@ pub async fn start_season_polling<R: tauri::Runtime>(
     interval_secs: Option<u64>,
 ) -> Result<(), String> {
     let interval = interval_secs.unwrap_or(30).clamp(10, 300);
-    let generation = state.season_generation.fetch_add(1, Ordering::SeqCst) + 1;
-    state.season_polling.store(true, Ordering::SeqCst);
-
-    let engine = state.engine.clone();
-    let loaded_ref = state.loaded.clone();
-    let season_ref = state.season.clone();
-    let config_ref = state.config.clone();
-    let polling = state.season_polling.clone();
-    let season_generation = state.season_generation.clone();
-
-    tauri::async_runtime::spawn(async move {
-        let mut memory = SeasonPollMemory::new(ANALYSIS_EVERY);
-        loop {
-            if !polling.load(Ordering::SeqCst)
-                || season_generation.load(Ordering::SeqCst) != generation
-            {
-                break;
-            }
-            let tick =
-                season_tick(&*engine, &loaded_ref, &season_ref, &config_ref, &mut memory).await;
-            // Health first: when a refresh fails there is no view to send, and
-            // the screen still has to hear that the attempt was made and lost.
-            if let Some(health) = &tick.health {
-                app.emit("season-poll-health", health).ok();
-                crate::companion::publish(&app, "season-poll-health", health);
-            }
-            if let Some(view) = &tick.view {
-                app.emit("season-updated", view).ok();
-                crate::companion::publish(&app, "season-updated", view);
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
-        }
-    });
+    poller::spawn(app, &state, interval);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn stop_season_polling(state: State<'_, AppState>) -> Result<(), String> {
+    // The generation bump is what actually stops the loop; the flag is only
+    // the record of what the user last asked for. See `poller::cancel` for
+    // why a sticky flag was the wrong tool.
+    poller::cancel(&state.season_generation);
     state.season_polling.store(false, Ordering::SeqCst);
     Ok(())
 }
@@ -291,14 +234,14 @@ mod tests {
         LoadedSeason {
             week: 2,
             season: 2025,
-            rosters: vec![roster],
-            matchups: Vec::new(),
-            schedule: Vec::new(),
-            season_points: HashMap::new(),
-            transactions: Vec::new(),
-            scores: Vec::new(),
-            last_season: Vec::new(),
-            history: History::default(),
+            rosters: std::sync::Arc::new(vec![roster]),
+            matchups: std::sync::Arc::new(Vec::new()),
+            schedule: std::sync::Arc::new(Vec::new()),
+            season_points: std::sync::Arc::new(HashMap::new()),
+            transactions: std::sync::Arc::new(Vec::new()),
+            scores: std::sync::Arc::new(Vec::new()),
+            last_season: std::sync::Arc::new(Vec::new()),
+            history: std::sync::Arc::new(History::default()),
             fetched_at: 0,
             warnings: Vec::new(),
             sources: Default::default(),

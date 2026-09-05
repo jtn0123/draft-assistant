@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AvailablePlayer, DraftView } from "../types";
@@ -249,22 +249,28 @@ describe("Board paging", () => {
   it("opens on one page and loads the next on demand", () => {
     const { container } = render(board(many(450)));
     const rows = () => container.querySelectorAll(".board-body");
+    // Every query below is scoped to the paging footer rather than run over
+    // the whole board. `getByRole` and `getByText` walk what they are given,
+    // and what they were being given was four hundred rows of a dozen nodes
+    // each: this test spent six seconds inside the queries alone and needed a
+    // twenty-second override to survive parallel workers. The footer is a
+    // handful of nodes, and the assertions are unchanged.
+    const foot = () => within(container.querySelector(".board-foot") as HTMLElement);
+    const count = () => container.querySelector(".board-count")?.textContent;
 
     expect(rows()).toHaveLength(200);
-    expect(screen.getByText("Showing 200 of 450")).toBeInTheDocument();
+    expect(count()).toBe("Showing 200 of 450");
 
-    fireEvent.click(screen.getByRole("button", { name: "Show 200 more" }));
+    fireEvent.click(foot().getByRole("button", { name: "Show 200 more" }));
     expect(rows()).toHaveLength(400);
-    expect(screen.getByText("Showing 400 of 450")).toBeInTheDocument();
+    expect(count()).toBe("Showing 400 of 450");
 
     // The last page offers only what is left of the pool.
-    expect(screen.getByRole("button", { name: "Show 50 more" })).toBeInTheDocument();
+    expect(foot().getByRole("button", { name: "Show 50 more" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show first 200" }));
+    fireEvent.click(foot().getByRole("button", { name: "Show first 200" }));
     expect(rows()).toHaveLength(200);
-    // Four commits of a couple of hundred rows apiece, which is more than the
-    // default budget allows for once coverage instrumentation is on top.
-  }, 20_000);
+  });
 
   it("leaves the paging control out when everything already fits", () => {
     render(board(many(3)));

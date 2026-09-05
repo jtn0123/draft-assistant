@@ -38,6 +38,7 @@ interface CompanionState {
   health: unknown;
   seasonHealth: unknown;
   connection: string;
+  offset: number;
 }
 
 interface Action {

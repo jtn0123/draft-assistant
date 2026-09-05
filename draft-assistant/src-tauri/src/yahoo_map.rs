@@ -301,9 +301,55 @@ pub fn auction(league: &YahooLeague, results: &[YahooDraftPick]) -> Auction {
     // how the caller tells: no branch on draft type is needed or wanted,
     // because Yahoo calls a live auction `draft_type: "live"`.
     Auction {
-        budget: league.draft_budget,
+        budget: league.draft_budget.or_else(|| derived_budget(results)),
         costs,
     }
+}
+
+/// A budget worked out from the bids themselves, for the auction leagues
+/// whose settings do not carry one.
+///
+/// Yahoo's `draft_budget` is not on every auction league's settings payload —
+/// it is absent on leagues that never changed it from the default, and on
+/// older ones — and without a budget an auction board has no denominator: a
+/// $55 bid is a number with nothing to measure it against, and every "share
+/// of the room's money" figure reads as zero.
+///
+/// The assumption, stated plainly: **every team started with at least what
+/// the biggest spender has spent**. Summing each team's costs and taking the
+/// largest total is therefore a floor, not the number. Early in a draft it is
+/// a long way under, which is why the load says so out loud
+/// ([`derived_budget_warning`]) rather than passing it off as Yahoo's own.
+/// It rises as the bidding goes on and lands on the real budget by the end.
+///
+/// `None` when nothing has a cost on it, which is every snake draft and an
+/// auction before its first sale.
+pub fn derived_budget(results: &[YahooDraftPick]) -> Option<u32> {
+    let mut spent: HashMap<&str, f64> = HashMap::new();
+    for result in results.iter().filter(|result| result.cost.is_some()) {
+        *spent.entry(result.team_key.as_str()).or_insert(0.0) += result.cost.unwrap_or(0.0);
+    }
+    spent
+        .into_values()
+        .fold(None::<f64>, |most, total| {
+            Some(most.map_or(total, |most: f64| most.max(total)))
+        })
+        .filter(|most| *most > 0.0)
+        .map(|most| most.ceil() as u32)
+}
+
+/// The line the board shows when the budget on it was worked out from the
+/// bids rather than read off the league.
+pub fn derived_budget_warning(league: &YahooLeague, results: &[YahooDraftPick]) -> Option<String> {
+    if league.draft_budget.is_some() {
+        return None;
+    }
+    let derived = derived_budget(results)?;
+    Some(format!(
+        "Yahoo sent no auction budget for this league, so the board is using ${derived} — \
+         the most any one team has spent so far. It is a floor, and it rises as the \
+         bidding does."
+    ))
 }
 
 /// A Yahoo player as the app's player row, plus the two facts that have no
@@ -326,11 +372,15 @@ pub struct MappedPlayer {
 impl MappedPlayer {
     /// The key lane 2's crosswalk matches Sleeper rows on: normalised name,
     /// team, position — the same normalisers the projections import uses, so
-    /// both sides of the match are spelled the same way.
+    /// both sides of the match are spelled the same way. The team goes
+    /// through `crate::yahoo_crosswalk_teams::canonical_team` for the same
+    /// reason: Yahoo's JAC and Sleeper's JAX are one team.
     pub fn crosswalk_key(&self) -> (String, String, String) {
         (
             crate::second_opinion::normalize_name(self.meta.full_name.as_deref().unwrap_or("")),
-            self.meta.team.clone().unwrap_or_default(),
+            crate::yahoo_crosswalk_teams::canonical_team(
+                self.meta.team.as_deref().unwrap_or_default(),
+            ),
             crate::second_opinion::normalize_position(self.meta.position.as_deref().unwrap_or("")),
         )
     }

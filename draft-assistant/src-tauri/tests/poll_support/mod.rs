@@ -114,8 +114,8 @@ impl Harness {
         Self {
             engine: Flaky {
                 failing: Cell::new(false),
-                matchups: season.matchups.clone(),
-                rosters: season.rosters.clone(),
+                matchups: season.matchups.as_ref().clone(),
+                rosters: season.rosters.as_ref().clone(),
                 week: Cell::new(season.week),
                 reloads: Cell::new(0),
                 reloaded: None,

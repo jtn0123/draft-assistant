@@ -1,105 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MatchupView, SeasonView, SourceHealth } from "../season-types";
+import type { SourceHealth } from "../season-types";
+import { FROZEN, NOW, fresh, matchup, myChip, view } from "./season-screen-fixture";
 import { ODDS_NOTE } from "../odds";
 import { SeasonScreen } from "./SeasonScreen";
-
-/** A matchup whose set lineup is worse than the best one available — the
- *  state in which the header and the lineup panel used to disagree. */
-function matchup(): MatchupView {
-  const row = {
-    slot: "QB",
-    my_player_id: "a",
-    my_name: "Jalen Hurts",
-    my_team: "PHI",
-    my_points: 22.4,
-    opp_player_id: "b",
-    opp_name: "Baker Mayfield",
-    opp_team: "TB",
-    opp_points: 15.2,
-    margin: 7.2,
-  };
-  return {
-    my_name: "Trust the Process",
-    opp_name: "punt_god",
-    my_avatar: null,
-    opp_avatar: null,
-    my_projected: 122.4,
-    opp_projected: 108.9,
-    rows: [row],
-    set_projected: 118.1,
-    set_rows: [{ ...row, my_name: "Bryce Young", my_points: 18.1, margin: 2.9 }],
-  };
-}
-
-// Grade item D8. The badge's whole job is to notice how long ago something
-// happened, so every test here runs against a clock that is standing still:
-// otherwise "5 seconds ago" is a race against the second hand, and the
-// thresholds below could never be asserted at the boundary itself.
-const FROZEN = Date.parse("2026-09-13T17:00:00Z");
-const NOW = () => Math.floor(FROZEN / 1000);
-
-function fresh(): SourceHealth {
-  return {
-    matchups: { last_success_secs: NOW() - 5, error: null },
-    scores: { last_success_secs: NOW() - 5, error: null },
-    rosters: { last_success_secs: NOW() - 5, error: null },
-  };
-}
-
-function view(overrides: Partial<SeasonView> = {}): SeasonView {
-  return {
-    schema_version: "1.3",
-    generated_at: 0,
-    team_avatars: {},
-    league: {
-      league_id: "1",
-      name: "Dynasty Warriors",
-      season: "2026",
-      platform: "sleeper",
-      total_rosters: 12,
-      roster_positions: ["QB", "RB", "BN"],
-      draftable_positions: ["QB", "RB"],
-      scoring_settings: {},
-    },
-    week: 3,
-    season: "2026",
-    my_roster_id: 1,
-    header: {
-      opponent_name: "punt_god",
-      my_projected: 122.4,
-      my_set_projected: 118.1,
-      opp_projected: 108.9,
-      win_odds_best: 0.62,
-      win_odds_set: 0.55,
-      playoff_odds: 0.88,
-      playoff_status: null,
-      locks_in_ms: null,
-    },
-    matchup: null,
-    calls: [],
-    points_on_table: 0,
-    waivers: [],
-    waiver_budget_left: 38,
-    waiver_budget_total: 100,
-    standings: [],
-    live: {
-      games: [],
-      windows: [],
-      totals: { my_playing: 0, my_pre: 0, my_done: 0, my_live_points: 0, opp_live_points: 0 },
-      next_kickoff_ms: null,
-      bye_teams: [],
-    },
-    roster: [],
-    trades: [],
-    recent_trades: [],
-    activity: [],
-    last_season: [],
-    trends: { series: [], changes: [] },
-    data_health: { fetched_at: NOW(), warnings: [], sources: fresh() },
-    ...overrides,
-  };
-}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -341,7 +245,7 @@ describe("SeasonScreen header", () => {
           kickoff_ms: FROZEN,
           flag: null,
           channel: null,
-          chips: [],
+          chips: [myChip(state === "pre" ? "pre" : state === "live" ? "playing" : "done")],
         },
       ],
       windows: [],
@@ -384,79 +288,5 @@ describe("SeasonScreen header", () => {
     done.header.playoff_status = "In the playoffs — seed 3";
     render(<SeasonScreen view={done} pollHealth={null} />);
     expect(screen.getByText("In the playoffs — seed 3")).toBeInTheDocument();
-  });
-});
-
-/** A game already under way, which is what locks the lineup. */
-function liveGame() {
-  return {
-    game_id: "phi-tb",
-    away: "PHI",
-    home: "TB",
-    away_score: 7,
-    home_score: 3,
-    state: "live" as const,
-    status: "Q2 08:14",
-    kickoff_ms: FROZEN - 3600_000,
-    flag: null,
-    channel: "FOX",
-    chips: [],
-  };
-}
-
-/** The view with every game under way and no call left to make. */
-function lockedView() {
-  const base = view({ matchup: matchup() });
-  return {
-    ...base,
-    calls: [],
-    live: { ...base.live, games: [liveGame()] },
-  };
-}
-
-describe("once the lineup is locked", () => {
-  // The bug: the header defaulted to the best lineup's odds forever, so all
-  // Sunday afternoon it quoted a percentage for a lineup nobody could set any
-  // more — 62% off a bench the user could no longer touch.
-  it("quotes the lineup that is actually playing, and says so", () => {
-    render(<SeasonScreen view={lockedView()} />);
-
-    expect(screen.getByText("55%")).toBeInTheDocument();
-    expect(screen.queryByText("62%")).not.toBeInTheDocument();
-    expect(screen.getByText(/^lineup as set · locked · /)).toBeInTheDocument();
-  });
-
-  it("takes away the best/set toggle, because it is not a choice any more", () => {
-    render(<SeasonScreen view={lockedView()} />);
-
-    expect(screen.queryByRole("button", { name: "Best" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Set" })).not.toBeInTheDocument();
-    expect(screen.getByText("lineup locked")).toBeInTheDocument();
-  });
-
-  // And before kickoff nothing changes: the choice is still the user's.
-  it("leaves the toggle alone while a call can still be made", () => {
-    render(<SeasonScreen view={view({ matchup: matchup() })} />);
-    expect(screen.getByRole("button", { name: "Set" })).toBeInTheDocument();
-    expect(screen.getByText("62%")).toBeInTheDocument();
-  });
-});
-
-describe("the lock countdown", () => {
-  // It used to read the clock inside a render that only happened when new
-  // scores arrived, so on a quiet evening "Locks in 2h 0m" sat there saying
-  // 2h 0m for hours.
-  it("counts down on its own without waiting for new data", () => {
-    render(
-      <SeasonScreen
-        view={view({ header: { ...view().header, locks_in_ms: FROZEN + 7_200_000 } })}
-      />,
-    );
-    expect(screen.getByText("2h 0m")).toBeInTheDocument();
-
-    act(() => {
-      vi.advanceTimersByTime(11 * 60_000);
-    });
-    expect(screen.getByText("1h 49m")).toBeInTheDocument();
   });
 });

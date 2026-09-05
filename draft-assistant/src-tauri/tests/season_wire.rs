@@ -38,10 +38,14 @@ const STATE: &str = r#"{"season": "2026", "week": 3, "display_week": 3, "season_
 /// starts failing. The stub's router is a plain `fn`, so the switch has to
 /// live somewhere it can reach.
 static STATE_IS_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The same door for `/rosters`, flipped by the roster-outage test.
+static ROSTERS_ARE_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The stub is shared by every test in this binary and they run in parallel,
-/// so a load that happens to overlap the outage would see the 500 too. Every
-/// ordinary test holds this for reading while it loads; the outage test takes
-/// it for writing around the flip, and so waits for the others to finish.
+/// so a load that happens to overlap an outage would see the 500 too. Every
+/// ordinary test holds this for reading while it loads; each outage test takes
+/// it for writing around its flip, and so waits for the others to finish. One
+/// gate covers every route that can be switched off, because a reader has no
+/// way to say which outages it can tolerate.
 static STATE_GATE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
 const ROSTERS: &str = r#"[
@@ -107,7 +111,12 @@ fn route(path: &str) -> Option<stub::Reply> {
     }
     if let Some(rest) = path.strip_prefix("/v1/league/league-2026/") {
         return match rest {
-            "rosters" => ok(ROSTERS.to_string()),
+            "rosters" => {
+                if ROSTERS_ARE_DOWN.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Some((500, "\"boom\"".to_string()));
+                }
+                ok(ROSTERS.to_string())
+            }
             "winners_bracket" => ok("[]".to_string()),
             _ => match rest.split_once('/') {
                 // Week 2 has no matchup rows at all, which is how the sweep's
@@ -266,7 +275,7 @@ async fn a_live_refresh_moves_the_clock_and_the_scores() {
         .await
         .expect("loaded");
     season.fetched_at = 0;
-    season.scores.clear();
+    season.scores = std::sync::Arc::new(Vec::new());
 
     engine
         .refresh_live(&mut season, "league-2026")
@@ -324,6 +333,49 @@ async fn a_week_that_cannot_be_checked_falls_back_to_the_last_one_seen() {
             .any(|w| w.contains("which NFL week it is could not be checked")),
         "the fallback has to admit itself: {:?}",
         stale.warnings
+    );
+    cleanup(engine);
+}
+
+/// The bug: rosters were the one request in the whole load with no cached
+/// fallback, so a season that could have opened entirely from disk failed
+/// outright the moment that single call did. Rosters barely move between
+/// waiver runs; yesterday's, clearly labelled, beats an empty screen.
+#[tokio::test]
+async fn rosters_fall_back_to_the_last_copy_on_disk() {
+    let engine = engine("rosters-outage");
+    let league = league("league-2026", None);
+
+    let first = {
+        let _state_up = STATE_GATE.read().await;
+        engine
+            .load_season(&league, Some("user-a"), true)
+            .await
+            .expect("the first load has every endpoint")
+    };
+    assert_eq!(first.rosters.len(), 2);
+
+    let outage = STATE_GATE.write().await;
+    ROSTERS_ARE_DOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+    let stale = engine
+        .load_season(&league, Some("user-a"), true)
+        .await
+        .expect("the cached rosters must keep the season loadable");
+    ROSTERS_ARE_DOWN.store(false, std::sync::atomic::Ordering::SeqCst);
+    drop(outage);
+
+    assert_eq!(stale.rosters.len(), 2, "the cached rosters were not used");
+    assert!(
+        stale
+            .warnings
+            .iter()
+            .any(|w| w.contains("rosters could not be refreshed")),
+        "the fallback has to admit itself: {:?}",
+        stale.warnings
+    );
+    assert!(
+        stale.sources.rosters.error.is_some(),
+        "a roster list served off disk must not be stamped as a live source"
     );
     cleanup(engine);
 }

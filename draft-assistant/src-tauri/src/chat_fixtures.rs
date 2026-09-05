@@ -137,3 +137,23 @@ pub fn draft_fixture() -> DraftView {
         },
     }
 }
+
+/// The same league with a full board: forty players, tier alerts and the last
+/// eight picks, which is what a real question on draft night is answered
+/// against. The small fixture above pins single lines; this one is for
+/// anything that measures how big the prompt is.
+pub fn full_board_fixture() -> DraftView {
+    let mut view = draft_fixture();
+    view.available = (11..=50)
+        .map(|rank| {
+            player(
+                rank,
+                &format!("Player Number {rank}"),
+                ["WR", "RB", "QB", "TE"][(rank % 4) as usize],
+                260.0 - f64::from(rank),
+            )
+        })
+        .collect();
+    view.data_health.board_size = 40;
+    view
+}

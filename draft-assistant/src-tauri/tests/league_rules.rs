@@ -322,3 +322,63 @@ fn a_player_the_dictionary_spells_in_parts_is_not_shown_as_an_id() {
     assert_eq!(v.recent_picks[0].position, "K");
     assert_eq!(v.rosters[0].players[0].name, "Jane Kicker");
 }
+
+/// The last pick of the night never reached the screen. "Has this happened?"
+/// is `pick_no < current_pick`, and a finished draft parked `current_pick` on
+/// the final pick — so that one pick was permanently in the future: absent
+/// from the activity feed, invisible to the position run, and missing from
+/// the recent list every roster is read beside.
+#[test]
+fn the_final_pick_of_a_finished_draft_is_on_the_feed() {
+    let (mut loaded, config) = league();
+    // Four teams over six rounds is a 24-pick board. Picks 1..=20 are players
+    // the fixture board does not carry, so they have no position and cannot
+    // colour the run; 21..=24 are four wideouts in a row.
+    let mut picks: Vec<Pick> = (1..=20).map(|n| pick(n, &format!("x{n}"), false)).collect();
+    picks.extend(
+        ["w1", "w2", "w3", "w4"]
+            .iter()
+            .enumerate()
+            .map(|(i, id)| pick(21 + i as u32, id, false)),
+    );
+    loaded.api_picks = picks;
+
+    let v = view(&loaded, &config);
+    assert_eq!(v.draft.total_picks_made, 24, "the board is full");
+    assert_eq!(v.draft.status, "complete");
+    // One past the board, so every pick that was made counts as made.
+    assert_eq!(v.draft.current_pick, 25);
+    assert_eq!(
+        v.recent_picks.first().map(|p| p.pick_no),
+        Some(24),
+        "the winning pick of the night: {:?}",
+        v.recent_picks
+    );
+    assert_eq!(
+        v.recent_picks.first().map(|p| p.player_id.as_str()),
+        Some("w4")
+    );
+    // Four wideouts inside the last six picks — and the fourth is pick 24,
+    // so without it there is no run at all.
+    let run = v.position_run.expect("the closing run of wideouts");
+    assert_eq!((run.position.as_str(), run.count), ("WR", 4));
+
+    // Nothing is on the clock and nothing is mine any more.
+    assert!(!v.draft.is_my_pick);
+    assert!(v.draft.my_next_picks.is_empty());
+    assert_eq!(v.draft.picks_until_mine, None);
+    assert_eq!(v.draft.clock_deadline_ms, None);
+    // The clock still rests on the manager who closed the draft out rather
+    // than on a slot from a round that does not exist.
+    assert_eq!(
+        v.draft.on_clock_slot, 1,
+        "round 6 runs backwards, so pick 24 is slot 1"
+    );
+
+    // One pick short of the end, the last made pick is still the newest and
+    // the clock is genuinely on 24.
+    loaded.api_picks.pop();
+    let v = view(&loaded, &config);
+    assert_eq!(v.draft.current_pick, 24);
+    assert_eq!(v.recent_picks.first().map(|p| p.pick_no), Some(23));
+}

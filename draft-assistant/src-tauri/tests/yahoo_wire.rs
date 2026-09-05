@@ -25,6 +25,7 @@ const AUCTION: &str = include_str!("fixtures/yahoo/draft_results_auction.json");
 const PLAYERS_0: &str = include_str!("fixtures/yahoo/players_page_0.json");
 const PLAYERS_1: &str = include_str!("fixtures/yahoo/players_page_1.json");
 const ROSTER: &str = include_str!("fixtures/yahoo/team_roster.json");
+const ROSTERS: &str = include_str!("fixtures/yahoo/teams_rosters.json");
 const LEAGUE_KEY: &str = "449.l.12345";
 
 const SECRET: &str = "top-secret-client-secret";
@@ -67,6 +68,8 @@ fn fixture_route(request: &Request) -> Reply {
         Reply::ok(USER_LEAGUES)
     } else if path.ends_with("/settings") {
         Reply::ok(LEAGUE)
+    } else if path.ends_with("/teams;out=roster") {
+        Reply::ok(ROSTERS)
     } else if path.ends_with("/teams") {
         Reply::ok(TEAMS)
     } else if path.ends_with("/draftresults") {
@@ -236,6 +239,31 @@ async fn a_team_roster_loads_through_the_team_resource() {
         stub.requests()[0].path(),
         "/fantasy/v2/team/449.l.12345.t.1/roster"
     );
+}
+
+#[tokio::test]
+async fn every_teams_roster_loads_in_one_call_with_the_keeper_flags_on_it() {
+    // The failure this prevents: keepers were read off `draftresults`, which
+    // the live resource does not send them on, so a keeper league's kept
+    // players were drawn as ordinary picks. This is the resource that says.
+    let stub = serve(fixture_route);
+    let client = client_for(&stub, live_tokens());
+    let rosters = client
+        .league_rosters(LEAGUE_KEY)
+        .await
+        .expect("the rosters load");
+    assert_eq!(rosters.len(), 3, "one roster per team");
+    assert_eq!(
+        stub.requests()[0].path(),
+        "/fantasy/v2/league/449.l.12345/teams;out=roster",
+        "the plain team list carries no rosters and no keeper flags"
+    );
+    let kept: Vec<&str> = rosters
+        .iter()
+        .filter(|player| player.is_keeper == Some(true))
+        .map(|player| player.player_key.as_str())
+        .collect();
+    assert_eq!(kept, vec!["449.p.100002"]);
 }
 
 #[tokio::test]

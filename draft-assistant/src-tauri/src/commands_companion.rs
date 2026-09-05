@@ -2,6 +2,7 @@
 
 use crate::companion::routes_chat::{ask, AskError};
 use crate::companion::{net, CompanionServer, Device};
+use crate::engine::AppConfig;
 use crate::shared_chat::{EntryDevice, SharedChatThread};
 use crate::state::AppState;
 use std::sync::Arc;
@@ -56,28 +57,69 @@ pub async fn companion_enable(
         .await
         .companion_port
         .unwrap_or(net::DEFAULT_PORT);
-    let port = companion.start(wanted).await?;
-    if wanted != port {
-        let mut config = state.config.lock().await;
-        config.companion_port = Some(port);
-        // A port that could not be written down is not a reason to refuse the
-        // connection the user just asked for; it only means the next launch
-        // starts from the default again.
-        if let Err(e) = state.engine.save_config(&config) {
-            crate::applog::warn(format!(
-                "could not remember the phone connection's port: {e}"
-            ));
-        }
-    }
+    let port = companion
+        .start(wanted)
+        .await
+        .map_err(crate::applog::failing("companion_enable", String::new()))?;
+    remember(&state, Some(port), true).await;
     Ok(status_of(&companion))
 }
 
 #[tauri::command]
 pub async fn companion_disable(
+    state: State<'_, AppState>,
     companion: State<'_, Arc<CompanionServer>>,
 ) -> Result<CompanionStatus, String> {
     companion.stop();
+    remember(&state, None, false).await;
     Ok(status_of(&companion))
+}
+
+/// Write down whether the phone connection is on, and which port it took.
+///
+/// A setting that could not be written down is not a reason to refuse the
+/// connection the user just asked for; it only means the next launch starts
+/// from the defaults again.
+async fn remember(state: &AppState, port: Option<u16>, enabled: bool) {
+    let mut config = state.config.lock().await;
+    if let Some(port) = port {
+        config.companion_port = Some(port);
+    }
+    if config.companion_enabled == enabled && port.is_none() {
+        return;
+    }
+    config.companion_enabled = enabled;
+    if let Err(e) = state.engine.save_config(&config) {
+        crate::applog::warn(format!("could not remember the phone connection: {e}"));
+    }
+}
+
+/// The port to bring the companion up on at launch, when the user left it on.
+///
+/// Pure, and separate from [`autostart`], so what "was it on?" means can be
+/// tested without a server: `None` is the whole of "leave it off".
+pub fn autostart_port(config: &AppConfig) -> Option<u16> {
+    config
+        .companion_enabled
+        .then(|| config.companion_port.unwrap_or(net::DEFAULT_PORT))
+}
+
+/// Bring the companion back up at launch on the port [`autostart_port`] chose.
+///
+/// Started on the async runtime rather than awaited: setup must not block on a
+/// socket, and a phone that reconnects a second late is a phone that
+/// reconnects. A server that will not start is logged, not fatal — the app
+/// itself works with no companion at all.
+pub fn autostart(companion: &Arc<CompanionServer>, port: Option<u16>) {
+    let Some(port) = port else {
+        return;
+    };
+    let companion = companion.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = companion.start(port).await {
+            crate::applog::warn(format!("could not restart the phone connection: {e}"));
+        }
+    });
 }
 
 /// A new pairing code, and every paired device thrown off.
@@ -137,6 +179,24 @@ pub async fn shared_chat_send(
     Ok(())
 }
 
+/// Empty the shared thread for a screen, as the host machine.
+///
+/// The league is the loaded one, the same league `shared_chat_get` reads and
+/// `shared_chat_send` asks about: there is one shared thread per screen per
+/// league and it is the board on screen that says which.
+#[tauri::command]
+pub async fn shared_chat_reset(
+    companion: State<'_, Arc<CompanionServer>>,
+    screen: String,
+) -> Result<SharedChatThread, String> {
+    let srv = companion.srv()?;
+    let screen = screen_name(&screen)?;
+    let league_id = crate::companion::routes_chat::active_league(&srv).await?;
+    let thread = srv.chat.reset(&league_id, screen).await;
+    srv.announce(&thread);
+    Ok(thread)
+}
+
 fn screen_name(screen: &str) -> Result<&'static str, String> {
     match screen {
         "draft" => Ok("draft"),
@@ -175,7 +235,40 @@ fn from_command(program: &str, args: &[&str]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_host_name, from_command, screen_name};
+    use super::{autostart_port, default_host_name, from_command, screen_name};
+    use crate::companion::net::DEFAULT_PORT;
+    use crate::engine::AppConfig;
+
+    #[test]
+    fn the_connection_comes_back_on_the_port_it_was_left_on() {
+        let mut config = AppConfig::default();
+        // Off is off, whatever port is written down.
+        assert_eq!(autostart_port(&config), None);
+        config.companion_port = Some(7881);
+        assert_eq!(autostart_port(&config), None);
+        config.companion_enabled = true;
+        assert_eq!(autostart_port(&config), Some(7881));
+        // Left on before a port was ever remembered: the default.
+        config.companion_port = None;
+        assert_eq!(autostart_port(&config), Some(DEFAULT_PORT));
+    }
+
+    #[test]
+    fn whether_the_connection_was_on_survives_being_written_and_read_back() {
+        // The failure this prevents: an older config file, written before the
+        // flag existed, must still load — and read as off.
+        let older: AppConfig = serde_json::from_str("{}").expect("an empty config loads");
+        assert!(!older.companion_enabled);
+        let config = AppConfig {
+            companion_enabled: true,
+            companion_port: Some(7879),
+            ..Default::default()
+        };
+        let text = serde_json::to_string(&config).expect("the config writes");
+        let back: AppConfig = serde_json::from_str(&text).expect("the config reads back");
+        assert!(back.companion_enabled);
+        assert_eq!(back.companion_port, Some(7879));
+    }
 
     #[test]
     fn a_host_always_has_a_name() {

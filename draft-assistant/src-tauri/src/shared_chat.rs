@@ -233,19 +233,36 @@ impl SharedChat {
     }
 
     /// The thread as the model should see it: the questions and the answers
-    /// that worked, in order. Failed turns are left out — an entry saying the
-    /// API key is missing is not something to ask Claude to follow on from.
+    /// that worked, in order, roles alternating.
     pub async fn messages(&self, league_id: &str, screen: &str) -> Vec<ChatMessage> {
         let thread = self.thread(league_id, screen).await;
+        alternating(&thread.entries)
+    }
+
+    /// Empty one screen's thread.
+    ///
+    /// The only way to start over. The thread keeps two hundred entries, every
+    /// paired device adds to the same one, and a phone has no saved-chats
+    /// picker to open a new one from — so before this, a thread that had gone
+    /// somewhere unhelpful stayed there until somebody deleted the file.
+    ///
+    /// `busy` is deliberately left as it was: an answer may still be running,
+    /// and [`SharedChat::finish`] is what clears the flag. Its entry lands in
+    /// the emptied thread, where [`alternating`] leaves it out of the next
+    /// request for opening on an assistant turn.
+    pub async fn reset(&self, league_id: &str, screen: &str) -> SharedChatThread {
+        let mut guard = self.inner.lock().await;
+        let path = self.path_for(league_id);
+        let live = load_into(&mut guard, &path, league_id);
+        live.stored.screen_mut(screen).clear();
+        let thread = SharedChatThread {
+            league_id: league_id.to_string(),
+            screen: screen.to_string(),
+            busy: live.busy(screen),
+            entries: Vec::new(),
+        };
+        save(&path, &live.stored);
         thread
-            .entries
-            .into_iter()
-            .filter(|e| e.error.is_none() && !e.text.trim().is_empty())
-            .map(|e| ChatMessage {
-                role: e.role,
-                content: e.text,
-            })
-            .collect()
     }
 
     /// Forget everything held in memory, so the next read comes off disk.
@@ -254,6 +271,37 @@ impl SharedChat {
     pub async fn forget(&self) {
         self.inner.lock().await.clear();
     }
+}
+
+/// The entries as an alternating conversation.
+///
+/// A failed turn used to leave its question behind: the error entry was
+/// filtered out and the question that caused it was not, so the next request
+/// carried two user turns in a row and the API refused it. One failure — a
+/// missing key, a timeout — broke that league's shared thread for good, and
+/// nothing on the phone could clear it. A question whose answer failed goes
+/// out with the answer, and any two entries of the same role in a row collapse
+/// to the later one, which is the one with an answer still to come.
+///
+/// The conversation also never opens on an assistant turn, which is a 400.
+pub(crate) fn alternating(entries: &[SharedEntry]) -> Vec<ChatMessage> {
+    let mut out: Vec<ChatMessage> = Vec::new();
+    for entry in entries {
+        if entry.error.is_some() || entry.text.trim().is_empty() {
+            continue;
+        }
+        if out.last().is_some_and(|last| last.role == entry.role) {
+            out.pop();
+        }
+        if out.is_empty() && entry.role != "user" {
+            continue;
+        }
+        out.push(ChatMessage {
+            role: entry.role.clone(),
+            content: entry.text.clone(),
+        });
+    }
+    out
 }
 
 /// The league's threads, read off disk if this is the first time.

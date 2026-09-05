@@ -27,6 +27,9 @@
     isRevokedClose,
     needsTicker,
     createTicker,
+    createHeartbeat,
+    clockOffset,
+    needsRevive,
   } = window.Companion;
 
   // ----------------------------------------------------------------- DOM --
@@ -76,7 +79,6 @@
     let state = initialState();
     let socket = null;
     let attempt = 0;
-    let pingTimer = null;
     // Private browsing can refuse storage: the page works, it just forgets.
     const store = (key, value) => {
       try {
@@ -169,6 +171,18 @@
     });
 
     // ---- websocket -----------------------------------------------------
+    // Pings that have to be answered. A socket the phone's network dropped
+    // while the screen was off stays open as far as the page can see, so
+    // without this the page sat on a dead connection showing live data.
+    const heartbeat = createHeartbeat(window, {
+      ping: () => {
+        if (socket && socket.readyState === 1) socket.send(JSON.stringify({ type: "ping" }));
+      },
+      silent: () => {
+        // Closing runs `onclose`, which is already the reconnect path.
+        if (socket) socket.close();
+      },
+    });
     function connect() {
       if (!state.token) return;
       const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -176,9 +190,7 @@
       socket.onopen = () => {
         attempt = 0;
         dispatch({ type: "connection", status: "online" });
-        pingTimer = window.setInterval(() => {
-          if (socket && socket.readyState === 1) socket.send(JSON.stringify({ type: "ping" }));
-        }, 25000);
+        heartbeat.start();
       };
       socket.onmessage = (event) => {
         let frame = null;
@@ -187,11 +199,18 @@
         } catch {
           return;
         }
-        if (frame?.type === "revoked") dropToken();
+        if (frame?.type === "pong") heartbeat.pong();
+        else if (frame?.type === "hello") {
+          heartbeat.pong();
+          dispatch({
+            type: "clock-offset",
+            offset: clockOffset(frame.payload?.server_now_ms, Date.now()),
+          });
+        } else if (frame?.type === "revoked") dropToken();
         else if (LIVE.includes(frame?.type)) dispatch({ type: frame.type, payload: frame.payload });
       };
       socket.onclose = (event) => {
-        window.clearInterval(pingTimer);
+        heartbeat.stop();
         if (!state.token) return;
         // The host restarted or was revoked: retrying with this token would
         // fail for ever, so the page asks for the code again instead.
@@ -204,6 +223,31 @@
         attempt += 1;
       };
     }
+
+    // A phone that was asleep, in flight mode or off the Wi-Fi wakes with a
+    // socket the operating system has already thrown away. Nothing errors, so
+    // the page has to ask for itself the moment it is looked at again.
+    const revive = () => {
+      if (!state.token || state.screen !== "app") return;
+      if (!needsRevive(socket)) return;
+      if (socket) {
+        // Detached first: its `onclose` would otherwise schedule a reconnect
+        // of its own and the page would end up with two sockets.
+        socket.onclose = null;
+        socket.onmessage = null;
+        socket.close();
+      }
+      heartbeat.stop();
+      socket = null;
+      attempt = 0;
+      dispatch({ type: "connection", status: "reconnecting" });
+      void loadEverything();
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") revive();
+    });
+    window.addEventListener("pageshow", revive);
+    window.addEventListener("online", revive);
 
     // ---- chat ----------------------------------------------------------
     /** Which thread the chat block shows: the Week tab is always the season. */
@@ -240,7 +284,8 @@
       const d = view?.draft;
       if (!d) spans(strip, ["muted", "No draft is loaded on the host."]);
       else {
-        const clock = formatClock(d.clock_deadline_ms, Date.now());
+        // The host's clock, not this phone's: the deadline is the host's.
+        const clock = formatClock(d.clock_deadline_ms, Date.now() + state.offset);
         spans(
           strip,
           ["headline", `Pick ${d.current_pick} · round ${d.current_round}`],

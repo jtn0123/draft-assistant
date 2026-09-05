@@ -233,3 +233,64 @@ async fn revoking_tells_every_device_and_then_drops_it() {
     assert_eq!(status, 401);
     assert_eq!(body["error"], "not paired");
 }
+
+#[tokio::test]
+async fn the_opening_frames_carry_the_host_s_own_clock() {
+    let host = host("ws-hello").await;
+    let paired = host.pair_ok("Rob's iPhone", "phone").await;
+    let mut socket = open(&host.base, &paired.token).await;
+    // The failure this prevents: a phone whose own clock is minutes out shows
+    // a pick timer that is minutes wrong, because the deadline is the host's.
+    let hello = next_of(&mut socket, "hello").await;
+    let server_now = hello["payload"]["server_now_ms"]
+        .as_u64()
+        .expect("the host says what time it is");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_millis() as u64;
+    assert!(server_now.abs_diff(now) < 60_000, "{server_now} vs {now}");
+    assert_eq!(hello["payload"]["host_name"], "Justin's Mac");
+}
+
+/// The whole failure: a phone pairs again — a new token, the same device id —
+/// and the socket the old token opened goes on reading the draft, because
+/// every check on that socket was about the device and not the token.
+#[tokio::test]
+async fn pairing_again_closes_the_socket_the_old_token_opened() {
+    let host = host("ws-repair").await;
+    let first = host.pair_ok("Rob's iPhone", "phone").await;
+    let mut old = open(&host.base, &first.token).await;
+    next_of(&mut old, "devices").await;
+
+    let second = host
+        .pair_again("Rob's iPhone", "phone", Some(&first.device_id))
+        .await;
+    assert_eq!(second.device_id, first.device_id, "still the same phone");
+    assert_ne!(second.token, first.token, "the token was not replaced");
+
+    // The old socket is told it is finished, with the same code that sends a
+    // phone back to the pairing screen.
+    let mut closed = false;
+    for _ in 0..20 {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), old.next()).await {
+            Ok(Some(Ok(Message::Close(Some(close))))) => {
+                assert_eq!(u16::from(close.code), 4401, "{close:?}");
+                closed = true;
+                break;
+            }
+            Ok(None) | Ok(Some(Err(_))) => {
+                closed = true;
+                break;
+            }
+            Ok(Some(Ok(_))) => continue,
+            Err(_) => break,
+        }
+    }
+    assert!(closed, "the socket on the replaced token stayed open");
+    // And the token itself is worthless everywhere else too.
+    assert_eq!(host.get("/api/state", &first.token).await.0, 401);
+    // The new token is the live one, and its socket works.
+    let mut fresh = open(&host.base, &second.token).await;
+    assert_eq!(next_of(&mut fresh, "devices").await["type"], "devices");
+}

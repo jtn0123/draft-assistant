@@ -5,6 +5,7 @@
 //! Split out of `commands_draft` so that file stays a list of commands.
 
 use super::*;
+use crate::traded_picks::{self, TradedPick};
 
 /// What a tick says when Sleeper hands back an empty pick list for a draft
 /// that already has picks on it. `/picks` answers `null` now and then, which
@@ -71,27 +72,80 @@ pub(super) fn draft_update(draft: Option<Result<Draft, String>>) -> DraftUpdate 
     }
 }
 
-/// One refresh of the picks — and, where the platform has one to refresh, the
-/// draft resource beside them.
+/// Everything one tick asked the platform for.
+pub(super) struct TickFetch {
+    /// The pick list. The only half that decides whether a tick failed.
+    pub picks: Result<Vec<Pick>, String>,
+    /// The draft resource, where the platform has one.
+    pub draft: Option<Result<Draft, String>>,
+    /// The trade list, where the platform has one.
+    pub traded: Option<Result<Vec<TradedPick>, String>>,
+}
+
+/// What one tick should do with the `/traded_picks` list it asked for.
 ///
-/// Sleeper serves both from the draft id. Yahoo has no draft resource at all:
-/// the picks come from `draftresults` and the team list, and the draft's shape
-/// was settled at load time, so there is nothing to re-read and `None` is
-/// returned in its place.
+/// Trades are agreed during a draft, not only before it. The list used to be
+/// read once at load, so a pick traded at 8:40pm still drew the old owner on
+/// the clock and still counted towards the old owner's "my next picks" for
+/// the rest of the night — the one moment in the season when getting that
+/// wrong costs a pick.
+///
+/// A `/traded_picks` call that fails is a note, not a failed tick, for the
+/// same reason `/draft` is: the list already on screen stays right, and one
+/// sulking endpoint must not stretch the poll or grey the sync badge.
+pub(super) fn traded_update(
+    traded: Option<Result<Vec<TradedPick>, String>>,
+) -> Result<Option<Vec<TradedPick>>, String> {
+    match traded {
+        None => Ok(None),
+        Some(Ok(traded)) => Ok(Some(traded)),
+        Some(Err(error)) => Err(format!(
+            "traded picks not refreshed, keeping the last list: {error}"
+        )),
+    }
+}
+
+/// Adopt a freshly fetched trade list, and say whether it changed who picks
+/// where. Only a changed ownership map is worth redrawing the board for: the
+/// array itself comes back in whatever order Sleeper feels like.
+pub(super) fn adopt_traded(loaded: &mut LoadedLeague, traded: Vec<TradedPick>) -> bool {
+    let season = loaded.draft.season.clone();
+    let before = traded_picks::ownership_map(season.as_deref(), &loaded.traded_picks);
+    let after = traded_picks::ownership_map(season.as_deref(), &traded);
+    loaded.traded_picks = traded;
+    before != after
+}
+
+/// One refresh of the picks — and, where the platform has them to refresh,
+/// the draft resource and the trade list beside them.
+///
+/// Sleeper serves all three from the draft id. Yahoo has no draft resource at
+/// all and no traded-pick list: the picks come from `draftresults` and the
+/// team list, and the draft's shape was settled at load time, so there is
+/// nothing to re-read and `None` is returned in their place.
 pub(super) async fn fetch_tick(
     engine: &Engine,
     yahoo: &YahooState,
     draft_id: &str,
     yahoo_ids: &HashMap<String, String>,
-) -> (Result<Vec<Pick>, String>, Option<Result<Draft, String>>) {
+) -> TickFetch {
     if is_yahoo_key(draft_id) {
-        return (yahoo_picks(engine, yahoo, draft_id, yahoo_ids).await, None);
+        return TickFetch {
+            picks: yahoo_picks(engine, yahoo, draft_id, yahoo_ids).await,
+            draft: None,
+            traded: None,
+        };
     }
-    let (picks, draft) = tokio::join!(engine.client.picks(draft_id), engine.client.draft(draft_id));
-    (
-        picks.map_err(to_message),
-        Some(draft.map_err(|error| error.to_string())),
-    )
+    let (picks, draft, traded) = tokio::join!(
+        engine.client.picks(draft_id),
+        engine.client.draft(draft_id),
+        engine.client.traded_picks(draft_id)
+    );
+    TickFetch {
+        picks: picks.map_err(to_message),
+        draft: Some(draft.map_err(|error| error.to_string())),
+        traded: Some(traded.map_err(to_message)),
+    }
 }
 
 /// What one tick needs to know about the league on screen before it goes out.
@@ -99,12 +153,29 @@ pub(super) fn tick_target(loaded: &LoadedLeague) -> (String, HashMap<String, Str
     (loaded.draft.draft_id.clone(), loaded.yahoo_ids.clone())
 }
 
-/// Take the pick back out of memory after its write failed, leaving what is
-/// on screen matching what is on disk.
-pub(super) async fn undo_pick_in_memory(state: &AppState, draft_id: &str) {
+/// Take one specific pick back out of memory after its write failed, leaving
+/// what is on screen matching what is on disk.
+///
+/// It used to `pop()`. The write happens with the `loaded` lock let go, and a
+/// poll tick landing in that window reconciles manual picks the API has
+/// caught up with straight out of the list — so the last element was often
+/// not the pick that failed. Popping then deleted an unrelated pick the user
+/// had typed and left the failed one on the board, which is both halves of
+/// the bug at once.
+pub(super) async fn undo_pick_in_memory(state: &AppState, draft_id: &str, pick: &Pick) {
     let mut guard = state.loaded.lock().await;
     if let Some(loaded) = guard.as_mut().filter(|l| l.draft.draft_id == draft_id) {
-        loaded.manual_picks.pop();
+        remove_entered(&mut loaded.manual_picks, pick);
+    }
+}
+
+/// Take one named pick out of a manual-pick list, and nothing else.
+pub(super) fn remove_entered(picks: &mut Vec<Pick>, entered: &Pick) {
+    if let Some(at) = picks
+        .iter()
+        .position(|p| p.pick_no == entered.pick_no && p.player_id == entered.player_id)
+    {
+        picks.remove(at);
     }
 }
 
@@ -154,7 +225,7 @@ pub(super) async fn save_keepers_off_lock(
 /// battery for nothing. Each consecutive failure doubles the wait, up to
 /// eight times the interval and never more than a minute; one success puts it
 /// straight back to the interval the user asked for.
-pub(super) fn backoff_secs(interval: u64, failures: u32) -> u64 {
+pub(crate) fn backoff_secs(interval: u64, failures: u32) -> u64 {
     const MAX_SECS: u64 = 60;
     let factor = 1u64 << failures.min(3);
     interval.saturating_mul(factor).min(MAX_SECS)
@@ -162,8 +233,10 @@ pub(super) fn backoff_secs(interval: u64, failures: u32) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{backoff_secs, draft_update, DraftUpdate};
-    use crate::sleeper::{Draft, DraftSettings};
+    use super::{
+        backoff_secs, draft_update, remove_entered, traded_update, DraftUpdate, TradedPick,
+    };
+    use crate::sleeper::{Draft, DraftSettings, Pick};
 
     fn draft(teams: u32, rounds: u32) -> Draft {
         Draft {
@@ -227,5 +300,64 @@ mod tests {
         assert_eq!(backoff_secs(20, 3), 60);
         assert_eq!(backoff_secs(60, 0), 60);
         assert_eq!(backoff_secs(u64::MAX, 3), 60);
+    }
+
+    fn manual(pick_no: u32, player_id: &str) -> Pick {
+        Pick {
+            round: 1,
+            pick_no,
+            draft_slot: 1,
+            player_id: player_id.into(),
+            picked_by: None,
+            metadata: None,
+            is_keeper: None,
+        }
+    }
+
+    /// The pick whose write failed used to be taken back with `pop()`. The
+    /// write happens with the `loaded` lock let go, so a poll tick landing in
+    /// that window can reconcile entries out of the list first — and then the
+    /// last element is somebody else's pick. That deleted a pick the user had
+    /// typed and left the failed one on the board.
+    #[test]
+    fn taking_a_failed_pick_back_removes_that_pick_and_not_the_last_one() {
+        let failed = manual(12, "rb-1");
+        // A reconcile ran while the write was in flight and dropped the
+        // failed pick's neighbour, then the user typed another one.
+        let mut picks = vec![manual(4, "wr-9"), failed.clone(), manual(15, "te-3")];
+        remove_entered(&mut picks, &failed);
+        assert_eq!(
+            picks.iter().map(|p| p.pick_no).collect::<Vec<_>>(),
+            vec![4, 15],
+            "the failed pick goes, and only the failed pick"
+        );
+        // And if the reconcile already removed it, nothing else is taken.
+        remove_entered(&mut picks, &failed);
+        assert_eq!(picks.len(), 2);
+        // Same number, different player, is a different pick.
+        remove_entered(&mut picks, &manual(15, "somebody-else"));
+        assert_eq!(picks.len(), 2);
+    }
+
+    /// A `/traded_picks` that does not answer must not count against the poll
+    /// health, for the same reason `/draft` does not: the list already on
+    /// screen is still right, and one sulking endpoint would grey the sync
+    /// badge and stretch the tick to 24 seconds while picks arrive on time.
+    #[test]
+    fn a_failed_traded_picks_call_is_a_note_not_a_failed_tick() {
+        let note = traded_update(Some(Err("Sleeper answered 500".into())))
+            .expect_err("a failed call is reported");
+        assert!(note.contains("Sleeper answered 500"), "{note}");
+        assert!(note.contains("keeping the last list"), "{note}");
+        // Yahoo has no list to refresh at all.
+        assert!(matches!(traded_update(None), Ok(None)));
+        let fresh = vec![TradedPick {
+            season: "2026".into(),
+            round: 3,
+            roster_id: 10,
+            owner_id: 20,
+            previous_owner_id: Some(10),
+        }];
+        assert!(matches!(traded_update(Some(Ok(fresh))), Ok(Some(list)) if list.len() == 1));
     }
 }

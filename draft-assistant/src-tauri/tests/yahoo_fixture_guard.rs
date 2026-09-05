@@ -35,24 +35,87 @@ enum Shape {
     DraftResultsEmpty,
     /// A page of `/players`, or a team roster -- Yahoo returns the same shape.
     Players,
+    /// `teams;out=roster`: every team's roster in one payload, which is where
+    /// the keeper flag actually lives.
+    TeamsWithRosters,
+}
+
+/// Where a fixture's *shape* came from.
+///
+/// This is not decoration. A hand-written fixture is not evidence that Yahoo
+/// sends a field: the keeper flag on a draft result and the budget in an
+/// auction's settings were both believed for exactly as long as the only
+/// place they appeared was a file in this directory, and both turned out to
+/// be absent from the live resource often enough to matter. Anything read out
+/// of a `HandWritten` fixture needs a fallback for the leagues that do not
+/// send it, and the fallback needs its own test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Source {
+    /// The shape is a real Yahoo response's, with the names, ids and numbers
+    /// replaced by fictional ones.
+    RecordedShape,
+    /// Assembled by hand from a recorded fixture of the same resource, to
+    /// stand in for a league nobody had a recording of.
+    HandWritten,
 }
 
 /// Every fixture in the directory, and what it is. The walk below fails on any
 /// file that is not in this list, which is the point: adding a fixture means
 /// saying what it holds.
-const FIXTURES: &[(&str, Shape)] = &[
-    ("user_leagues.json", Shape::UserLeagues),
-    ("league_settings.json", Shape::League),
-    ("league_settings_auction.json", Shape::League),
-    ("teams.json", Shape::Teams),
-    ("draft_results_predraft.json", Shape::DraftResultsEmpty),
-    ("draft_results_partial.json", Shape::DraftResults),
-    ("draft_results_complete.json", Shape::DraftResults),
-    ("draft_results_auction.json", Shape::DraftResults),
-    ("draft_results_keepers.json", Shape::DraftResults),
-    ("players_page_0.json", Shape::Players),
-    ("players_page_1.json", Shape::Players),
-    ("team_roster.json", Shape::Players),
+const FIXTURES: &[(&str, Shape, Source)] = &[
+    (
+        "user_leagues.json",
+        Shape::UserLeagues,
+        Source::RecordedShape,
+    ),
+    ("league_settings.json", Shape::League, Source::RecordedShape),
+    // No auction league was recorded: this one is the plain settings payload
+    // with `is_auction_draft` and `draft_budget` written into it. Yahoo does
+    // not always send the budget, which is why `yahoo_map::derived_budget`
+    // exists and is tested against results that carry no budget at all.
+    (
+        "league_settings_auction.json",
+        Shape::League,
+        Source::HandWritten,
+    ),
+    ("teams.json", Shape::Teams, Source::RecordedShape),
+    (
+        "teams_rosters.json",
+        Shape::TeamsWithRosters,
+        Source::RecordedShape,
+    ),
+    (
+        "draft_results_predraft.json",
+        Shape::DraftResultsEmpty,
+        Source::RecordedShape,
+    ),
+    (
+        "draft_results_partial.json",
+        Shape::DraftResults,
+        Source::RecordedShape,
+    ),
+    (
+        "draft_results_complete.json",
+        Shape::DraftResults,
+        Source::RecordedShape,
+    ),
+    // Costs written onto a recorded result set by hand.
+    (
+        "draft_results_auction.json",
+        Shape::DraftResults,
+        Source::HandWritten,
+    ),
+    // `is_keeper` written onto a recorded result set by hand. The live
+    // `draftresults` resource does not send it, which is why the keeper flags
+    // are read off `teams_rosters.json`'s shape instead.
+    (
+        "draft_results_keepers.json",
+        Shape::DraftResults,
+        Source::HandWritten,
+    ),
+    ("players_page_0.json", Shape::Players, Source::RecordedShape),
+    ("players_page_1.json", Shape::Players, Source::RecordedShape),
+    ("team_roster.json", Shape::Players, Source::RecordedShape),
 ];
 
 fn fixture_dir() -> std::path::PathBuf {
@@ -86,7 +149,7 @@ fn load(name: &str) -> Value {
 /// The list and the directory describe the same set of files.
 #[test]
 fn every_fixture_on_disk_is_accounted_for_and_every_listed_one_exists() {
-    let mut listed: Vec<&str> = FIXTURES.iter().map(|(name, _)| *name).collect();
+    let mut listed: Vec<&str> = FIXTURES.iter().map(|(name, _, _)| *name).collect();
     listed.sort_unstable();
     let on_disk = files_on_disk();
     let on_disk: Vec<&str> = on_disk.iter().map(String::as_str).collect();
@@ -119,7 +182,10 @@ fn a_leagues_listing_parses_into_leagues_that_can_be_asked_for() {
 
 #[test]
 fn the_league_resource_parses_with_the_settings_the_mapper_needs() {
-    for (name, _) in FIXTURES.iter().filter(|(_, shape)| *shape == Shape::League) {
+    for (name, ..) in FIXTURES
+        .iter()
+        .filter(|(_, shape, _)| *shape == Shape::League)
+    {
         one_league_parses(name);
     }
 }
@@ -150,11 +216,55 @@ fn one_league_parses(name: &str) {
         "no stat_modifiers -- nothing could be scored"
     );
     // An auction board is unreadable without the budget the bids are
-    // measured against, so a fixture that records one has to carry it.
-    if league.is_auction_draft {
+    // measured against, so a fixture written to carry one has to carry it.
+    // Only a hand-written one is held to that: a recorded auction league may
+    // legitimately send no budget at all, and that is the case
+    // `yahoo_map::derived_budget` covers.
+    let hand_written = FIXTURES
+        .iter()
+        .any(|(file, _, source)| *file == name && *source == Source::HandWritten);
+    if league.is_auction_draft && hand_written {
         assert!(
             league.draft_budget.unwrap_or(0) > 0,
             "{name}: an auction league with no draft_budget"
+        );
+    }
+}
+
+/// The rosters payload is where a keeper is flagged, so it has to parse into
+/// players that carry the flag -- and into *every* team's, not just the first.
+#[test]
+fn the_rosters_payload_names_every_teams_players_and_says_who_is_kept() {
+    for (name, ..) in FIXTURES
+        .iter()
+        .filter(|(_, shape, _)| *shape == Shape::TeamsWithRosters)
+    {
+        let payload = load(name);
+        let teams = parse::teams(&payload);
+        assert!(teams.len() > 1, "{name}: fewer than two teams to walk");
+        let rosters = parse::rosters(&payload);
+        assert!(
+            rosters.len() >= teams.len(),
+            "{name}: {} players across {} teams -- the walk stopped at the first roster",
+            rosters.len(),
+            teams.len()
+        );
+        for player in &rosters {
+            assert!(
+                player.player_key.contains(".p."),
+                "{name}: a roster row with no player key: {:?}",
+                player.player_key
+            );
+        }
+        // The whole reason this resource is fetched: at least one row has to
+        // carry a keeper decision, or the fixture proves nothing.
+        assert!(
+            rosters.iter().any(|player| player.is_keeper == Some(true)),
+            "{name}: no player is flagged as kept"
+        );
+        assert!(
+            rosters.iter().any(|player| player.is_keeper.is_none()),
+            "{name}: every row carries a flag, so the silent case is untested"
         );
     }
 }
@@ -187,9 +297,9 @@ fn a_predraft_result_set_is_empty_rather_than_full_of_blanks() {
 
 #[test]
 fn every_recorded_draft_result_parses_into_ordered_picks() {
-    for (name, _) in FIXTURES
+    for (name, ..) in FIXTURES
         .iter()
-        .filter(|(_, shape)| *shape == Shape::DraftResults)
+        .filter(|(_, shape, _)| *shape == Shape::DraftResults)
     {
         let picks = parse::draft_results(&load(name));
         assert!(!picks.is_empty(), "{name} parsed to no picks");
@@ -224,9 +334,9 @@ fn every_recorded_draft_result_parses_into_ordered_picks() {
 
 #[test]
 fn every_player_page_parses_into_players_the_crosswalk_can_match_on() {
-    for (name, _) in FIXTURES
+    for (name, ..) in FIXTURES
         .iter()
-        .filter(|(_, shape)| *shape == Shape::Players)
+        .filter(|(_, shape, _)| *shape == Shape::Players)
     {
         let page = parse::players(&load(name));
         assert!(!page.players.is_empty(), "{name} parsed to no players");

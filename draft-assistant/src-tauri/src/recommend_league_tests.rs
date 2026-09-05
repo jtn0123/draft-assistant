@@ -5,7 +5,7 @@
 //! are the cases where the league disagrees with that default.
 
 use super::score::{score_candidate, Context};
-use super::tests::{entry, of_mode, player, recs, slots};
+use super::tests::{deep_full_board, entry, of_mode, player, recs, recs_on_board, slots};
 use super::*;
 use crate::board::AvailablePlayer;
 
@@ -69,8 +69,14 @@ fn a_superflex_league_wants_a_second_quarterback_and_does_not_dock_him() {
     );
     let have: HashMap<&str, u32> = HashMap::from([("QB", 1), ("RB", 1), ("WR", 1), ("TE", 1)]);
 
+    // What the league starts comes off the whole board, so this test hands
+    // one over: a one-player board cannot say how many quarterbacks a
+    // superflex league starts, and it is that number the discipline layer
+    // reads before calling anybody a backup.
+    let full = deep_full_board();
     let superflex = rules(&superflex_slots());
-    let inputs = RecommendInputs::new(&available, Some(&mine), &superflex, 5, 15, 50, 12);
+    let mut inputs = RecommendInputs::new(&available, Some(&mine), &superflex, 5, 15, 50, 12);
+    inputs.full_board = &full;
     let scored = score_candidate(
         &context(&inputs, have.clone()),
         &available[0],
@@ -91,7 +97,8 @@ fn a_superflex_league_wants_a_second_quarterback_and_does_not_dock_him() {
     // The same roster and the same board in a one-quarterback league: there he
     // really is a backup, and the two scores have to be a long way apart.
     let standard = RosterRules::new(&slots());
-    let inputs = RecommendInputs::new(&available, Some(&mine), &standard, 5, 15, 50, 12);
+    let mut inputs = RecommendInputs::new(&available, Some(&mine), &standard, 5, 15, 50, 12);
+    inputs.full_board = &full;
     let backup = score_candidate(&context(&inputs, have), &available[0], Mode::Balanced)
         .expect("a second QB in a one-QB league is depth, not disqualified");
     assert!(
@@ -107,8 +114,10 @@ fn a_third_quarterback_in_superflex_is_depth_not_a_disqualification() {
     // not refused outright the way the one-QB cap refused him.
     let available = vec![player("qb3", "QB", 200.0), player("wr9", "WR", 5.0)];
     let mine = roster_with(&["QB", "QB", "RB", "WR"], &[("FLEX", 1)]);
-    let deep = recs(
+    let full = deep_full_board();
+    let deep = recs_on_board(
         &available,
+        &full,
         Some(&mine),
         &rules(&superflex_slots()),
         8,
@@ -123,8 +132,9 @@ fn a_third_quarterback_in_superflex_is_depth_not_a_disqualification() {
     );
     // A fourth is still off the board — one spare beyond what the league starts.
     let mine = roster_with(&["QB", "QB", "QB", "RB"], &[("FLEX", 1)]);
-    let fourth = recs(
+    let fourth = recs_on_board(
         &available,
+        &full,
         Some(&mine),
         &rules(&superflex_slots()),
         8,
@@ -311,7 +321,7 @@ pub(super) fn context<'a>(
         need_pressure: 1.0,
         rounds_left: inputs.total_rounds - inputs.current_round + 1,
         median_cv: None,
-        demand: super::score::starting_demand(inputs.available, inputs.rules, inputs.teams),
+        demand: super::score::starting_demand(inputs.demand_pool(), inputs.rules, inputs.teams),
     }
 }
 

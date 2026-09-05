@@ -408,3 +408,58 @@ fn an_auction_league_answers_with_its_budget_and_what_each_pick_cost() {
     assert!(snake["costs"].as_object().expect("the costs").is_empty());
     s.finish();
 }
+
+#[test]
+fn a_player_kept_rather_than_drafted_is_marked_as_kept_and_stays_marked() {
+    // The failure this prevents: keepers were read off `draftresults`, and the
+    // live resource does not send `is_keeper` there at all. Every kept player
+    // was drawn as an ordinary first-round pick, so the board took him off at
+    // the wrong moment and the pick maths counted a pick nobody would make.
+    // Yahoo does say on the roster, and `teams;out=roster` fetches every
+    // team's in one call.
+    let s = session("yahoo-keepers");
+    s.connect();
+    let view = s.ok("add_league", json!({"leagueId": LEAGUE_KEY, "force": true}));
+    assert_eq!(
+        view["draft"]["keeper_picks"],
+        json!([3]),
+        "the kept player on the rosters payload was not recognised"
+    );
+    let kept = view["rosters"]
+        .as_array()
+        .expect("the rosters")
+        .iter()
+        .flat_map(|roster| roster["players"].as_array().expect("a roster").iter())
+        .find(|player| player["pick_no"] == 3)
+        .expect("pick three landed on somebody's roster");
+    assert_eq!(kept["is_keeper"], true, "kept, not drafted tonight");
+    // The two players Yahoo did not flag are ordinary picks, not keepers by
+    // omission.
+    assert_eq!(
+        view["draft"]["total_picks_made"], 3,
+        "a keeper is still a pick that has happened"
+    );
+
+    // …and a tick does not take it back. The poller re-reads the draft alone,
+    // so the flags have to survive on the load's own caches.
+    let view = s.ok("refresh_picks", json!({}));
+    assert_eq!(view["draft"]["keeper_picks"], json!([3]));
+    assert_eq!(view["data_health"]["poll_last_error"], Value::Null);
+    s.finish();
+}
+
+#[test]
+fn the_board_says_out_loud_that_it_has_not_read_yahoos_traded_picks() {
+    // A Yahoo league that trades draft picks is drawn in plain snake order
+    // with the picks in the wrong hands. It looks right and it is wrong, which
+    // is the worst way for a board to be wrong, so every load says so.
+    let s = session("yahoo-traded-picks");
+    s.connect();
+    let view = s.ok("add_league", json!({"leagueId": LEAGUE_KEY, "force": true}));
+    let warnings = view["data_health"]["warnings"].to_string();
+    assert!(
+        warnings.contains("traded picks are not read"),
+        "the board did not say pick ownership is guessed: {warnings}"
+    );
+    s.finish();
+}

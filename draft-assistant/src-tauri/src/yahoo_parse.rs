@@ -336,17 +336,62 @@ pub fn players(root: &Value) -> PlayerPage {
     let Some(container) = find(root, "players") else {
         return PlayerPage::default();
     };
-    let players: Vec<YahooPlayer> = items(container, "player")
-        .into_iter()
-        .map(player_from)
+    let raw = items(container, "player");
+    let players: Vec<YahooPlayer> = raw
+        .iter()
+        .map(|player| player_from(player))
         .filter(|player| !player.player_key.is_empty())
         .collect();
+    // `count` is how many rows Yahoo sent, and the pool walk stops on the
+    // first page that comes back short of what it asked for. The array shape
+    // carries no `count` at all, and falling back to the *filtered* rows
+    // there ended the walk on the first row this parser dropped — a page of
+    // 25 with one unreadable row read as "24, so that was the last page" and
+    // the rest of the league never reached the board. The raw item count is
+    // the same number Yahoo would have put in `count`.
     let count = container
         .get("count")
         .and_then(|c| c.as_u64().or_else(|| c.as_str()?.parse().ok()))
         .map(|c| c as usize)
-        .unwrap_or(players.len());
+        .unwrap_or(raw.len());
     PlayerPage { players, count }
+}
+
+/// Every player on every roster in a `league/<key>/teams;out=roster` payload.
+///
+/// [`players`] reads the *first* `players` collection it finds, which on this
+/// resource is team one's roster and nobody else's. Keepers are read off
+/// these rows, so stopping at the first team would leave eleven teams' kept
+/// players looking like ordinary first-round picks.
+pub fn rosters(root: &Value) -> Vec<YahooPlayer> {
+    let mut out = Vec::new();
+    collect_player_containers(root, &mut out);
+    out
+}
+
+fn collect_player_containers(value: &Value, out: &mut Vec<YahooPlayer>) {
+    match value {
+        Value::Object(map) => {
+            for (key, inner) in map {
+                if key == "players" {
+                    out.extend(
+                        items(inner, "player")
+                            .into_iter()
+                            .map(player_from)
+                            .filter(|player| !player.player_key.is_empty()),
+                    );
+                } else {
+                    collect_player_containers(inner, out);
+                }
+            }
+        }
+        Value::Array(list) => {
+            for item in list {
+                collect_player_containers(item, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn player_from(value: &Value) -> YahooPlayer {

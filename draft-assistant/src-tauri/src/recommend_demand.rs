@@ -12,7 +12,6 @@
 //! So the need model asks the replacement model. Same allocator, same board,
 //! one answer.
 
-use crate::board::AvailablePlayer;
 use crate::roster::RosterRules;
 use crate::valuation::{allocate_demand, ScoredPlayer};
 use std::collections::HashMap;
@@ -21,17 +20,17 @@ use std::collections::HashMap;
 /// 2.7 running backs. Fractional on purpose — a FLEX is one body that several
 /// positions compete for, and the early-depth term has to price a tight end's
 /// claim on it against a receiver's.
-pub(crate) fn starting_demand(
-    available: &[AvailablePlayer],
+pub(crate) fn starting_demand<'a>(
+    pool: impl IntoIterator<Item = (&'a str, f64)>,
     rules: &RosterRules,
     teams: u32,
 ) -> HashMap<String, f64> {
     let teams = teams.max(1) as usize;
-    let pool: Vec<ScoredPlayer> = available
-        .iter()
-        .map(|a| ScoredPlayer {
-            position: a.player.position.clone(),
-            points: a.player.points,
+    let pool: Vec<ScoredPlayer> = pool
+        .into_iter()
+        .map(|(position, points)| ScoredPlayer {
+            position: position.to_string(),
+            points,
         })
         .collect();
     allocate_demand(&pool, rules, teams, None)
@@ -78,15 +77,20 @@ pub(crate) fn starters_phrase(rules: &RosterRules, position: &str, demand: f64) 
     format!("{whole} {} plus a share of the {shared}", plural(whole))
 }
 
-/// How many of a position this league starts in a slot of its own — its
-/// dedicated slots, plus SUPER_FLEX for a quarterback, which is what a
-/// superflex league *is*. The backup discipline caps roster counts against it.
-pub(crate) fn dedicated_starters(rules: &RosterRules, position: &str) -> u32 {
-    rules
-        .slots()
-        .iter()
-        .filter(|slot| {
-            slot.as_str() == position || (position == "QB" && slot.as_str() == "SUPER_FLEX")
-        })
-        .count() as u32
+/// How many of a position this league starts in a slot of its own, read off
+/// the league's own demand allocation rather than off slot names.
+///
+/// Matching slot names special-cased the one league everybody remembers — a
+/// SUPER_FLEX counts for a quarterback — and got every other one wrong. A
+/// TE-premium league whose REC_FLEX allocation lands on tight ends starts two
+/// of them; the name test saw one dedicated TE slot, docked the second tight
+/// end twenty points for being a backup and refused the third outright.
+/// The allocator already answers this question for the whole board, so ask it:
+/// the whole part of a position's per-team demand is the number of bodies the
+/// league starts there come what may.
+pub(crate) fn dedicated_starters(demand: f64) -> u32 {
+    // A demand of exactly two comes back as 24/12, which in binary is exact,
+    // but a league size that does not divide its allocation does not, and
+    // 1.9999999 must not read as one starter.
+    (demand + 1e-6).floor().max(0.0) as u32
 }

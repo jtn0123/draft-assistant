@@ -53,6 +53,32 @@ describe("pick clock", () => {
     expect(screen.getByText("0:00")).toBeInTheDocument();
   });
 
+  it("treats a mock draft that still says pre_draft as live once real picks are in", () => {
+    // Sleeper mock drafts keep `pre_draft` on the wire while picks are made;
+    // the dev fixture is one, at pick 27 with no keepers.
+    const view = fixture();
+    view.draft.status = "pre_draft";
+    view.draft.keeper_picks = [];
+    view.draft.total_picks_made = 26;
+    view.draft.is_my_pick = false;
+    view.draft.on_clock_name = "Team Rocket";
+
+    render(<ClockBanner view={view} />);
+    expect(screen.getByText(/On the clock/)).toBeInTheDocument();
+    expect(screen.queryByText(/has not started/)).not.toBeInTheDocument();
+  });
+
+  it("does not glow green for my pick while the draft is paused", () => {
+    const view = fixture();
+    view.draft.status = "paused";
+    view.draft.paused = true;
+    view.draft.is_my_pick = true;
+
+    const { container } = render(<ClockBanner view={view} />);
+    expect(container.querySelector(".clock")).not.toHaveClass("is-mine");
+    expect(screen.getByText("Draft paused")).toBeInTheDocument();
+  });
+
   it("says the draft is paused instead of naming a manager who cannot act", () => {
     const view = fixture();
     view.draft.status = "paused";
@@ -326,5 +352,73 @@ describe("your picks and a draft with no clock", () => {
 
     render(<ClockBanner view={view} />);
     expect(screen.queryByText("no clock from Yahoo")).not.toBeInTheDocument();
+  });
+});
+
+// A keeper league writes its kept picks into the draft before anybody sits
+// down, so `total_picks_made` is not zero on a draft that has not started.
+// The banner demanded both, decided the draft was under way, and named a
+// manager as being on the clock hours before the room opened.
+describe("a keeper league that has not started", () => {
+  function keeperLeague(): DraftView {
+    const view = fixture();
+    view.draft.status = "pre_draft";
+    view.draft.total_picks_made = 3;
+    view.draft.keeper_picks = [1, 2, 3];
+    view.draft.current_pick = 4;
+    view.draft.is_my_pick = false;
+    view.draft.on_clock_name = "Marla";
+    view.draft.clock_deadline_ms = null;
+    return view;
+  }
+
+  it("says the draft has not started rather than naming someone on the clock", () => {
+    render(<ClockBanner view={keeperLeague()} />);
+    expect(screen.getByText("Draft has not started")).toBeInTheDocument();
+    expect(screen.queryByText(/On the clock/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Marla/)).not.toBeInTheDocument();
+  });
+
+  it("tells a screen reader the same thing", () => {
+    render(<ClockBanner view={keeperLeague()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("The draft has not started yet.");
+  });
+
+  it("leaves the Yahoo no-clock note off a draft nobody is waiting on", () => {
+    const view = keeperLeague();
+    view.league.platform = "yahoo";
+    render(<ClockBanner view={view} />);
+    expect(screen.queryByText("no clock from Yahoo")).not.toBeInTheDocument();
+  });
+});
+
+// `current_pick` stays where the last pick left it, so the queue went on being
+// built from it after the final selection — a strip of picks nobody would ever
+// make, the first of them wearing the on-the-clock highlight.
+describe("the strip once the draft is over", () => {
+  it("shows no queue at all", () => {
+    const view = fixture();
+    view.draft.status = "complete";
+    const { container } = render(<SnakeStrip view={view} />);
+    expect(container.querySelector(".snake")).toBeNull();
+    expect(container.querySelector(".snake-chip.is-on-clock")).toBeNull();
+  });
+
+  it("still shows the queue while the draft is only paused", () => {
+    const view = fixture();
+    view.draft.paused = true;
+    const { container } = render(<SnakeStrip view={view} />);
+    expect(container.querySelector(".snake")).not.toBeNull();
+  });
+});
+
+describe("counting the picks still to come", () => {
+  it("calls one remaining pick a pick, not 1 picks", () => {
+    const view = fixture();
+    view.draft.picks_until_mine = null;
+    // The last pick of the draft is the only one left in the queue.
+    view.draft.current_pick = view.draft.teams * view.draft.rounds;
+    const note = render(<SnakeStrip view={view} />).container.querySelector(".snake-note");
+    expect(note?.textContent).toBe("1 pick ahead");
   });
 });

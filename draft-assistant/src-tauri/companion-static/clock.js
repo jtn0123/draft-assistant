@@ -47,12 +47,74 @@
     };
   };
 
+  /** How often the page pings the host, and how many unanswered pings it
+   *  puts up with before it treats the socket as dead. */
+  const HEARTBEAT_MS = 25000;
+  const MISSED_PONGS = 2;
+
+  /** A ping that has to be answered.
+   *
+   *  The page used to ping and never read the reply, so a socket the phone's
+   *  network had quietly dropped — asleep in a pocket, off a lift, a router
+   *  that forgot the connection — stayed `readyState === 1` for ever. Nothing
+   *  arrived and nothing errored: the page looked live and was not. Two
+   *  unanswered pings is the whole of "this socket is gone".
+   *
+   *  `timers` is whatever owns setInterval, so a test can drive it by hand. */
+  const createHeartbeat = (timers, { ping, silent, intervalMs = HEARTBEAT_MS }) => {
+    let handle = null;
+    let unanswered = 0;
+    const stop = () => {
+      if (handle !== null) timers.clearInterval(handle);
+      handle = null;
+    };
+    return {
+      start: () => {
+        stop();
+        unanswered = 0;
+        handle = timers.setInterval(() => {
+          if (unanswered >= MISSED_PONGS) {
+            stop();
+            silent();
+            return;
+          }
+          unanswered += 1;
+          ping();
+        }, intervalMs);
+      },
+      /** The host answered: whatever is in flight is accounted for. */
+      pong: () => {
+        unanswered = 0;
+      },
+      stop,
+      running: () => handle !== null,
+      unanswered: () => unanswered,
+    };
+  };
+
+  /** How far the host's clock is ahead of this phone's, in milliseconds.
+   *  Added to `Date.now()` wherever the page counts a host deadline down, so
+   *  a phone whose own clock is minutes out does not show a pick timer that
+   *  is minutes wrong. A host that says nothing sensible means no offset. */
+  const clockOffset = (serverNowMs, localNowMs) =>
+    typeof serverNowMs === "number" && isFinite(serverNowMs) ? serverNowMs - localNowMs : 0;
+
+  /** Whether the page has to build a socket again: it has none, or the one it
+   *  has is not open. A phone coming back from sleep asks this before it
+   *  throws a working connection away. */
+  const needsRevive = (socket) => !socket || socket.readyState !== 1;
+
   window.Companion = {
     ...window.Companion,
     TICK_MS,
     REVOKED_CLOSE,
+    HEARTBEAT_MS,
+    MISSED_PONGS,
     isRevokedClose,
     needsTicker,
     createTicker,
+    createHeartbeat,
+    clockOffset,
+    needsRevive,
   };
 })();

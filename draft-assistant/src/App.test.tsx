@@ -134,7 +134,9 @@ describe("App live workflow", () => {
     render(<App />);
     await user.type(await screen.findByLabelText("League ID"), "123456789012345");
     await user.click(screen.getByRole("button", { name: "Load league" }));
-    expect(await screen.findByText("Error: league unavailable")).toBeInTheDocument();
+    // The message, not "Error: " and then the message: every surface reads an
+    // error the same way now.
+    expect(await screen.findByText("league unavailable")).toBeInTheDocument();
   });
 
   it("offers to reconnect rather than dropping to setup when restore fails", async () => {
@@ -347,5 +349,48 @@ describe("when an action fails", () => {
       vi.advanceTimersByTime(5000);
     });
     expect(screen.queryByText(note)).not.toBeInTheDocument();
+  });
+});
+
+describe("the way back off the setup screen", () => {
+  it("returns to the saved league after a mis-click on the launch screen", async () => {
+    // "Enter a different league" was a one-way door: the setup screen it opens
+    // has no way out, so the only way back to the saved league was quitting.
+    const user = userEvent.setup();
+    const initial = fixture();
+    h.api.getConfig.mockResolvedValue({
+      my_user_id: null,
+      active_league_id: initial.league.league_id,
+      leagues: [
+        {
+          league_id: initial.league.league_id,
+          name: "Dynasty Warriors",
+          season: "2026",
+          status: null,
+        },
+      ],
+    });
+    h.api.addLeague.mockRejectedValue(new Error("request timed out"));
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Enter a different league" }));
+    expect(await screen.findByLabelText("League ID")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Back to Dynasty Warriors$/ }));
+
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("League ID")).not.toBeInTheDocument();
+  });
+
+  it("offers no way back when there was no league to go back to", async () => {
+    h.api.getConfig.mockResolvedValue({
+      my_user_id: null,
+      active_league_id: null,
+      leagues: [],
+    });
+
+    render(<App />);
+    expect(await screen.findByLabelText("League ID")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Back to/ })).not.toBeInTheDocument();
   });
 });

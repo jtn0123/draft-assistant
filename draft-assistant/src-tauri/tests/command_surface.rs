@@ -1,4 +1,4 @@
-//! The one place `lib.rs` is exercised rather than merely compiled.
+//! The one place the command surface is exercised rather than merely compiled.
 //!
 //! Every other test in this crate calls a function directly. Nothing stands
 //! the Tauri app up and pushes a message through it, so the wiring between a
@@ -7,10 +7,20 @@
 //! `commands_draft.rs` and forgotten in `generate_handler!` compiles, ships,
 //! and fails at the user.
 //!
-//! This builds the real command surface on Tauri's mock runtime and sends
-//! each command a real IPC request, asserting the dispatcher recognises it.
-//! Most then fail on "no league loaded" or a missing argument, which is the
-//! point: reaching a command's own error means the routing worked.
+//! `lib.rs`'s own `run()` is not called here and cannot be: it builds a real
+//! Tauri app around a real webview and never returns. What is checked against
+//! `lib.rs` is its *text* — the names inside `generate_handler!` are read out
+//! of the source below — and the commands themselves are then registered on
+//! Tauri's mock runtime by this file and sent a real IPC request, asserting
+//! the dispatcher recognises each one. Most then fail on "no league loaded"
+//! or a missing argument, which is the point: reaching a command's own error
+//! means the routing worked. `run()`'s setup steps — the data directory, the
+//! log, the tray — are covered where they live, not here.
+//!
+//! Nothing in here is allowed off the machine. The Sleeper client is pointed
+//! at a stub on loopback before the first one is built, and the companion is
+//! asked for port 0 so it takes a kernel-assigned port rather than the 7878 a
+//! copy of the real app may be sitting on.
 //!
 //! The list below is duplicated from `lib.rs` on purpose, and
 //! `handler_list_matches_lib_rs` fails if the two ever drift -- so the
@@ -27,6 +37,7 @@ use std::sync::Arc;
 
 use draft_assistant_lib::commands_chat as chat;
 use draft_assistant_lib::commands_companion as companion;
+use draft_assistant_lib::commands_diag as diag;
 use draft_assistant_lib::commands_draft as draft;
 use draft_assistant_lib::commands_season as season;
 use draft_assistant_lib::commands_second_opinion as second_opinion;
@@ -43,6 +54,38 @@ use tokio::sync::Mutex;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+}
+
+/// A listener on loopback that answers every request with an empty 404, and
+/// the base URL to point the Sleeper client at.
+///
+/// Without it, `refresh_picks`, `refresh_data` and the two poll loops below
+/// went to api.sleeper.app for real: the test needed the network to pass,
+/// left traffic on somebody else's API on every `cargo test`, and took as
+/// long as the internet did. A 404 is all this needs to answer — every
+/// command here is being checked for having been *routed*, not for what it
+/// then did.
+///
+/// The listener is deliberately never joined or shut down; it lives as long
+/// as the test binary, which is the only thing that ever talks to it.
+fn sleeper_stub() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+    let base = format!(
+        "http://{}",
+        listener.local_addr().expect("the bound address")
+    );
+    std::thread::spawn(move || {
+        use std::io::{Read as _, Write as _};
+        for stream in listener.incoming().flatten() {
+            let mut stream = stream;
+            let mut scratch = [0u8; 1024];
+            // One read is enough to let the client finish sending its request
+            // line; the body, if any, is of no interest.
+            let _ = stream.read(&mut scratch);
+            let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n");
+        }
+    });
+    base
 }
 
 /// The command names `lib.rs` actually hands to `generate_handler!`.
@@ -109,7 +152,13 @@ fn declared_in_crate() -> BTreeSet<String> {
 /// one here would either pop a real file picker or panic for want of the
 /// dialog plugin's state, which the mock app has no window to host --- or, in
 /// `yahoo_begin_connect`'s case, hand a URL to the machine's browser.
-const OPENS_NATIVE_UI: [&str; 2] = ["import_second_opinion", "yahoo_begin_connect"];
+/// `open_log_folder` joins them: called here it would spawn a Finder window on
+/// the machine running the tests.
+const OPENS_NATIVE_UI: [&str; 3] = [
+    "import_second_opinion",
+    "yahoo_begin_connect",
+    "open_log_folder",
+];
 
 /// The full command list, as `lib.rs` should have it.
 fn handler_list() -> BTreeSet<String> {
@@ -155,7 +204,11 @@ fn handler_list() -> BTreeSet<String> {
         "companion_revoke",
         "set_device_name",
         "shared_chat_get",
+        "shared_chat_reset",
         "shared_chat_send",
+        "diagnostics",
+        "log_frontend_error",
+        "open_log_folder",
     ]
     .into_iter()
     .map(str::to_string)
@@ -187,6 +240,11 @@ fn handler_list_matches_lib_rs() {
 /// installs, then asks every command to answer over the IPC.
 #[test]
 fn every_command_answers_over_the_ipc() {
+    // Set before the first `Engine`, and so before the first `SleeperClient`:
+    // `sleeper_host::host()` reads the variable once and remembers the answer
+    // for the life of the process.
+    std::env::set_var("DRAFT_ASSISTANT_SLEEPER_BASE", sleeper_stub());
+
     let data_dir = std::env::temp_dir().join(format!(
         "draft-assistant-command-surface-{}",
         std::process::id()
@@ -194,7 +252,11 @@ fn every_command_answers_over_the_ipc() {
     std::fs::create_dir_all(&data_dir).expect("create test data dir");
 
     let engine = Engine::new(data_dir.clone());
-    let config = engine.load_config();
+    let mut config = engine.load_config();
+    // `companion_enable` listens on whatever this says. Port 0 lets the
+    // kernel pick a free one, so this never fights the developer's own copy
+    // of the app for 7878 and never fails for want of it.
+    config.companion_port = Some(0);
     let app = mock_builder()
         .invoke_handler(tauri::generate_handler![
             draft::add_league,
@@ -238,7 +300,11 @@ fn every_command_answers_over_the_ipc() {
             companion::companion_revoke,
             companion::set_device_name,
             companion::shared_chat_get,
+            companion::shared_chat_reset,
             companion::shared_chat_send,
+            diag::diagnostics,
+            diag::log_frontend_error,
+            diag::open_log_folder,
         ])
         .build(mock_context(noop_assets()))
         .expect("the app builds on the mock runtime");
@@ -298,11 +364,10 @@ fn every_command_answers_over_the_ipc() {
         }
     }
 
-    // Two of those commands started a poll loop against the real Sleeper host
-    // — the stub is not installed here — and nothing stopped them. Left
-    // running they outlive the test, retrying on the network every few
-    // seconds for as long as the binary is alive.
-    // `companion_enable` above put a real listener on the machine's network.
+    // Two of those commands started a poll loop, and nothing stopped them.
+    // Left running they outlive the test, hitting the stub every few seconds
+    // for as long as the binary is alive.
+    // `companion_enable` above put a real listener on a real port.
     for command in ["stop_polling", "stop_season_polling", "companion_disable"] {
         get_ipc_response(
             &webview,

@@ -4,13 +4,8 @@
 //! directly. The board, roster and clock are passed as a system prompt rather
 //! than pasted into every user turn.
 //!
-//! The cache breakpoint sits on the *last* system block, so the cached prefix
-//! is the guidance plus the context together. The guidance alone is around 450
-//! tokens — under the 512-token minimum a prefix must reach before Opus 5
-//! caches it at all — so a breakpoint on the guidance by itself silently
-//! cached nothing. Caching is a byte-exact prefix match, so the hits are real
-//! only while the context is unchanged: a second question about the same board
-//! reads the prefix back, and the next pick rewrites it.
+//! The request body, cache breakpoint included, is in `chat_request.rs`; what
+//! is here is the call and everything that happens to the reply.
 
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +13,12 @@ const ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
 /// Opt into server-side refusal fallbacks (the `fallbacks: "default"` form).
 const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
-const MAX_TOKENS: u32 = 16000;
+
+/// The request body's own types, its cache breakpoints and its ceilings.
+#[path = "chat_request.rs"]
+mod request;
+
+use request::build_request;
 
 /// The models the panel offers. Opus 5 can turn thinking off; Fable 5 cannot,
 /// so its effort list starts at "low".
@@ -78,7 +78,12 @@ impl ChatModel {
 }
 
 /// What is added to an answer the model ran out of room for.
-pub const TRUNCATED_NOTE: &str = "Answer was cut off at the length limit.";
+///
+/// It names the effort level because thinking is billed against the same
+/// ceiling the answer is: at a high effort most of the room can go on
+/// reasoning nobody sees, and the same question at a lower one finishes.
+pub const TRUNCATED_NOTE: &str =
+    "Answer was cut off at the length limit. Ask for a shorter answer, or try a lower effort.";
 
 /// Say so when the answer stops mid-thought. `stop_reason: "max_tokens"` used
 /// to be read past in silence, so a truncated answer reached the panel looking
@@ -177,7 +182,9 @@ pub struct ChatMessage {
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatReply {
     pub text: String,
-    /// Present when the model summarised its reasoning.
+    /// Always `None`. Summarised reasoning is billed as output tokens and
+    /// nothing renders it, so it is no longer asked for; the field stays
+    /// because the panel's reply type has it.
     pub thinking: Option<String>,
     pub model: String,
     /// True when safety classifiers declined and no fallback rescued it.
@@ -204,51 +211,6 @@ pub struct ChatReply {
     pub screen_spend_usd: f64,
 }
 
-// ---------- request wire types ----------
-
-#[derive(Serialize)]
-struct SystemBlock<'a> {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    text: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cache_control: Option<CacheControl>,
-}
-
-#[derive(Serialize)]
-struct CacheControl {
-    #[serde(rename = "type")]
-    kind: &'static str,
-}
-
-#[derive(Serialize)]
-struct Thinking {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    display: Option<&'static str>,
-}
-
-#[derive(Serialize)]
-struct OutputConfig {
-    effort: &'static str,
-}
-
-#[derive(Serialize)]
-struct Request<'a> {
-    model: &'a str,
-    max_tokens: u32,
-    system: Vec<SystemBlock<'a>>,
-    messages: &'a [ChatMessage],
-    output_config: OutputConfig,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thinking: Option<Thinking>,
-    /// Route around a policy decline instead of returning nothing. A body
-    /// parameter; the beta that enables it travels in the `anthropic-beta`
-    /// header, which is the only place the API looks for it.
-    fallbacks: &'static str,
-}
-
 // ---------- response wire types ----------
 
 #[derive(Deserialize)]
@@ -257,8 +219,6 @@ struct ContentBlock {
     kind: String,
     #[serde(default)]
     text: Option<String>,
-    #[serde(default)]
-    thinking: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -300,13 +260,14 @@ struct ApiErrorDetail {
 
 /// Ask Claude about the current board.
 ///
-/// `context` is the serialized view (draft or season) the panel is showing.
+/// `context` is the serialized view (draft or season) the panel is showing,
+/// in the two halves the cache breakpoint goes between.
 pub async fn ask(
     http: &reqwest::Client,
     api_key: &str,
     model: ChatModel,
     effort: Effort,
-    context: &str,
+    context: &crate::chat_context::SplitContext,
     messages: &[ChatMessage],
 ) -> Result<ChatReply, String> {
     ask_at(ENDPOINT, http, api_key, model, effort, context, messages).await
@@ -320,7 +281,7 @@ async fn ask_at(
     api_key: &str,
     model: ChatModel,
     effort: Effort,
-    context: &str,
+    context: &crate::chat_context::SplitContext,
     messages: &[ChatMessage],
 ) -> Result<ChatReply, String> {
     if api_key.trim().is_empty() {
@@ -330,43 +291,7 @@ async fn ask_at(
         return Err("nothing to ask".into());
     }
 
-    let disable_thinking = effort == Effort::Off && model.can_disable_thinking();
-    let request = Request {
-        model: model.id(),
-        max_tokens: MAX_TOKENS,
-        system: vec![
-            SystemBlock {
-                kind: "text",
-                text: crate::chat_copy::GUIDANCE,
-                cache_control: None,
-            },
-            SystemBlock {
-                kind: "text",
-                // Guidance + context is the cacheable prefix: the guidance on
-                // its own is too short to reach the minimum. Everything the
-                // user types renders after this block, so a second question
-                // about an unchanged board reads the whole prefix back.
-                text: context,
-                cache_control: Some(CacheControl { kind: "ephemeral" }),
-            },
-        ],
-        messages,
-        output_config: OutputConfig {
-            effort: effort.api_effort(),
-        },
-        thinking: if disable_thinking {
-            Some(Thinking {
-                kind: "disabled",
-                display: None,
-            })
-        } else {
-            Some(Thinking {
-                kind: "adaptive",
-                display: Some("summarized"),
-            })
-        },
-        fallbacks: "default",
-    };
+    let request = build_request(model, effort, context, messages);
 
     let response = http
         .post(endpoint)
@@ -420,14 +345,6 @@ async fn ask_at(
         .filter_map(|b| b.text.as_deref())
         .collect::<Vec<_>>()
         .join("\n\n");
-    let thinking = parsed
-        .content
-        .iter()
-        .filter(|b| b.kind == "thinking")
-        .filter_map(|b| b.thinking.as_deref())
-        .filter(|t| !t.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n");
     let refused = parsed.stop_reason.as_deref() == Some("refusal");
     let truncated = parsed.stop_reason.as_deref() == Some("max_tokens");
     let text = if text.trim().is_empty() && refused {
@@ -438,11 +355,8 @@ async fn ask_at(
 
     Ok(ChatReply {
         text: with_truncation_note(text, truncated),
-        thinking: if thinking.is_empty() {
-            None
-        } else {
-            Some(thinking)
-        },
+        // Not asked for and not rendered: see `chat_request.rs`.
+        thinking: None,
         model: parsed.model,
         refused,
         truncated,

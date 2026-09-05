@@ -313,4 +313,33 @@ export interface FollowRecord {
   url: string;
   token: string;
   host_name: string;
+  /** The id the host gave this device when it paired. Sent back on the next
+   *  pair so the host replaces the entry instead of listing "This Mac 2".
+   *  Absent in records written before this was kept. */
+  device_id?: string;
+}
+
+/** Everything the Diagnostics dialog shows, and everything "Copy diagnostics"
+ *  puts on the clipboard. Mirrors `Diagnostics` in
+ *  `src-tauri/src/commands_diag.rs`.
+ *
+ *  Deliberately carries no pairing code and no token: the whole point of it is
+ *  that it can be pasted into a chat window. */
+export interface Diagnostics {
+  app_version: string;
+  /** `macos aarch64` on the desktop; on a follower, who it is following. */
+  platform: string;
+  league_id: string | null;
+  league_name: string | null;
+  draft_id: string | null;
+  /** Which service the league on screen is read from. */
+  platform_name: string | null;
+  polling: boolean;
+  poll: PollHealth | null;
+  companion_enabled: boolean;
+  companion_devices: number;
+  /** Null when this copy of the app has no log of its own — a follower, or
+   *  the browser preview. The dialog hides the log actions then. */
+  log_path: string | null;
+  log_tail: string[];
 }

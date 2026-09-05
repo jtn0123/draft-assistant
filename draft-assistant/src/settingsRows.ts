@@ -45,8 +45,24 @@ export interface SettingsRowInput {
   onAppearance: () => void;
   onCompanion: () => void;
   onJoinHost: () => void;
+  /** Open Settings -> "Diagnostics…". */
+  onDiagnostics: () => void;
   onLeaveHost: () => void;
   onDismiss: () => void;
+  /** Ask for the Sleeper username again. Optional because the shell wires it
+   *  up separately; without it the row stays off the menu rather than
+   *  offering a button that does nothing. */
+  onSetUsername?: () => void;
+}
+
+/** Where headshots come from, named by platform.
+ *
+ * Sleeper serves them; Yahoo's do not come from Sleeper at all, and telling a
+ * Yahoo-only user that their pictures come from a service they have never
+ * connected read as a bug in the app. */
+function headshotNote(platform: string): string {
+  const source = platform === "yahoo" ? "your league" : "Sleeper";
+  return `Headshots from ${source}, saved on this Mac after the first look`;
 }
 
 export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
@@ -88,6 +104,24 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
         onSelect: input.onYahoo,
       },
     );
+    // The username is asked for once, on the first-launch screen, and never
+    // again. Skip it there — or mistype it — and the app has no way to know
+    // which team is yours, the roster panel stays empty, and there was no
+    // route back to the question short of clearing the config by hand. Yahoo
+    // learns the same thing from the connected account, so the row is
+    // Sleeper's alone.
+    if (input.view.league.platform === "sleeper" && input.onSetUsername !== undefined) {
+      rows.push({
+        label: "Sleeper username…",
+        note:
+          input.view.my_roster === null
+            ? "Not set, so no team on the board is marked as yours"
+            : "Change which team on the board is yours",
+        value: input.view.my_roster === null ? "Set" : "Change",
+        on: input.view.my_roster !== null,
+        onSelect: input.onSetUsername,
+      });
+    }
   }
 
   rows.push({
@@ -163,7 +197,7 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
       label: "Player pictures",
       note:
         input.avatars === "headshots"
-          ? "Headshots from Sleeper, saved on this Mac after the first look"
+          ? headshotNote(input.view.league.platform)
           : "Team logos only — no photo downloads",
       value: input.avatars === "headshots" ? "Headshots" : "Team logos",
       on: input.avatars === "headshots",
@@ -183,6 +217,13 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
             : "Light",
       on: input.theme === "dark",
       onSelect: input.onAppearance,
+    },
+    {
+      label: "Diagnostics…",
+      note: "What this app knows about itself, and the log",
+      value: "Show",
+      on: false,
+      onSelect: input.onDiagnostics,
     },
     {
       label: "Version",

@@ -191,3 +191,70 @@ fn yahoos_auction_flag_is_read_off_the_settings_however_it_is_written() {
     ]}});
     assert!(!league(&silent).expect("a league").is_auction_draft);
 }
+
+#[test]
+fn a_page_that_carries_no_count_reports_the_rows_yahoo_sent_not_the_rows_read() {
+    // The failure this prevents: the array-shaped players collection has no
+    // `count`, so the page reported the *filtered* rows. One row Yahoo sent
+    // without a `player_key` then made a full page look short, the pool walk
+    // read that as "this was the last page", and the rest of the league never
+    // reached the board.
+    let payload = json!({"fantasy_content": {"league": [
+        {"league_key": "449.l.1"},
+        {"players": [
+            {"player": [[{"player_key": "449.p.1"}, {"player_id": "1"},
+                         {"name": {"full": "Wire One"}}, {"display_position": "WR"}]]},
+            {"player": [[{"player_id": "2"}, {"name": {"full": "No Key"}}]]},
+            {"player": [[{"player_key": "449.p.3"}, {"player_id": "3"},
+                         {"name": {"full": "Wire Three"}}, {"display_position": "RB"}]]}
+        ]}
+    ]}});
+    let page = players(&payload);
+    assert_eq!(page.players.len(), 2, "the keyless row is not a player");
+    assert_eq!(
+        page.count, 3,
+        "the page has to report what Yahoo sent, or the walk stops early"
+    );
+}
+
+#[test]
+fn the_count_yahoo_did_send_still_wins_over_the_row_tally() {
+    let payload = json!({"fantasy_content": {"league": [
+        {"league_key": "449.l.1"},
+        {"players": {"0": {"player": [[{"player_key": "449.p.1"}, {"player_id": "1"}]]},
+                     "count": 25}}
+    ]}});
+    assert_eq!(players(&payload).count, 25);
+}
+
+#[test]
+fn every_teams_roster_is_read_and_not_just_the_first() {
+    // `players` finds the first collection it meets, which on the
+    // `teams;out=roster` resource is team one's roster. Keepers are read off
+    // these rows, so stopping there left every other team's kept players
+    // looking like ordinary picks.
+    let payload = json!({"fantasy_content": {"league": [
+        {"league_key": "449.l.1"},
+        {"teams": {
+            "0": {"team": [[{"team_key": "449.l.1.t.1"}],
+                {"roster": {"players": {
+                    "0": {"player": [[{"player_key": "449.p.1"}, {"player_id": "1"},
+                          {"is_keeper": {"status": null, "cost": null, "kept": "1"}}]]},
+                    "count": 1}}}]},
+            "1": {"team": [[{"team_key": "449.l.1.t.2"}],
+                {"roster": {"players": {
+                    "0": {"player": [[{"player_key": "449.p.2"}, {"player_id": "2"}]]},
+                    "count": 1}}}]},
+            "count": 2}}
+    ]}});
+    let rows = rosters(&payload);
+    assert_eq!(rows.len(), 2, "the walk stopped at the first roster");
+    assert_eq!(rows[0].player_key, "449.p.1");
+    assert_eq!(rows[0].is_keeper, Some(true));
+    assert_eq!(
+        rows[1].is_keeper, None,
+        "a row with no flag is not a decision either way"
+    );
+    // A payload with no rosters in it is empty rather than a panic.
+    assert!(rosters(&json!({"fantasy_content": {}})).is_empty());
+}

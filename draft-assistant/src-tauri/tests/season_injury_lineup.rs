@@ -14,7 +14,7 @@ fn view_with_injury(player_id: &str, status: Option<&str>) -> SeasonView {
     // dropped rather than offered. What this file is about is whether the
     // solver believes a stale projection, which is decided before kickoff.
     let (mut loaded, mut season, config) = common::fixture();
-    season.scores.clear();
+    season.scores = std::sync::Arc::new(Vec::new());
     if let Some(status) = status {
         mark(&mut loaded, player_id, status);
     }

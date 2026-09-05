@@ -25,6 +25,7 @@ const KEEPERS: &str = include_str!("fixtures/yahoo/draft_results_keepers.json");
 const PLAYERS_0: &str = include_str!("fixtures/yahoo/players_page_0.json");
 const PLAYERS_1: &str = include_str!("fixtures/yahoo/players_page_1.json");
 const ROSTER: &str = include_str!("fixtures/yahoo/team_roster.json");
+const ROSTERS: &str = include_str!("fixtures/yahoo/teams_rosters.json");
 
 #[test]
 fn the_login_users_leagues_come_out_of_three_levels_of_wrapping() {
@@ -321,4 +322,32 @@ fn a_snake_leagues_picks_carry_no_keeper_opinion() {
     for pick in parse::draft_results(&json(PARTIAL)) {
         assert_eq!(pick.is_keeper, None, "pick {} invented a flag", pick.pick);
     }
+}
+
+#[test]
+fn the_rosters_resource_names_every_teams_keepers_in_one_payload() {
+    // The failure this prevents: the keeper flag was read off `draftresults`,
+    // which the live resource does not send, so a keeper league's kept players
+    // were drawn as ordinary picks. `teams;out=roster` always says.
+    let rows = parse::rosters(&json(ROSTERS));
+    assert_eq!(rows.len(), 3, "one roster per team was expected");
+    let kept: Vec<(&str, Option<bool>)> = rows
+        .iter()
+        .map(|player| (player.player_key.as_str(), player.is_keeper))
+        .collect();
+    assert_eq!(
+        kept[0],
+        ("449.p.30977", Some(false)),
+        "Yahoo's empty keeper object means 'this league keeps players and he is not one'"
+    );
+    assert_eq!(
+        kept[1],
+        ("449.p.31883", None),
+        "a row with no keeper field at all is not a decision either way"
+    );
+    assert_eq!(kept[2], ("449.p.100002", Some(true)));
+    // The rows are whole players, not keeper flags with a key attached: the
+    // same reader builds them, so a name and a position come free.
+    assert_eq!(rows[0].full_name, "Ja'Marr Chase");
+    assert_eq!(rows[0].display_position, "WR");
 }

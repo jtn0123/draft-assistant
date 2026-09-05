@@ -14,7 +14,9 @@ import { useSyncExternalStore } from "react";
 
 const listeners = new Set<() => void>();
 let timer: number | null = null;
-let now = 0;
+// Seeded at import so the very first render, which happens before React has
+// called `subscribe`, has a real reading rather than 1970.
+let now = Date.now();
 
 function tick(): void {
   now = Date.now();
@@ -36,22 +38,25 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-/** No timer wanted: the value is read once and never notified about. */
+/**
+ * No timer wanted: the value is refreshed as this consumer subscribes and
+ * never notified about again.
+ *
+ * The refresh happens here rather than in `snapshot` because `snapshot` is
+ * `getSnapshot`, and React calls that while it is deciding whether anything
+ * changed — during render, and twice in a row in StrictMode. A getter that
+ * writes to the store it is reading can hand back two different values for one
+ * render pass, which is exactly the "getSnapshot should be cached" loop React
+ * warns about. Subscribing is an effect, so it is a safe place to write.
+ */
 function ignore(): () => void {
+  if (timer === null) now = Date.now();
   return () => {
     // Nothing subscribed, so nothing to tear down.
   };
 }
 
 function snapshot(): number {
-  // With the interval stopped nothing is keeping `now` fresh, so read the
-  // system clock. Held for a second at a time so that repeated calls within
-  // one render agree with each other — `useSyncExternalStore` needs a snapshot
-  // that only changes when there is genuinely something new to show.
-  if (timer === null) {
-    const t = Date.now();
-    if (t < now || t - now >= 1000) now = t;
-  }
   return now;
 }
 

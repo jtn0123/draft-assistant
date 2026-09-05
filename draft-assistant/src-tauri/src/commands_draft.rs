@@ -17,11 +17,11 @@ use std::sync::Arc;
 use tauri::{Emitter, State};
 
 mod edits;
-mod tick;
+pub(crate) mod tick;
 pub use edits::*;
 use tick::{
-    backoff_secs, draft_update, fetch_tick, save_keepers_off_lock, save_picks_off_lock,
-    tick_target, DraftUpdate, EMPTY_PICKS,
+    adopt_traded, backoff_secs, draft_update, fetch_tick, save_keepers_off_lock,
+    save_picks_off_lock, tick_target, traded_update, DraftUpdate, TickFetch, EMPTY_PICKS,
 };
 
 /// What every command and tick says when the league moved on under it. The
@@ -85,7 +85,13 @@ pub async fn add_league(
         Pasted::Sleeper(id) | Pasted::Yahoo(id) => id,
         Pasted::YahooNumeric(numeric) => resolve_yahoo_league(&state, &numeric).await?,
     };
-    let new_loaded = load_dispatched(&state, &league_id, force).await?;
+    let new_loaded =
+        load_dispatched(&state, &league_id, force)
+            .await
+            .map_err(crate::applog::failing(
+                "add_league",
+                crate::applog::context(&[("league", &league_id)]),
+            ))?;
     let mut config = state.config.lock().await;
     // Edited on a copy and only committed once it is safely on disk: a failed
     // save used to leave the picker showing a league the next launch would
@@ -160,8 +166,11 @@ pub async fn refresh_picks(state: State<'_, AppState>) -> Result<DraftView, Stri
         let loaded = state.loaded.lock().await;
         tick_target(loaded.as_ref().ok_or("no league loaded")?)
     };
-    let (picks, draft) = fetch_tick(&state.engine, &state.yahoo, &draft_id, &yahoo_ids).await;
-    let picks = picks?;
+    let fetched = fetch_tick(&state.engine, &state.yahoo, &draft_id, &yahoo_ids).await;
+    let picks = fetched.picks.map_err(crate::applog::failing(
+        "refresh_picks",
+        crate::applog::context(&[("draft", &draft_id)]),
+    ))?;
 
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
@@ -172,33 +181,57 @@ pub async fn refresh_picks(state: State<'_, AppState>) -> Result<DraftView, Stri
         return Err(LEAGUE_CHANGED.to_string());
     }
     let mut errors = Vec::new();
-    if picks.is_empty() && !loaded.api_picks.is_empty() {
+    // Problems worth a log line that are nobody's failed tick: a disk write
+    // that did not land, and an endpoint beside the picks that did not answer.
+    let mut notes: Vec<String> = Vec::new();
+    let kept_previous = picks.is_empty() && !loaded.api_picks.is_empty();
+    if kept_previous {
         errors.push(EMPTY_PICKS.to_string());
     } else {
         loaded.api_picks = picks;
         if picks::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
-            state
-                .engine
-                .save_manual_picks(&draft_id, &loaded.manual_picks)?;
+            // A save that fails is a note. The board in memory is right
+            // either way and the next tick writes it again; counting it as a
+            // failed poll greyed the sync badge over a full disk.
+            notes.extend(
+                state
+                    .engine
+                    .save_manual_picks(&draft_id, &loaded.manual_picks)
+                    .err(),
+            );
         }
         // A keeper is only recognisable while it sits ahead of the clock, so
-        // the judgement is made and written down on every refresh. A keeper
-        // set that fails to save is reported here exactly as the background
-        // poller reports it — the same tick, collected and recorded, rather
-        // than dropped on the floor because this path happens to be the
-        // manual one.
-        errors.extend(keepers::note_keepers(state.engine.as_ref(), loaded));
+        // the judgement is made and written down on every refresh.
+        notes.extend(keepers::note_keepers(state.engine.as_ref(), loaded));
     }
     // Also refresh draft status/order — it flips to "drafting" at start time.
     // A `/draft` that does not answer is logged rather than counted: the picks
     // came through, so this refresh did not fail.
-    match draft_update(draft) {
+    match draft_update(fetched.draft) {
         DraftUpdate::Adopt(draft) => loaded.draft = *draft,
-        DraftUpdate::Logged(note) => crate::applog::warn(note),
+        DraftUpdate::Logged(note) => notes.push(note),
         DraftUpdate::Refused(reason) => errors.push(reason),
         DraftUpdate::Nothing => {}
     }
+    // Trades are agreed mid-draft, so the ownership map is re-read every tick
+    // rather than only at load.
+    match traded_update(fetched.traded) {
+        Ok(Some(traded)) => {
+            adopt_traded(loaded, traded);
+        }
+        Ok(None) => {}
+        Err(note) => notes.push(note),
+    }
     record_poll_outcome(loaded, &errors);
+    for note in notes {
+        crate::applog::warn(note);
+    }
+    // The picks came back empty and the board on screen is the old one. This
+    // used to answer Ok with an unchanged view, so the toast said "picks
+    // re-pulled — 84 in" over a pull that pulled nothing.
+    if kept_previous {
+        return Err(EMPTY_PICKS.to_string());
+    }
     let config = state.config.lock().await;
     Ok(view_from(loaded, &config))
 }
@@ -210,7 +243,13 @@ pub async fn refresh_data(state: State<'_, AppState>) -> Result<DraftView, Strin
         let config = state.config.lock().await;
         config.active_league_id.clone().ok_or("no active league")?
     };
-    let new_loaded = load_dispatched(&state, &league_id, true).await?;
+    let new_loaded =
+        load_dispatched(&state, &league_id, true)
+            .await
+            .map_err(crate::applog::failing(
+                "refresh_data",
+                crate::applog::context(&[("league", &league_id)]),
+            ))?;
     // The rebuild goes back to the wire for everything, which takes long
     // enough for the user to have picked a different league meanwhile. Both
     // locks are taken here, in the order the rest of the app takes them, so
@@ -241,7 +280,13 @@ pub async fn export_state(state: State<'_, AppState>) -> Result<String, String> 
     let target = path.clone();
     tokio::task::spawn_blocking(move || {
         let json = serde_json::to_string_pretty(&view).map_err(|e| e.to_string())?;
-        std::fs::write(&target, json).map_err(|e| e.to_string())
+        // Written to a sibling and renamed over, at 0600, exactly like every
+        // cache file. A plain `write` truncated the previous export before it
+        // had the new bytes, so a full disk or a crash mid-export left the
+        // user with an empty file instead of last night's; and the default
+        // 0644 published the whole league — member names, Sleeper user ids,
+        // every roster — to every account on the machine.
+        crate::cache::replace_file(crate::cache::temp_sibling(&target), target, json)
     })
     .await
     .unwrap_or_else(|e| Err(format!("export failed: {e}")))?;
@@ -257,6 +302,7 @@ pub async fn start_polling<R: tauri::Runtime>(
     interval_secs: Option<u64>,
 ) -> Result<(), String> {
     let interval = interval_secs.unwrap_or(3).clamp(2, 60);
+    crate::applog::info(format!("polling started every {interval}s"));
     let generation = state.poll_generation.fetch_add(1, Ordering::SeqCst) + 1;
     state.polling.store(true, Ordering::SeqCst);
 
@@ -269,6 +315,9 @@ pub async fn start_polling<R: tauri::Runtime>(
 
     tauri::async_runtime::spawn(async move {
         let mut memory = DraftPollMemory::default();
+        // What was last said about this poller's health. Without it the choice
+        // is a line every three seconds or, as it was, no line at all.
+        let mut watch = crate::applog::HealthWatch::default();
         // How many consecutive failures the tick has seen, read back off the
         // loaded league where the poll outcome is recorded.
         let mut failures = 0u32;
@@ -283,7 +332,11 @@ pub async fn start_polling<R: tauri::Runtime>(
                 loaded.as_ref().map(tick_target)
             };
             if let Some((draft_id, yahoo_ids)) = target {
-                let (picks, draft) = fetch_tick(&engine, &yahoo, &draft_id, &yahoo_ids).await;
+                let TickFetch {
+                    picks,
+                    draft,
+                    traded,
+                } = fetch_tick(&engine, &yahoo, &draft_id, &yahoo_ids).await;
                 let mut changed = false;
                 let mut errors = Vec::new();
                 // Problems that are worth a log line but are not a failed
@@ -336,6 +389,15 @@ pub async fn start_polling<R: tauri::Runtime>(
                             DraftUpdate::Refused(reason) => errors.push(reason),
                             DraftUpdate::Nothing => {}
                         }
+                        // Picks change hands mid-draft. Kept out of `errors`
+                        // for the same reason `/draft` is: a trade list that
+                        // does not answer costs nothing, because the one
+                        // already on screen is still right.
+                        match traded_update(traded) {
+                            Ok(Some(traded)) => changed |= adopt_traded(loaded, traded),
+                            Ok(None) => {}
+                            Err(note) => notes.push(note),
+                        }
                         applied = true;
                     }
                 }
@@ -343,14 +405,20 @@ pub async fn start_polling<R: tauri::Runtime>(
                 // these were a synchronous disk write on every single tick,
                 // three seconds apart, with every command and every view
                 // build waiting behind them.
+                //
+                // A write that fails is a note, never a failed tick. The
+                // board in memory is right either way and the next tick
+                // writes it again, but counting the failure greyed the sync
+                // badge and stretched the poll to 24 seconds over a full
+                // disk, as if Sleeper had stopped answering.
                 if let Some(picks) = picks_to_save {
                     if let Err(error) = save_picks_off_lock(&engine, draft_id.clone(), picks).await
                     {
-                        errors.push(error);
+                        notes.push(error);
                     }
                 }
                 if let Some(keepers) = keepers_to_save {
-                    errors.extend(save_keepers_off_lock(&engine, draft_id.clone(), keepers).await);
+                    notes.extend(save_keepers_off_lock(&engine, draft_id.clone(), keepers).await);
                 }
                 for note in notes {
                     crate::applog::warn(note);
@@ -362,6 +430,16 @@ pub async fn start_polling<R: tauri::Runtime>(
                         failures = loaded.poll_consecutive_failures;
                         health = Some(poll::poll_health(loaded));
                     }
+                }
+                if let Some(note) = watch.observe(
+                    failures,
+                    backoff_secs(interval, failures),
+                    errors.first().map(String::as_str),
+                ) {
+                    crate::applog::warn(format!(
+                        "{note}{}",
+                        crate::applog::context(&[("draft", &draft_id)])
+                    ));
                 }
                 if let Some(health) = health {
                     app.emit("poll-health", &health).ok();
@@ -392,6 +470,7 @@ pub async fn start_polling<R: tauri::Runtime>(
 
 #[tauri::command]
 pub async fn stop_polling(state: State<'_, AppState>) -> Result<(), String> {
+    crate::applog::info("polling stopped");
     state.polling.store(false, Ordering::SeqCst);
     Ok(())
 }
