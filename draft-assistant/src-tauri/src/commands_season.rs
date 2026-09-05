@@ -8,10 +8,40 @@ use crate::poll::refresh_or_roll;
 use crate::season::SeasonView;
 use crate::season_engine::{LoadedSeason, SeasonLoader};
 use crate::season_history::HistoryStore;
-use crate::state::{season_view_from, AppState};
+use crate::state::{build_season_off_thread, season_inputs, AppState, CachedSeasonView};
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tauri::State;
 use tokio::sync::Mutex;
+
+/// The ids a failure on this screen should be tied to, read off the league
+/// that is open.
+///
+/// These commands take no id of their own, so without this a logged failure
+/// names the command and nothing else, and "refresh_season failed" a week
+/// later does not say which league it was.
+async fn ids(state: &AppState) -> String {
+    let loaded = state.loaded.lock().await;
+    let (league, draft) = loaded
+        .as_ref()
+        .map(|l| (l.league.league_id.clone(), l.draft.draft_id.clone()))
+        .unwrap_or_default();
+    crate::applog::context(&[("league", &league), ("draft", &draft)])
+}
+
+/// [`crate::state::season_view_from`] for a caller that holds the state itself
+/// rather than Tauri's wrapper around it.
+///
+/// The command bodies moved behind `&AppState` so a unit test can drive them,
+/// and a test cannot build a `State<'_, AppState>`.
+async fn season_view_now(state: &AppState) -> Result<SeasonView, String> {
+    let inputs = season_inputs(&state.loaded, &state.season, &state.config).await?;
+    let view = Arc::new(build_season_off_thread(inputs).await?);
+    // Remembered for the chat panel, which would otherwise pay for the whole
+    // build again on every question.
+    *state.last_season_view.lock().await = Some(CachedSeasonView::new(view.clone()));
+    Ok((*view).clone())
+}
 
 /// Fetch the in-season picture for the active league. Idempotent: a second
 /// call reuses cached data unless `force` is set.
@@ -20,6 +50,14 @@ pub async fn load_season(
     state: State<'_, AppState>,
     force: Option<bool>,
 ) -> Result<SeasonView, String> {
+    crate::applog::logged!(
+        "load_season",
+        ids(&state).await,
+        load_season_inner(&state, force).await
+    )
+}
+
+async fn load_season_inner(state: &AppState, force: Option<bool>) -> Result<SeasonView, String> {
     let force = force.unwrap_or(false);
     let league = {
         let loaded = state.loaded.lock().await;
@@ -29,11 +67,7 @@ pub async fn load_season(
     let mut fresh = state
         .engine
         .load_season(&league, my_user_id.as_deref(), force)
-        .await
-        .map_err(crate::applog::failing(
-            "load_season",
-            crate::applog::context(&[("league", &league.league_id)]),
-        ))?;
+        .await?;
     // The load above took a few seconds with no lock held. If the user
     // switched leagues in that window, this data belongs to the old one:
     // writing it would file league A's roster snapshot under league B.
@@ -44,8 +78,16 @@ pub async fn load_season(
     // that disk work.
     let mine = league_snapshot(&state.loaded, &league.league_id).await?;
     adopt_load(&state.engine, Some(&mine), &league.league_id, &mut fresh).await?;
+    let week = fresh.week;
     *state.season.lock().await = Some(fresh);
-    season_view_from(&state).await
+    // So the log tells the story of a session rather than only its failures:
+    // reading back a week later, this is the line that says which league was
+    // open and how far into the season it had got.
+    crate::applog::info(format!(
+        "season loaded league={} week={week}",
+        league.league_id
+    ));
+    season_view_now(state).await
 }
 
 /// Copy the still-loaded league out from behind its mutex, if it is the one
@@ -97,7 +139,10 @@ pub async fn headshot(
     state: State<'_, AppState>,
     player_id: String,
 ) -> Result<Option<String>, String> {
-    state.engine.headshot(&player_id).await
+    // The player is the only id this one has, and it is what makes a run of
+    // failed headshots readable: one bad player, or the whole cache.
+    let context = crate::applog::context(&[("player", &player_id)]);
+    crate::applog::logged!("headshot", context, state.engine.headshot(&player_id).await)
 }
 
 /// A manager's team picture as a data URL (cached on disk), or null.
@@ -107,20 +152,37 @@ pub async fn avatar(
     reference: String,
     full: bool,
 ) -> Result<Option<String>, String> {
-    state.engine.avatar(&reference, full).await
+    let context = crate::applog::context(&[("avatar", &reference)]);
+    crate::applog::logged!(
+        "avatar",
+        context,
+        state.engine.avatar(&reference, full).await
+    )
 }
 
 /// The current season view, without refetching.
 #[tauri::command]
 pub async fn get_season(state: State<'_, AppState>) -> Result<SeasonView, String> {
-    season_view_from(&state).await
+    crate::applog::logged!(
+        "get_season",
+        ids(&state).await,
+        season_view_now(&state).await
+    )
 }
 
 /// Re-pull the fast-moving slice (this week's scoring and the NFL scoreboard).
 #[tauri::command]
 pub async fn refresh_season(state: State<'_, AppState>) -> Result<SeasonView, String> {
+    crate::applog::logged!(
+        "refresh_season",
+        ids(&state).await,
+        refresh_season_inner(&state).await
+    )
+}
+
+async fn refresh_season_inner(state: &AppState) -> Result<SeasonView, String> {
     refresh_or_roll(&*state.engine, &state.loaded, &state.season, &state.config).await?;
-    season_view_from(&state).await
+    season_view_now(state).await
 }
 
 /// Poll live scoring every `interval_secs` (default 30). Emits "season-updated"
@@ -137,19 +199,26 @@ pub async fn start_season_polling<R: tauri::Runtime>(
     state: State<'_, AppState>,
     interval_secs: Option<u64>,
 ) -> Result<(), String> {
-    let interval = interval_secs.unwrap_or(30).clamp(10, 300);
-    poller::spawn(app, &state, interval);
-    Ok(())
+    // Wrapped like every other command even though it cannot fail today, so
+    // that if it ever starts to, the rejection the screen shows is also in the
+    // log rather than only in a dismissed toast.
+    crate::applog::logged!("start_season_polling", ids(&state).await, {
+        let interval = interval_secs.unwrap_or(30).clamp(10, 300);
+        poller::spawn(app, &state, interval);
+        Ok(())
+    })
 }
 
 #[tauri::command]
 pub async fn stop_season_polling(state: State<'_, AppState>) -> Result<(), String> {
-    // The generation bump is what actually stops the loop; the flag is only
-    // the record of what the user last asked for. See `poller::cancel` for
-    // why a sticky flag was the wrong tool.
-    poller::cancel(&state.season_generation);
-    state.season_polling.store(false, Ordering::SeqCst);
-    Ok(())
+    crate::applog::logged!("stop_season_polling", ids(&state).await, {
+        // The generation bump is what actually stops the loop; the flag is
+        // only the record of what the user last asked for. See
+        // `poller::cancel` for why a sticky flag was the wrong tool.
+        poller::cancel(&state.season_generation);
+        state.season_polling.store(false, Ordering::SeqCst);
+        Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -246,6 +315,34 @@ mod tests {
             warnings: Vec::new(),
             sources: Default::default(),
         }
+    }
+
+    /// The failure this prevents: a season command returned `Err`, the string
+    /// became a toast, the toast was dismissed, and nothing in the log said
+    /// the command had been called at all.
+    #[tokio::test]
+    async fn a_season_command_that_fails_leaves_an_error_line_naming_it() {
+        let (state, dir) = AppState::scratch("season-log");
+        let capture = crate::applog::Capture::start();
+        // The same wrapper `get_season` is, with the Tauri `State` a unit test
+        // cannot build taken out. Nothing is loaded, so it fails on the spot
+        // and reaches no network.
+        let out: Result<SeasonView, String> = crate::applog::logged!(
+            "get_season",
+            ids(&state).await,
+            season_view_now(&state).await
+        );
+        assert_eq!(
+            out.unwrap_err(),
+            "no league loaded",
+            "the sentence the user sees is unchanged"
+        );
+        assert!(
+            capture.saw("ERROR get_season failed: no league loaded"),
+            "{:?}",
+            capture.lines()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

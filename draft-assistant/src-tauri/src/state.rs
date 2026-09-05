@@ -51,6 +51,35 @@ impl AppState {
             yahoo: self.yahoo.clone(),
         }
     }
+
+    /// An empty state pointed at a scratch directory, for the tests that drive
+    /// a command's inner half.
+    ///
+    /// Nothing is loaded and nothing is polling, which is exactly the shape
+    /// that makes most commands fail — and a command failing is what the
+    /// logging tests are about. Never the real data directory: a test must not
+    /// touch a config a user would open.
+    #[cfg(test)]
+    pub(crate) fn scratch(tag: &str) -> (AppState, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "draft-assistant-state-{tag}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        let state = AppState {
+            engine: Arc::new(Engine::new(dir.clone())),
+            loaded: Arc::new(Mutex::new(None)),
+            season: Arc::new(Mutex::new(None)),
+            config: Arc::new(Mutex::new(AppConfig::default())),
+            polling: Arc::new(AtomicBool::new(false)),
+            poll_generation: Arc::new(AtomicU64::new(0)),
+            season_polling: Arc::new(AtomicBool::new(false)),
+            season_generation: Arc::new(AtomicU64::new(0)),
+            last_season_view: Arc::new(Mutex::new(None)),
+            yahoo: Arc::new(YahooState::default()),
+        };
+        (state, dir)
+    }
 }
 
 /// The Yahoo client, built when it is first wanted and thrown away whenever

@@ -5,8 +5,9 @@
 //! apart from the commands themselves so the start/stop ordering rules can be
 //! tested without a running Tauri app.
 
+use crate::applog::HealthWatch;
 use crate::commands_draft::tick::backoff_secs;
-use crate::poll::{season_tick, SeasonPollMemory};
+use crate::poll::{season_tick, PollHealth, SeasonPollMemory};
 use crate::state::{AppState, CachedSeasonView};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -42,6 +43,42 @@ pub(crate) fn is_live(generation: &AtomicU64, mine: u64) -> bool {
     generation.load(Ordering::SeqCst) == mine
 }
 
+/// The log line this season tick is worth, or `None` when nothing changed.
+///
+/// Split out of the loop because the loop needs a Tauri emitter and this does
+/// not: the rule about when a poller is worth a line is the interesting part
+/// and it should be testable without a running app.
+///
+/// A tick with no health at all is not a failing poller — it is a tick with no
+/// league open, or the season not loaded yet. The watch is reset rather than
+/// consulted, so the next league starts from silence instead of inheriting the
+/// last one's "still failing".
+fn health_note(
+    watch: &mut HealthWatch,
+    health: Option<&PollHealth>,
+    wait: u64,
+    league_id: &str,
+    week: Option<u32>,
+) -> Option<String> {
+    let Some(health) = health else {
+        *watch = HealthWatch::default();
+        return None;
+    };
+    let week = week.map(|w| w.to_string()).unwrap_or_default();
+    watch
+        .observe(
+            health.consecutive_failures,
+            wait,
+            health.last_error.as_deref(),
+        )
+        .map(|note| {
+            format!(
+                "season {note}{}",
+                crate::applog::context(&[("league", league_id), ("week", &week)])
+            )
+        })
+}
+
 /// Spawn the loop that polls live scoring for as long as `generation` stands.
 pub(crate) fn spawn<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: &AppState, interval: u64) {
     let generation = begin(&state.season_generation);
@@ -56,10 +93,28 @@ pub(crate) fn spawn<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: &AppStat
 
     tauri::async_runtime::spawn(async move {
         let mut memory = SeasonPollMemory::new(ANALYSIS_EVERY);
+        // What was last said about this poller's health. Without it the season
+        // loop wrote nothing at all, so "live scoring stopped around 1:20" had
+        // no answer anywhere in the log. The draft loop has had this since it
+        // was built; this is the same watch on the other loop.
+        let mut watch = HealthWatch::default();
         loop {
             if !is_live(&season_generation, generation) {
                 break;
             }
+            // Read before the tick so a league switched away mid-tick is named
+            // as the league the tick was actually about.
+            let league_id = {
+                let loaded = loaded_ref.lock().await;
+                loaded
+                    .as_ref()
+                    .map(|l| l.league.league_id.clone())
+                    .unwrap_or_default()
+            };
+            let week = {
+                let season = season_ref.lock().await;
+                season.as_ref().map(|s| s.week)
+            };
             let tick =
                 season_tick(&*engine, &loaded_ref, &season_ref, &config_ref, &mut memory).await;
             // Health first: when a refresh fails there is no view to send, and
@@ -85,6 +140,11 @@ pub(crate) fn spawn<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: &AppStat
             // do to a service already struggling and burns battery for
             // nothing. One success puts the cadence straight back.
             let wait = backoff_secs(interval, failures);
+            if let Some(note) =
+                health_note(&mut watch, tick.health.as_ref(), wait, &league_id, week)
+            {
+                crate::applog::warn(note);
+            }
             tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
         }
     });
@@ -125,6 +185,86 @@ mod tests {
 
         cancel(&generation);
         assert!(!is_live(&generation, second));
+    }
+
+    fn health(failures: u32, error: Option<&str>) -> PollHealth {
+        PollHealth {
+            last_success_at: None,
+            consecutive_failures: failures,
+            last_error: error.map(str::to_string),
+        }
+    }
+
+    /// The bug: the season loop wrote nothing at all, so an afternoon of live
+    /// scoring quietly not updating left no line anywhere to explain it.
+    #[test]
+    fn a_season_poller_that_starts_failing_says_so_once_with_the_league_and_week() {
+        let mut watch = HealthWatch::default();
+        let line = health_note(
+            &mut watch,
+            Some(&health(1, Some("sleeper timed out"))),
+            60,
+            "42",
+            Some(3),
+        )
+        .expect("the first failure is worth a line");
+        assert!(line.starts_with("season poll started failing"), "{line}");
+        assert!(line.contains("sleeper timed out"), "{line}");
+        assert!(line.ends_with(" league=42 week=3"), "{line}");
+
+        // And the identical failure thirty seconds later is not, which is what
+        // keeps an hour of trouble from rotating the log away.
+        assert_eq!(
+            health_note(
+                &mut watch,
+                Some(&health(2, Some("sleeper timed out"))),
+                60,
+                "42",
+                Some(3)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_season_poller_that_recovers_says_so_and_then_goes_quiet() {
+        let mut watch = HealthWatch::default();
+        health_note(
+            &mut watch,
+            Some(&health(1, Some("timed out"))),
+            60,
+            "42",
+            Some(3),
+        );
+        let back = health_note(&mut watch, Some(&health(0, None)), 30, "42", Some(3))
+            .expect("recovery is worth a line");
+        assert_eq!(back, "season poll recovered league=42 week=3");
+        assert_eq!(
+            health_note(&mut watch, Some(&health(0, None)), 30, "42", Some(3)),
+            None
+        );
+    }
+
+    /// A tick with no health is a tick with no league open, not a failure.
+    /// Reporting it as one would grey the log every time the user closed a
+    /// league, and leaving the watch set would make the next league's first
+    /// healthy tick look like a recovery.
+    #[test]
+    fn a_tick_with_nothing_loaded_is_silent_and_clears_what_was_remembered() {
+        let mut watch = HealthWatch::default();
+        health_note(
+            &mut watch,
+            Some(&health(1, Some("timed out"))),
+            60,
+            "42",
+            Some(3),
+        );
+        assert_eq!(health_note(&mut watch, None, 30, "", None), None);
+        // Nothing remembered, so a healthy tick afterwards is not a recovery.
+        assert_eq!(
+            health_note(&mut watch, Some(&health(0, None)), 30, "7", Some(1)),
+            None
+        );
     }
 
     /// The failure count the loop backs off on is the one the health report

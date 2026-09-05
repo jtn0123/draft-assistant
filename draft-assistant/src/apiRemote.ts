@@ -436,6 +436,7 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
         companion_enabled: false,
         companion_devices: 0,
         log_path: null,
+        log_level: "info",
         log_tail: [],
       } satisfies Diagnostics;
     },
@@ -443,6 +444,8 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
     // The host's log is the host's. Reporting into it from here would let any
     // paired device write lines the host cannot account for.
     logFrontendError: () => Promise.resolve(),
+    // The host's log level is the host's to set.
+    setLogLevel: refused,
 
     // ---------- nothing to ask, nothing to fail ----------
     sleeperLeagues: () => Promise.resolve([]),

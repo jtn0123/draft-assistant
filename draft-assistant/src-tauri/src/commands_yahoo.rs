@@ -13,18 +13,20 @@
 //! put a password prompt in front of the user, and holding a lock across that
 //! stops both pollers for as long as the user takes to answer.
 
+mod secrets;
+
 use crate::engine::Engine;
 use crate::engine::StoredLeague;
 use crate::sleeper::Pick;
 use crate::state::AppState;
 use crate::state::YahooState;
-use crate::yahoo::YahooClient;
-use crate::yahoo_oauth::{authorize_url_on, AuthError, OauthClient, TokenSet, YahooCredentials};
-use crate::yahoo_secrets::{self, SecretStore};
+use crate::yahoo_oauth::{authorize_url_on, AuthError, OauthClient, YahooCredentials};
+use crate::yahoo_secrets;
 use serde::Serialize;
-use std::path::PathBuf;
-use std::sync::Arc;
 use tauri::State;
+
+pub use secrets::{client_for, client_from, persist_tokens, persist_tokens_for};
+use secrets::{read_secrets, status_now, store_for};
 
 /// What the Settings panel renders itself from.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -46,117 +48,6 @@ pub struct YahooConnectStart {
     pub authorize_url: String,
     pub state: String,
     pub redirect: String,
-}
-
-/// The Keychain (or its file stand-in) for this install, off the runtime.
-///
-/// `keychain` is [`YahooState::keychain`]: false pins the file store in the
-/// app's own data directory, which is what the tests use and what a machine
-/// with no Keychain gets anyway.
-async fn store_for(data_dir: PathBuf, keychain: bool) -> Result<Arc<dyn SecretStore>, String> {
-    tokio::task::spawn_blocking(move || -> Arc<dyn SecretStore> {
-        match keychain {
-            true => Arc::from(yahoo_secrets::store_for(data_dir)),
-            false => Arc::new(yahoo_secrets::FileStore::in_dir(data_dir)),
-        }
-    })
-    .await
-    .map_err(|e| format!("Yahoo credentials: {e}"))
-}
-
-/// Read both items in one hop off the runtime.
-async fn read_secrets(
-    store: Arc<dyn SecretStore>,
-) -> Result<(Option<YahooCredentials>, Option<TokenSet>), String> {
-    tokio::task::spawn_blocking(move || {
-        (
-            yahoo_secrets::load_credentials(store.as_ref()),
-            yahoo_secrets::load_tokens(store.as_ref()),
-        )
-    })
-    .await
-    .map_err(|e| format!("Yahoo credentials: {e}"))
-}
-
-/// The status as the Keychain and the on-disk caches currently have it.
-async fn status_now(state: &AppState) -> Result<YahooStatus, String> {
-    let store = store_for(state.engine.data_dir.clone(), state.yahoo.keychain).await?;
-    let (credentials, tokens) = read_secrets(store).await?;
-    Ok(YahooStatus {
-        configured: credentials.is_some(),
-        connected: tokens.is_some(),
-        redirect: state.yahoo.hosts.redirect_uri.clone(),
-        account: cached_account(state).await,
-    })
-}
-
-/// The manager nickname off whichever Yahoo league this install has already
-/// loaded. A cache read, never a request — the settings screen must not wait
-/// on Yahoo to render.
-async fn cached_account(state: &AppState) -> Option<String> {
-    let keys: Vec<String> = {
-        let config = state.config.lock().await;
-        config
-            .leagues
-            .iter()
-            .filter(|league| league.platform == crate::view_types::YAHOO)
-            .map(|league| league.league_id.clone())
-            .collect()
-    };
-    keys.iter()
-        .find_map(|key| state.engine.yahoo_cached_account(key))
-}
-
-/// The client to make Yahoo calls with, built from the Keychain on first use.
-///
-/// Every caller must hand the tokens back afterwards through
-/// [`persist_tokens`]: the client renews its own access token, and a renewal
-/// that is not written down is spent again on the next launch.
-pub async fn client_for(state: &AppState) -> Result<Arc<YahooClient>, String> {
-    client_from(&state.engine, &state.yahoo).await
-}
-
-/// [`client_for`] for a caller that holds the parts rather than the state —
-/// the background poll task, which owns clones of both and no `State`.
-pub async fn client_from(engine: &Engine, yahoo: &YahooState) -> Result<Arc<YahooClient>, String> {
-    if let Some(client) = yahoo.client().await {
-        return Ok(client);
-    }
-    let store = store_for(engine.data_dir.clone(), yahoo.keychain).await?;
-    let (credentials, tokens) = read_secrets(store).await?;
-    let credentials = credentials.ok_or(
-        "Yahoo is not set up — paste your Yahoo app's client id and secret in Settings first",
-    )?;
-    let tokens = tokens.ok_or("not connected to Yahoo — use Connect in Settings")?;
-    let client = Arc::new(YahooClient::with_hosts(
-        credentials,
-        tokens,
-        yahoo.hosts.clone(),
-    ));
-    yahoo.set_client(Some(client.clone())).await;
-    Ok(client)
-}
-
-/// Write back whatever the client's last call refreshed.
-///
-/// A failure here is not worth failing the user's call over — the answer they
-/// asked for has already arrived — but it does mean the next launch signs in
-/// again, so it goes to stderr rather than nowhere.
-pub async fn persist_tokens(state: &AppState, client: &YahooClient) {
-    persist_tokens_for(&state.engine, &state.yahoo, client).await;
-}
-
-pub async fn persist_tokens_for(engine: &Engine, yahoo: &YahooState, client: &YahooClient) {
-    let tokens = client.tokens().await;
-    let Ok(store) = store_for(engine.data_dir.clone(), yahoo.keychain).await else {
-        return;
-    };
-    let stored =
-        tokio::task::spawn_blocking(move || yahoo_secrets::save_tokens(store.as_ref(), &tokens))
-            .await;
-    if let Err(error) = stored.map_err(|e| e.to_string()).and_then(|r| r) {
-        crate::applog::warn(format!("yahoo: refreshed token not saved: {error}"));
-    }
 }
 
 /// One poll tick's worth of Yahoo picks.
@@ -198,15 +89,32 @@ pub async fn yahoo_picks(
 }
 
 /// Whether Yahoo is set up, connected, and who as.
+///
+/// None of the Yahoo commands has a league or draft id to be tied to, so the
+/// context is empty rather than invented. What must never go in it is the one
+/// thing these commands do hold: a client secret, a token or an authorization
+/// code.
 #[tauri::command]
 pub async fn yahoo_status(state: State<'_, AppState>) -> Result<YahooStatus, String> {
-    status_now(&state).await
+    crate::applog::logged!("yahoo_status", String::new(), status_now(&state).await)
 }
 
 /// Store the client id and secret from developer.yahoo.com.
 #[tauri::command]
 pub async fn yahoo_save_credentials(
     state: State<'_, AppState>,
+    client_id: String,
+    client_secret: String,
+) -> Result<YahooStatus, String> {
+    crate::applog::logged!(
+        "yahoo_save_credentials",
+        String::new(),
+        yahoo_save_credentials_inner(&state, client_id, client_secret).await
+    )
+}
+
+async fn yahoo_save_credentials_inner(
+    state: &AppState,
     client_id: String,
     client_secret: String,
 ) -> Result<YahooStatus, String> {
@@ -225,19 +133,25 @@ pub async fn yahoo_save_credentials(
     .map_err(|e| format!("Yahoo credentials: {e}"))??;
     // Any client already built is holding the old identity.
     state.yahoo.set_client(None).await;
-    status_now(&state).await
+    status_now(state).await
 }
 
 /// Start the sign-in: the URL to open, and the `state` that comes back with
 /// the code.
 #[tauri::command]
 pub async fn yahoo_begin_connect(state: State<'_, AppState>) -> Result<YahooConnectStart, String> {
-    let store = store_for(state.engine.data_dir.clone(), state.yahoo.keychain)
-        .await
-        .map_err(crate::applog::failing("yahoo_begin_connect", String::new()))?;
-    let (credentials, _) = read_secrets(store)
-        .await
-        .map_err(crate::applog::failing("yahoo_begin_connect", String::new()))?;
+    crate::applog::logged!(
+        "yahoo_begin_connect",
+        String::new(),
+        yahoo_begin_connect_inner(&state).await
+    )
+}
+
+async fn yahoo_begin_connect_inner(state: &AppState) -> Result<YahooConnectStart, String> {
+    // The two Keychain reads below used to log themselves, which is now the
+    // wrapper's job: doing both wrote the same failure twice.
+    let store = store_for(state.engine.data_dir.clone(), state.yahoo.keychain).await?;
+    let (credentials, _) = read_secrets(store).await?;
     let credentials = credentials.ok_or(
         "Yahoo is not set up — paste your Yahoo app's client id and secret in Settings first",
     )?;
@@ -271,6 +185,20 @@ pub async fn yahoo_finish_connect(
     code: String,
     state: String,
 ) -> Result<YahooStatus, String> {
+    // The code Yahoo showed the user is a secret, so it stays out of the
+    // context; the wrapper logs only that this command failed and why.
+    crate::applog::logged!(
+        "yahoo_finish_connect",
+        String::new(),
+        yahoo_finish_connect_inner(&app, code, state).await
+    )
+}
+
+async fn yahoo_finish_connect_inner(
+    app: &AppState,
+    code: String,
+    state: String,
+) -> Result<YahooStatus, String> {
     let Some(expected) = app.yahoo.take_state().await else {
         return Err("no Yahoo sign-in is in progress — use Connect first".to_string());
     };
@@ -294,16 +222,14 @@ pub async fn yahoo_finish_connect(
             // browser again.
             app.yahoo.expect_state(&expected).await;
             // The error itself carries whatever Yahoo said back, code and all,
-            // which is exactly why it goes through the redacting log.
-            return Err(crate::applog::failing(
-                "yahoo_finish_connect",
-                String::new(),
-            )(match error {
+            // which is exactly why it goes through the redacting log — the
+            // wrapper above writes the line now, so this returns plainly.
+            return Err(match error {
                 AuthError::Transport(_) => {
                     format!("could not reach Yahoo to finish signing in — {error}")
                 }
                 _ => "Yahoo rejected that code — check it and try again".to_string(),
-            }));
+            });
         }
     };
     tokio::task::spawn_blocking(move || yahoo_secrets::save_tokens(store.as_ref(), &tokens))
@@ -311,7 +237,7 @@ pub async fn yahoo_finish_connect(
         .map_err(|e| format!("Yahoo tokens: {e}"))??;
     // The next call builds a client around the pair just stored.
     app.yahoo.set_client(None).await;
-    status_now(&app).await
+    status_now(app).await
 }
 
 /// Sign out of the Yahoo account.
@@ -326,6 +252,17 @@ pub async fn yahoo_disconnect(
     state: State<'_, AppState>,
     forget_credentials: Option<bool>,
 ) -> Result<YahooStatus, String> {
+    crate::applog::logged!(
+        "yahoo_disconnect",
+        String::new(),
+        yahoo_disconnect_inner(&state, forget_credentials).await
+    )
+}
+
+async fn yahoo_disconnect_inner(
+    state: &AppState,
+    forget_credentials: Option<bool>,
+) -> Result<YahooStatus, String> {
     let forget = forget_credentials.unwrap_or(false);
     let store = store_for(state.engine.data_dir.clone(), state.yahoo.keychain).await?;
     tokio::task::spawn_blocking(move || match forget {
@@ -336,16 +273,24 @@ pub async fn yahoo_disconnect(
     .map_err(|e| format!("Yahoo credentials: {e}"))??;
     state.yahoo.set_client(None).await;
     let _ = state.yahoo.take_state().await;
-    status_now(&state).await
+    status_now(state).await
 }
 
 /// The NFL leagues on the connected account, for the league picker.
 #[tauri::command]
 pub async fn yahoo_leagues(state: State<'_, AppState>) -> Result<Vec<StoredLeague>, String> {
-    let client = client_for(&state).await?;
+    crate::applog::logged!(
+        "yahoo_leagues",
+        String::new(),
+        yahoo_leagues_inner(&state).await
+    )
+}
+
+async fn yahoo_leagues_inner(state: &AppState) -> Result<Vec<StoredLeague>, String> {
+    let client = client_for(state).await?;
     let leagues = state.engine.yahoo_user_leagues(&client).await;
     // Even a failed call may have spent a refresh token on the way.
-    persist_tokens(&state, &client).await;
+    persist_tokens(state, &client).await;
     Ok(sorted_stored(leagues?))
 }
 
@@ -365,13 +310,27 @@ pub async fn yahoo_auction(
     state: State<'_, AppState>,
     league_key: String,
 ) -> Result<crate::yahoo_map::Auction, String> {
-    let client = client_for(&state).await?;
+    // Built before the key is handed on, because the macro only evaluates the
+    // context on the error path and the key has moved by then.
+    let context = crate::applog::context(&[("league", &league_key)]);
+    crate::applog::logged!(
+        "yahoo_auction",
+        context,
+        yahoo_auction_inner(&state, league_key).await
+    )
+}
+
+async fn yahoo_auction_inner(
+    state: &AppState,
+    league_key: String,
+) -> Result<crate::yahoo_map::Auction, String> {
+    let client = client_for(state).await?;
     let (league, results) = tokio::join!(
         client.league(&league_key),
         client.draft_results(&league_key)
     );
     // Even a failed call may have spent a refresh token getting there.
-    persist_tokens(&state, &client).await;
+    persist_tokens(state, &client).await;
     let mut auction = crate::yahoo_map::auction(
         &league.map_err(|error| error.to_string())?,
         &results.map_err(|error| error.to_string())?,

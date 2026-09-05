@@ -120,3 +120,48 @@ describe("the copied text", () => {
     expect(text).toContain("Log: none on this machine");
   });
 });
+
+describe("verbose logging", () => {
+  // The failure this prevents: debug lines could only be turned on by
+  // exporting an environment variable before launch, which nobody who
+  // double-clicks the app can do.
+  it("turns the level up and down from the dialog", async () => {
+    render(<Diagnostics appVersion="0.2.0" onClose={() => undefined} />);
+    const box = await screen.findByRole("checkbox", { name: /Verbose logging/ });
+    expect(box).not.toBeChecked();
+
+    await userEvent.click(box);
+    expect(api.setLogLevel).toHaveBeenCalledWith("debug");
+    await waitFor(() => expect(screen.getByText("Verbose logging is on")).toBeInTheDocument());
+    expect(box).toBeChecked();
+
+    await userEvent.click(box);
+    expect(api.setLogLevel).toHaveBeenCalledWith("info");
+    await waitFor(() => expect(screen.getByText("Verbose logging is off")).toBeInTheDocument());
+  });
+
+  it("shows the level the backend is actually using when it opens", async () => {
+    api.diagnostics.mockResolvedValue(diagnostics({ log_level: "debug" }));
+    render(<Diagnostics appVersion="0.2.0" onClose={() => undefined} />);
+    expect(await screen.findByRole("checkbox", { name: /Verbose logging/ })).toBeChecked();
+  });
+
+  it("puts the checkbox back when the backend refuses", async () => {
+    api.setLogLevel.mockRejectedValue(new Error("this app has no log file yet"));
+    render(<Diagnostics appVersion="0.2.0" onClose={() => undefined} />);
+    const box = await screen.findByRole("checkbox", { name: /Verbose logging/ });
+
+    await userEvent.click(box);
+    await waitFor(() =>
+      expect(screen.getByText("this app has no log file yet")).toBeInTheDocument(),
+    );
+    expect(box).not.toBeChecked();
+  });
+
+  it("is not offered on a follower, which has no log of its own", async () => {
+    api.diagnostics.mockResolvedValue(diagnostics({ log_path: null, log_tail: [] }));
+    render(<Diagnostics appVersion="0.2.0" onClose={() => undefined} />);
+    await waitFor(() => expect(screen.getByText("Nothing in the log yet.")).toBeInTheDocument());
+    expect(screen.queryByRole("checkbox", { name: /Verbose logging/ })).not.toBeInTheDocument();
+  });
+});

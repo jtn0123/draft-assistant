@@ -8,10 +8,14 @@
 //! the app's other data instead.
 //!
 //! Four levels, because one was not enough to tell a failed Keychain write
-//! from a missing weekly projection when reading the file back. Everything
-//! goes through [`redact`] on the way in: the log's whole purpose is to be
-//! pasted into a chat window on draft night, and a URL quoted back by a failed
-//! request carries whatever was in its query string.
+//! from a missing weekly projection when reading the file back. The bottom one
+//! is switchable while the app runs, from Settings -> Diagnostics: an
+//! environment variable is no use to someone who double-clicks a bundled
+//! `.app` on draft night.
+//!
+//! Everything goes through [`redact`] on the way in: the log's whole purpose
+//! is to be pasted into a chat window on draft night, and a URL quoted back by
+//! a failed request carries whatever was in its query string.
 //!
 //! Every failure here is swallowed: a logger that panics because the disk is
 //! full turns a warning into a crash, which is strictly worse than a lost log
@@ -26,6 +30,7 @@ pub use health::HealthWatch;
 pub use redact::redact;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
 
 /// Where the log lives, once the app knows its data directory.
@@ -41,6 +46,72 @@ static DIR: OnceLock<PathBuf> = OnceLock::new();
 /// the megabyte cap in an afternoon of polling and rotate away the warnings
 /// that actually explain a draft night.
 const DEBUG_VAR: &str = "DRAFT_ASSISTANT_DEBUG";
+
+/// The two levels this app has a use for. `debug` adds the lines inside
+/// loops; `info` is everything else, which is what a normal session writes.
+pub const LEVEL_DEBUG: &str = "debug";
+pub const LEVEL_INFO: &str = "info";
+
+/// Nobody has chosen a level yet, so `DRAFT_ASSISTANT_DEBUG` decides.
+const LEVEL_UNSET: u8 = 2;
+const DEBUG_OFF: u8 = 0;
+const DEBUG_ON: u8 = 1;
+
+/// Whether debug lines are being written, as chosen at runtime.
+///
+/// The failure this exists to prevent: the only way to turn debug on used to
+/// be an environment variable, which a user who double-clicks a bundled `.app`
+/// has no way to set. Now Settings -> Diagnostics can, and the choice is
+/// re-applied from the config at startup.
+static DEBUG: AtomicU8 = AtomicU8::new(LEVEL_UNSET);
+
+/// Turn debug lines on or off. Anything that is not `debug` means off, so a
+/// config file carrying a level this app no longer knows is quiet rather than
+/// noisy.
+pub fn set_level(level: &str) {
+    DEBUG.store(
+        if level.eq_ignore_ascii_case(LEVEL_DEBUG) {
+            DEBUG_ON
+        } else {
+            DEBUG_OFF
+        },
+        Ordering::Relaxed,
+    );
+}
+
+/// The level in force, for the Diagnostics dialog's checkbox to reflect.
+pub fn level() -> &'static str {
+    if debug_wanted() {
+        LEVEL_DEBUG
+    } else {
+        LEVEL_INFO
+    }
+}
+
+/// `DEBUG` is one static for the whole test binary, so every test that moves
+/// it takes a turn behind this rather than racing the others into a flake.
+#[cfg(test)]
+pub(crate) static LEVEL_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Put the level back where a fresh process would have it, so a test that
+/// turned debug on cannot leave every later test writing debug lines.
+#[cfg(test)]
+pub(crate) fn reset_level_for_tests() {
+    DEBUG.store(LEVEL_UNSET, Ordering::Relaxed);
+}
+
+/// The level a string names, or `None` when it names neither. The command
+/// layer refuses the `None` rather than silently storing a level that does
+/// nothing.
+pub fn parse_level(level: &str) -> Option<&'static str> {
+    if level.eq_ignore_ascii_case(LEVEL_DEBUG) {
+        Some(LEVEL_DEBUG)
+    } else if level.eq_ignore_ascii_case(LEVEL_INFO) {
+        Some(LEVEL_INFO)
+    } else {
+        None
+    }
+}
 
 /// Point the log at the app data directory. Later calls are ignored: the
 /// directory does not change while the app runs, and a second call is a bug
@@ -72,9 +143,10 @@ pub fn info(msg: impl AsRef<str>) {
     write("INFO", msg.as_ref());
 }
 
-/// Detail for a problem being chased. Written only when `DRAFT_ASSISTANT_DEBUG`
-/// is set, so a call in a poll loop costs one environment read per tick and
-/// nothing else.
+/// Detail for a problem being chased. Written only while the level is `debug`
+/// -- set from Settings -> Diagnostics, or by `DRAFT_ASSISTANT_DEBUG` when
+/// nobody has chosen -- so a call in a poll loop costs one atomic read per
+/// tick and nothing else.
 pub fn debug(msg: impl AsRef<str>) {
     if debug_wanted() {
         write("DEBUG", msg.as_ref());
@@ -84,8 +156,15 @@ pub fn debug(msg: impl AsRef<str>) {
 /// Whether debug lines are being written. Split out so the rule can be tested
 /// without a log file: a debug call in a poll loop that wrote by default would
 /// fill the megabyte cap in an afternoon and rotate the warnings away.
+///
+/// A runtime choice wins over the environment variable in both directions: a
+/// user who unticked "Verbose logging" gets a quiet log even on a machine
+/// where the variable happens to be exported.
 fn debug_wanted() -> bool {
-    std::env::var_os(DEBUG_VAR).is_some()
+    match DEBUG.load(Ordering::Relaxed) {
+        LEVEL_UNSET => std::env::var_os(DEBUG_VAR).is_some(),
+        chosen => chosen == DEBUG_ON,
+    }
 }
 
 /// The ` league=… draft=…` tail a call site attaches so a line can be tied to
@@ -121,6 +200,27 @@ pub fn failing(command: &'static str, context: String) -> impl FnOnce(String) ->
     }
 }
 
+/// Wrap a command's outcome: on failure log the command's name, the error and
+/// whatever ids the caller can supply, then hand the error back untouched.
+///
+/// The failure this exists to prevent is the one that made the whole log worth
+/// rewriting: a command returned `Err`, the string became a toast, the toast
+/// was dismissed, and afterwards there was no record the command had even been
+/// called. Every `#[tauri::command]` that can fail goes through this.
+///
+/// A macro rather than a plain function because building the context means
+/// taking a lock, and that is only worth doing when something actually failed:
+/// the expression here is evaluated on the error path and nowhere else.
+macro_rules! logged {
+    ($command:literal, $context:expr, $body:expr) => {
+        match $body {
+            Ok(value) => Ok(value),
+            Err(error) => Err($crate::applog::failing($command, $context)(error)),
+        }
+    };
+}
+pub(crate) use logged;
+
 /// Send every panic to the log before the default hook has its say.
 ///
 /// Without this a panic in a bundled `.app` is completely silent: the process
@@ -138,8 +238,12 @@ fn install_hook(sink: impl Fn(String) + Send + Sync + 'static) {
         let location = info
             .location()
             .map(|at| format!(" at {}:{}:{}", at.file(), at.line(), at.column()));
+        // The version is on the line itself because a panic is often all
+        // that is left of a session: the process is going away, so there may
+        // be no INFO start line above it saying which build this was.
         sink(format!(
-            "PANIC {}{}",
+            "PANIC [{}] {}{}",
+            env!("CARGO_PKG_VERSION"),
             info.payload()
                 .downcast_ref::<&str>()
                 .map(|s| (*s).to_string())
@@ -153,6 +257,78 @@ fn install_hook(sink: impl Fn(String) + Send + Sync + 'static) {
     }));
 }
 
+/// Lines written while a test is capturing them, instead of the file.
+///
+/// `DIR` is a `OnceLock` no test may set — one test claiming it would wedge it
+/// for every other test in the binary — so this is how a test reads back what
+/// was actually logged.
+#[cfg(test)]
+static CAPTURED: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
+
+/// Everything written to the log while this is alive, for a test to read.
+///
+/// Capturing is process-wide, so only one of these exists at a time: holding
+/// the gate is what makes that true rather than a race.
+#[cfg(test)]
+pub(crate) struct Capture {
+    _held: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+static CAPTURE_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+impl Capture {
+    pub(crate) fn start() -> Self {
+        let held = CAPTURE_GATE.lock().unwrap_or_else(|e| e.into_inner());
+        *CAPTURED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Vec::new());
+        Self { _held: held }
+    }
+
+    /// The lines written so far, in the order they were written.
+    pub(crate) fn lines(&self) -> Vec<String> {
+        CAPTURED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_default()
+    }
+
+    /// Whether any captured line contains `needle`.
+    pub(crate) fn saw(&self, needle: &str) -> bool {
+        self.lines().iter().any(|line| line.contains(needle))
+    }
+}
+
+/// Run an async test body with the log captured, and hand back what it
+/// returned together with every line it wrote.
+///
+/// A plain `fn` driving its own runtime rather than a `#[tokio::test]` holding
+/// a `Capture`: the capture and the level are guarded by ordinary blocking
+/// mutexes, and holding one of those across an `.await` is the deadlock
+/// `clippy::await_holding_lock` exists to stop. Here the guard is held across
+/// `block_on` in synchronous code, where it cannot.
+#[cfg(test)]
+pub(crate) fn captured<F>(body: impl FnOnce() -> F) -> (F::Output, Vec<String>)
+where
+    F: std::future::Future,
+{
+    let capture = Capture::start();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime for the test");
+    let out = runtime.block_on(body());
+    (out, capture.lines())
+}
+
+#[cfg(test)]
+impl Drop for Capture {
+    fn drop(&mut self) {
+        *CAPTURED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+}
+
 /// One line: timestamp, level, redacted message.
 fn write(level: &str, msg: &str) {
     let line = format!(
@@ -160,6 +336,14 @@ fn write(level: &str, msg: &str) {
         file::timestamp(file::now_secs()),
         redact(msg)
     );
+    #[cfg(test)]
+    {
+        let mut captured = CAPTURED.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(lines) = captured.as_mut() {
+            lines.push(line.clone());
+            return;
+        }
+    }
     match log_path() {
         Some(path) => {
             if file::append(&path, &line).is_err() {
@@ -173,117 +357,4 @@ fn write(level: &str, msg: &str) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use file::TempDir;
-
-    /// `write` reads the process-wide `DIR`, which no test may set. These
-    /// assertions are made against the same formatting through `append`.
-    fn line_of(level: &str, msg: &str) -> String {
-        format!("{} {level} {}\n", file::timestamp(0), redact(msg))
-    }
-
-    #[test]
-    fn every_level_writes_its_own_prefix_so_the_file_can_be_read_by_severity() {
-        let dir = TempDir::new("levels");
-        let log = dir.join(LOG_NAME);
-        for (level, msg) in [
-            ("ERROR", "could not load the league"),
-            ("WARN", "projection source unreachable"),
-            ("INFO", "polling started"),
-            ("DEBUG", "tick 4"),
-        ] {
-            file::append(&log, &line_of(level, msg)).expect("write");
-        }
-        let text = std::fs::read_to_string(&log).unwrap();
-        assert!(text.contains(" ERROR could not load the league"));
-        assert!(text.contains(" WARN projection source unreachable"));
-        assert!(text.contains(" INFO polling started"));
-        assert!(text.contains(" DEBUG tick 4"));
-    }
-
-    #[test]
-    fn a_secret_quoted_back_by_a_failed_request_never_reaches_the_file() {
-        let dir = TempDir::new("redact");
-        let log = dir.join(LOG_NAME);
-        file::append(
-            &log,
-            &line_of("ERROR", "POST /token?client_secret=hunter2 refused"),
-        )
-        .expect("write");
-        let text = std::fs::read_to_string(&log).unwrap();
-        assert!(!text.contains("hunter2"), "{text}");
-        assert!(text.contains("client_secret=····"), "{text}");
-    }
-
-    #[test]
-    fn context_names_the_ids_and_skips_the_ones_that_are_missing() {
-        assert_eq!(
-            context(&[("league", "123"), ("draft", "456")]),
-            " league=123 draft=456"
-        );
-        assert_eq!(context(&[("league", "123"), ("draft", "")]), " league=123");
-        assert_eq!(context(&[]), "");
-    }
-
-    #[test]
-    fn a_failing_command_hands_its_error_back_exactly_as_it_was_given() {
-        // The user-visible sentence must not change: the toast is the same
-        // toast, and only the log gains a line.
-        let handed_back = failing("add_league", context(&[("league", "123")]))(
-            "no league 123 on your account".to_string(),
-        );
-        assert_eq!(handed_back, "no league 123 on your account");
-    }
-
-    #[test]
-    fn a_panic_reaches_the_hook_with_its_message_and_where_it_happened() {
-        use std::sync::{Arc, Mutex};
-        let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        let sink = seen.clone();
-        install_hook(move |note| sink.lock().expect("sink lock").push(note));
-
-        let panicked = std::panic::catch_unwind(|| panic!("token=hunter2 was refused"));
-        assert!(panicked.is_err(), "the panic still propagates");
-
-        // Back to the default hook before anything else in this binary
-        // panics, so this test's sink does not outlive it.
-        let _ = std::panic::take_hook();
-
-        let notes = seen.lock().expect("sink lock");
-        let note = notes.first().expect("the hook wrote a note");
-        assert!(note.starts_with("PANIC "), "{note}");
-        assert!(note.contains("applog.rs:"), "the location is named: {note}");
-        // Redaction happens on the way into the file, so the note itself still
-        // holds the raw text; what matters is that `error` is what receives it.
-        assert!(!redact(note).contains("hunter2"), "{note}");
-    }
-
-    #[test]
-    fn debug_lines_are_off_unless_the_environment_asks_for_them() {
-        // Nothing in the test suite sets it, and nothing should: the point of
-        // the gate is that a poll loop's debug line is not written by default.
-        assert!(std::env::var_os(DEBUG_VAR).is_none());
-        assert!(!debug_wanted(), "debug must be off by default");
-        // And a debug call with the gate shut writes nothing anywhere.
-        let dir = TempDir::new("debug-off");
-        debug("tick 4");
-        assert!(!dir.join(LOG_NAME).exists());
-    }
-
-    #[test]
-    fn logging_before_init_writes_nothing_to_disk_and_does_not_panic() {
-        // No `init` has run in this test binary, so `DIR` is empty and the
-        // fallback is stderr. The assertion that matters is that this neither
-        // panics nor creates a file anywhere the test can see.
-        let dir = TempDir::new("preinit");
-        warn("engine could not reach the projection source");
-        error("and this one too");
-        assert!(
-            !dir.join(LOG_NAME).exists(),
-            "a pre-init log call must not invent a log file"
-        );
-        assert!(DIR.get().is_none(), "no test in this binary may call init");
-        assert_eq!(log_path(), None);
-    }
-}
+mod tests;

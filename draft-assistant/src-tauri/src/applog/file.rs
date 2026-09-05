@@ -63,14 +63,30 @@ pub(super) fn rotated(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// The last `lines` lines of the log, oldest first.
+/// The last `lines` lines of the log, oldest first, across both generations.
 ///
 /// Empty for a log that does not exist yet, which on a healthy first run is
-/// the normal answer rather than a problem worth reporting. Only the current
-/// generation is read: a line that has just rotated into `.1` is gone from
-/// the dialog, which is the price of not loading two megabytes to show two
-/// hundred lines.
+/// the normal answer rather than a problem worth reporting.
+///
+/// `.1` is read when the current file is shorter than the ask. The failure
+/// that prevents is the nastiest one this file has: a rotation happening a
+/// moment before the thing went wrong leaves the current file two lines long,
+/// and a tail that read only that showed two lines and hid the whole evening
+/// that explains them.
 pub fn tail(path: &Path, lines: usize) -> Vec<String> {
+    let mut out = last_lines(path, lines);
+    if out.len() < lines {
+        // Only the tail end of the older generation is wanted, and it goes
+        // above the newer lines because it was written first.
+        let mut older = last_lines(&rotated(path), lines - out.len());
+        older.append(&mut out);
+        out = older;
+    }
+    out
+}
+
+/// The last `lines` lines of one file, or nothing when it is not there.
+fn last_lines(path: &Path, lines: usize) -> Vec<String> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
@@ -232,6 +248,37 @@ mod tests {
         assert_eq!(tail(&log, 3), vec!["line 7", "line 8", "line 9"]);
         // Asking for more than there is gives everything, not a panic.
         assert_eq!(tail(&log, 100).len(), 10);
+    }
+
+    #[test]
+    fn a_rotation_just_before_the_problem_does_not_hide_the_evening_that_explains_it() {
+        // The bug: the log rotated at 8:39, the draft broke at 8:40, and the
+        // dialog showed the two lines written since the rotation.
+        let dir = TempDir::new("tail-rotated");
+        let log = dir.join(LOG_NAME);
+        std::fs::write(
+            rotated(&log),
+            "old 1\nold 2\nold 3\nold 4\nold 5\nold 6\nold 7\n",
+        )
+        .expect("seed the rotated generation");
+        append(&log, "new 1\nnew 2\n").expect("write the current generation");
+
+        // Older lines first, then the current ones, and never more than asked.
+        assert_eq!(tail(&log, 4), vec!["old 6", "old 7", "new 1", "new 2"]);
+        assert_eq!(
+            tail(&log, 100),
+            vec!["old 1", "old 2", "old 3", "old 4", "old 5", "old 6", "old 7", "new 1", "new 2",]
+        );
+    }
+
+    #[test]
+    fn a_current_generation_long_enough_on_its_own_is_not_joined_to_the_older_one() {
+        let dir = TempDir::new("tail-enough");
+        let log = dir.join(LOG_NAME);
+        std::fs::write(rotated(&log), "old\n").expect("seed");
+        append(&log, "a\nb\nc\n").expect("write");
+        assert_eq!(tail(&log, 2), vec!["b", "c"]);
+        assert_eq!(tail(&log, 3), vec!["a", "b", "c"]);
     }
 
     #[test]

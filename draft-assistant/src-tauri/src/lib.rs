@@ -94,7 +94,7 @@ use commands_companion::{
     companion_disable, companion_enable, companion_revoke, companion_status, set_device_name,
     shared_chat_get, shared_chat_reset, shared_chat_send,
 };
-use commands_diag::{diagnostics, log_frontend_error, open_log_folder};
+use commands_diag::{diagnostics, log_frontend_error, open_log_folder, set_log_level};
 use commands_draft::{
     add_league, clear_keepers, export_state, get_config, get_state, record_manual_pick,
     refresh_data, refresh_picks, set_my_username, start_polling, stop_polling, undo_manual_pick,
@@ -135,6 +135,24 @@ pub fn run() {
             applog::install_panic_hook();
             let engine = Engine::new(data_dir.clone());
             let config = engine.load_config();
+            // Whatever the user last chose in Settings -> Diagnostics. Applied
+            // before anything else can log, so a session started to reproduce
+            // a problem is verbose from its first line rather than from
+            // whenever the dialog is next opened.
+            if let Some(level) = config.log_level.as_deref() {
+                applog::set_level(level);
+            }
+            // The first line of every session, so a log opened cold says which
+            // build wrote it, on what, and where the rest of the app's files
+            // are. Without it a pasted tail could be any version at all.
+            applog::info(format!(
+                "app started version={} platform={} {} level={} data={}",
+                env!("CARGO_PKG_VERSION"),
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                applog::level(),
+                data_dir.display(),
+            ));
             // The name this Mac introduces itself by, and the port its phone
             // server last used. Read before the config is handed over.
             let host_name = config
@@ -231,6 +249,7 @@ pub fn run() {
             diagnostics,
             log_frontend_error,
             open_log_folder,
+            set_log_level,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

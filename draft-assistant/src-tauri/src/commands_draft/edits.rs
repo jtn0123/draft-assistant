@@ -27,6 +27,17 @@ pub async fn record_manual_pick(
     state: State<'_, AppState>,
     player_id: String,
 ) -> Result<DraftView, String> {
+    crate::applog::logged!(
+        "record_manual_pick",
+        super::ids(&state).await,
+        record_manual_pick_inner(&state, player_id).await
+    )
+}
+
+async fn record_manual_pick_inner(
+    state: &AppState,
+    player_id: String,
+) -> Result<DraftView, String> {
     let mut guard = state.loaded.lock().await;
     let loaded = guard.as_mut().ok_or("no league loaded")?;
     let teams = loaded.draft.settings.teams;
@@ -71,17 +82,24 @@ pub async fn record_manual_pick(
     // is tens of milliseconds during which the poll loop, every command and
     // every view build would otherwise be stopped dead.
     if let Err(error) = save_picks_off_lock(&state.engine, draft_id.clone(), picks).await {
-        undo_pick_in_memory(&state, &draft_id, &entered).await;
-        return Err(crate::applog::failing(
-            "record_manual_pick",
-            crate::applog::context(&[("draft", &draft_id)]),
-        )(error));
+        undo_pick_in_memory(state, &draft_id, &entered).await;
+        // Returned plainly: the wrapper writes the ERROR line now, and logging
+        // it here as well wrote the same failure to the file twice.
+        return Err(error);
     }
-    view_now(&state).await
+    view_now(state).await
 }
 
 #[tauri::command]
 pub async fn undo_manual_pick(state: State<'_, AppState>) -> Result<DraftView, String> {
+    crate::applog::logged!(
+        "undo_manual_pick",
+        super::ids(&state).await,
+        undo_manual_pick_inner(&state).await
+    )
+}
+
+async fn undo_manual_pick_inner(state: &AppState) -> Result<DraftView, String> {
     let mut guard = state.loaded.lock().await;
     let loaded = guard.as_mut().ok_or("no league loaded")?;
     let removed = loaded
@@ -97,7 +115,7 @@ pub async fn undo_manual_pick(state: State<'_, AppState>) -> Result<DraftView, S
         }
         return Err(error);
     }
-    view_now(&state).await
+    view_now(state).await
 }
 
 /// Forget every keeper this app has decided on for the draft on screen, and
@@ -110,6 +128,14 @@ pub async fn undo_manual_pick(state: State<'_, AppState>) -> Result<DraftView, S
 /// user's way out.
 #[tauri::command]
 pub async fn clear_keepers(state: State<'_, AppState>) -> Result<DraftView, String> {
+    crate::applog::logged!(
+        "clear_keepers",
+        super::ids(&state).await,
+        clear_keepers_inner(&state).await
+    )
+}
+
+async fn clear_keepers_inner(state: &AppState) -> Result<DraftView, String> {
     let draft_id = {
         let loaded = state.loaded.lock().await;
         loaded
@@ -143,5 +169,38 @@ pub async fn clear_keepers(state: State<'_, AppState>) -> Result<DraftView, Stri
         ),
     };
     drop(guard);
-    view_now(&state).await
+    view_now(state).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The failure this prevents: an edit command returned `Err`, the string
+    /// became a toast, the toast was dismissed, and nothing in the log said
+    /// the command had been called at all.
+    #[tokio::test]
+    async fn an_edit_command_that_fails_leaves_an_error_line_naming_it() {
+        let (state, dir) = AppState::scratch("edits-log");
+        let capture = crate::applog::Capture::start();
+        // The same wrapper `undo_manual_pick` is, with the Tauri `State` a
+        // unit test cannot build taken out. No league is loaded, so it fails
+        // on the spot and touches neither disk nor network.
+        let out: Result<DraftView, String> = crate::applog::logged!(
+            "undo_manual_pick",
+            super::super::ids(&state).await,
+            undo_manual_pick_inner(&state).await
+        );
+        assert_eq!(
+            out.unwrap_err(),
+            "no league loaded",
+            "the sentence the user sees is unchanged"
+        );
+        assert!(
+            capture.saw("ERROR undo_manual_pick failed: no league loaded"),
+            "{:?}",
+            capture.lines()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

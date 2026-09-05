@@ -341,5 +341,7 @@ export interface Diagnostics {
   /** Null when this copy of the app has no log of its own — a follower, or
    *  the browser preview. The dialog hides the log actions then. */
   log_path: string | null;
+  /** "debug" or "info": what the Verbose logging checkbox shows. */
+  log_level: string;
   log_tail: string[];
 }

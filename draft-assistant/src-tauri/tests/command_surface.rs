@@ -209,6 +209,7 @@ fn handler_list() -> BTreeSet<String> {
         "diagnostics",
         "log_frontend_error",
         "open_log_folder",
+        "set_log_level",
     ]
     .into_iter()
     .map(str::to_string)
@@ -305,6 +306,7 @@ fn every_command_answers_over_the_ipc() {
             diag::diagnostics,
             diag::log_frontend_error,
             diag::open_log_folder,
+            diag::set_log_level,
         ])
         .build(mock_context(noop_assets()))
         .expect("the app builds on the mock runtime");

@@ -121,6 +121,7 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         device_name: None,
         companion_port: None,
         companion_enabled: false,
+        log_level: None,
     };
     let loaded = LoadedLeague {
         my_slot: None,

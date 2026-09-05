@@ -33,7 +33,7 @@ export function diagnosticsText(report: Report, appVersion: string): string {
     `Draft: ${report.draft_id ?? "none"}`,
     `Live sync: ${pollSummary(report)}`,
     `Phone & second screen: ${report.companion_enabled ? `on, ${report.companion_devices} paired` : "off"}`,
-    `Log: ${report.log_path ?? "none on this machine"}`,
+    `Log: ${report.log_path ?? "none on this machine"} (level ${report.log_level})`,
   ];
   if (report.log_tail.length > 0) lines.push("", "--- log ---", ...report.log_tail);
   return lines.join("\n");

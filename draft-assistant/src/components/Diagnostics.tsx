@@ -43,6 +43,10 @@ export function Diagnostics({
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  /** The level the user has just chosen, before the next report catches up.
+   *  Null until they touch the checkbox, so the backend's answer is what
+   *  shows on open. */
+  const [level, setLevel] = useState<string | null>(null);
 
   useEffect(() => {
     opener.current = document.activeElement as HTMLElement | null;
@@ -74,6 +78,27 @@ export function Diagnostics({
       ?.writeText(text)
       .then(() => setNote(said))
       .catch((e: unknown) => setError(describeError(e)));
+  };
+
+  /** Turn verbose logging on or off.
+   *
+   *  Applied optimistically so the checkbox does not lag a disk write, and put
+   *  back if the backend refuses: a checkbox that shows a setting the app is
+   *  not actually using is worse than no checkbox.
+   */
+  const setVerbose = (wanted: boolean) => {
+    const asked = wanted ? "debug" : "info";
+    setLevel(asked);
+    void api.setLogLevel(asked).then(
+      (inForce) => {
+        setLevel(inForce);
+        setNote(inForce === "debug" ? "Verbose logging is on" : "Verbose logging is off");
+      },
+      (e: unknown) => {
+        setLevel(null);
+        setError(describeError(e));
+      },
+    );
   };
 
   const openFolder = () => {
@@ -132,6 +157,21 @@ export function Diagnostics({
               />
               <Fact name="Log file" value={report.log_path ?? "None on this machine"} />
             </div>
+
+            {report.log_path !== null && (
+              <label className="diag-verbose">
+                <input
+                  type="checkbox"
+                  checked={(level ?? report.log_level) === "debug"}
+                  onChange={(e) => setVerbose(e.target.checked)}
+                />
+                <span>Verbose logging</span>
+                <span className="diag-empty">
+                  Records far more, including every poll tick. Turn it on to reproduce a problem,
+                  then turn it back off.
+                </span>
+              </label>
+            )}
 
             {report.log_tail.length === 0 ? (
               <span className="diag-empty">Nothing in the log yet.</span>

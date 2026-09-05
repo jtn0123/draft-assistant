@@ -41,3 +41,20 @@
   color: var(--faint);
   font-size: 12px;
 }
+
+.diag-verbose {
+  /* The checkbox, its name and the sentence under it: the name sits beside the
+     box and the explanation runs full width below both, so a long sentence
+     does not push the box out of line with it. */
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px 8px;
+  margin: 6px 0 2px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.diag-verbose .diag-empty {
+  grid-column: 2;
+}

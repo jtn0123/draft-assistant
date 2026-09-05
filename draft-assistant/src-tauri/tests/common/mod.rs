@@ -475,6 +475,7 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
         device_name: None,
         companion_port: None,
         companion_enabled: false,
+        log_level: None,
     };
     (loaded, season, config)
 }

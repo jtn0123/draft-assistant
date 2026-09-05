@@ -320,3 +320,30 @@ fn spend_is_filed_under_the_screen_and_the_league_together() {
         assert_ne!(spend_key(screen, Some("1")), screen);
     }
 }
+
+/// A refused budget used to leave nothing behind once its toast was gone: the
+/// panel said no, the user dismissed it, and the log had no record that
+/// `set_chat_budget` had even been called. This drives the command's own body
+/// — the same macro, the same inner half, the same context.
+#[tokio::test]
+async fn a_refused_chat_command_leaves_an_error_line_naming_it() {
+    let (state, _dir) = AppState::scratch("chat-logging");
+    let capture = crate::applog::Capture::start();
+    // Nothing is loaded and nothing goes over the network: a negative cap is
+    // refused before the config file is ever opened.
+    let handed_back: Result<f64, String> = crate::applog::logged!(
+        "set_chat_budget",
+        ids(&state, "").await,
+        set_chat_budget_inner(&state, -1.0).await
+    );
+    let error = handed_back.expect_err("a negative cap is not a cap");
+    assert!(
+        error.contains("cannot be negative"),
+        "the toast says what it always said: {error}"
+    );
+    assert!(
+        capture.saw(&format!("ERROR set_chat_budget failed: {error}")),
+        "{:?}",
+        capture.lines()
+    );
+}

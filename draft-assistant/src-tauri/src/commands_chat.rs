@@ -38,6 +38,24 @@ pub struct ChatSettings {
     notes: std::collections::HashMap<&'static str, [&'static str; 2]>,
 }
 
+/// The ids a failure in this panel should be tied to: the screen that asked,
+/// and the league whose board the question was about.
+///
+/// Without them a logged failure names the command and nothing else, and "ask
+/// claude failed" read back a week later does not say which screen it was on
+/// or which league was open. Commands with no screen of their own pass `""`,
+/// which [`crate::applog::context`] drops rather than writing `screen=`.
+async fn ids(state: &AppState, screen: &str) -> String {
+    let league = {
+        let loaded = state.loaded.lock().await;
+        loaded
+            .as_ref()
+            .map(|l| l.league.league_id.clone())
+            .unwrap_or_default()
+    };
+    crate::applog::context(&[("screen", screen), ("league", &league)])
+}
+
 /// Which route a question takes. An explicit choice wins; otherwise the CLI
 /// when it is installed and no key has been added, else the API.
 fn resolve_provider(config: &AppConfig, has_key: bool, cli_available: bool) -> &'static str {
@@ -83,6 +101,14 @@ where
 /// Store (or clear, with an empty string) the Anthropic API key.
 #[tauri::command]
 pub async fn set_api_key(state: State<'_, AppState>, key: String) -> Result<bool, String> {
+    crate::applog::logged!(
+        "set_api_key",
+        ids(&state, "").await,
+        set_api_key_inner(&state, key).await
+    )
+}
+
+async fn set_api_key_inner(state: &AppState, key: String) -> Result<bool, String> {
     let trimmed = key.trim().to_string();
     let next = if trimmed.is_empty() {
         None
@@ -106,6 +132,17 @@ pub async fn set_chat_provider(
     state: State<'_, AppState>,
     provider: String,
 ) -> Result<&'static str, String> {
+    crate::applog::logged!(
+        "set_chat_provider",
+        ids(&state, "").await,
+        set_chat_provider_inner(&state, provider).await
+    )
+}
+
+async fn set_chat_provider_inner(
+    state: &AppState,
+    provider: String,
+) -> Result<&'static str, String> {
     let chosen = match provider.as_str() {
         PROVIDER_API => PROVIDER_API,
         PROVIDER_CLI => PROVIDER_CLI,
@@ -125,6 +162,14 @@ pub async fn set_chat_provider(
 /// What the chat panel needs to render itself before the first message.
 #[tauri::command]
 pub async fn chat_settings(state: State<'_, AppState>) -> Result<ChatSettings, String> {
+    crate::applog::logged!(
+        "chat_settings",
+        ids(&state, "").await,
+        chat_settings_inner(&state).await
+    )
+}
+
+async fn chat_settings_inner(state: &AppState) -> Result<ChatSettings, String> {
     // Copied rather than held: the Keychain lookup below can take a moment
     // the first time, and nothing else should wait on the config for it.
     let config = state.config.lock().await.clone();
@@ -248,6 +293,14 @@ fn checked_budget(dollars: f64) -> Result<f64, String> {
 /// Set the dollar cap a screen's chat runs under. Zero turns it off.
 #[tauri::command]
 pub async fn set_chat_budget(state: State<'_, AppState>, dollars: f64) -> Result<f64, String> {
+    crate::applog::logged!(
+        "set_chat_budget",
+        ids(&state, "").await,
+        set_chat_budget_inner(&state, dollars).await
+    )
+}
+
+async fn set_chat_budget_inner(state: &AppState, dollars: f64) -> Result<f64, String> {
     let dollars = checked_budget(dollars)?;
     let mut config = state.config.lock().await;
     config.chat_budget_usd = Some(dollars);
@@ -320,19 +373,11 @@ pub async fn ask_claude(
     effort: String,
     messages: Vec<ChatMessage>,
 ) -> Result<ChatReply, String> {
-    let league = {
-        let loaded = state.loaded.lock().await;
-        loaded
-            .as_ref()
-            .map(|l| l.league.league_id.clone())
-            .unwrap_or_default()
-    };
-    answer(&state, &screen, &model, &effort, messages)
-        .await
-        .map_err(crate::applog::failing(
-            "ask_claude",
-            crate::applog::context(&[("screen", &screen), ("league", &league)]),
-        ))
+    crate::applog::logged!(
+        "ask_claude",
+        ids(&state, &screen).await,
+        answer(&state, &screen, &model, &effort, messages).await
+    )
 }
 
 /// One answered turn, provider choice, budget and all.

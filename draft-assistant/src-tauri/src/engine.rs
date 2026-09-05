@@ -14,10 +14,13 @@ use crate::sleeper_error::to_message;
 use crate::traded_picks::TradedPick;
 use crate::valuation::ReplacementModel;
 use crate::weekly::WeeklyPoints;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+mod config;
+pub use config::{AppConfig, StoredLeague};
 
 pub(crate) const PLAYERS_TTL_SECS: u64 = 24 * 3600;
 pub(crate) const PROJECTIONS_TTL_SECS: u64 = 6 * 3600;
@@ -31,67 +34,6 @@ pub(crate) fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
-}
-
-// ---------- persisted config ----------
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AppConfig {
-    pub my_user_id: Option<String>,
-    pub active_league_id: Option<String>,
-    #[serde(default)]
-    pub leagues: Vec<StoredLeague>,
-    /// Key for the Ask Claude panel. Stored in the app's own data directory
-    /// and never sent anywhere except api.anthropic.com.
-    #[serde(default)]
-    pub anthropic_api_key: Option<String>,
-    /// How Ask Claude reaches Claude: "api" (the key above) or "claude_code"
-    /// (the Claude Code CLI, signed in with a subscription). Unset means
-    /// whichever is available, preferring the CLI when there is no key.
-    #[serde(default)]
-    pub chat_provider: Option<String>,
-    /// Dollars one screen's Ask Claude may spend before the backend refuses
-    /// the next turn. `None` means nobody has set one and the default is in
-    /// force; `Some(0.0)` means the user turned the cap off.
-    #[serde(default)]
-    pub chat_budget_usd: Option<f64>,
-    /// screen ("draft" / "season") -> what that screen's chats have cost, all
-    /// conversations together. The cap is checked against this, so it has to
-    /// outlive both the conversation and the app.
-    #[serde(default)]
-    pub chat_spend_usd: HashMap<String, f64>,
-    /// What this Mac calls itself in the shared chat and on a follower's
-    /// "Hosted by …" pill. Unset until the user edits it, and then the
-    /// machine's own computer name is used.
-    #[serde(default)]
-    pub device_name: Option<String>,
-    /// The port the phone server last took, so a bookmarked URL keeps working.
-    #[serde(default)]
-    pub companion_port: Option<u16>,
-    /// Whether it was on when the app last closed; see COMPANION-API.md.
-    #[serde(default)]
-    pub companion_enabled: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredLeague {
-    pub league_id: String,
-    pub name: String,
-    pub season: String,
-    /// Sleeper's `pre_draft`/`drafting`/`in_season`/`complete`; absent for
-    /// older configs and for a mock draft, which has no league to ask.
-    #[serde(default)]
-    pub status: Option<String>,
-    /// `"sleeper"` or `"yahoo"`. Defaulted so a config written before Yahoo
-    /// existed still loads, with every league in it read as a Sleeper one —
-    /// which is what it was.
-    #[serde(default = "sleeper")]
-    pub platform: String,
-}
-
-/// The platform a stored league has when its config predates the field.
-fn sleeper() -> String {
-    crate::view_types::SLEEPER.to_string()
 }
 
 // ---------- engine ----------

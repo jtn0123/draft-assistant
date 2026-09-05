@@ -6,17 +6,20 @@
 //! told anyone where it was, and a page-level error -- a rejected promise, a
 //! screen that would not render -- never reached it at all.
 //!
-//! Three commands. `diagnostics` is everything worth pasting, `log_frontend_error`
-//! is the webview's way into the same log, and `open_log_folder` puts the file
-//! in front of the user in their file manager.
+//! Four commands. `diagnostics` is everything worth pasting, `log_frontend_error`
+//! is the webview's way into the same log, `open_log_folder` puts the file in
+//! front of the user in their file manager, and `set_log_level` is the only
+//! way a user without a terminal can turn verbose logging on.
 
 use crate::applog;
 use crate::companion::CompanionServer;
+use crate::engine::{AppConfig, Engine};
 use crate::poll::{poll_health, PollHealth};
 use crate::state::AppState;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::State;
+use tokio::sync::Mutex;
 
 /// Everything the Diagnostics dialog shows, and everything "Copy diagnostics"
 /// puts on the clipboard.
@@ -42,6 +45,8 @@ pub struct Diagnostics {
     /// Where the log is, or `None` before the app has a data directory —
     /// which in practice means only the tests.
     pub log_path: Option<String>,
+    /// `"debug"` or `"info"`: what the "Verbose logging" checkbox shows.
+    pub log_level: String,
     pub log_tail: Vec<String>,
 }
 
@@ -74,8 +79,44 @@ pub async fn diagnostics(
         companion_enabled: companion.is_enabled(),
         companion_devices: companion.hub.devices().len(),
         log_path: log_path.map(|path| path.to_string_lossy().to_string()),
+        log_level: applog::level().to_string(),
         log_tail,
     })
+}
+
+/// Turn verbose logging on or off from the Diagnostics dialog, and remember
+/// the choice.
+///
+/// The failure this exists to prevent: debug lines were reachable only by
+/// exporting `DRAFT_ASSISTANT_DEBUG` before launch, which is not a thing a
+/// user who double-clicks the app on draft night can do. Applied immediately
+/// and again at startup from the config.
+#[tauri::command]
+pub async fn set_log_level(state: State<'_, AppState>, level: String) -> Result<String, String> {
+    applog::logged!(
+        "set_log_level",
+        String::new(),
+        set_level_on(&state.engine, &state.config, &level).await
+    )
+}
+
+/// The half of `set_log_level` with no Tauri `State` in it, so a test can
+/// drive it with an engine pointed at a scratch directory.
+async fn set_level_on(
+    engine: &Engine,
+    config_ref: &Mutex<AppConfig>,
+    level: &str,
+) -> Result<String, String> {
+    let level = applog::parse_level(level)
+        .ok_or_else(|| format!("{level:?} is not a log level this app writes"))?;
+    applog::set_level(level);
+    let mut config = config_ref.lock().await;
+    config.log_level = Some(level.to_string());
+    // Saved rather than only held: chasing a problem usually means restarting,
+    // and a verbose setting that resets on restart is no use for that.
+    engine.save_config(&config)?;
+    applog::info(format!("log level set to {level}"));
+    Ok(level.to_string())
 }
 
 /// The webview's way into the log: a render error, a rejected promise, or
@@ -107,6 +148,11 @@ fn frontend_line(message: &str, source: Option<&str>) -> String {
 /// half that matters.
 #[tauri::command]
 pub async fn open_log_folder() -> Result<String, String> {
+    applog::logged!("open_log_folder", String::new(), show_log_folder())
+}
+
+/// The half with the error in it, so the wrapper above is only the wrapper.
+fn show_log_folder() -> Result<String, String> {
     let path = applog::log_path().ok_or("this app has no log file yet")?;
     let folder = path.parent().unwrap_or(&path).to_path_buf();
     let shown = folder.to_string_lossy().to_string();
@@ -166,6 +212,73 @@ mod tests {
         // follower is the host's address with its bearer token in it.
         let line = frontend_line("GET /api/state?token=abc123 failed", Some("render"));
         assert!(!applog::redact(&line).contains("abc123"), "{line}");
+    }
+
+    /// A scratch data directory, so no test ever writes a real config.
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("draft-assistant-diag-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        dir
+    }
+
+    /// Drive an async body while holding the process-wide level gate.
+    ///
+    /// A plain `fn` with its own runtime rather than a `#[tokio::test]`: the
+    /// gate is a blocking mutex, and holding one of those across an `.await`
+    /// is the deadlock `clippy::await_holding_lock` exists to stop.
+    fn with_level_gate<F: std::future::Future>(body: impl FnOnce() -> F) -> F::Output {
+        let _held = applog::LEVEL_GATE.lock().unwrap_or_else(|e| e.into_inner());
+        applog::reset_level_for_tests();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime for the test");
+        let out = runtime.block_on(body());
+        applog::reset_level_for_tests();
+        out
+    }
+
+    #[test]
+    fn turning_verbose_logging_on_is_applied_now_and_remembered_for_next_time() {
+        // The failure: debug lines could only be had by exporting an
+        // environment variable before launch, which a user who double-clicks
+        // the app cannot do.
+        let dir = scratch("level");
+        with_level_gate(|| async {
+            let engine = Engine::new(dir.clone());
+            let config = Mutex::new(AppConfig::default());
+
+            let chosen = set_level_on(&engine, &config, "debug")
+                .await
+                .expect("debug is a level this app writes");
+            assert_eq!(chosen, applog::LEVEL_DEBUG);
+            assert_eq!(applog::level(), applog::LEVEL_DEBUG, "applied immediately");
+            assert_eq!(
+                config.lock().await.log_level.as_deref(),
+                Some(applog::LEVEL_DEBUG),
+                "and stored, so a restart to reproduce the problem is still verbose"
+            );
+
+            set_level_on(&engine, &config, "info")
+                .await
+                .expect("and back off again");
+            assert_eq!(applog::level(), applog::LEVEL_INFO);
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_level_this_app_does_not_write_is_refused_rather_than_stored() {
+        let dir = scratch("level-bad");
+        with_level_gate(|| async {
+            let engine = Engine::new(dir.clone());
+            let config = Mutex::new(AppConfig::default());
+            let refused = set_level_on(&engine, &config, "trace").await;
+            assert!(refused.is_err(), "a level that does nothing is not stored");
+            assert_eq!(config.lock().await.log_level, None);
+        });
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

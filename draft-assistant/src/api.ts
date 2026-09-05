@@ -154,6 +154,9 @@ export interface Api {
    *  the same log as everything else. Best effort: never worth a toast, and
    *  never worth failing over. */
   logFrontendError(message: string, source: string): Promise<void>;
+  /** Turn verbose logging on ("debug") or off ("info"), now and for next
+   *  launch. Resolves to the level that is now in force. */
+  setLogLevel(level: string): Promise<string>;
 }
 
 const tauriApi: Api = {
@@ -219,6 +222,7 @@ const tauriApi: Api = {
   diagnostics: () => invoke<Diagnostics>("diagnostics"),
   openLogFolder: () => invoke<string>("open_log_folder"),
   logFrontendError: (message, source) => invoke<void>("log_frontend_error", { message, source }),
+  setLogLevel: (level) => invoke<string>("set_log_level", { level }),
 };
 
 /**
@@ -396,12 +400,15 @@ function browserApi(): Api {
       companion_enabled: previewEnabled,
       companion_devices: 0,
       log_path: null,
+      log_level: "info",
       log_tail: [],
     }),
     openLogFolder: () => readOnly("the log lives with the desktop app"),
     // Nowhere to send it, and a preview that threw here would turn one page
     // error into two.
     logFrontendError: () => Promise.resolve(),
+    // Nothing here writes a log, so there is no level to move.
+    setLogLevel: () => readOnly("the log lives with the desktop app"),
   };
 }
 

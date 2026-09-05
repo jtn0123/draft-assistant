@@ -81,6 +81,7 @@ const METHODS: Record<keyof Api, true> = {
   diagnostics: true,
   openLogFolder: true,
   logFrontendError: true,
+  setLogLevel: true,
 };
 
 const METHOD_NAMES = Object.keys(METHODS) as (keyof Api)[];
@@ -146,6 +147,7 @@ function build(): Harness {
     api.logFrontendError.mockResolvedValue(undefined);
     api.openLogFolder.mockResolvedValue("/tmp/logs");
     api.diagnostics.mockResolvedValue(diagnostics());
+    api.setLogLevel.mockImplementation((level: string) => Promise.resolve(level));
     api.sleeperLeagues.mockResolvedValue([]);
     api.yahooLeagues.mockResolvedValue([]);
     api.yahooStatus.mockResolvedValue({
@@ -255,6 +257,7 @@ export function diagnostics(overrides: Partial<Diagnostics> = {}): Diagnostics {
     companion_enabled: false,
     companion_devices: 0,
     log_path: "/Users/x/Library/Application Support/draft-assistant/draft-assistant.log",
+    log_level: "info",
     log_tail: ["2026-09-03T16:22:01Z INFO polling started every 3s"],
     ...overrides,
   };

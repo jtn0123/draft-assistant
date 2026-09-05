@@ -57,10 +57,35 @@ pub async fn import_second_opinion<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<Option<SecondOpinionImport>, String> {
+    // Cancelling the picker is outside the wrapper on purpose: closing a
+    // dialog is not a failure, and logging it as one would put an ERROR line
+    // in the log every time the user changed their mind.
     let Some(source) = pick_file(&app).await else {
         return Ok(None);
     };
-    let text = std::fs::read_to_string(&source)
+    crate::applog::logged!(
+        "import_second_opinion",
+        league_of(&state).await,
+        import_second_opinion_inner(&state, &source).await
+    )
+}
+
+/// The league a failed import belongs to, so the log line says which board
+/// the new column was meant for rather than naming the command alone.
+async fn league_of(state: &AppState) -> String {
+    let loaded = state.loaded.lock().await;
+    let league = loaded
+        .as_ref()
+        .map(|l| l.league.league_id.clone())
+        .unwrap_or_default();
+    crate::applog::context(&[("league", &league)])
+}
+
+async fn import_second_opinion_inner(
+    state: &AppState,
+    source: &std::path::Path,
+) -> Result<Option<SecondOpinionImport>, String> {
+    let text = std::fs::read_to_string(source)
         .map_err(|e| format!("that file could not be opened: {e}"))?;
     let loaded_at = crate::engine::now_secs();
     // Parsed before it is kept, so a file that is not a projections export
@@ -90,4 +115,38 @@ pub async fn import_second_opinion<R: tauri::Runtime>(
         excluded_reason: report.excluded.reason(),
         view,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::import_second_opinion_inner;
+    use crate::state::AppState;
+
+    #[tokio::test]
+    async fn an_import_that_cannot_read_the_file_leaves_an_error_line_naming_the_command() {
+        // The failure this prevents: the import toast said the file could not
+        // be opened, the user dismissed it, and nothing recorded that the
+        // import had been attempted or which file it was.
+        let capture = crate::applog::Capture::start();
+        let (state, dir) = AppState::scratch("second-opinion-log");
+        // A path inside the scratch directory that was never written, so this
+        // fails on the first read with no picker and no network.
+        let missing = dir.join("not-a-file.csv");
+        let out = crate::applog::logged!(
+            "import_second_opinion",
+            super::league_of(&state).await,
+            import_second_opinion_inner(&state, &missing).await
+        );
+        let message = out.expect_err("a file that is not there cannot be imported");
+        assert!(
+            message.starts_with("that file could not be opened"),
+            "the sentence the user sees is unchanged: {message}"
+        );
+        assert!(
+            capture.saw("ERROR import_second_opinion failed: that file could not be opened"),
+            "{:?}",
+            capture.lines()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

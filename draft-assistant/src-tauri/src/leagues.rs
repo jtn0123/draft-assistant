@@ -55,6 +55,17 @@ pub async fn sleeper_leagues(
     state: State<'_, AppState>,
     season: Option<String>,
 ) -> Result<Vec<StoredLeague>, String> {
+    crate::applog::logged!(
+        "sleeper_leagues",
+        crate::applog::context(&[("season", season.as_deref().unwrap_or_default())]),
+        sleeper_leagues_inner(&state, season.as_deref()).await
+    )
+}
+
+async fn sleeper_leagues_inner(
+    state: &AppState,
+    season: Option<&str>,
+) -> Result<Vec<StoredLeague>, String> {
     let user_id = {
         let config = state.config.lock().await;
         config.my_user_id.clone()
@@ -63,7 +74,7 @@ pub async fn sleeper_leagues(
         "no Sleeper account saved — set your Sleeper username before looking up your leagues",
     )?;
     let season = match season {
-        Some(season) => season,
+        Some(season) => season.to_string(),
         None => {
             let loaded = state.loaded.lock().await;
             loaded
@@ -92,8 +103,19 @@ pub async fn remove_league(
     state: State<'_, AppState>,
     league_id: String,
 ) -> Result<Vec<StoredLeague>, String> {
+    crate::applog::logged!(
+        "remove_league",
+        crate::applog::context(&[("league", &league_id)]),
+        remove_league_inner(&state, &league_id).await
+    )
+}
+
+async fn remove_league_inner(
+    state: &AppState,
+    league_id: &str,
+) -> Result<Vec<StoredLeague>, String> {
     let mut config = state.config.lock().await;
-    if config.active_league_id.as_deref() == Some(league_id.as_str()) {
+    if config.active_league_id.as_deref() == Some(league_id) {
         return Err("that league is on screen — switch to another one first".to_string());
     }
     let before = config.leagues.len();
@@ -102,6 +124,9 @@ pub async fn remove_league(
         return Err(format!("league {league_id} is not in the list"));
     }
     state.engine.save_config(&config)?;
+    // A league disappearing from the picker looks like data loss when the log
+    // is read back a week later. This line says it was asked for, and when.
+    crate::applog::info(format!("league {league_id} removed from the picker"));
     Ok(config.leagues.clone())
 }
 
@@ -123,8 +148,10 @@ fn sorted_stored(leagues: Vec<League>) -> Vec<StoredLeague> {
 
 #[cfg(test)]
 mod tests {
-    use super::{path_segment, sorted_stored};
+    use super::{path_segment, remove_league_inner, sorted_stored};
+    use crate::engine::StoredLeague;
     use crate::sleeper::League;
+    use crate::state::AppState;
 
     fn league(id: &str, name: &str) -> League {
         League {
@@ -177,5 +204,30 @@ mod tests {
         .map(|l| l.name)
         .collect();
         assert_eq!(names, ["Alpha", "middle", "zeta"]);
+    }
+
+    #[tokio::test]
+    async fn removing_a_league_that_is_not_there_leaves_an_error_line_naming_the_command() {
+        // The failure this prevents: the toast said the league was not in the
+        // list, the user dismissed it, and afterwards nothing recorded that
+        // remove_league had been called at all.
+        let capture = crate::applog::Capture::start();
+        let (state, dir) = AppState::scratch("leagues-log");
+        let out: Result<Vec<StoredLeague>, String> = crate::applog::logged!(
+            "remove_league",
+            crate::applog::context(&[("league", "999")]),
+            remove_league_inner(&state, "999").await
+        );
+        assert_eq!(
+            out.unwrap_err(),
+            "league 999 is not in the list",
+            "the sentence the user sees is unchanged"
+        );
+        assert!(
+            capture.saw("ERROR remove_league failed: league 999 is not in the list league=999"),
+            "{:?}",
+            capture.lines()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
