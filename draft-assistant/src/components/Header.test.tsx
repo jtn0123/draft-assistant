@@ -39,6 +39,8 @@ function Harness({
       <Header
         leagueName="Dynasty Warriors"
         hostedBy={null}
+        followStatus={null}
+        onPairAgain={() => {}}
         onSwitchLeague={onSwitchLeague}
         subtitle="Week 3"
         meta="14-team full-PPR"
@@ -196,6 +198,8 @@ describe("the sync pill", () => {
       <Header
         leagueName="Dynasty Warriors"
         hostedBy={null}
+        followStatus={null}
+        onPairAgain={() => {}}
         onSwitchLeague={() => {}}
         subtitle="Week 3"
         meta="14-team full-PPR"
@@ -277,6 +281,8 @@ describe("re-pulling the picks", () => {
       <Header
         leagueName="Dynasty Warriors"
         hostedBy={null}
+        followStatus={null}
+        onPairAgain={() => {}}
         onSwitchLeague={() => {}}
         subtitle="Week 3"
         meta="14-team full-PPR"

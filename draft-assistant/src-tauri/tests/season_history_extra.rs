@@ -76,8 +76,8 @@ fn loaded_league() -> LoadedLeague {
         draft: draft(),
         user_names: HashMap::new(),
         user_avatars: HashMap::new(),
-        board: Vec::new(),
-        board_index: HashMap::new(),
+        board: Default::default(),
+        board_index: Default::default(),
         replacement_model: ReplacementModel {
             demand: HashMap::new(),
             baseline: HashMap::new(),
@@ -94,8 +94,8 @@ fn loaded_league() -> LoadedLeague {
         projections_fetched_at: 0,
         weekly_fetched_at: 0,
         warnings: Vec::new(),
-        player_meta: player_meta(),
-        weekly_points: WeeklyPoints::build(&weekly_rows(), &scoring),
+        player_meta: std::sync::Arc::new(player_meta()),
+        weekly_points: std::sync::Arc::new(WeeklyPoints::build(&weekly_rows(), &scoring)),
         second_opinion_loaded_at: None,
     }
 }
@@ -238,7 +238,7 @@ fn live_slice_staleness_is_measured_from_fetch_time() {
 /// `Lookup`, so this roster started a QB in one screen and nobody in the other.
 fn league_with_a_disputed_position() -> LoadedLeague {
     let mut loaded = loaded_league();
-    loaded.board = vec![BoardPlayer {
+    loaded.board = std::sync::Arc::new(vec![BoardPlayer {
         player_id: "swap1".to_string(),
         name: "S. Wapp".to_string(),
         position: "QB".to_string(),
@@ -255,10 +255,11 @@ fn league_with_a_disputed_position() -> LoadedLeague {
         sleeper_pts_ppr: None,
         second_opinion: None,
         weekly_cv: None,
-    }];
-    loaded.board_index = HashMap::from([("swap1".to_string(), 0)]);
-    loaded.player_meta =
-        serde_json::from_str(r#"{"swap1": {"full_name": "S. Wapp", "position": "WR"}}"#).unwrap();
+    }]);
+    loaded.board_index = std::sync::Arc::new(HashMap::from([("swap1".to_string(), 0)]));
+    loaded.player_meta = std::sync::Arc::new(
+        serde_json::from_str(r#"{"swap1": {"full_name": "S. Wapp", "position": "WR"}}"#).unwrap(),
+    );
     let rows: Vec<ProjectionRow> = serde_json::from_str(
         r#"[
             {"player_id": "swap1", "stats": {"rec": 8.0}, "week": 1},
@@ -266,7 +267,10 @@ fn league_with_a_disputed_position() -> LoadedLeague {
         ]"#,
     )
     .unwrap();
-    loaded.weekly_points = WeeklyPoints::build(&rows, &loaded.league.scoring_settings.clone());
+    loaded.weekly_points = std::sync::Arc::new(WeeklyPoints::build(
+        &rows,
+        &loaded.league.scoring_settings.clone(),
+    ));
     loaded
 }
 

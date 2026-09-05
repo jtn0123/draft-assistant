@@ -75,7 +75,7 @@ impl League {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DraftSettings {
     pub teams: u32,
     pub rounds: u32,

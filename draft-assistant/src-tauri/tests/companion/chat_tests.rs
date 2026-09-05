@@ -199,3 +199,82 @@ async fn the_host_hears_about_the_shared_chat_on_its_own_window() {
         "{kinds:?}"
     );
 }
+
+/// A hung model call used to leave `busy` set for good: the flag is in memory
+/// and only `finish` clears it, and nothing bounded how long the answering
+/// task waited. Every paired device's composer stayed greyed out until the app
+/// was restarted.
+#[tokio::test]
+async fn an_answer_that_never_arrives_times_out_instead_of_wedging_the_thread() {
+    let host = host("chat-hang").await;
+    let srv = host.companion.srv().expect("the companion is attached");
+    let asker = EntryDevice {
+        name: "Rob's iPhone".to_string(),
+        kind: "phone".to_string(),
+    };
+    srv.chat
+        .post("league-1", "draft", asker.clone(), "who should I take?")
+        .await
+        .expect("the question is accepted");
+    assert!(srv.chat.thread("league-1", "draft").await.busy);
+
+    draft_assistant_lib::companion::routes_chat::finish_within(
+        srv.clone(),
+        "draft",
+        "league-1".to_string(),
+        asker,
+        std::time::Duration::from_millis(50),
+        async {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            Err::<draft_assistant_lib::chat::ChatReply, String>("never reached".to_string())
+        },
+    )
+    .await;
+
+    let thread = srv.chat.thread("league-1", "draft").await;
+    assert!(!thread.busy, "the thread is still marked busy");
+    assert_eq!(
+        thread.entries[1].error.as_deref(),
+        Some("Timed out waiting for an answer")
+    );
+    // And the next question goes through, which is the point of clearing it.
+    srv.chat
+        .post("league-1", "draft", phone_again(), "and now?")
+        .await
+        .expect("the thread is free again");
+}
+
+/// The same guarantee when the answering task panics rather than hangs.
+#[tokio::test]
+async fn a_panicking_answer_still_lets_the_next_question_through() {
+    let host = host("chat-panic").await;
+    let srv = host.companion.srv().expect("the companion is attached");
+    srv.chat
+        .post("league-1", "draft", phone_again(), "who?")
+        .await
+        .expect("the question is accepted");
+
+    draft_assistant_lib::companion::routes_chat::finish_within(
+        srv.clone(),
+        "draft",
+        "league-1".to_string(),
+        phone_again(),
+        std::time::Duration::from_secs(30),
+        async { panic!("the answer blew up") },
+    )
+    .await;
+
+    let thread = srv.chat.thread("league-1", "draft").await;
+    assert!(!thread.busy, "a panic left the thread busy");
+    assert_eq!(
+        thread.entries[1].error.as_deref(),
+        Some("The answer stopped unexpectedly")
+    );
+}
+
+fn phone_again() -> EntryDevice {
+    EntryDevice {
+        name: "Rob's iPhone".to_string(),
+        kind: "phone".to_string(),
+    }
+}

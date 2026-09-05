@@ -6,10 +6,17 @@
   "use strict";
   const TOKEN_KEY = "da.companion.token";
   const DEVICE_KEY = "da.companion.device";
+  const DEVICE_ID_KEY = "da.companion.device-id";
   const HOST_KEY = "da.companion.host";
-  const REVOKED = "Pairing was revoked — ask the host for the new code";
+  const REVOKED = "The host restarted or revoked this device. Pair again.";
   const TABS = ["now", "picks", "chat", "week"];
-  const LIVE = ["draft-updated", "season-updated", "shared-chat", "poll-health"];
+  const LIVE = [
+    "draft-updated",
+    "season-updated",
+    "shared-chat",
+    "poll-health",
+    "season-poll-health",
+  ];
   const NOTES = { 409: "The host is still answering.", 429: "Too many questions — slow down." };
   // ---------------------------------------------------------------- pure --
 
@@ -120,6 +127,7 @@
     chat: {},
     note: {},
     health: null,
+    seasonHealth: null,
     connection: "online",
   });
   /** The whole client state machine, one pure function per action. */
@@ -136,6 +144,7 @@
     "shared-chat": (s, a) =>
       a.payload?.screen ? { ...s, chat: { ...s.chat, [a.payload.screen]: a.payload } } : s,
     "poll-health": (s, a) => ({ ...s, health: a.payload ?? null }),
+    "season-poll-health": (s, a) => ({ ...s, seasonHealth: a.payload ?? null }),
     note: (s, a) => ({ ...s, note: { ...s.note, [a.screen]: a.message } }),
     tab: (s, a) =>
       TABS.includes(a.tab) && (a.tab !== "week" || s.season) ? { ...s, tab: a.tab } : s,
@@ -145,6 +154,7 @@
   window.Companion = {
     TOKEN_KEY,
     DEVICE_KEY,
+    DEVICE_ID_KEY,
     HOST_KEY,
     REVOKED,
     TABS,

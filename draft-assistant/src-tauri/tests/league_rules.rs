@@ -251,8 +251,13 @@ fn survival_is_judged_against_real_picks_not_keeper_slots() {
     assert!((survival_of(&clean, "q2") - pinned).abs() < 1e-12);
 
     // Now the same league with picks 2..=7 already in the book as keepers.
-    // Six of the seven picks in front of mine take nobody's turn, so only one
-    // player is actually selected before pick 8 arrives.
+    // Nobody selects at any of them, so my picks 1, 8 and 9 are one unbroken
+    // turn: passing on a player now costs nothing, because he is still there
+    // when 8 and 9 arrive a moment later. The pick that actually decides
+    // anything is 16 — and with the six keepers behind it, position 10 of the
+    // market. Judging this at pick 8 said a player who goes at ADP 7 was 80%
+    // to last, at the very moment a whole round was about to come off the
+    // board in one go.
     loaded.api_picks = ["w3", "w4", "q3", "r5", "w6", "q4"]
         .iter()
         .enumerate()
@@ -263,16 +268,14 @@ fn survival_is_judged_against_real_picks_not_keeper_slots() {
     assert_eq!(kept.draft.my_next_picks.get(1).copied(), Some(8));
     assert_eq!(
         survival_of(&kept, "q2"),
-        draft_assistant_lib::draft::survival_probability_in(7.0, 2, 4)
+        draft_assistant_lib::draft::survival_probability_in(7.0, 10, 4)
     );
-    // Six market positions of difference, read off a curve whose spread is
-    // the ~20-40 picks the app's own draft actually showed: a real move, but
-    // not the near-certainty the old three-pick sigma turned it into.
+    // Still read off the market rather than the board: pick 16 with six
+    // keepers in front of it is position 10, not 16.
     assert!(
-        survival_of(&kept, "q2") > survival_of(&clean, "q2") + 0.1,
-        "a keeper-heavy book is kinder: {} vs {}",
-        survival_of(&kept, "q2"),
-        survival_of(&clean, "q2")
+        survival_of(&kept, "q2") > draft_assistant_lib::draft::survival_probability_in(7.0, 16, 4),
+        "keepers ahead of the pick still soften it: {}",
+        survival_of(&kept, "q2")
     );
 }
 
@@ -297,7 +300,7 @@ fn a_simulated_pick_lands_on_the_roster_that_owns_it() {
 #[test]
 fn a_player_the_dictionary_spells_in_parts_is_not_shown_as_an_id() {
     let (mut loaded, config) = league();
-    loaded.player_meta.insert(
+    std::sync::Arc::make_mut(&mut loaded.player_meta).insert(
         "9999".to_string(),
         PlayerMeta {
             full_name: None,

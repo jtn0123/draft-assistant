@@ -125,7 +125,7 @@ impl Engine {
                 board.len()
             ));
         }
-        let board_index = board
+        let board_index: HashMap<String, usize> = board
             .iter()
             .enumerate()
             .map(|(i, p)| (p.player_id.clone(), i))
@@ -136,7 +136,18 @@ impl Engine {
         // goes on screen. It used to be discarded, so the only symptom was a
         // cold, slow start every single launch with nothing said.
         warnings.extend(self.take_cache_warnings());
-        let keeper_pick_nos = self.load_keepers(&draft.draft_id);
+        // Where the clock stands right now is the last gap in this draft's
+        // pick list that can be trusted to mean "keeper". Every later snapshot
+        // is judged against it, so one `/picks` answer that drops a pick
+        // cannot brand the rest of the board. See `keepers::evidence`.
+        let keeper_pick_nos = crate::keepers::KeeperMemory {
+            picks: self.load_keepers(&draft.draft_id),
+            floor: crate::picks::next_open_pick(
+                &api_picks,
+                draft.settings.teams,
+                draft.settings.rounds,
+            ),
+        };
         Ok(LoadedLeague {
             league,
             draft,
@@ -144,8 +155,12 @@ impl Engine {
             user_avatars,
             my_slot,
             yahoo_ids,
-            board,
-            board_index,
+            // Behind `Arc` because the season poll tick copies the whole
+            // loaded league out from under its mutex every thirty seconds:
+            // a deep copy of the board, its index, the dictionary and the
+            // weekly projections was megabytes of map cloning per tick.
+            board: std::sync::Arc::new(board),
+            board_index: std::sync::Arc::new(board_index),
             replacement_model: board_build.replacement,
             roster_rules,
             api_picks,
@@ -159,8 +174,8 @@ impl Engine {
             projections_fetched_at,
             weekly_fetched_at,
             warnings,
-            weekly_points: WeeklyPoints::build(&weekly_rows, &scoring_map),
-            player_meta,
+            weekly_points: std::sync::Arc::new(WeeklyPoints::build(&weekly_rows, &scoring_map)),
+            player_meta: std::sync::Arc::new(player_meta),
             second_opinion_loaded_at,
         })
     }

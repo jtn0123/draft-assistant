@@ -23,7 +23,9 @@ fn view_with_injury(player_id: &str, status: Option<&str>) -> SeasonView {
 
 fn mark(loaded: &mut LoadedLeague, player_id: &str, status: &str) {
     let index = loaded.board_index[player_id];
-    loaded.board[index].injury_status = Some(status.to_string());
+    // The board is shared behind an `Arc` so the poll tick can copy the loaded
+    // league without duplicating it; a test that edits it takes its own copy.
+    std::sync::Arc::make_mut(&mut loaded.board)[index].injury_status = Some(status.to_string());
 }
 
 fn projected_points(view: &SeasonView, roster_id: u32) -> f64 {
@@ -116,5 +118,28 @@ fn my_own_out_starter_leaves_the_lineup_i_set_alone() {
         call.reason.as_deref().is_some_and(|r| r.contains("Out")),
         "{:?}",
         call.reason
+    );
+}
+
+/// The header used to count the calls one way and total their points another:
+/// the total was taken before the injury calls joined the list, so a week whose
+/// only advice was "your starter is Out" read "1 calls to make, 0.0 points on
+/// the table". Count and total now describe the same set.
+#[test]
+fn the_points_on_the_table_are_the_listed_calls_own_gains() {
+    // Lead Back is Out. The bench back projects less than the stale projection
+    // still sitting on him, so the point maths raises nothing at all and the
+    // only call is the injury one — with a negative gain, which is the whole
+    // reason it was left out of the total.
+    let view = view_with_injury("r1", Some("Out"));
+    assert_eq!(view.calls.len(), 1, "{:?}", view.calls);
+    assert_eq!(view.calls[0].player_out_id, "r1");
+    assert!(view.calls[0].gain < 0.0, "{}", view.calls[0].gain);
+
+    let listed: f64 = view.calls.iter().map(|call| call.gain).sum();
+    assert!(
+        (view.points_on_table - listed).abs() < 1e-9,
+        "{} points claimed above calls worth {listed}",
+        view.points_on_table
     );
 }

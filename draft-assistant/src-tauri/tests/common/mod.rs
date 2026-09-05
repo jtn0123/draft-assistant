@@ -208,7 +208,7 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
         .enumerate()
         .map(|(i, (id, name, pos, team))| board_player(id, name, pos, team, i as u32 + 1))
         .collect();
-    let board_index = board
+    let board_index: HashMap<String, usize> = board
         .iter()
         .enumerate()
         .map(|(i, p)| (p.player_id.clone(), i))
@@ -277,8 +277,8 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
             ("u1".to_string(), "avatar-one".to_string()),
             ("u2".to_string(), "avatar-two".to_string()),
         ]),
-        board,
-        board_index,
+        board: std::sync::Arc::new(board),
+        board_index: std::sync::Arc::new(board_index),
         replacement_model: ReplacementModel {
             baseline: HashMap::new(),
             demand: HashMap::new(),
@@ -295,8 +295,8 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
         projections_fetched_at: 2,
         weekly_fetched_at: 3,
         warnings: Vec::new(),
-        player_meta,
-        weekly_points: WeeklyPoints::build(&projections(), &scoring),
+        player_meta: std::sync::Arc::new(player_meta),
+        weekly_points: std::sync::Arc::new(WeeklyPoints::build(&projections(), &scoring)),
         second_opinion_loaded_at: Some(1_756_000_000),
     };
 

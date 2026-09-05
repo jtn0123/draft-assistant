@@ -363,7 +363,7 @@ pub fn build_board(
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         let pts: Vec<f64> = idxs.iter().map(|&i| scored[i].points).collect();
-        let tiers = valuation::assign_tiers(&pts, valuation::tier_gap_threshold(pos));
+        let tiers = valuation::assign_tiers(&pts, valuation::tier_gap_threshold_for(pos, &pts));
         for (rank, (&i, tier)) in idxs.iter().zip(tiers).enumerate() {
             scored[i].position_rank = rank as u32 + 1;
             scored[i].tier = tier;

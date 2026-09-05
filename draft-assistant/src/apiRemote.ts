@@ -12,6 +12,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { Api } from "./api";
 import { validateDraftView, validateSeasonView } from "./api";
 import { clearFollow } from "./companion";
+import { REVOKED_CLOSE_CODE, setFollowStatus } from "./followStatus";
 import type { ChatSettings } from "./chat-types";
 import type { SeasonView } from "./season-types";
 import type {
@@ -70,6 +71,9 @@ class HostSocket {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private ping: ReturnType<typeof setInterval> | undefined;
   private closed = false;
+  /** Run on every open, including each reconnection. Set by `remoteApi`
+   *  after construction so the re-read can name the socket it belongs to. */
+  onOpen: () => void = () => undefined;
 
   constructor(
     private follow: FollowRecord,
@@ -91,17 +95,39 @@ class HostSocket {
     this.socket = socket;
     socket.onopen = () => {
       this.attempt = 0;
+      setFollowStatus("connected");
       this.ping = setInterval(() => socket.send(JSON.stringify({ type: "ping" })), PING_MS);
+      this.onOpen();
     };
     socket.onmessage = (event: MessageEvent) => this.deliver(String(event.data));
-    socket.onclose = () => {
+    socket.onclose = (event?: { code?: number }) => {
       clearInterval(this.ping);
       this.socket = null;
+      // A host that has forgotten this device closes with 4401 rather than
+      // dropping the connection. Reconnecting into that forever would be a
+      // device arguing with a decision that has already been made.
+      if (event?.code === REVOKED_CLOSE_CODE) {
+        this.stop();
+        this.onRevoked();
+        return;
+      }
+      setFollowStatus("reconnecting");
       this.retry();
     };
     // A socket that errors closes straight after; the close handler is the
     // one place that schedules a retry, so there is only ever one pending.
     socket.onerror = () => socket.close();
+  }
+
+  /** True when something on screen is listening for this kind of frame. */
+  wants(type: string): boolean {
+    return (this.handlers.get(type)?.size ?? 0) > 0;
+  }
+
+  /** Hand a payload to the handlers a frame of that type would have reached,
+   *  so a snapshot fetched over HTTP arrives the same way a pushed one does. */
+  emit(type: string, payload: unknown): void {
+    for (const handler of this.handlers.get(type) ?? []) handler(payload);
   }
 
   private deliver(text: string): void {
@@ -154,25 +180,31 @@ function hostOnly(hostName: string): Promise<never> {
   return Promise.reject(new Error(`That's controlled by the host (${hostName})`));
 }
 
+/** What a dropped follower does when the shell has not said otherwise:
+ *  forget the host, and leave the note the next launch reads. The window is
+ *  left standing rather than reloaded out from under whoever is looking at
+ *  it — the header says what happened and offers the way back. */
+function forgetHost(): void {
+  clearFollow();
+  try {
+    localStorage.setItem(REVOKED_KEY, "1");
+  } catch {
+    // The note is a nicety; the demotion above is the point.
+  }
+}
+
 /**
  * Build the follower's backend.
  *
- * `onRevoked` defaults to forgetting the host and reloading into local mode —
- * a revoked device has nothing left to show, and the shell says what happened
- * on the way back up.
+ * `onRevoked` defaults to `forgetHost`. Either way the connection state moves
+ * to "revoked" first, because that is what the header reads and no caller
+ * should have to remember to set it.
  */
 export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
-  const revoked =
-    onRevoked ??
-    (() => {
-      clearFollow();
-      try {
-        localStorage.setItem(REVOKED_KEY, "1");
-      } catch {
-        // The toast is a nicety; the demotion below is the point.
-      }
-      window.location.reload();
-    });
+  const revoked = () => {
+    setFollowStatus("revoked");
+    (onRevoked ?? forgetHost)();
+  };
   const fetchJson = remoteFetcher(follow, revoked);
   const socket = new HostSocket(follow, revoked);
   const refused = () => hostOnly(follow.host_name);
@@ -200,6 +232,28 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
   };
   const listen = <T>(type: string, handler: (value: T) => void): Promise<UnlistenFn> =>
     Promise.resolve(socket.on(type, (payload) => handler(payload as T)));
+
+  // Every reconnection re-reads what the screens are showing. A socket that
+  // was away for ten seconds missed whatever happened in them, and a board
+  // that quietly sits on last minute's picks is the worst way to find out.
+  // The host sends both snapshots as opening frames too; this window cannot
+  // tell how old the host it joined is, so it asks either way. A failure is
+  // dropped on purpose: nothing here is worth a toast, and the socket is
+  // already live for whatever comes next.
+  socket.onOpen = () => {
+    if (socket.wants("draft-updated")) {
+      void state().then(
+        (view) => socket.emit("draft-updated", view),
+        () => undefined,
+      );
+    }
+    if (socket.wants("season-updated")) {
+      void season().then(
+        (view) => socket.emit("season-updated", view),
+        () => undefined,
+      );
+    }
+  };
 
   return {
     // ---------- reads ----------
@@ -282,6 +336,7 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
     importSecondOpinion: refused,
     recordManualPick: refused,
     undoManualPick: refused,
+    clearKeepers: refused,
     exportState: refused,
     askClaude: refused,
     companionStatus: refused,

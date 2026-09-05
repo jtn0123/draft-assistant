@@ -7,8 +7,15 @@
 
 use super::{Mode, RecommendInputs};
 use crate::board::AvailablePlayer;
-use crate::roster::RosterRules;
 use std::collections::{HashMap, HashSet};
+
+#[path = "recommend_demand.rs"]
+mod demand;
+#[path = "recommend_injury.rs"]
+mod injury;
+
+use demand::dedicated_starters;
+pub(crate) use demand::{starters_phrase, starting_demand};
 
 /// A pick-count threshold fitted on a twelve-team league, restated in this
 /// league's picks. Rounded, because a threshold measured in picks that lands
@@ -78,6 +85,9 @@ pub(crate) struct Context<'a> {
     /// real week-to-week distribution — measured against a fixed 0.5 the whole
     /// board reads as identically steady and the signal disappears.
     pub median_cv: Option<f64>,
+    /// Per-team starting demand by position, allocated the way the
+    /// replacement level is. Worked out once for the whole board.
+    pub demand: HashMap<String, f64>,
 }
 
 /// `None` when the candidate is disqualified outright at this roster.
@@ -105,7 +115,7 @@ pub(crate) fn score_candidate(ctx: &Context, a: &AvailablePlayer, mode: Mode) ->
     scarcity(a, tier_left, &mut score);
     market(ctx, a, mode, &mut score);
     strategy(ctx, a, tier_left, &mut score);
-    injury(ctx, a, mode, &mut score);
+    injury::injury(a, ctx.inputs.pre_draft, mode, &mut score);
 
     if mode == Mode::Upside {
         upside(ctx, a, &mut score);
@@ -148,47 +158,6 @@ fn need(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
         -penalty,
         format!("depth pick — {count} {} already rostered", p.position),
     );
-}
-
-/// How many of a position this league actually starts in a slot of its own —
-/// its dedicated slots, plus SUPER_FLEX for a quarterback, which is what a
-/// superflex league *is*. The discipline below caps roster counts against it.
-fn dedicated_starters(rules: &RosterRules, position: &str) -> u32 {
-    rules
-        .slots()
-        .iter()
-        .filter(|slot| {
-            slot.as_str() == position || (position == "QB" && slot.as_str() == "SUPER_FLEX")
-        })
-        .count() as u32
-}
-
-/// "2", or "about 3 with flex" for a fractional share ("2.7" read as a typo).
-fn starters_phrase(demand: f64) -> String {
-    match (demand - demand.round()).abs() < 0.05 {
-        true => format!("{demand:.0}"),
-        false => format!("about {} with flex", demand.ceil() as u32),
-    }
-}
-
-/// How many of a position the league starts once flex slots are shared out —
-/// two RB slots plus a third of a FLEX is 2.33 running backs. Fractional on
-/// purpose: a FLEX is not two-thirds of a running back and one whole one, it
-/// is one body that three positions compete for, and the early-depth term
-/// below has to price a tight end's claim on it the same way it prices a
-/// receiver's.
-fn starting_demand(rules: &RosterRules, position: &str) -> f64 {
-    rules
-        .slots()
-        .iter()
-        .filter(|slot| !RosterRules::is_non_starting(slot))
-        .map(|slot| match RosterRules::flex_eligible(slot) {
-            Some(eligible) if eligible.contains(&position) => 1.0 / eligible.len() as f64,
-            Some(_) => 0.0,
-            None if slot.as_str() == position => 1.0,
-            None => 0.0,
-        })
-        .sum()
 }
 
 /// Positional discipline (fantasy-bot's documented failure modes, fixed):
@@ -246,7 +215,17 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
             // RB/WR: reward filling the thin side of the flex pool, and
             // dampen piling past 5 of a kind. Past mid-draft, a position with
             // <2 bodies is one injury from an empty starting slot.
-            if count < 2 && ctx.inputs.current_round > 8 {
+            // Only when the need layer above has not already paid for the
+            // same hole. Both fired on the same position and the score
+            // counted one empty starting slot twice, 20 here on top of
+            // need's 12 times the pressure, which is how a fourth receiver
+            // outbid a first-round back in round nine.
+            let already_paid = ctx
+                .inputs
+                .rules
+                .first_open_slot_for(&ctx.open, &p.position)
+                .is_some();
+            if count < 2 && ctx.inputs.current_round > 8 && !already_paid {
                 score.add(
                     20.0,
                     format!(
@@ -271,7 +250,7 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
     // gap between the top two cards, and no part of that head start had
     // anything to do with the league's roster.
     if !crate::board::is_late_only(&p.position) {
-        let demand = starting_demand(ctx.inputs.rules, p.position.as_str());
+        let demand = ctx.demand.get(p.position.as_str()).copied().unwrap_or(0.0);
         let short = (demand - count as f64).max(0.0);
         if short > 0.05 {
             score.add(
@@ -279,7 +258,7 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
                 format!(
                     "thin at {}: {count} rostered, the league starts {}",
                     p.position,
-                    starters_phrase(demand)
+                    starters_phrase(ctx.inputs.rules, p.position.as_str(), demand)
                 ),
             );
         }
@@ -335,13 +314,24 @@ fn market(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
         let past_adp = ctx.inputs.market_pick as f64 - adp;
         let falling = league_scaled(ctx, 8.0);
         let ahead = league_scaled(ctx, 25.0);
+        // Both terms are worth what the distance is worth, capped. Flat
+        // numbers here meant a man nine picks past his ADP and a man
+        // sixty-two picks past him got the same five points, under a reason
+        // line that quoted the real distance — the card said sixty-two and
+        // the score said eight. The cap is there because past a few rounds
+        // the market has stopped saying "bargain" and started saying
+        // "something happened that this board has not heard about".
         if past_adp > falling {
             score.add(
-                5.0,
+                (past_adp * 0.15).min(8.0),
                 format!("falling: {past_adp:.0} picks past ADP {adp:.0}"),
             );
         } else if past_adp < -ahead {
-            score.add(-3.0, format!("ahead of market (ADP {adp:.0})"));
+            let early = -past_adp;
+            score.add(
+                -(early * 0.1).min(6.0),
+                format!("ahead of market: {early:.0} picks before ADP {adp:.0}"),
+            );
         }
     }
 
@@ -424,42 +414,6 @@ fn strategy(ctx: &Context, a: &AvailablePlayer, tier_left: usize, score: &mut Sc
             }
         }
     }
-}
-
-/// What a tag is worth off a player's score. Sleeper's codes, worst first.
-fn injury_severity(status: &str) -> f64 {
-    match status.trim().to_ascii_uppercase().as_str() {
-        "" => 0.0,
-        "OUT" | "IR" | "PUP" | "SUS" | "NA" | "DNR" | "COV" => 25.0,
-        "DOUBTFUL" => 12.0,
-        "QUESTIONABLE" => 2.0,
-        // An unfamiliar tag is still a tag, and Sleeper adds them.
-        _ => 6.0,
-    }
-}
-
-/// Injuries, scaled by what the tag actually means.
-///
-/// Both modes read them: balanced ignoring them entirely put men who will not
-/// play on the card, and safe docking a flat 15 for any tag at all demoted
-/// three of the top five over practice-report "Questionable" — a tag that in
-/// August is not about this season at all, which is why it is dropped outright
-/// before the draft starts.
-fn injury(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
-    let Some(status) = a.player.injury_status.as_deref() else {
-        return;
-    };
-    let mut severity = injury_severity(status);
-    if severity <= 0.0 {
-        return;
-    }
-    if ctx.inputs.pre_draft && status.trim().eq_ignore_ascii_case("questionable") {
-        return;
-    }
-    if mode == Mode::Safe {
-        severity *= 1.5;
-    }
-    score.add(-severity, format!("injury flag: {status}"));
 }
 
 /// Upside: pay for the players whose ceiling is real.

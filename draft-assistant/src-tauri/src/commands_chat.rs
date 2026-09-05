@@ -2,6 +2,7 @@
 
 use crate::chat::{self, ChatMessage, ChatModel, ChatReply, Effort};
 use crate::chat_cli;
+use crate::chat_client;
 use crate::chat_context;
 use crate::chat_copy;
 use crate::engine::AppConfig;
@@ -264,6 +265,17 @@ pub fn spend_key(screen: &str, league_id: Option<&str>) -> String {
     format!("{screen}.{}", league_id.unwrap_or("none"))
 }
 
+/// What a turn is billed at.
+///
+/// The requested model is what the panel picked; the reported one is what
+/// answered. Those differ whenever a server-side fallback rescues a refusal,
+/// and pricing the answer as the request charged the wrong rate — under, if
+/// Opus was asked for and Fable answered, so the cap let the next turn
+/// through on money that had already been spent.
+fn billed_model(requested: ChatModel, reported: &str) -> ChatModel {
+    ChatModel::from_reported(reported).unwrap_or(requested)
+}
+
 /// Ask Claude about the board or the week. `screen` selects which view is
 /// summarised into the system prompt.
 #[tauri::command]
@@ -305,6 +317,11 @@ pub(crate) async fn answer(
     let key = spend_key(screen, config.active_league_id.as_deref());
     let spent = config.chat_spend_usd.get(&key).copied().unwrap_or(0.0);
     check_budget(spent, budget_of(&config), screen)?;
+    // The cap above is read before the turn and written after it, so two
+    // questions asked at once both saw the spend from before either of them.
+    // The claim is held for the rest of this function and released by every
+    // path out of it, `?` included.
+    let _in_flight = chat_client::reserve(&key)?;
 
     // Building a season view is seconds of arithmetic. It must not happen with
     // the pollers' mutexes held, so the season screen's own view is reused and
@@ -333,7 +350,9 @@ pub(crate) async fn answer(
     } else {
         let api_key = api_key.ok_or("no Anthropic API key set — add one in Settings")?;
         chat::ask(
-            &state.engine.client.http_client(),
+            // Not the Sleeper client: its eight-second budget cut off every
+            // answer that took longer than a board refresh.
+            &chat_client::client(),
             &api_key,
             model,
             effort,
@@ -348,7 +367,7 @@ pub(crate) async fn answer(
     reply.cost_usd = if provider == PROVIDER_CLI {
         0.0
     } else {
-        chat::turn_cost_of(model, &reply)
+        chat::turn_cost_of(billed_model(model, &reply.model), &reply)
     };
     reply.provider = provider.to_string();
     let mut config = state.config.lock().await;

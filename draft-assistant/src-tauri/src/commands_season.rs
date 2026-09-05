@@ -217,7 +217,6 @@ mod tests {
     use crate::season_history::History;
     use crate::sleeper::{Draft, League};
     use crate::valuation::ReplacementModel;
-    use crate::weekly::WeeklyPoints;
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -258,8 +257,8 @@ mod tests {
             user_avatars: HashMap::new(),
             my_slot: None,
             yahoo_ids: HashMap::new(),
-            board: Vec::new(),
-            board_index: HashMap::new(),
+            board: Default::default(),
+            board_index: Default::default(),
             replacement_model: ReplacementModel {
                 demand: HashMap::new(),
                 baseline: HashMap::new(),
@@ -276,8 +275,8 @@ mod tests {
             projections_fetched_at: 0,
             weekly_fetched_at: 0,
             warnings: Vec::new(),
-            player_meta: HashMap::new(),
-            weekly_points: WeeklyPoints::default(),
+            player_meta: Default::default(),
+            weekly_points: Default::default(),
             second_opinion_loaded_at: None,
         }
     }

@@ -51,7 +51,7 @@ fn the_view_carries_every_players_second_opinion_and_the_load_date() {
 #[test]
 fn a_board_with_nothing_imported_carries_no_opinion_at_all() {
     let (mut loaded, _, config) = common::fixture();
-    for player in &mut loaded.board {
+    for player in std::sync::Arc::make_mut(&mut loaded.board) {
         player.second_opinion = None;
     }
     loaded.second_opinion_loaded_at = None;
@@ -72,7 +72,7 @@ fn a_big_disagreement_in_the_players_favour_reaches_the_rec_card() {
     // recommendation it writes has to carry the reason. Thirty-six picks is
     // nine rounds of this four-team fixture league, which is the point: the
     // sentence counts rounds of *this* league, not of a twelve-team one.
-    for player in &mut loaded.board {
+    for player in std::sync::Arc::make_mut(&mut loaded.board) {
         player.position_rank = 21;
         player.adp = Some(58.0);
         player.second_opinion = Some(SecondOpinion {
@@ -105,8 +105,7 @@ fn a_big_disagreement_in_the_players_favour_reaches_the_rec_card() {
 fn a_disagreement_against_the_player_costs_him_the_card() {
     let (mut loaded, _, config) = common::fixture();
     let before = build_view(&loaded, &config).recommendations[0].clone();
-    let player = loaded
-        .board
+    let player = std::sync::Arc::make_mut(&mut loaded.board)
         .iter_mut()
         .find(|p| p.player_id == before.player_id)
         .expect("the recommended player is on the board");
@@ -148,7 +147,10 @@ fn importing_the_real_export_stamps_the_board_it_recognises() {
     // matches them — which is exactly the "0 of 40" case the toast must be
     // able to report without anything breaking.
     let table = second_opinion::parse(&fixture_csv(), 1_700_000_000).expect("the export parses");
-    let report = second_opinion::apply(&table, &mut loaded.board);
+    let report = second_opinion::apply(
+        &table,
+        std::sync::Arc::<Vec<_>>::make_mut(&mut loaded.board),
+    );
     assert_eq!(report.total, 38);
     assert_eq!(report.matched, 0);
     // The rows the parser would not rank are reported, not hidden: three
@@ -162,14 +164,16 @@ fn importing_the_real_export_stamps_the_board_it_recognises() {
 
     // Rename one fixture player to a name the export does carry, suffix and
     // all, and he matches on the next pass.
-    let rb = loaded
-        .board
+    let rb = std::sync::Arc::make_mut(&mut loaded.board)
         .iter_mut()
         .find(|p| p.position == "RB")
         .expect("the fixture has a running back");
     rb.name = "Travis Etienne".to_string();
     rb.team = Some("NO".to_string());
-    let report = second_opinion::apply(&table, &mut loaded.board);
+    let report = second_opinion::apply(
+        &table,
+        std::sync::Arc::<Vec<_>>::make_mut(&mut loaded.board),
+    );
     assert_eq!(report.matched, 1);
     let view = build_view(&loaded, &config);
     assert!(view

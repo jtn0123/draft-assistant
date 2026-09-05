@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import type { PollHealth } from "../types";
 import { age } from "../format";
 import { setChime, useChime, type Screen } from "../prefs";
+import { followStatusMessage, type FollowStatus } from "../followStatus";
 
 import "../companion.css";
 
@@ -142,6 +143,8 @@ function GearIcon() {
 export function Header({
   leagueName,
   hostedBy,
+  followStatus,
+  onPairAgain,
   onSwitchLeague,
   subtitle,
   meta,
@@ -164,6 +167,12 @@ export function Header({
    *  the league name is the one permanent reminder that the data on screen —
    *  and the league it is about — belongs to somebody else's Mac. */
   hostedBy: string | null;
+  /** How the follower's connection to that host is doing, or null when this
+   *  app is not following anyone. Connected says nothing: a socket that is
+   *  working is what the pill above already implies. */
+  followStatus: FollowStatus | null;
+  /** Leave follow mode, offered only once the host has dropped this device. */
+  onPairAgain: () => void;
   /** Opens the league picker; the name in the header is the way in. */
   onSwitchLeague: () => void;
   subtitle: string;
@@ -188,6 +197,10 @@ export function Header({
   // The chime is a preference the header owns outright: it reads it from the
   // store and flips it there, rather than being handed both halves as props.
   const chime = useChime();
+  // Written once here so the header has one thing to render rather than three
+  // branches: null while all is well, a sentence when it is not.
+  const followNote =
+    followStatus === null ? null : followStatusMessage(followStatus, hostedBy ?? "the host");
   // Wraps the gear and the menu together, so focus moving between the two
   // does not read as leaving.
   const menuRef = useRef<HTMLDivElement>(null);
@@ -287,6 +300,19 @@ export function Header({
           <span className="muted header-subtitle">
             {subtitle}
             {hostedBy !== null && <span className="hosted-pill">Hosted by {hostedBy}</span>}
+            {followNote !== null && (
+              <span
+                className={followStatus === "revoked" ? "follow-note is-revoked" : "follow-note"}
+                role="status"
+              >
+                {followNote}
+                {followStatus === "revoked" && (
+                  <button type="button" className="link-btn" onClick={onPairAgain}>
+                    Pair again
+                  </button>
+                )}
+              </span>
+            )}
           </span>
         </div>
         <div className="header-modes">

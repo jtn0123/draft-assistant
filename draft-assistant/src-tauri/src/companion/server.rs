@@ -39,7 +39,7 @@ pub struct Srv {
 impl CompanionServer {
     pub fn new(host_name: String, data_dir: std::path::PathBuf) -> Result<Self, String> {
         Ok(Self {
-            hub: Arc::new(CompanionHub::new(host_name)?),
+            hub: Arc::new(CompanionHub::new(host_name, data_dir.clone())?),
             chat: Arc::new(SharedChat::new(data_dir)),
             srv: OnceLock::new(),
             running: Mutex::new(None),
@@ -93,7 +93,11 @@ impl CompanionServer {
         let router = super::routes::router(srv);
         let (shutdown, wait) = oneshot::channel();
         tokio::spawn(async move {
-            let served = axum::serve(listener, router)
+            // With the peer's address attached to every request: the pairing
+            // lockout counts wrong codes per address, so one machine guessing
+            // cannot shut the rest of the house out.
+            let service = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
+            let served = axum::serve(listener, service)
                 .with_graceful_shutdown(async move {
                     // Either an explicit stop or the handle being dropped.
                     let _ = wait.await;
@@ -141,22 +145,24 @@ impl Srv {
     }
 }
 
-/// The phone page, compiled in. The three files are written by the page lane;
+/// The phone page, compiled in. The files are written by the page lane;
 /// serving them from the binary rather than from disk is what keeps the app a
 /// single bundle with nothing to install beside it.
 pub const INDEX_HTML: &str = include_str!("../../companion-static/index.html");
 pub const HELPERS_JS: &str = include_str!("../../companion-static/helpers.js");
+pub const CLOCK_JS: &str = include_str!("../../companion-static/clock.js");
 pub const APP_JS: &str = include_str!("../../companion-static/app.js");
 pub const APP_CSS: &str = include_str!("../../companion-static/app.css");
 
 /// The static file behind a `/static/{file}` path, with its content type.
 ///
-/// An allow-list of three names rather than a directory read: there is no path
+/// An allow-list of names rather than a directory read: there is no path
 /// to traverse, so no request can ask this for anything the page is not.
 pub fn static_file(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
         "index.html" => Some(("text/html; charset=utf-8", INDEX_HTML)),
         "helpers.js" => Some(("text/javascript; charset=utf-8", HELPERS_JS)),
+        "clock.js" => Some(("text/javascript; charset=utf-8", CLOCK_JS)),
         "app.js" => Some(("text/javascript; charset=utf-8", APP_JS)),
         "app.css" => Some(("text/css; charset=utf-8", APP_CSS)),
         _ => None,
@@ -169,7 +175,7 @@ mod tests {
 
     #[test]
     fn only_the_page_files_are_served() {
-        for name in ["index.html", "helpers.js", "app.js", "app.css"] {
+        for name in ["index.html", "helpers.js", "clock.js", "app.js", "app.css"] {
             let (mime, body) = static_file(name).expect("{name} is served");
             assert!(!mime.is_empty());
             assert!(!body.is_empty(), "{name} is empty");

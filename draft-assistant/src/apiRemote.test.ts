@@ -3,6 +3,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { remoteApi, remoteFetcher, REVOKED_KEY } from "./apiRemote";
+import { getFollowStatus, resetFollowStatus } from "./followStatus";
+import type { Api } from "./api";
 import type { DraftView, FollowRecord } from "./types";
 
 const follow: FollowRecord = {
@@ -16,12 +18,14 @@ const draftView = {
   league: { league_id: "L1", name: "Test", season: "2026", platform: "sleeper" },
 } as unknown as DraftView;
 
+const seasonView = { schema_version: "1.3", week: 3 } as unknown as Record<string, unknown>;
+
 /** A stand-in for the browser's socket that a test can push frames into. */
 class FakeSocket {
   static live: FakeSocket[] = [];
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event?: { code?: number }) => void) | null = null;
   onerror: (() => void) | null = null;
   sent: string[] = [];
   closed = false;
@@ -31,9 +35,9 @@ class FakeSocket {
   send(text: string): void {
     this.sent.push(text);
   }
-  close(): void {
+  close(code?: number): void {
     this.closed = true;
-    this.onclose?.();
+    this.onclose?.({ code });
   }
   /** What the host would push down the wire. */
   push(type: string, payload?: unknown): void {
@@ -60,6 +64,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 beforeEach(() => {
+  resetFollowStatus();
   FakeSocket.live = [];
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
@@ -156,7 +161,7 @@ describe("being dropped", () => {
     expect(revoked).toHaveBeenCalled();
   });
 
-  it("by default forgets the host and leaves a note for the reload", () => {
+  it("by default forgets the host and leaves a note, without pulling the page out", async () => {
     const store = new Map<string, string>([["da.companion.follow", "{}"]]);
     vi.stubGlobal("localStorage", {
       getItem: (k: string) => store.get(k) ?? null,
@@ -166,30 +171,156 @@ describe("being dropped", () => {
     const reload = vi.fn();
     vi.stubGlobal("location", { reload });
     fetchMock.mockResolvedValue(json({ error: "not paired" }, 401));
-    return remoteApi(follow)
-      .getState()
-      .catch(() => {
-        expect(store.has("da.companion.follow")).toBe(false);
-        expect(store.get(REVOKED_KEY)).toBe("1");
-        expect(reload).toHaveBeenCalled();
-      });
+    await expect(remoteApi(follow).getState()).rejects.toThrow("The host revoked this");
+
+    expect(store.has("da.companion.follow")).toBe(false);
+    expect(store.get(REVOKED_KEY)).toBe("1");
+    // The header says what happened and offers the way back, so the window
+    // is left standing rather than reloaded out from under the user.
+    expect(reload).not.toHaveBeenCalled();
+    expect(getFollowStatus()).toBe("revoked");
   });
 });
 
-describe("what the host keeps", () => {
-  it("refuses every host-only call by name", async () => {
+describe("the connection state the header reads", () => {
+  it("starts connected and says so when nothing is wrong", async () => {
+    await remoteApi(follow, () => undefined).onDraftUpdated(() => undefined);
+    newest().onopen?.();
+    expect(getFollowStatus()).toBe("connected");
+  });
+
+  it("says it is reconnecting while the socket is away, and connected once back", async () => {
+    vi.useFakeTimers();
+    await remoteApi(follow, () => undefined).onDraftUpdated(() => undefined);
+    newest().onopen?.();
+    newest().close();
+    expect(getFollowStatus()).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    newest().onopen?.();
+    expect(getFollowStatus()).toBe("connected");
+  });
+
+  it("reads a 4401 close as being dropped, and stops trying", async () => {
+    vi.useFakeTimers();
+    const revoked = vi.fn();
+    await remoteApi(follow, revoked).onDraftUpdated(() => undefined);
+    newest().close(4401);
+
+    expect(revoked).toHaveBeenCalled();
+    expect(getFollowStatus()).toBe("revoked");
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(FakeSocket.live).toHaveLength(1);
+  });
+
+  it("never walks a revoked device back to reconnecting", async () => {
     const api = remoteApi(follow, () => undefined);
-    for (const call of [
-      () => api.setApiKey("sk-x"),
-      () => api.setChatBudget(9),
-      () => api.yahooLeagues(),
-      () => api.recordManualPick("1"),
-      () => api.exportState(),
-      () => api.askClaude({ screen: "draft", model: "Opus 5", effort: "High", messages: [] }),
-      () => api.companionEnable(),
-    ]) {
-      await expect(call()).rejects.toThrow("That's controlled by the host (Justin's Mac)");
-    }
+    await api.onDraftUpdated(() => undefined);
+    newest().close(4401);
+    // A second socket cannot exist after 4401, but the state must not be
+    // reopened by anything that closes late either.
+    newest().onclose?.({ code: 1006 });
+    expect(getFollowStatus()).toBe("revoked");
+  });
+
+  it("marks the follower revoked when any call is answered with a 401", async () => {
+    fetchMock.mockResolvedValue(json({ error: "not paired" }, 401));
+    await expect(remoteApi(follow, () => undefined).getState()).rejects.toThrow(
+      "The host revoked this",
+    );
+    expect(getFollowStatus()).toBe("revoked");
+  });
+});
+
+describe("coming back from a blip", () => {
+  it("re-reads the board and the season every time the socket opens", async () => {
+    // Nothing else re-read state after a reconnect: whatever the host did
+    // while the socket was away simply never arrived.
+    vi.useFakeTimers();
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(json(url.endsWith("/api/season") ? seasonView : draftView)),
+    );
+    const api = remoteApi(follow, () => undefined);
+    const boards: DraftView[] = [];
+    const seasons: unknown[] = [];
+    await api.onDraftUpdated((view) => boards.push(view));
+    await api.onSeasonUpdated((view) => seasons.push(view));
+
+    newest().onopen?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(boards).toHaveLength(1);
+    expect(seasons).toHaveLength(1);
+
+    newest().close();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeSocket.live).toHaveLength(2);
+    newest().onopen?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(boards).toHaveLength(2);
+  });
+
+  it("asks for nothing no screen is listening for", async () => {
+    fetchMock.mockResolvedValue(json(draftView));
+    const api = remoteApi(follow, () => undefined);
+    await api.onPollHealth(() => undefined);
+    newest().onopen?.();
+    await Promise.resolve();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("stays up when the host answers the re-read with an error", async () => {
+    fetchMock.mockRejectedValue(new Error("connection refused"));
+    const api = remoteApi(follow, () => undefined);
+    await api.onDraftUpdated(() => undefined);
+    newest().onopen?.();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(getFollowStatus()).toBe("connected");
+  });
+});
+
+/** Every call a follower refuses outright, with arguments good enough to
+ *  reach the refusal. Seven of these were covered and thirteen were not, so a
+ *  new host-only method could be added and quietly answer nothing at all. Add
+ *  a row here whenever `remoteApi` gains a `refused`. */
+const hostOnlyCalls: Array<[string, (api: Api) => Promise<unknown>]> = [
+  ["removeLeague", (api) => api.removeLeague("L1")],
+  ["setMyUsername", (api) => api.setMyUsername("justin")],
+  ["setApiKey", (api) => api.setApiKey("sk-x")],
+  ["setChatBudget", (api) => api.setChatBudget(9)],
+  ["setChatProvider", (api) => api.setChatProvider("api")],
+  ["yahooSaveCredentials", (api) => api.yahooSaveCredentials("id", "secret")],
+  ["yahooBeginConnect", (api) => api.yahooBeginConnect()],
+  ["yahooFinishConnect", (api) => api.yahooFinishConnect("code", "state")],
+  ["yahooDisconnect", (api) => api.yahooDisconnect(false)],
+  ["yahooLeagues", (api) => api.yahooLeagues()],
+  ["importSecondOpinion", (api) => api.importSecondOpinion()],
+  ["recordManualPick", (api) => api.recordManualPick("1")],
+  ["undoManualPick", (api) => api.undoManualPick()],
+  ["exportState", (api) => api.exportState()],
+  [
+    "askClaude",
+    (api) => api.askClaude({ screen: "draft", model: "Opus 5", effort: "High", messages: [] }),
+  ],
+  ["companionStatus", (api) => api.companionStatus()],
+  ["companionEnable", (api) => api.companionEnable()],
+  ["companionDisable", (api) => api.companionDisable()],
+  ["companionRevoke", (api) => api.companionRevoke()],
+  ["setDeviceName", (api) => api.setDeviceName("Justin's Mac")],
+];
+
+describe("what the host keeps", () => {
+  it.each(hostOnlyCalls)("refuses %s by naming the host", async (_name, call) => {
+    await expect(call(remoteApi(follow, () => undefined))).rejects.toThrow(
+      "That's controlled by the host (Justin's Mac)",
+    );
+    // A refusal is a decision, not a request: nothing may go out over the wire.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("covers every host-only method the follower refuses", () => {
+    // The count is the guard: adding a `refused` without a row here fails.
+    expect(hostOnlyCalls).toHaveLength(20);
+    expect(new Set(hostOnlyCalls.map(([name]) => name)).size).toBe(hostOnlyCalls.length);
   });
 
   it("restores the host's own league as a read, and refuses to switch it", async () => {

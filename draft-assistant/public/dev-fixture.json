@@ -118,6 +118,7 @@
     ],
     "total_picks_made": 26,
     "manual_picks_active": true,
+    "paused": false,
     "clock_deadline_ms": null,
     "pick_slot_overrides": {},
     "keeper_picks": []

@@ -196,6 +196,10 @@ pub fn recommend(inputs: &RecommendInputs) -> Vec<Recommendation> {
         need_pressure,
         rounds_left,
         median_cv,
+        // Asked of the replacement model rather than split evenly between the
+        // positions a flex is open to, so the need model and the VORP a
+        // candidate is judged on are talking about the same league.
+        demand: score::starting_demand(inputs.available, inputs.rules, inputs.teams),
     };
 
     for mode in [Mode::Balanced, Mode::Safe, Mode::Upside] {
@@ -270,3 +274,11 @@ mod mode_tests;
 #[cfg(test)]
 #[path = "recommend_league_tests.rs"]
 mod league_tests;
+
+#[cfg(test)]
+#[path = "recommend_injury_tests.rs"]
+mod injury_tests;
+
+#[cfg(test)]
+#[path = "recommend_demand_tests.rs"]
+mod demand_tests;

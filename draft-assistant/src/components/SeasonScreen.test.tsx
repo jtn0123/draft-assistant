@@ -363,7 +363,10 @@ describe("SeasonScreen header", () => {
     render(<SeasonScreen view={view({ live: liveSection("live") })} pollHealth={null} />);
     expect(screen.getByText("vs punt_god · 71.5 – 64.2")).toBeInTheDocument();
     expect(screen.getByText("This week · live")).toBeInTheDocument();
-    expect(screen.getByText("live · projected 122.4 – 108.9")).toBeInTheDocument();
+    // The projection beside it is the lineup that is actually playing: with
+    // every game under way and no call left, the best lineup is not a thing
+    // anybody can still set.
+    expect(screen.getByText("live · projected 118.1 – 108.9")).toBeInTheDocument();
   });
 
   it("keeps the live lead once the games are final", () => {
@@ -381,5 +384,79 @@ describe("SeasonScreen header", () => {
     done.header.playoff_status = "In the playoffs — seed 3";
     render(<SeasonScreen view={done} pollHealth={null} />);
     expect(screen.getByText("In the playoffs — seed 3")).toBeInTheDocument();
+  });
+});
+
+/** A game already under way, which is what locks the lineup. */
+function liveGame() {
+  return {
+    game_id: "phi-tb",
+    away: "PHI",
+    home: "TB",
+    away_score: 7,
+    home_score: 3,
+    state: "live" as const,
+    status: "Q2 08:14",
+    kickoff_ms: FROZEN - 3600_000,
+    flag: null,
+    channel: "FOX",
+    chips: [],
+  };
+}
+
+/** The view with every game under way and no call left to make. */
+function lockedView() {
+  const base = view({ matchup: matchup() });
+  return {
+    ...base,
+    calls: [],
+    live: { ...base.live, games: [liveGame()] },
+  };
+}
+
+describe("once the lineup is locked", () => {
+  // The bug: the header defaulted to the best lineup's odds forever, so all
+  // Sunday afternoon it quoted a percentage for a lineup nobody could set any
+  // more — 62% off a bench the user could no longer touch.
+  it("quotes the lineup that is actually playing, and says so", () => {
+    render(<SeasonScreen view={lockedView()} />);
+
+    expect(screen.getByText("55%")).toBeInTheDocument();
+    expect(screen.queryByText("62%")).not.toBeInTheDocument();
+    expect(screen.getByText(/^lineup as set · locked · /)).toBeInTheDocument();
+  });
+
+  it("takes away the best/set toggle, because it is not a choice any more", () => {
+    render(<SeasonScreen view={lockedView()} />);
+
+    expect(screen.queryByRole("button", { name: "Best" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Set" })).not.toBeInTheDocument();
+    expect(screen.getByText("lineup locked")).toBeInTheDocument();
+  });
+
+  // And before kickoff nothing changes: the choice is still the user's.
+  it("leaves the toggle alone while a call can still be made", () => {
+    render(<SeasonScreen view={view({ matchup: matchup() })} />);
+    expect(screen.getByRole("button", { name: "Set" })).toBeInTheDocument();
+    expect(screen.getByText("62%")).toBeInTheDocument();
+  });
+});
+
+describe("the lock countdown", () => {
+  // It used to read the clock inside a render that only happened when new
+  // scores arrived, so on a quiet evening "Locks in 2h 0m" sat there saying
+  // 2h 0m for hours.
+  it("counts down on its own without waiting for new data", () => {
+    render(
+      <SeasonScreen
+        view={view({ header: { ...view().header, locks_in_ms: FROZEN + 7_200_000 } })}
+      />,
+    );
+    expect(screen.getByText("2h 0m")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(11 * 60_000);
+    });
+    expect(screen.getByText("1h 49m")).toBeInTheDocument();
   });
 });

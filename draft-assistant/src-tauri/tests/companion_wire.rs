@@ -95,6 +95,8 @@ async fn the_page_itself_needs_no_token() {
     for path in [
         "/",
         "/static/index.html",
+        "/static/helpers.js",
+        "/static/clock.js",
         "/static/app.js",
         "/static/app.css",
     ] {
@@ -293,4 +295,186 @@ async fn another_origin_is_allowed_to_call_the_api() {
             .map(|v| v.to_str().unwrap_or("")),
         Some("*")
     );
+}
+
+/// Every response the phone loads the page from carries the policy, so a
+/// string that somehow became markup has no script to run and nowhere to send
+/// what it found.
+#[tokio::test]
+async fn the_page_is_served_under_a_content_security_policy() {
+    let host = host("csp").await;
+    for path in ["/", "/static/app.js", "/static/app.css", "/static/clock.js"] {
+        let response = host
+            .http
+            .get(format!("{}{path}", host.base))
+            .send()
+            .await
+            .expect("the request goes through");
+        let header = |name: &str| {
+            response
+                .headers()
+                .get(name)
+                .map(|v| v.to_str().unwrap_or("").to_string())
+                .unwrap_or_default()
+        };
+        let csp = header("content-security-policy");
+        assert!(csp.contains("default-src 'none'"), "{path}: {csp}");
+        assert!(csp.contains("script-src 'self'"), "{path}: {csp}");
+        assert!(csp.contains("img-src 'self' data:"), "{path}: {csp}");
+        assert!(csp.contains("connect-src 'self' ws: wss:"), "{path}: {csp}");
+        assert!(csp.contains("base-uri 'none'"), "{path}: {csp}");
+        assert!(csp.contains("form-action 'none'"), "{path}: {csp}");
+        assert_eq!(header("x-content-type-options"), "nosniff", "{path}");
+        assert_eq!(header("referrer-policy"), "no-referrer", "{path}");
+    }
+}
+
+/// The failure this prevents: a page the phone has open in another tab
+/// posting to the host in the background, on a token the browser will happily
+/// attach to a request the user never made.
+#[tokio::test]
+async fn a_page_on_another_site_cannot_post_to_the_host() {
+    let host = host("origin").await;
+    let paired = host.pair_ok("Rob's iPhone", "phone").await;
+    let post = |origin: &'static str| {
+        let http = host.http.clone();
+        let base = host.base.clone();
+        let token = paired.token.clone();
+        async move {
+            http.post(format!("{base}/api/chat"))
+                .bearer_auth(token)
+                .header("origin", origin)
+                .json(&serde_json::json!({ "screen": "draft", "text": "hello?" }))
+                .send()
+                .await
+                .expect("the request goes through")
+                .status()
+                .as_u16()
+        }
+    };
+    assert_eq!(post("https://evil.example.com").await, 403);
+    // The follower desktop and the dev server are the two other origins that
+    // are ours, and they must go on working.
+    assert_ne!(post("tauri://localhost").await, 403);
+    assert_ne!(post("http://localhost:1420").await, 403);
+    // The phone page itself: its own origin is this server.
+    let port = host.companion.port().expect("a port");
+    let same = host
+        .http
+        .post(format!("{}/api/chat", host.base))
+        .bearer_auth(&paired.token)
+        .header("origin", format!("http://127.0.0.1:{port}"))
+        .json(&serde_json::json!({ "screen": "draft", "text": "hello?" }))
+        .send()
+        .await
+        .expect("the request goes through");
+    assert_ne!(same.status().as_u16(), 403);
+    // A read is not a change, and stays open to anyone holding the token.
+    let read = host
+        .http
+        .get(format!("{}/api/devices", host.base))
+        .bearer_auth(&paired.token)
+        .header("origin", "https://evil.example.com")
+        .send()
+        .await
+        .expect("the request goes through");
+    assert_eq!(read.status(), 200);
+}
+
+/// The whole failure: the host process restarts and every phone in the house
+/// is silently unpaired, with no way to know but the next request failing.
+#[tokio::test]
+async fn a_phone_stays_paired_across_a_restart_of_the_host() {
+    let first = host("restart").await;
+    let paired = first.pair_ok("Rob's iPhone", "phone").await;
+    assert_eq!(first.get("/api/state", &paired.token).await.0, 200);
+    first.companion.stop();
+
+    // The same data directory and the same league: a new process, nothing
+    // else. The token the phone is holding still opens the door.
+    let restarted = harness::host_over(first.data_dir.clone(), first.state.clone()).await;
+    let (status, view) = restarted.get("/api/state", &paired.token).await;
+    assert_eq!(status, 200, "the phone was silently unpaired: {view}");
+    let devices = restarted.companion.hub.devices();
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].name, "Rob's iPhone");
+    assert!(
+        !devices[0].connected,
+        "nothing is connected to a fresh server"
+    );
+}
+
+#[tokio::test]
+async fn two_phones_with_the_same_name_both_stay_paired() {
+    let host = host("two-phones").await;
+    let first = host.pair_ok("iPhone", "phone").await;
+    let second = host.pair_ok("iPhone", "phone").await;
+    // Both work: the second phone in a house used to evict the first, whose
+    // owner then found the app asking for a code again for no visible reason.
+    assert_eq!(host.get("/api/devices", &first.token).await.0, 200);
+    assert_eq!(host.get("/api/devices", &second.token).await.0, 200);
+    let names: Vec<String> = host
+        .companion
+        .hub
+        .devices()
+        .into_iter()
+        .map(|d| d.name)
+        .collect();
+    assert_eq!(names, vec!["iPhone".to_string(), "iPhone 2".to_string()]);
+
+    // The first phone pairing again, saying which device it is, replaces
+    // itself rather than becoming a third entry.
+    let again = host
+        .pair_again("iPhone", "phone", Some(&first.device_id))
+        .await;
+    assert_eq!(again.device_id, first.device_id);
+    assert_eq!(host.companion.hub.devices().len(), 2);
+    let (status, _) = host.get("/api/devices", &first.token).await;
+    assert_eq!(status, 401, "the replaced token still works");
+}
+
+/// A code that has paired a phone is spent: the next device types a new one.
+#[tokio::test]
+async fn the_code_on_screen_changes_after_it_has_been_used() {
+    let host = host("code-rotation").await;
+    let used = host.companion.hub.code();
+    host.pair_ok("Rob's iPhone", "phone").await;
+    assert_ne!(host.companion.hub.code(), used, "the code was reused");
+    let response = host
+        .http
+        .post(format!("{}/api/pair", host.base))
+        .json(&serde_json::json!({ "code": used, "device_name": "Thief", "kind": "phone" }))
+        .send()
+        .await
+        .expect("the request goes through");
+    assert_eq!(response.status(), 403);
+}
+
+/// The per-address pairing lockout itself is unit-tested in `hub_tests`; what
+/// this file proves is that the peer address reaches it at all, since every
+/// pairing test here would fail with a 500 if the connect info were missing.
+///
+/// A code left on screen all afternoon is replaced, and the old one is no
+/// longer worth anything to whoever glanced at it.
+#[tokio::test]
+async fn an_idle_code_is_replaced_after_ten_minutes() {
+    let host = host("idle-code").await;
+    let before = host.companion.hub.code();
+    let later = draft_assistant_lib::companion::hub::now_ms()
+        + draft_assistant_lib::companion::hub::CODE_MAX_AGE_MS
+        + 1;
+    assert!(host.companion.hub.rotate_if_idle(later));
+    assert_ne!(host.companion.hub.code(), before);
+    let stale = host
+        .http
+        .post(format!("{}/api/pair", host.base))
+        .json(&serde_json::json!({ "code": before, "device_name": "Thief", "kind": "phone" }))
+        .send()
+        .await
+        .expect("the request goes through");
+    assert_eq!(stale.status(), 403);
+    // The host's own screen hears about it the way it hears about devices.
+    assert!(host
+        .emitted_kinds()
+        .contains(&"companion-devices".to_string()));
 }

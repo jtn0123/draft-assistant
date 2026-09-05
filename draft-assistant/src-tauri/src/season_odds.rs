@@ -204,32 +204,40 @@ pub fn playoff_odds(
         .filter_map(|game| {
             let home = *slot_of.get(&game.home)?;
             let away = *slot_of.get(&game.away)?;
-            let mean_for = |roster_id: u32| {
-                means
+            // A week with no starters resolved — a data gap — still needs a
+            // mean and a spread, and they have to be the ones an ordinary
+            // lineup would have produced.
+            //
+            // A spread of exactly zero beside a real mean is not a gap: it is
+            // a week whose games have all finished, priced off what was
+            // banked. That used to be read as missing and replaced with 27%
+            // noise, so an opponent who had finished fifty points behind was
+            // still simulated as having a one-in-twenty chance.
+            let priced = |roster_id: u32| {
+                let mean = means
                     .get(&roster_id)
                     .and_then(|w| w.get(&game.week).copied())
-                    .filter(|m| *m > 0.0)
-                    .unwrap_or(league_mean)
-            };
-            // A week with no starters resolved — a data gap, or a mean that
-            // fell back to the league average — still needs a spread, and it
-            // has to be the one an ordinary lineup would have produced.
-            let sigma_for = |roster_id: u32, mean: f64| {
-                sigmas
+                    .filter(|m| *m > 0.0);
+                let sigma = sigmas
                     .get(&roster_id)
-                    .and_then(|w| w.get(&game.week).copied())
-                    .filter(|s| *s > 0.0)
-                    .unwrap_or_else(|| season_spread::fallback_sigma(mean))
+                    .and_then(|w| w.get(&game.week).copied());
+                match mean {
+                    Some(mean) => (
+                        mean,
+                        sigma.unwrap_or_else(|| season_spread::fallback_sigma(mean)),
+                    ),
+                    None => (league_mean, season_spread::fallback_sigma(league_mean)),
+                }
             };
-            let home_mean = mean_for(game.home);
-            let away_mean = mean_for(game.away);
+            let (home_mean, home_sigma) = priced(game.home);
+            let (away_mean, away_sigma) = priced(game.away);
             Some(Game {
                 home,
                 away,
                 home_mean,
-                home_sigma: sigma_for(game.home, home_mean),
+                home_sigma,
                 away_mean,
-                away_sigma: sigma_for(game.away, away_mean),
+                away_sigma,
             })
         })
         .collect();

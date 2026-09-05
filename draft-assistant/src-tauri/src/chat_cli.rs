@@ -114,21 +114,24 @@ fn parse_result(stdout: &str, requested: ChatModel) -> Result<ChatReply, String>
         });
     }
     let refused = parsed.stop_reason.as_deref() == Some("refusal");
+    let truncated = parsed.stop_reason.as_deref() == Some("max_tokens");
     let model = parsed
         .model_usage
         .keys()
         .find(|k| k.contains(requested.id()))
         .cloned()
         .unwrap_or_else(|| requested.id().to_string());
+    let text = if parsed.result.trim().is_empty() && refused {
+        "Claude declined to answer that one.".to_string()
+    } else {
+        parsed.result
+    };
     Ok(ChatReply {
-        text: if parsed.result.trim().is_empty() && refused {
-            "Claude declined to answer that one.".to_string()
-        } else {
-            parsed.result
-        },
+        text: crate::chat::with_truncation_note(text, truncated),
         thinking: None,
         model,
         refused,
+        truncated,
         input_tokens: parsed.usage.input_tokens,
         output_tokens: parsed.usage.output_tokens,
         // The CLI route reports no cache tiers, and is not billed by the

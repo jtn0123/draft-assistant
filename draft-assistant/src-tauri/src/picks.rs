@@ -75,17 +75,49 @@ pub fn next_open_pick(picks: &[Pick], teams: u32, rounds: u32) -> Option<u32> {
     (1..=teams.saturating_mul(rounds)).find(|pick| !made.contains(pick))
 }
 
-/// Which picks are keepers, judged by position rather than by Sleeper's flag:
-/// anything flagged, plus anything already in the book at or beyond the next
-/// open pick — a pick the draft has not reached yet can only be a keeper.
+/// How much of a keeper judgement one snapshot of the pick list is allowed to
+/// make.
+///
+/// Judging by position — "already in the book, ahead of the clock, therefore a
+/// keeper" — is the only thing that works in a league where Sleeper's own
+/// `is_keeper` flag is missing, but it trusts the gap in front of the clock
+/// absolutely. `/picks` drops a pick from its answer now and then, and
+/// mid-draft that opens a false gap: with pick 37 of 50 missing, every pick
+/// from 38 up sat "ahead of the clock" and was branded a keeper, remembered
+/// for ever, and written to disk. So position only counts where the gap can
+/// be believed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeeperEvidence {
+    /// Position counts. Safe before the draft starts, and on the first sight
+    /// of a draft, where the gap in front of the clock is the real one.
+    Position,
+    /// Only Sleeper's own flag counts — the rule for every later snapshot of
+    /// a running draft, which may never widen the keeper set.
+    FlagOnly,
+}
+
+/// Which picks are keepers: anything Sleeper flagged, plus — where the
+/// evidence allows it — anything already in the book at or beyond the next
+/// open pick, because a pick the draft has not reached yet can only be a
+/// keeper.
 ///
 /// Union this into `LoadedLeague::keeper_pick_nos` whenever picks arrive, so
 /// the judgement survives the draft passing the slot.
-pub fn keeper_pick_nos(picks: &[Pick], teams: u32, rounds: u32) -> HashSet<u32> {
+pub fn keeper_pick_nos(
+    picks: &[Pick],
+    teams: u32,
+    rounds: u32,
+    evidence: KeeperEvidence,
+) -> HashSet<u32> {
     let open = next_open_pick(picks, teams, rounds).unwrap_or(u32::MAX);
+    // A pick number off the end of the board is not a keeper, it is a pick
+    // this draft cannot have: Sleeper has served stale picks from a resized
+    // draft, and by position every one of them looked kept.
+    let last = teams.max(1).saturating_mul(rounds.max(1));
+    let by_position = |pick: &Pick| evidence == KeeperEvidence::Position && pick.pick_no >= open;
     picks
         .iter()
-        .filter(|p| p.is_keeper == Some(true) || p.pick_no >= open)
+        .filter(|p| p.pick_no <= last && (p.is_keeper == Some(true) || by_position(p)))
         .map(|p| p.pick_no)
         .collect()
 }
@@ -197,13 +229,18 @@ mod tests {
         assert_eq!(next_open_pick(&full, 2, 2), None);
     }
 
+    fn sorted(found: HashSet<u32>) -> Vec<u32> {
+        let mut found: Vec<u32> = found.into_iter().collect();
+        found.sort_unstable();
+        found
+    }
+
     #[test]
     fn keepers_are_judged_by_position_when_sleepers_flag_is_missing() {
         // Nothing flagged, but 11 and 20 sit beyond the open pick (1).
         let picks = [pick(11, "a"), pick(20, "b")];
-        let mut found: Vec<u32> = keeper_pick_nos(&picks, 14, 15).into_iter().collect();
-        found.sort_unstable();
-        assert_eq!(found, vec![11, 20]);
+        let found = keeper_pick_nos(&picks, 14, 15, KeeperEvidence::Position);
+        assert_eq!(sorted(found), vec![11, 20]);
     }
 
     #[test]
@@ -212,8 +249,41 @@ mod tests {
         picks.push(keeper(5));
         picks[4] = keeper(5);
         // Open pick is 11, so position alone would say nothing is a keeper.
-        let found = keeper_pick_nos(&picks, 14, 15);
+        let found = keeper_pick_nos(&picks, 14, 15, KeeperEvidence::Position);
         assert!(found.contains(&5), "flag alone must be enough: {found:?}");
+    }
+
+    /// `/picks` answering without one pick of a running draft used to brand
+    /// every pick after the hole a keeper, for ever and on disk.
+    #[test]
+    fn a_dropped_pick_mid_draft_no_longer_brands_the_rest_of_the_board() {
+        // Fifty picks made, and this snapshot is missing number 37.
+        let picks: Vec<Pick> = (1..=50)
+            .filter(|n| *n != 37)
+            .map(|n| pick(n, "drafted"))
+            .collect();
+        assert_eq!(next_open_pick(&picks, 14, 15), Some(37));
+        // Position would call 38..=50 keepers. On a snapshot that is not
+        // allowed to widen the set, nothing is.
+        assert!(keeper_pick_nos(&picks, 14, 15, KeeperEvidence::FlagOnly).is_empty());
+        // Sleeper's own flag still counts, whatever the evidence rule.
+        let mut flagged = picks.clone();
+        flagged.push(keeper(200));
+        assert_eq!(
+            sorted(keeper_pick_nos(&flagged, 14, 15, KeeperEvidence::FlagOnly)),
+            vec![200]
+        );
+    }
+
+    #[test]
+    fn a_pick_off_the_end_of_the_board_is_not_a_keeper() {
+        // A four-team, four-round draft has 16 picks. Anything past that is
+        // stale data, not something being kept.
+        let picks = [pick(3, "a"), keeper(99)];
+        assert_eq!(
+            sorted(keeper_pick_nos(&picks, 4, 4, KeeperEvidence::Position)),
+            vec![3]
+        );
     }
 
     #[test]

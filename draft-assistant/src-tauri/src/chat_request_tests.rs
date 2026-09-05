@@ -21,6 +21,38 @@ fn effort_labels_map_to_api_values() {
     assert_eq!(Effort::Off.api_effort(), "medium");
 }
 
+/// The id an answer reports is dated, and a server-side fallback can answer on
+/// a model nobody asked for. Both used to be priced as the request.
+#[test]
+fn a_reported_model_id_maps_back_to_the_price_list() {
+    assert_eq!(
+        ChatModel::from_reported("claude-opus-5-20260219"),
+        Some(ChatModel::Opus5)
+    );
+    assert_eq!(
+        ChatModel::from_reported("claude-fable-5-20260219"),
+        Some(ChatModel::Fable5)
+    );
+    assert_eq!(
+        ChatModel::from_reported("CLAUDE-FABLE-5"),
+        Some(ChatModel::Fable5)
+    );
+    // Nothing recognisable is not guessed at; the caller keeps what it asked
+    // for rather than being charged at a made-up rate.
+    assert_eq!(ChatModel::from_reported(""), None);
+    assert_eq!(ChatModel::from_reported("gpt-9"), None);
+}
+
+#[test]
+fn the_length_note_is_appended_only_to_a_truncated_answer() {
+    assert_eq!(with_truncation_note("done".into(), false), "done");
+    assert_eq!(
+        with_truncation_note("cut".into(), true),
+        format!("cut\n\n{TRUNCATED_NOTE}")
+    );
+    assert_eq!(with_truncation_note("  ".into(), true), TRUNCATED_NOTE);
+}
+
 #[test]
 fn an_empty_key_fails_before_any_request_is_made() {
     let http = reqwest::Client::new();

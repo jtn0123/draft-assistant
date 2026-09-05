@@ -29,6 +29,48 @@ pub(super) fn unusable(draft: &Draft) -> Option<String> {
     })
 }
 
+/// What one tick should do with the `/draft` resource it asked for beside the
+/// picks.
+pub(super) enum DraftUpdate {
+    /// Adopt this draft: it refreshed and it can be laid out.
+    Adopt(Box<Draft>),
+    /// The call itself failed. Keep the draft already on screen and say why in
+    /// the log, and nowhere else.
+    Logged(String),
+    /// It answered, with a draft nothing can be laid out from. That is a real
+    /// problem with the league on screen rather than a flaky endpoint, so the
+    /// user is told.
+    Refused(String),
+    /// Nothing was asked for. Yahoo has no draft resource to refresh.
+    Nothing,
+}
+
+/// Read the `/draft` half of a tick.
+///
+/// A failed call here is deliberately not the picks' problem. Both calls used
+/// to drop their errors into one list, and a single failing `/draft` —
+/// Sleeper 500s on that endpoint alone often enough — marked the whole tick
+/// failed: the sync badge went stale and the backoff stretched the poll to 24
+/// seconds while picks were arriving perfectly well every three. A draft
+/// resource that does not answer costs nothing, because the status, the order
+/// and the timer were read at load and have not changed.
+///
+/// A draft that *does* answer and cannot be laid out is a different matter:
+/// something is wrong with the league on screen, and that is worth saying out
+/// loud.
+pub(super) fn draft_update(draft: Option<Result<Draft, String>>) -> DraftUpdate {
+    match draft {
+        None => DraftUpdate::Nothing,
+        Some(Err(error)) => DraftUpdate::Logged(format!(
+            "draft status not refreshed, keeping the last one: {error}"
+        )),
+        Some(Ok(draft)) => match unusable(&draft) {
+            Some(reason) => DraftUpdate::Refused(reason),
+            None => DraftUpdate::Adopt(Box::new(draft)),
+        },
+    }
+}
+
 /// One refresh of the picks — and, where the platform has one to refresh, the
 /// draft resource beside them.
 ///
@@ -120,7 +162,54 @@ pub(super) fn backoff_secs(interval: u64, failures: u32) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::backoff_secs;
+    use super::{backoff_secs, draft_update, DraftUpdate};
+    use crate::sleeper::{Draft, DraftSettings};
+
+    fn draft(teams: u32, rounds: u32) -> Draft {
+        Draft {
+            draft_id: "D1".into(),
+            status: "drafting".into(),
+            draft_type: "snake".into(),
+            settings: DraftSettings {
+                teams,
+                rounds,
+                ..Default::default()
+            },
+            draft_order: None,
+            start_time: None,
+            season: None,
+            metadata: None,
+            creators: None,
+            last_picked: None,
+            slot_to_roster_id: None,
+        }
+    }
+
+    /// `/draft` failing put its error in the same list as the picks', so one
+    /// bad endpoint stretched the poll to 24 seconds and greyed the sync badge
+    /// while every pick was arriving on time.
+    #[test]
+    fn a_failed_draft_call_is_a_note_to_log_not_a_failed_tick() {
+        let note = match draft_update(Some(Err("Sleeper answered 500".into()))) {
+            DraftUpdate::Logged(note) => note,
+            _ => panic!("a failed /draft is logged, not counted against the sync"),
+        };
+        assert!(note.contains("Sleeper answered 500"), "{note}");
+        assert!(note.contains("keeping the last one"), "{note}");
+
+        // A draft that answers but cannot be laid out is a different thing:
+        // the league on screen has a real problem and the user is told.
+        assert!(matches!(
+            draft_update(Some(Ok(draft(0, 0)))),
+            DraftUpdate::Refused(_)
+        ));
+        // A good answer is adopted, and Yahoo has nothing to adopt at all.
+        assert!(matches!(
+            draft_update(Some(Ok(draft(12, 15)))),
+            DraftUpdate::Adopt(_)
+        ));
+        assert!(matches!(draft_update(None), DraftUpdate::Nothing));
+    }
 
     /// A draft that has gone away was asked again every three seconds
     /// forever. Each consecutive failure now doubles the wait, up to eight

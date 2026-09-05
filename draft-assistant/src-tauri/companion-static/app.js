@@ -8,6 +8,7 @@
   const {
     TOKEN_KEY,
     DEVICE_KEY,
+    DEVICE_ID_KEY,
     HOST_KEY,
     REVOKED,
     TABS,
@@ -23,6 +24,9 @@
     parseMarkdown,
     initialState,
     reduce,
+    isRevokedClose,
+    needsTicker,
+    createTicker,
   } = window.Companion;
 
   // ----------------------------------------------------------------- DOM --
@@ -135,7 +139,14 @@
         const response = await fetch("/api/pair", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code, device_name: device, kind: "phone" }),
+          body: JSON.stringify({
+            code,
+            device_name: device,
+            kind: "phone",
+            // What makes this a re-pair of the same phone rather than a
+            // second one: without it the host would list us twice.
+            device_id: load(DEVICE_ID_KEY),
+          }),
         });
         const body = await response.json().catch(() => ({}));
         if (response.status !== 200 || !body.token) {
@@ -146,6 +157,7 @@
         }
         store(TOKEN_KEY, body.token);
         store(DEVICE_KEY, device);
+        if (body.device_id) store(DEVICE_ID_KEY, body.device_id);
         if (body.host_name) store(HOST_KEY, body.host_name);
         dispatch({ type: "paired", token: body.token, hostName: body.host_name });
         await loadEverything();
@@ -178,9 +190,15 @@
         if (frame?.type === "revoked") dropToken();
         else if (LIVE.includes(frame?.type)) dispatch({ type: frame.type, payload: frame.payload });
       };
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         window.clearInterval(pingTimer);
         if (!state.token) return;
+        // The host restarted or was revoked: retrying with this token would
+        // fail for ever, so the page asks for the code again instead.
+        if (isRevokedClose(event)) {
+          dropToken();
+          return;
+        }
         dispatch({ type: "connection", status: "reconnecting" });
         window.setTimeout(connect, backoffDelay(attempt));
         attempt += 1;
@@ -212,6 +230,10 @@
     }
 
     // ---- rendering -----------------------------------------------------
+    // The pick clock counts down between updates from the host: without this
+    // "0:45 left" sat unchanged on screen until the next pick moved, which on
+    // a slow pick is the whole minute the number was there to warn about.
+    const ticker = createTicker(window, () => render());
     function renderNow() {
       const view = state.draft;
       const strip = clear($("clock-strip"));
@@ -326,6 +348,8 @@
         ["mine", live && `${live.my_live_points.toFixed(1)} – ${live.opp_live_points.toFixed(1)}`],
         ["muted", projected],
       );
+      const behind = state.seasonHealth?.consecutive_failures ?? 0;
+      if (behind) spans(header, ["muted", `${behind} failed syncs`]);
       const calls = clear($("week-calls"));
       for (const call of view.calls ?? []) {
         const row = calls.appendChild(el("li", "row"));
@@ -347,6 +371,7 @@
       $("pair-host").textContent = state.hostName ? `Hosted by ${state.hostName}` : "";
       $("pair-error").hidden = !state.pairError;
       $("pair-error").textContent = state.pairError ?? "";
+      ticker.sync(needsTicker(state));
       if (state.screen === "pair") return;
       for (const button of $("tabbar").children) {
         if (button.dataset.tab === "week") button.hidden = !state.season;

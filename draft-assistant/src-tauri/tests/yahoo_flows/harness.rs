@@ -26,8 +26,12 @@ const TEAMS: &str = include_str!("../fixtures/yahoo/teams.json");
 const PARTIAL: &str = include_str!("../fixtures/yahoo/draft_results_partial.json");
 const COMPLETE: &str = include_str!("../fixtures/yahoo/draft_results_complete.json");
 const PLAYERS_0: &str = include_str!("../fixtures/yahoo/players_page_0.json");
+const AUCTION_LEAGUE: &str = include_str!("../fixtures/yahoo/league_settings_auction.json");
+const AUCTION_RESULTS: &str = include_str!("../fixtures/yahoo/draft_results_auction.json");
 
 pub(crate) const LEAGUE_KEY: &str = "449.l.12345";
+/// The second league on the account, which is the auction one.
+pub(crate) const AUCTION_KEY: &str = "449.l.67890";
 pub(crate) const CLIENT_ID: &str = "dj0yJmk9flowsclient";
 pub(crate) const SECRET: &str = "flows-client-secret";
 pub(crate) const CODE: &str = "abcd1234";
@@ -63,12 +67,18 @@ fn yahoo_route(request: &Request, advanced: &AtomicBool, pool_calls: &AtomicU64)
         return Reply::ok(USER_LEAGUES);
     }
     if path.ends_with("/settings") {
-        return Reply::ok(LEAGUE);
+        return match path.contains(AUCTION_KEY) {
+            true => Reply::ok(AUCTION_LEAGUE),
+            false => Reply::ok(LEAGUE),
+        };
     }
     if path.ends_with("/teams") {
         return Reply::ok(TEAMS);
     }
     if path.ends_with("/draftresults") {
+        if path.contains(AUCTION_KEY) {
+            return Reply::ok(AUCTION_RESULTS);
+        }
         return match advanced.load(Ordering::SeqCst) {
             true => Reply::ok(COMPLETE),
             false => Reply::ok(PARTIAL),
@@ -158,6 +168,7 @@ pub(crate) fn session(label: &str) -> Session {
             yahoo::yahoo_finish_connect,
             yahoo::yahoo_disconnect,
             yahoo::yahoo_leagues,
+            yahoo::yahoo_auction,
         ])
         .build(mock_context(noop_assets()))
         .expect("the app builds on the mock runtime");

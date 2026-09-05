@@ -1,19 +1,26 @@
 // Modal confirm and the toast strip.
 
 import { useEffect, useRef } from "react";
+import { platformName } from "../leagues";
+import type { Platform } from "../types";
 import { useFocusTrap } from "./useFocusTrap";
 
 export function ConfirmDialog({
   pickLabel,
   playerName,
+  platform,
   onConfirm,
   onCancel,
 }: {
   pickLabel: string;
   playerName: string;
+  /** Which service the league is read from. The sentence below names it, and
+   *  it said "Sleeper" to Yahoo players until this was handed in. */
+  platform: Platform;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const service = platformName(platform);
   const dialog = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   // Whatever was focused when the dialog opened — a board row, usually.
@@ -57,8 +64,8 @@ export function ConfirmDialog({
           Mark {playerName} as drafted?
         </span>
         <span className="mid dialog-note">
-          This records the pick locally. It does not draft them in Sleeper, and live sync from
-          Sleeper overrides it.
+          This records the pick locally. It does not draft them in {service}, and live sync from{" "}
+          {service} overrides it.
         </span>
         <div className="dialog-actions">
           <button type="button" className="btn-primary" onClick={onConfirm} ref={confirmRef}>

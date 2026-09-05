@@ -62,17 +62,36 @@ fn flex_score(pool: &[&ScoredPlayer], index: usize, horizon: usize, bias: f64) -
     Some(next + bias * (next - deeper))
 }
 
-pub fn compute_replacement(
-    players: &[ScoredPlayer],
+/// Each position's players, best first. Borrowed rather than copied: the
+/// allocator only ever reads points.
+fn build_pools(players: &[ScoredPlayer]) -> HashMap<String, Vec<&ScoredPlayer>> {
+    let mut pools: HashMap<String, Vec<&ScoredPlayer>> = HashMap::new();
+    for p in players {
+        pools.entry(p.position.clone()).or_default().push(p);
+    }
+    for pool in pools.values_mut() {
+        pool.sort_by(|a, b| {
+            b.points
+                .partial_cmp(&a.points)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+    pools
+}
+
+/// League-wide starting demand per position: dedicated slots times the number
+/// of teams, plus every flex slot handed to whichever eligible position values
+/// it most. A flex slot that no eligible pool can still fill is left
+/// unallocated rather than guessed at.
+fn allocate(
+    pools: &HashMap<String, Vec<&ScoredPlayer>>,
     rules: &RosterRules,
     teams: usize,
-    flex_bias: Option<f64>,
-) -> ReplacementModel {
-    let bias = flex_bias.unwrap_or(DEFAULT_FLEX_BIAS);
+    bias: f64,
+) -> HashMap<String, usize> {
     // One round of that position coming off the board — the span a manager is
     // choosing over when they decide whether to take the flex player now.
     let horizon = teams.max(1);
-    // League-wide dedicated demand per position.
     let mut base_demand: HashMap<String, usize> = HashMap::new();
     let mut flex_slots: Vec<&[&str]> = Vec::new();
     for slot in rules.slots() {
@@ -90,22 +109,9 @@ pub fn compute_replacement(
     }
     flex_slots.sort_by_key(|eligible| eligible.len());
 
-    // Sort each position's pool by points, descending.
-    let mut pools: HashMap<String, Vec<&ScoredPlayer>> = HashMap::new();
-    for p in players {
-        pools.entry(p.position.clone()).or_default().push(p);
-    }
-    for pool in pools.values_mut() {
-        pool.sort_by(|a, b| {
-            b.points
-                .partial_cmp(&a.points)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-    }
-
     // Allocate each flex slot independently against its own eligible pool.
     // This remains correct when a league mixes FLEX, REC_FLEX, and SUPER_FLEX.
-    let mut demand = base_demand.clone();
+    let mut demand = base_demand;
     for eligible in flex_slots {
         for _ in 0..teams {
             let best_position = eligible
@@ -122,6 +128,34 @@ pub fn compute_replacement(
             }
         }
     }
+    demand
+}
+
+/// The demand half of the model on its own, for callers that need to know how
+/// many of a position the league starts without also needing a replacement
+/// level. The recommender's need model reads it: splitting a flex evenly
+/// between the positions eligible for it credited a quarterback a quarter of
+/// every superflex slot, so the need model and this model disagreed about the
+/// same league.
+pub fn allocate_demand(
+    players: &[ScoredPlayer],
+    rules: &RosterRules,
+    teams: usize,
+    flex_bias: Option<f64>,
+) -> HashMap<String, usize> {
+    let bias = flex_bias.unwrap_or(DEFAULT_FLEX_BIAS);
+    allocate(&build_pools(players), rules, teams, bias)
+}
+
+pub fn compute_replacement(
+    players: &[ScoredPlayer],
+    rules: &RosterRules,
+    teams: usize,
+    flex_bias: Option<f64>,
+) -> ReplacementModel {
+    let bias = flex_bias.unwrap_or(DEFAULT_FLEX_BIAS);
+    let pools = build_pools(players);
+    let demand = allocate(&pools, rules, teams, bias);
 
     // Baseline = mean points of the 3 players bracketing the replacement rank.
     let mut baseline: HashMap<String, f64> = HashMap::new();
@@ -158,6 +192,8 @@ pub fn assign_tiers(sorted_points: &[f64], gap_threshold: f64) -> Vec<u32> {
     tiers
 }
 
+/// The point gap that starts a new tier, on the board these numbers were
+/// fitted on: a standard full-PPR twelve-team league.
 pub fn tier_gap_threshold(position: &str) -> f64 {
     match position {
         "QB" => 14.0,
@@ -167,6 +203,53 @@ pub fn tier_gap_threshold(position: &str) -> f64 {
         "DEF" => 8.0,
         _ => 12.0,
     }
+}
+
+/// How many players deep a position's starters run in a twelve-team league,
+/// and the median season points of that group under standard full PPR.
+///
+/// This is the ruler the constants above were measured with. Without it the
+/// gap thresholds are absolute season points applied to whatever scale the
+/// league happens to use: a six-point-per-passing-touchdown, 0.5-per-carry
+/// house league scores roughly double, so every real gap cleared 12 points and
+/// the board came back as one long chain of one-man tiers. A tiny-scale league
+/// (best-ball fractions, a two-week playoff pool) does the opposite and hands
+/// back a single tier per position.
+fn reference_level(position: &str) -> (usize, f64) {
+    match position {
+        "QB" => (24, 300.0),
+        "RB" => (36, 180.0),
+        "WR" => (36, 185.0),
+        "TE" => (12, 140.0),
+        "K" => (12, 130.0),
+        "DEF" => (12, 110.0),
+        _ => (36, 180.0),
+    }
+}
+
+/// This league's point scale at `position`, as a multiple of the full-PPR
+/// board the tier constants were fitted on. Clamped, because a pool that is
+/// mostly zeroes (a projection source that failed halfway) must not collapse
+/// every position into one tier or blow it apart into forty.
+fn point_scale(position: &str, sorted_points: &[f64]) -> f64 {
+    let (depth, reference) = reference_level(position);
+    // Four players is not a scale. Below that the league's own numbers say
+    // less than the default does.
+    if sorted_points.len() < 4 || reference <= 0.0 {
+        return 1.0;
+    }
+    let top = &sorted_points[..depth.min(sorted_points.len())];
+    let median = top[top.len() / 2];
+    if median <= 0.0 {
+        return 1.0;
+    }
+    (median / reference).clamp(0.25, 4.0)
+}
+
+/// The gap that starts a new tier at `position`, put on this league's own
+/// point scale. `sorted_points` is that position's pool, best first.
+pub fn tier_gap_threshold_for(position: &str, sorted_points: &[f64]) -> f64 {
+    tier_gap_threshold(position) * point_scale(position, sorted_points)
 }
 
 #[cfg(test)]

@@ -99,7 +99,7 @@ fn loaded_league() -> LoadedLeague {
     board.push(board_player("streamer", FILLERS as u32 + 2));
     rows.push(week_row("streamer", 25.0));
 
-    let board_index = board
+    let board_index: HashMap<String, usize> = board
         .iter()
         .enumerate()
         .map(|(i, p)| (p.player_id.clone(), i))
@@ -111,8 +111,8 @@ fn loaded_league() -> LoadedLeague {
         draft: draft(),
         user_names: HashMap::from([("user-1".to_string(), "Me".to_string())]),
         user_avatars: HashMap::new(),
-        board,
-        board_index,
+        board: std::sync::Arc::new(board),
+        board_index: std::sync::Arc::new(board_index),
         replacement_model: ReplacementModel {
             demand: HashMap::new(),
             baseline: HashMap::new(),
@@ -129,8 +129,8 @@ fn loaded_league() -> LoadedLeague {
         projections_fetched_at: 0,
         weekly_fetched_at: 0,
         warnings: Vec::new(),
-        player_meta: HashMap::new(),
-        weekly_points: WeeklyPoints::build(&rows, &scoring),
+        player_meta: Default::default(),
+        weekly_points: std::sync::Arc::new(WeeklyPoints::build(&rows, &scoring)),
         second_opinion_loaded_at: None,
     }
 }

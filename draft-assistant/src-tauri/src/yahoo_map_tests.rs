@@ -42,6 +42,7 @@ fn sample_league() -> YahooLeague {
             name: "Passing Yards".into(),
             display: "Pass Yds".into(),
         }],
+        ..YahooLeague::default()
     }
 }
 
@@ -62,6 +63,7 @@ fn result(pick: u32, round: u32, team_key: &str, player_key: &str) -> YahooDraft
         team_key: team_key.into(),
         player_key: player_key.into(),
         cost: None,
+        is_keeper: None,
     }
 }
 
@@ -309,28 +311,6 @@ fn a_known_player_fills_in_the_picks_label() {
     assert_eq!(meta.team.as_deref(), Some("CIN"));
 }
 
-#[test]
-fn a_snake_draft_has_no_auction_costs() {
-    let costs = auction_costs(&[result(1, 1, "449.l.1.t.1", "449.p.100")]);
-    assert!(costs.is_empty());
-}
-
-#[test]
-fn an_auction_keeps_what_each_player_went_for() {
-    let costs = auction_costs(&[
-        YahooDraftPick {
-            cost: Some(55.0),
-            ..result(1, 1, "449.l.1.t.1", "449.p.100")
-        },
-        YahooDraftPick {
-            cost: Some(1.0),
-            ..result(2, 1, "449.l.1.t.2", "449.p.200")
-        },
-    ]);
-    assert_eq!(costs.get("yahoo:100"), Some(&55.0));
-    assert_eq!(costs.get("yahoo:200"), Some(&1.0));
-}
-
 fn sample_player() -> YahooPlayer {
     YahooPlayer {
         player_key: "449.p.100".into(),
@@ -344,6 +324,7 @@ fn sample_player() -> YahooPlayer {
         status: Some("Q".into()),
         bye_week: Some(10),
         uniform_number: Some("1".into()),
+        is_keeper: None,
     }
 }
 

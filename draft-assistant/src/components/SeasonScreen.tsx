@@ -181,6 +181,18 @@ function LiveStatus({ health, poll }: { health: SeasonHealth; poll: PollHealth |
   );
 }
 
+/**
+ * "Locks in 6h 12m", re-read from the clock rather than from the data.
+ *
+ * Everything else in the header changes when a poll tick brings new scores;
+ * this one counts down on its own, and left to re-render on data alone it sat
+ * frozen at whatever it said when the view was last rebuilt.
+ */
+function LocksIn({ ms }: { ms: number | null }) {
+  const now = useClockTick();
+  return <HeaderStat label="Locks in" value={untilLabel(ms, now * 1000)} sub={lockLabel(ms)} />;
+}
+
 export function SeasonScreen({
   view,
   pollHealth = null,
@@ -225,13 +237,19 @@ export function SeasonScreen({
   // One lineup, one score, one probability. Both numbers are computed in the
   // Rust view against the same opponent, so picking here cannot make them
   // disagree the way a single scalar and a local toggle could.
-  const best = lineup === "Best";
-  const myProjected = best ? header.my_projected : header.my_set_projected;
-  const winOdds = best ? header.win_odds_best : header.win_odds_set;
   // Once the ball is in the air the projection is the second-most interesting
   // number on the screen. Lead with what has actually been scored, and keep the
   // projection beside it as the thing still to come.
   const anyStarted = view.live.games.some((game) => game.state !== "pre");
+  // Nothing left to change: every game has kicked off and every swap worth
+  // making involves a player already on the field, so the calls list is empty.
+  // Quoting best-lineup odds from here on is quoting a lineup nobody can set —
+  // the header said "74% to win" off a bench the user could no longer touch.
+  const locked = anyStarted && view.calls.length === 0;
+  const choice: LineupChoice = locked ? "Set" : lineup;
+  const best = choice === "Best";
+  const myProjected = best ? header.my_projected : header.my_set_projected;
+  const winOdds = best ? header.win_odds_best : header.win_odds_set;
   const { my_live_points: myLive, opp_live_points: oppLive } = view.live.totals;
   const thisWeek =
     header.opponent_name === null
@@ -258,16 +276,12 @@ export function SeasonScreen({
         <HeaderStat
           label="Win odds"
           value={pct(winOdds)}
-          sub={`${best ? "best lineup" : "lineup as set"} · ${ODDS_NOTE}`}
+          sub={`${best ? "best lineup" : "lineup as set"}${locked ? " · locked" : ""} · ${ODDS_NOTE}`}
         />
         {/* A percentage is a forecast. Past the last regular week there is
             nothing left to forecast, so the bracket's own answer is shown. */}
         <HeaderStat label="Playoffs" value={header.playoff_status ?? pct(header.playoff_odds)} />
-        <HeaderStat
-          label="Locks in"
-          value={untilLabel(header.locks_in_ms)}
-          sub={lockLabel(header.locks_in_ms)}
-        />
+        <LocksIn ms={header.locks_in_ms} />
         <div className="season-stat">
           <span className="eyebrow">Data</span>
           <LiveStatus health={view.data_health} poll={pollHealth} />
@@ -285,7 +299,13 @@ export function SeasonScreen({
             pointsOnTable={view.points_on_table}
             started={anyStarted}
           />
-          <LineupCompare matchup={matchup} which={lineup} onWhich={setLineup} winOdds={winOdds} />
+          <LineupCompare
+            matchup={matchup}
+            which={choice}
+            onWhich={setLineup}
+            winOdds={winOdds}
+            locked={locked}
+          />
           <Waivers
             waivers={view.waivers}
             budgetLeft={view.waiver_budget_left}

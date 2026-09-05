@@ -160,6 +160,18 @@ describe("the restore on launch", () => {
   });
 });
 
+describe("when the launch itself fails", () => {
+  it("shows the error's own sentence, not 'Error: Error:'", async () => {
+    // `String(e)` on an Error prefixes "Error:", and the launch screen builds
+    // its line from a message that already carried one.
+    mocks.addLeague.mockRejectedValue(new Error("Error: Sleeper is not answering"));
+    const { result } = renderHook(() => useDraftSession(() => undefined));
+    await waitFor(() => expect(result.current.launchError).not.toBeNull());
+
+    expect(result.current.launchError).toBe("Sleeper is not answering");
+  });
+});
+
 describe("re-pulling the picks", () => {
   it("asks the backend again and says what came back", async () => {
     const { said, showToast } = toasts();

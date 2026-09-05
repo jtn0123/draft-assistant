@@ -97,11 +97,22 @@ pub async fn host_over(data_dir: std::path::PathBuf, state: Arc<AppState>) -> Ho
 impl Host {
     /// Pair with the code on the host's screen, and keep the token.
     pub async fn pair_ok(&self, name: &str, kind: &str) -> Paired {
+        self.pair_again(name, kind, None).await
+    }
+
+    /// The same, saying which device this already was — what a phone that has
+    /// paired before sends, and the only thing that replaces an old entry.
+    pub async fn pair_again(&self, name: &str, kind: &str, previous: Option<&str>) -> Paired {
         let code = self.companion.hub.code();
         let response = self
             .http
             .post(format!("{}/api/pair", self.base))
-            .json(&serde_json::json!({ "code": code, "device_name": name, "kind": kind }))
+            .json(&serde_json::json!({
+                "code": code,
+                "device_name": name,
+                "kind": kind,
+                "device_id": previous,
+            }))
             .send()
             .await
             .expect("the pair request goes through");

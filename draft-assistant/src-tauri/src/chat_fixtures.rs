@@ -81,6 +81,7 @@ pub fn draft_fixture() -> DraftView {
             my_next_picks: vec![28, 43, 48, 63, 68],
             total_picks_made: 23,
             manual_picks_active: false,
+            paused: false,
             clock_deadline_ms: None,
             pick_slot_overrides: HashMap::new(),
             keeper_picks: Vec::new(),

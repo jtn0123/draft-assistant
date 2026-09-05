@@ -45,13 +45,33 @@ async fn next_of(socket: &mut Socket, kind: &str) -> Value {
 }
 
 #[tokio::test]
-async fn an_unpaired_token_cannot_open_the_socket() {
+async fn an_unpaired_token_is_told_so_and_then_closed() {
     let host = host("ws-auth").await;
     let url = format!(
         "{}/api/events?token=not-a-token",
         host.base.replace("http://", "ws://")
     );
-    assert!(connect_async(url).await.is_err(), "the socket opened");
+    // A browser learns nothing about a refused handshake, so the host accepts
+    // this one and closes it with a code of its own. Without that, a phone
+    // holding a token a restarted host has forgotten reconnects for ever and
+    // never says why.
+    let (mut socket, _) = connect_async(url).await.expect("the handshake is accepted");
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(5), socket.next())
+        .await
+        .expect("a frame arrives")
+        .expect("the socket is open")
+        .expect("the frame is readable");
+    match frame {
+        Message::Close(Some(close)) => {
+            assert_eq!(u16::from(close.code), 4401, "{close:?}");
+            assert_eq!(close.reason.as_str(), "revoked");
+        }
+        other => panic!("expected a close frame, got {other:?}"),
+    }
+    // And nothing at all is readable through it.
+    let (status, body) = host.get("/api/state", "not-a-token").await;
+    assert_eq!(status, 401);
+    assert_eq!(body["error"], "not paired");
 }
 
 #[tokio::test]
@@ -62,6 +82,13 @@ async fn a_new_socket_is_told_the_state_of_the_world() {
 
     let devices = next_of(&mut socket, "devices").await;
     assert_eq!(devices["payload"][0]["name"], "Rob's iPhone");
+    // The board and the week as they stand. Nothing re-reads them after a
+    // reconnect, so a phone that lost its socket between picks used to sit on
+    // a stale board until something moved.
+    let draft = next_of(&mut socket, "draft-updated").await;
+    assert_eq!(draft["payload"]["league"]["league_id"], "league-1");
+    let season = next_of(&mut socket, "season-updated").await;
+    assert_eq!(season["payload"]["league"]["league_id"], "league-1");
     // Both screens' threads, so the phone can switch tabs without a fetch.
     let first = next_of(&mut socket, "shared-chat").await;
     let second = next_of(&mut socket, "shared-chat").await;
@@ -153,11 +180,26 @@ async fn a_question_and_then_its_answer_arrive_over_the_socket() {
 }
 
 #[tokio::test]
+async fn a_reconnecting_socket_is_current_without_asking_for_anything() {
+    let host = host("ws-reconnect").await;
+    let paired = host.pair_ok("Rob's iPhone", "phone").await;
+    let first = open(&host.base, &paired.token).await;
+    drop(first);
+    // The phone comes back — out of a lift, off a lock screen — and opens a
+    // new socket with the same token. What it gets is the world as it is now.
+    let mut second = open(&host.base, &paired.token).await;
+    let draft = next_of(&mut second, "draft-updated").await;
+    assert!(draft["payload"]["available"].is_array(), "{draft}");
+}
+
+#[tokio::test]
 async fn a_draft_update_reaches_the_paired_devices() {
     let host = host("ws-draft").await;
     let paired = host.pair_ok("Rob's iPhone", "phone").await;
     let mut socket = open(&host.base, &paired.token).await;
     next_of(&mut socket, "devices").await;
+    // The board the socket opened with, before anything has moved.
+    next_of(&mut socket, "draft-updated").await;
     // The same call the poll loop makes when picks move.
     host.companion
         .hub

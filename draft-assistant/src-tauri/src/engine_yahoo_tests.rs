@@ -44,6 +44,7 @@ fn league() -> YahooLeague {
         roster_positions: slots(&[("QB", 1), ("RB", 2), ("W/R/T", 1), ("BN", 5), ("IR", 2)]),
         stat_modifiers: vec![],
         stat_categories: vec![],
+        ..YahooLeague::default()
     }
 }
 
@@ -191,6 +192,7 @@ fn yahoo_player(key: &str, full: &str, team: &str, position: &str) -> YahooPlaye
         status: None,
         bye_week: None,
         uniform_number: None,
+        is_keeper: None,
     }
 }
 
@@ -228,6 +230,7 @@ fn a_pick_names_the_player_by_the_id_the_board_put_him_on() {
             team_key: "449.l.12345.t.1".into(),
             player_key: "449.p.30977".into(),
             cost: None,
+            is_keeper: None,
         },
         YahooDraftPick {
             pick: 2,
@@ -235,6 +238,7 @@ fn a_pick_names_the_player_by_the_id_the_board_put_him_on() {
             team_key: "449.l.12345.t.2".into(),
             player_key: "449.p.99999".into(),
             cost: None,
+            is_keeper: None,
         },
         // Recorded but not filled: not a pick yet.
         YahooDraftPick {
@@ -243,6 +247,7 @@ fn a_pick_names_the_player_by_the_id_the_board_put_him_on() {
             team_key: "449.l.12345.t.2".into(),
             player_key: String::new(),
             cost: None,
+            is_keeper: None,
         },
     ];
     let picks = picks_for(&results, &teams, &pool, &crosswalk);

@@ -85,6 +85,9 @@ export interface Api {
   refreshData(): Promise<DraftView>;
   recordManualPick(playerId: string): Promise<DraftView>;
   undoManualPick(): Promise<DraftView>;
+  /** Forget the keepers this app worked out for the draft on screen and judge
+   *  them again from the picks as they stand. Returns the rebuilt view. */
+  clearKeepers(): Promise<DraftView>;
   exportState(): Promise<string>;
   /** Open the native file picker, import the chosen projections CSV, and
    *  return the counts plus the rebuilt view. `null` if the user cancelled. */
@@ -155,6 +158,7 @@ const tauriApi: Api = {
   refreshData: () => invokeView("refresh_data"),
   recordManualPick: (playerId) => invokeView("record_manual_pick", { playerId }),
   undoManualPick: () => invokeView("undo_manual_pick"),
+  clearKeepers: () => invokeView("clear_keepers"),
   exportState: () => invoke<string>("export_state"),
   importSecondOpinion: async () => {
     const result = await invoke<SecondOpinionImport | null>("import_second_opinion");
@@ -272,6 +276,7 @@ function browserApi(): Api {
     refreshData: () => draft.refresh(),
     recordManualPick: () => readOnly("run the desktop app to draft"),
     undoManualPick: () => readOnly("run the desktop app to draft"),
+    clearKeepers: () => readOnly("run the desktop app to draft"),
     exportState: () => Promise.resolve("browser preview — no export"),
     importSecondOpinion: () => readOnly("importing a CSV requires the desktop app"),
     headshot: (playerId) =>

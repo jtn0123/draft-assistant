@@ -162,10 +162,17 @@ export function injuryTag(status: string | null | undefined): string | null {
   }
 }
 
-/** "2d 6h", "6h 12m", "48m" — how long until a deadline. */
-export function untilLabel(ms: number | null): string {
+/**
+ * "2d 6h", "6h 12m", "48m" — how long until a deadline.
+ *
+ * `nowMs` is a parameter rather than a call to the clock inside, so a caller
+ * can subscribe it to a ticking value. The season header read the clock in
+ * here and re-rendered only when new data arrived, which on a quiet evening
+ * meant "Locks in 6h 12m" sat frozen at 6h 12m for hours.
+ */
+export function untilLabel(ms: number | null, nowMs: number = Date.now()): string {
   if (ms === null) return "–";
-  const diff = ms - Date.now();
+  const diff = ms - nowMs;
   if (diff <= 0) return "now";
   const minutes = Math.floor(diff / 60000);
   const hours = Math.floor(minutes / 60);

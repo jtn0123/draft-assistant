@@ -5,11 +5,9 @@
 //! header because a browser's `WebSocket` cannot set one.
 
 use super::hub::Device;
-use super::routes::fail;
 use super::server::Srv;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
 use axum::response::Response;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -27,9 +25,26 @@ pub async fn events(
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let Some(device) = srv.hub.device_for(&query.token) else {
-        return fail(StatusCode::UNAUTHORIZED, "not paired");
+        // The handshake is accepted and then closed with a code of our own
+        // rather than refused: a browser is told nothing at all about a failed
+        // WebSocket handshake — no status, no body — so a phone whose token
+        // the host has forgotten would retry for ever without ever learning
+        // why. [`REVOKED_CLOSE`] is what sends it back to the pairing screen.
+        return upgrade.on_upgrade(close_as_revoked);
     };
     upgrade.on_upgrade(move |socket| run(srv, device, socket))
+}
+
+/// The close code a client reads as "this token is no good any more". Above
+/// 4000, which is the range the WebSocket standard leaves to applications.
+pub const REVOKED_CLOSE: u16 = 4401;
+
+async fn close_as_revoked(mut socket: WebSocket) {
+    let frame = axum::extract::ws::CloseFrame {
+        code: REVOKED_CLOSE,
+        reason: "revoked".into(),
+    };
+    let _ = socket.send(Message::Close(Some(frame))).await;
 }
 
 async fn run(srv: Arc<Srv>, device: Device, mut socket: WebSocket) {
@@ -99,8 +114,26 @@ async fn answer_client(srv: &Srv, device: &Device, socket: &mut WebSocket, text:
 }
 
 /// The state of the world a freshly connected client is given.
+///
+/// The views are in here as well as the threads because nothing re-reads them
+/// after a reconnect: a phone that lost its socket in the lift used to sit on
+/// a board minutes out of date until the next pick moved, and a phone that
+/// reconnects between picks could sit on one all round.
 async fn opening_frames(srv: &Srv) -> Vec<String> {
     let mut frames = vec![frame("devices", serde_json::to_value(srv.hub.devices()))];
+    if let Some(view) = draft_view(srv).await {
+        frames.push(frame("draft-updated", serde_json::to_value(view)));
+    }
+    if let Ok(view) = crate::state::season_view_for_chat(
+        &srv.state.loaded,
+        &srv.state.season,
+        &srv.state.config,
+        &srv.state.last_season_view,
+    )
+    .await
+    {
+        frames.push(frame("season-updated", serde_json::to_value(&*view)));
+    }
     if let Ok(league_id) = super::routes_chat::active_league(srv).await {
         for screen in ["draft", "season"] {
             let thread = srv.chat.thread(&league_id, screen).await;
@@ -108,6 +141,14 @@ async fn opening_frames(srv: &Srv) -> Vec<String> {
         }
     }
     frames
+}
+
+/// The same draft view `GET /api/state` answers with, when a league is open.
+async fn draft_view(srv: &Srv) -> Option<crate::view_types::DraftView> {
+    let loaded = srv.state.loaded.lock().await;
+    let loaded = loaded.as_ref()?;
+    let config = srv.state.config.lock().await;
+    Some(crate::state::view_from(loaded, &config))
 }
 
 /// The `type` of a `{ type, payload }` frame, whichever direction it came from.

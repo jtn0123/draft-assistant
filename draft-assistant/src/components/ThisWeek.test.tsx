@@ -52,6 +52,16 @@ function call(slot: string, gain: number, why: string): LineupCall {
 }
 
 describe("CallsToMake", () => {
+  // The bug: the total was counted over a different set of calls from the one
+  // listed, so a week whose only advice was "your starter is Out" read
+  // "1 calls to make — 0.0 points on the table". The count and the total now
+  // describe the same calls, and a total worth nothing is not claimed at all.
+  it("drops the points clause when the calls listed are not worth any", () => {
+    render(<CallsToMake calls={[call("RB", -5, "he is out")]} pointsOnTable={-5} />);
+    expect(screen.getByText("1 call to make")).toBeInTheDocument();
+    expect(screen.queryByText(/points on the table/)).not.toBeInTheDocument();
+  });
+
   it("says so plainly when the lineup is already optimal", () => {
     render(<CallsToMake calls={[]} pointsOnTable={0} />);
     expect(screen.getByText("Your lineup is already optimal")).toBeInTheDocument();

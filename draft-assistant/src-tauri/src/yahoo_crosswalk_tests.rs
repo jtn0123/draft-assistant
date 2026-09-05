@@ -55,6 +55,7 @@ fn yahoo(
         status: None,
         bye_week: None,
         uniform_number: None,
+        is_keeper: None,
     }
 }
 

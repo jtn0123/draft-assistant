@@ -17,7 +17,7 @@ use crate::traded_picks::TradedPick;
 use crate::valuation::ReplacementModel;
 use crate::weekly::WeeklyPoints;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -114,8 +114,8 @@ pub struct LoadedLeague {
     /// the load's crosswalk. Empty for a Sleeper league; the poll tick reads
     /// it so it never has to build the crosswalk again.
     pub yahoo_ids: HashMap<String, String>,
-    pub board: Vec<BoardPlayer>,
-    pub board_index: HashMap<String, usize>,
+    pub board: std::sync::Arc<Vec<BoardPlayer>>,
+    pub board_index: std::sync::Arc<HashMap<String, usize>>,
     pub replacement_model: ReplacementModel,
     pub roster_rules: RosterRules,
     pub api_picks: Vec<Pick>,
@@ -124,10 +124,9 @@ pub struct LoadedLeague {
     /// in a league that trades none, and whenever the fetch fails — in which
     /// case pick ownership falls back to the plain snake.
     pub traded_picks: Vec<TradedPick>,
-    /// Pick numbers known to be keepers: flagged by Sleeper, or seen sitting
-    /// ahead of the clock at some point. Remembered on disk because a keeper
-    /// stays a keeper once the draft passes its slot.
-    pub keeper_pick_nos: HashSet<u32>,
+    /// Which picks this draft is known to keep, and how far it had got when
+    /// the league was loaded. See [`crate::keepers::KeeperMemory`].
+    pub keeper_pick_nos: crate::keepers::KeeperMemory,
     pub poll_last_success_at: Option<u64>,
     pub poll_consecutive_failures: u32,
     pub poll_last_error: Option<String>,
@@ -135,10 +134,10 @@ pub struct LoadedLeague {
     pub projections_fetched_at: u64,
     pub weekly_fetched_at: u64,
     pub warnings: Vec<String>,
-    pub player_meta: HashMap<String, PlayerMeta>,
+    pub player_meta: std::sync::Arc<HashMap<String, PlayerMeta>>,
     /// Per-week projected points under this league's scoring. Built once here
     /// so the season screen never re-scores raw stat lines.
-    pub weekly_points: WeeklyPoints,
+    pub weekly_points: std::sync::Arc<WeeklyPoints>,
     /// When the imported second-opinion CSV was read, epoch seconds. `None`
     /// when there is none to read.
     pub second_opinion_loaded_at: Option<u64>,

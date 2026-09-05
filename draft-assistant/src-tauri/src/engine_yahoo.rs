@@ -10,12 +10,14 @@
 //! served without a request, a fetch that fails falls back to whatever stale
 //! copy is on disk with a warning attached, and only a failure with no cache
 //! behind it takes the load down. Files are named `yahoo_<key>_<what>.json`
-//! so one league's cache never shadows another's.
+//! so one league's cache never shadows another's. The player pool has one
+//! rule of its own — it is fetched a page at a time and resumes where a
+//! throttled load stopped — and that lives in `crate::engine_yahoo_pool`.
 //!
 //! Draft results are the one thing that is never cached: they are the live
 //! part, and a stale pick list is worse than none.
 
-use crate::engine::{Engine, LoadedLeague, PLAYERS_TTL_SECS};
+use crate::engine::{Engine, LoadedLeague};
 use crate::engine_assemble::AssemblyParts;
 use crate::sleeper::{Draft, DraftSettings, Pick};
 use crate::yahoo::{YahooClient, YahooError};
@@ -31,15 +33,11 @@ use std::future::Future;
 /// the draft order and the draft status both live in them and both move.
 pub(crate) const YAHOO_LEAGUE_TTL_SECS: u64 = 300;
 
-/// Yahoo's pages are 25 players each, so the pool is the most expensive thing
-/// here. This is the stop of last resort; a real league's pool ends first.
-const POOL_LIMIT: u32 = 2000;
-
 /// The cache file for one league's copy of one resource.
 ///
 /// The key is scrubbed rather than trusted: it reaches here from a paste box,
 /// and a `/` in it would put the file somewhere else entirely.
-pub(crate) fn cache_name(league_key: &str, what: &str) -> String {
+pub fn cache_name(league_key: &str, what: &str) -> String {
     let safe: String = league_key
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
@@ -141,17 +139,12 @@ impl Engine {
 
         // Everything else is independent: three Yahoo reads and the three
         // Sleeper ones the board is scored from, all in flight together.
-        let (teams_name, pool_name) = (
-            cache_name(league_key, "teams"),
-            cache_name(league_key, "players"),
-        );
+        let teams_name = cache_name(league_key, "teams");
         let (teams, pool, results, sleeper) = tokio::join!(
             self.yahoo_cached(&teams_name, YAHOO_LEAGUE_TTL_SECS, force, "teams", || {
                 client.league_teams(league_key)
             },),
-            self.yahoo_cached(&pool_name, PLAYERS_TTL_SECS, force, "player pool", || {
-                client.all_players(league_key, None, POOL_LIMIT)
-            },),
+            self.yahoo_pool(client, league_key, force),
             client.draft_results(league_key),
             self.sleeper_inputs(season, force),
         );

@@ -132,7 +132,7 @@ describe("looking the account up on Sleeper", () => {
     open();
     await settle(() => screen.getByRole("button", { name: /Find my leagues/ }).click());
 
-    expect(screen.getByText("no Sleeper account saved")).toBeInTheDocument();
+    expect(screen.getByText("Sleeper: no Sleeper account saved")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Mock draft/ })).toBeInTheDocument();
   });
 });
@@ -169,8 +169,60 @@ describe("Yahoo leagues", () => {
     mocks.yahooLeagues.mockRejectedValue(new Error("Yahoo sign-in expired"));
     await settle(() => open({ yahooConnected: true }));
 
-    expect(screen.getByText("Yahoo sign-in expired")).toBeInTheDocument();
+    expect(screen.getByText("Yahoo: Yahoo sign-in expired")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Mock draft/ })).toBeInTheDocument();
+  });
+});
+
+describe("when one account's lookup fails", () => {
+  it("names the platform, so a Yahoo failure is not read as Sleeper's", async () => {
+    mocks.yahooLeagues.mockRejectedValue(new Error("sign-in expired"));
+    mocks.sleeperLeagues.mockResolvedValue([]);
+    await settle(() => open({ hasAccount: true, yahooConnected: true }));
+
+    expect(screen.getByText("Yahoo: sign-in expired")).toBeInTheDocument();
+    expect(screen.queryByText(/^Sleeper:/)).toBeNull();
+  });
+
+  it("leaves the Sleeper button waiting while its own lookup is still out", async () => {
+    // The two lookups shared one error slot: Yahoo failing wrote into it,
+    // which read as "Sleeper is done" and put its button back mid-flight.
+    let finishSleeper: (leagues: StoredLeague[]) => void = () => undefined;
+    mocks.sleeperLeagues.mockReturnValue(
+      new Promise<StoredLeague[]>((resolve) => {
+        finishSleeper = resolve;
+      }),
+    );
+    mocks.yahooLeagues.mockRejectedValue(new Error("sign-in expired"));
+    await settle(() => open({ hasAccount: true, yahooConnected: true }));
+
+    const sleeperButton = screen.getByRole("button", { name: "Asking Sleeper…" });
+    expect(sleeperButton).toBeDisabled();
+
+    await settle(() => finishSleeper([]));
+    expect(screen.getByRole("button", { name: "Ask Sleeper again" })).toBeEnabled();
+  });
+
+  it("gives Yahoo a retry of its own", async () => {
+    mocks.yahooLeagues.mockRejectedValueOnce(new Error("sign-in expired"));
+    await settle(() => open({ yahooConnected: true }));
+    expect(screen.getByText("Yahoo: sign-in expired")).toBeInTheDocument();
+
+    mocks.yahooLeagues.mockResolvedValue([
+      {
+        league_id: "449.l.98765",
+        name: "Office League",
+        season: "2026",
+        status: "pre_draft",
+        platform: "yahoo",
+      },
+    ]);
+    await settle(() => screen.getByRole("button", { name: /Find my leagues on Yahoo/ }).click());
+
+    expect(mocks.yahooLeagues).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Yahoo: sign-in expired")).toBeNull();
+    expect(screen.getByRole("button", { name: /Office League/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask Yahoo again" })).toBeInTheDocument();
   });
 });
 

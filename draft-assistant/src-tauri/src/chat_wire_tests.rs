@@ -184,6 +184,55 @@ fn a_refusal_with_no_text_still_says_something() {
     assert_eq!(reply.text, "Claude declined to answer that one.");
 }
 
+/// `stop_reason: "max_tokens"` used to be read past in silence, so an answer
+/// that stopped mid-sentence reached the panel looking like a complete one.
+#[test]
+fn an_answer_that_hit_the_length_limit_says_so_in_its_own_text() {
+    let reply = ask_stub(
+        200,
+        r#"{"model":"claude-opus-5","stop_reason":"max_tokens",
+            "content":[{"type":"text","text":"Take Bowers because he"}],
+            "usage":{"input_tokens":10,"output_tokens":16000}}"#,
+    )
+    .expect("a truncated answer is still a 200");
+    assert!(reply.truncated);
+    assert!(!reply.refused);
+    // The note is in the text itself, so the phone and the panel both carry it
+    // without either of them having to know the flag exists.
+    assert_eq!(
+        reply.text,
+        format!("Take Bowers because he\n\n{TRUNCATED_NOTE}")
+    );
+}
+
+/// Thinking can use the whole budget and leave no text at all behind.
+#[test]
+fn a_truncated_answer_with_no_text_is_the_note_on_its_own() {
+    let reply = ask_stub(
+        200,
+        r#"{"model":"claude-opus-5","stop_reason":"max_tokens","content":[],
+            "usage":{"input_tokens":10,"output_tokens":16000}}"#,
+    )
+    .expect("a 200 is a reply");
+    assert!(reply.truncated);
+    assert_eq!(reply.text, TRUNCATED_NOTE);
+}
+
+/// An answer that ended normally must not grow a note it has no business
+/// carrying.
+#[test]
+fn an_ordinary_answer_carries_no_length_note() {
+    let reply = ask_stub(
+        200,
+        r#"{"model":"claude-opus-5","stop_reason":"end_turn",
+            "content":[{"type":"text","text":"Take Bowers."}],
+            "usage":{"input_tokens":10,"output_tokens":5}}"#,
+    )
+    .expect("a 200 is a reply");
+    assert!(!reply.truncated);
+    assert_eq!(reply.text, "Take Bowers.");
+}
+
 #[test]
 fn an_error_body_is_unwrapped_into_the_message_the_panel_shows() {
     let error = ask_stub(

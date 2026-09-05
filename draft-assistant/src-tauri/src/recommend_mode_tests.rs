@@ -173,14 +173,16 @@ fn a_practice_tag_is_ignored_before_the_draft_starts() {
         .iter()
         .all(|r| !r.contains("injury")));
 
-    // An "Out" tag is not a practice report and still counts.
+    // An "Out" tag is not a practice report and still counts, and the line
+    // says which tag it was rather than the word "injury": what a drafter
+    // needs off the card is how much of the season is gone.
     let available = vec![with_tag("o", Some("Out"))];
     let mut inputs = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 1, 12);
     inputs.pre_draft = true;
     assert!(of_mode(&recommend(&inputs), "safe")
         .reasons
         .iter()
-        .any(|r| r.contains("injury")));
+        .any(|r| r.contains("tagged Out")));
 }
 
 // ---------- the strategy layer ----------
@@ -285,7 +287,9 @@ fn the_reasons_are_ordered_by_what_they_were_worth() {
     // so that has to come before the VORP boilerplate.
     let available = vec![player("wr", "WR", 2.0)];
     let mut mine = roster(&["QB", "RB", "RB", "TE"]);
-    mine.open_starters = vec![("WR".into(), 1)];
+    // No starting slot reported open, so the thin-room bonus is the only
+    // term paying for the empty receiver room and it is what picked him.
+    mine.open_starters = vec![];
     let recs = recs(
         &available,
         Some(&mine),

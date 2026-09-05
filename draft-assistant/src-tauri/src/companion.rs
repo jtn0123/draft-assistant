@@ -8,11 +8,13 @@
 
 pub mod hub;
 pub mod media;
+pub mod names;
 pub mod net;
 pub mod rand;
 pub mod routes;
 pub mod routes_chat;
 pub mod server;
+pub mod store;
 pub mod ws;
 
 pub use hub::{CompanionHub, Device};

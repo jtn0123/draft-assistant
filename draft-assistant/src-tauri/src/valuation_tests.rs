@@ -155,3 +155,69 @@ fn a_pool_that_runs_out_stops_taking_flex_slots() {
     assert_eq!(model.demand.get("WR"), Some(&2));
     assert_eq!(model.demand.get("RB"), Some(&1));
 }
+
+// ---------- tiers on the league's own point scale ----------
+
+/// Forty receivers shaped like a full-PPR board: the median of the top 36
+/// lands on the level the tier constants were fitted against, and the gaps
+/// between them alternate small, large and middling so there are real tier
+/// breaks to find.
+fn full_ppr_receivers() -> Vec<f64> {
+    let gaps = [5.0, 20.0, 8.0];
+    let mut points = vec![383.0];
+    for i in 0..39 {
+        points.push(points[i] - gaps[i % gaps.len()]);
+    }
+    points
+}
+
+#[test]
+fn a_full_ppr_board_tiers_exactly_as_the_constants_always_did() {
+    let points = full_ppr_receivers();
+    // The median of the top 36 is the reference level, so the scale is 1.
+    assert!((points[18] - 185.0).abs() < 1e-9, "{}", points[18]);
+    let scaled = tier_gap_threshold_for("WR", &points);
+    assert!(
+        (scaled - tier_gap_threshold("WR")).abs() < 1e-9,
+        "full PPR moved the threshold to {scaled}"
+    );
+    assert_eq!(
+        assign_tiers(&points, scaled),
+        assign_tiers(&points, tier_gap_threshold("WR"))
+    );
+}
+
+#[test]
+fn doubling_the_leagues_point_scale_does_not_double_the_tier_count() {
+    // A house league that pays six for a passing touchdown and half a point a
+    // carry scores about twice full PPR. Against a fixed 12-point gap every
+    // real break cleared the bar and the board came back as a chain of
+    // one-man tiers, which is no tiering at all.
+    let points = full_ppr_receivers();
+    let doubled: Vec<f64> = points.iter().map(|p| p * 2.0).collect();
+    let base = *assign_tiers(&points, tier_gap_threshold_for("WR", &points))
+        .last()
+        .expect("tiers");
+    let scaled = *assign_tiers(&doubled, tier_gap_threshold_for("WR", &doubled))
+        .last()
+        .expect("tiers");
+    assert_eq!(
+        base, scaled,
+        "the same board, twice the points, {base} vs {scaled}"
+    );
+    let absolute = *assign_tiers(&doubled, tier_gap_threshold("WR"))
+        .last()
+        .expect("tiers");
+    assert!(
+        absolute > scaled,
+        "the absolute threshold used to shatter this board: {absolute} vs {scaled}"
+    );
+}
+
+#[test]
+fn a_pool_too_short_to_measure_keeps_the_default_threshold() {
+    // Three kickers is not a point scale; guessing one off them would be
+    // worse than the constant it falls back to.
+    let points = vec![300.0, 200.0, 100.0];
+    assert!((tier_gap_threshold_for("K", &points) - tier_gap_threshold("K")).abs() < 1e-9);
+}

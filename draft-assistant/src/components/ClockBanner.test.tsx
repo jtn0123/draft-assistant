@@ -53,6 +53,24 @@ describe("pick clock", () => {
     expect(screen.getByText("0:00")).toBeInTheDocument();
   });
 
+  it("says the draft is paused instead of naming a manager who cannot act", () => {
+    const view = fixture();
+    view.draft.status = "paused";
+    view.draft.paused = true;
+    view.draft.is_my_pick = false;
+    view.draft.on_clock_name = "Team Rocket";
+    // Sleeper withholds the deadline on a paused draft, but an older host may
+    // not: either way nothing counts down while the draft is stopped.
+    view.draft.clock_deadline_ms = NOW + 41_000;
+
+    render(<ClockBanner view={view} />);
+    expect(screen.getByText("Draft paused")).toBeInTheDocument();
+    expect(screen.queryByText(/On the clock/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Clock")).not.toBeInTheDocument();
+    expect(screen.queryByText("0:41")).not.toBeInTheDocument();
+    expect(screen.getByRole("status").textContent).toContain("The draft is paused.");
+  });
+
   it("shows no clock cell when nothing is on the clock", () => {
     const view = fixture();
     view.draft.clock_deadline_ms = null;
@@ -187,6 +205,15 @@ describe("the queue under league rules the plain snake cannot see", () => {
     const { container } = render(<SnakeStrip view={view} />);
 
     expect(chipTexts(container)[1]).toContain("YOU");
+  });
+
+  it("stops the countdown on a paused draft", () => {
+    const view = fixture();
+    view.draft.paused = true;
+    view.draft.clock_deadline_ms = NOW + 41_000;
+    const { container } = render(<SnakeStrip view={view} />);
+
+    expect(container.querySelector(".snake-clock")).toBeNull();
   });
 
   it("leaves out picks that are already in the book as keepers", () => {

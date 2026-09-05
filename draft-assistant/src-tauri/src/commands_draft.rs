@@ -1,7 +1,6 @@
 //! Tauri commands for the draft screen.
 
 use crate::commands_yahoo::{client_from, persist_tokens_for, yahoo_picks};
-use crate::draft;
 use crate::engine::{AppConfig, Engine, LoadedLeague, StoredLeague};
 use crate::keepers::{self, KeeperStore};
 use crate::league_ref::{extract_ref, Pasted};
@@ -10,17 +9,19 @@ use crate::poll::{self, record_poll_outcome, DraftPollMemory};
 use crate::sleeper::{Draft, Pick};
 use crate::sleeper_error::to_message;
 use crate::state::{view_from, AppState, YahooState};
-use crate::view::{self, DraftView};
+use crate::view::DraftView;
 use crate::view_types::{is_yahoo_key, platform_for};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
+mod edits;
 mod tick;
+pub use edits::*;
 use tick::{
-    backoff_secs, fetch_tick, save_keepers_off_lock, save_picks_off_lock, tick_target,
-    undo_pick_in_memory, unusable, view_now, EMPTY_PICKS,
+    backoff_secs, draft_update, fetch_tick, save_keepers_off_lock, save_picks_off_lock,
+    tick_target, DraftUpdate, EMPTY_PICKS,
 };
 
 /// What every command and tick says when the league moved on under it. The
@@ -189,11 +190,13 @@ pub async fn refresh_picks(state: State<'_, AppState>) -> Result<DraftView, Stri
         errors.extend(keepers::note_keepers(state.engine.as_ref(), loaded));
     }
     // Also refresh draft status/order — it flips to "drafting" at start time.
-    if let Some(Ok(draft)) = draft {
-        match unusable(&draft) {
-            Some(error) => errors.push(error),
-            None => loaded.draft = draft,
-        }
+    // A `/draft` that does not answer is logged rather than counted: the picks
+    // came through, so this refresh did not fail.
+    match draft_update(draft) {
+        DraftUpdate::Adopt(draft) => loaded.draft = *draft,
+        DraftUpdate::Logged(note) => crate::applog::warn(note),
+        DraftUpdate::Refused(reason) => errors.push(reason),
+        DraftUpdate::Nothing => {}
     }
     record_poll_outcome(loaded, &errors);
     let config = state.config.lock().await;
@@ -220,73 +223,6 @@ pub async fn refresh_data(state: State<'_, AppState>) -> Result<DraftView, Strin
     let view = view_from(&new_loaded, &config);
     *loaded = Some(new_loaded);
     Ok(view)
-}
-
-/// Manual pick fallback for API lag or an offline draft. Marks the given
-/// player as taken at the current pick.
-#[tauri::command]
-pub async fn record_manual_pick(
-    state: State<'_, AppState>,
-    player_id: String,
-) -> Result<DraftView, String> {
-    let mut guard = state.loaded.lock().await;
-    let loaded = guard.as_mut().ok_or("no league loaded")?;
-    let teams = loaded.draft.settings.teams;
-    // A manual pick is a correction typed under time pressure; an id that is
-    // not on this league's board would be written to disk and reloaded as a
-    // ghost pick, so refuse it here.
-    if !loaded.board_index.contains_key(&player_id) {
-        return Err(format!("player {player_id} is not on this league's board"));
-    }
-    let picks = view::merged_picks(&loaded.api_picks, &loaded.manual_picks);
-    if picks.iter().any(|p| p.player_id == player_id) {
-        return Err("player already drafted".into());
-    }
-    // The first *gap*, not the pick count: keepers already in the book would
-    // otherwise push the manual pick several rounds past the real clock.
-    let rounds = loaded.draft.settings.rounds;
-    let pick_no = view::next_open_pick(&picks, teams, rounds)
-        .ok_or_else(|| "draft is complete".to_string())?;
-    let (order, _) = draft::DraftOrder::from_draft(&loaded.draft);
-    loaded.manual_picks.push(Pick {
-        round: (pick_no - 1) / teams + 1,
-        pick_no,
-        draft_slot: draft::slot_for_pick(pick_no, teams, order).unwrap_or(1),
-        player_id,
-        picked_by: None,
-        metadata: None,
-        is_keeper: None,
-    });
-    let (draft_id, picks) = (loaded.draft.draft_id.clone(), loaded.manual_picks.clone());
-    drop(guard);
-    // The file write happens with nothing locked: on a slow or busy disk it
-    // is tens of milliseconds during which the poll loop, every command and
-    // every view build would otherwise be stopped dead.
-    if let Err(error) = save_picks_off_lock(&state.engine, draft_id.clone(), picks).await {
-        undo_pick_in_memory(&state, &draft_id).await;
-        return Err(error);
-    }
-    view_now(&state).await
-}
-
-#[tauri::command]
-pub async fn undo_manual_pick(state: State<'_, AppState>) -> Result<DraftView, String> {
-    let mut guard = state.loaded.lock().await;
-    let loaded = guard.as_mut().ok_or("no league loaded")?;
-    let removed = loaded
-        .manual_picks
-        .pop()
-        .ok_or("no manual picks to undo (API picks cannot be undone locally)")?;
-    let (draft_id, picks) = (loaded.draft.draft_id.clone(), loaded.manual_picks.clone());
-    drop(guard);
-    if let Err(error) = save_picks_off_lock(&state.engine, draft_id.clone(), picks).await {
-        let mut guard = state.loaded.lock().await;
-        if let Some(loaded) = guard.as_mut().filter(|l| l.draft.draft_id == draft_id) {
-            loaded.manual_picks.push(removed);
-        }
-        return Err(error);
-    }
-    view_now(&state).await
 }
 
 /// Export the full AI-readable state to a JSON file; returns the path.
@@ -350,6 +286,9 @@ pub async fn start_polling<R: tauri::Runtime>(
                 let (picks, draft) = fetch_tick(&engine, &yahoo, &draft_id, &yahoo_ids).await;
                 let mut changed = false;
                 let mut errors = Vec::new();
+                // Problems that are worth a log line but are not a failed
+                // tick. See `tick::draft_update`.
+                let mut notes: Vec<String> = Vec::new();
                 let mut health = None;
                 let mut picks_to_save = None;
                 let mut keepers_to_save = None;
@@ -384,17 +323,18 @@ pub async fn start_polling<R: tauri::Runtime>(
                             }
                             Err(error) => errors.push(error),
                         }
-                        match draft {
-                            Some(Ok(draft)) => match unusable(&draft) {
-                                Some(error) => errors.push(error),
-                                None => {
-                                    changed |= memory.status_changed(&draft.status);
-                                    loaded.draft = draft;
-                                }
-                            },
-                            Some(Err(error)) => errors.push(error),
-                            // Yahoo has no draft resource to refresh.
-                            None => {}
+                        // Kept out of `errors` on purpose: only the picks
+                        // decide whether this tick failed, so one sulking
+                        // `/draft` endpoint cannot grey the sync badge or
+                        // stretch the poll to 24 seconds.
+                        match draft_update(draft) {
+                            DraftUpdate::Adopt(draft) => {
+                                changed |= memory.status_changed(&draft.status);
+                                loaded.draft = *draft;
+                            }
+                            DraftUpdate::Logged(note) => notes.push(note),
+                            DraftUpdate::Refused(reason) => errors.push(reason),
+                            DraftUpdate::Nothing => {}
                         }
                         applied = true;
                     }
@@ -411,6 +351,9 @@ pub async fn start_polling<R: tauri::Runtime>(
                 }
                 if let Some(keepers) = keepers_to_save {
                     errors.extend(save_keepers_off_lock(&engine, draft_id.clone(), keepers).await);
+                }
+                for note in notes {
+                    crate::applog::warn(note);
                 }
                 if applied {
                     let mut loaded = loaded_ref.lock().await;

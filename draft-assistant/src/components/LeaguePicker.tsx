@@ -15,10 +15,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { describeError } from "../errorText";
 import { mergeLeagues } from "../leagues";
 import type { StoredLeague } from "../types";
 import { LeagueRow } from "./LeagueRow";
 import { useFocusTrap } from "./useFocusTrap";
+
+/** A lookup failure with the account it belongs to on the front, because
+ *  "sign-in expired" under Sleeper's button was Yahoo's news half the time. */
+function lookupProblem(service: string, e: unknown): string {
+  return `${service}: ${describeError(e)}`;
+}
 
 export function LeaguePicker({
   leagues,
@@ -53,9 +60,15 @@ export function LeaguePicker({
   const [found, setFound] = useState<StoredLeague[]>([]);
   const [yahooFound, setYahooFound] = useState<StoredLeague[]>([]);
   const [asking, setAsking] = useState(false);
+  const [yahooAsking, setYahooAsking] = useState(false);
+  // One error slot per account. They used to share one, so a Yahoo failure
+  // wrote itself under Sleeper's button, ended Sleeper's "looking" state
+  // while that lookup was still out, and could not be retried on its own.
   const [error, setError] = useState<string | null>(null);
+  const [yahooError, setYahooError] = useState<string | null>(null);
   const [pasted, setPasted] = useState("");
   const [asked, setAsked] = useState(false);
+  const [yahooAsked, setYahooAsked] = useState(false);
 
   useEffect(() => {
     opener.current = document.activeElement as HTMLElement | null;
@@ -81,26 +94,28 @@ export function LeaguePicker({
         setAsked(true);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(String(e).replace(/^Error:\s*/, ""));
+        if (!cancelled) setError(lookupProblem("Sleeper", e));
       });
     return () => {
       cancelled = true;
     };
   }, [hasAccount, season]);
 
-  // Yahoo is a second account with its own list, and the button below is
-  // Sleeper's alone. So this asks on open and nowhere else: a failure here
-  // says so and leaves everything the picker already had on screen.
+  // Yahoo is a second account with its own list, its own button and its own
+  // error. A failure here says which service failed and leaves everything the
+  // picker already had on screen.
   useEffect(() => {
     if (!yahooConnected) return;
     let cancelled = false;
     api
       .yahooLeagues()
       .then((leagues) => {
-        if (!cancelled) setYahooFound(leagues);
+        if (cancelled) return;
+        setYahooFound(leagues);
+        setYahooAsked(true);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(String(e).replace(/^Error:\s*/, ""));
+        if (!cancelled) setYahooError(lookupProblem("Yahoo", e));
       });
     return () => {
       cancelled = true;
@@ -114,13 +129,30 @@ export function LeaguePicker({
       setFound(await api.sleeperLeagues(season));
       setAsked(true);
     } catch (e) {
-      setError(String(e).replace(/^Error:\s*/, ""));
+      setError(lookupProblem("Sleeper", e));
     } finally {
       setAsking(false);
     }
   };
 
+  const lookYahoo = async () => {
+    setYahooAsking(true);
+    setYahooError(null);
+    try {
+      setYahooFound(await api.yahooLeagues());
+      setYahooAsked(true);
+    } catch (e) {
+      setYahooError(lookupProblem("Yahoo", e));
+    } finally {
+      setYahooAsking(false);
+    }
+  };
+
+  // Each button waits on its own account. Reading the shared error here is
+  // what let a Yahoo failure put "Find my leagues on Sleeper" back on a button
+  // whose lookup was still in flight, and let it be pressed a second time.
   const looking = asking || (hasAccount && !asked && error === null);
+  const yahooLooking = yahooAsking || (yahooConnected && !yahooAsked && yahooError === null);
 
   const options = mergeLeagues(leagues, [...found, ...yahooFound], activeId);
   const stored = new Set(leagues.map((l) => l.league_id));
@@ -181,6 +213,21 @@ export function LeaguePicker({
           {looking ? "Asking Sleeper…" : asked ? "Ask Sleeper again" : "Find my leagues on Sleeper"}
         </button>
 
+        {yahooConnected && (
+          <button
+            type="button"
+            className="btn-ghost league-find"
+            disabled={busy || yahooLooking}
+            onClick={() => void lookYahoo()}
+          >
+            {yahooLooking
+              ? "Asking Yahoo…"
+              : yahooAsked
+                ? "Ask Yahoo again"
+                : "Find my leagues on Yahoo"}
+          </button>
+        )}
+
         <label className="field">
           Or paste a league or draft
           <input
@@ -195,6 +242,7 @@ export function LeaguePicker({
         </label>
 
         {error !== null && <div className="error">{error}</div>}
+        {yahooError !== null && <div className="error">{yahooError}</div>}
 
         <div className="dialog-actions">
           <button

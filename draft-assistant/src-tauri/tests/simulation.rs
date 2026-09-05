@@ -5,7 +5,6 @@ use draft_assistant_lib::simulation::apply_simulated_pick;
 use draft_assistant_lib::sleeper::{Draft, DraftSettings, League, LeagueSettings, PlayerMeta};
 use draft_assistant_lib::valuation::ReplacementModel;
 use draft_assistant_lib::view::build_view;
-use draft_assistant_lib::weekly::WeeklyPoints;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 
@@ -48,12 +47,12 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         .into_iter()
         .map(|available| available.player)
         .collect();
-    let board_index = board
+    let board_index: HashMap<String, usize> = board
         .iter()
         .enumerate()
         .map(|(index, player)| (player.player_id.clone(), index))
         .collect();
-    let player_meta = board
+    let player_meta: HashMap<String, PlayerMeta> = board
         .iter()
         .map(|player| {
             (
@@ -129,8 +128,8 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         draft,
         user_names: HashMap::from([(my_user_id, "Simulation User".into())]),
         user_avatars: HashMap::new(),
-        board,
-        board_index,
+        board: std::sync::Arc::new(board),
+        board_index: std::sync::Arc::new(board_index),
         replacement_model: ReplacementModel {
             baseline: fixture.replacement_baselines,
             demand: fixture.replacement_demand,
@@ -147,10 +146,10 @@ fn loaded_fixture() -> (LoadedLeague, AppConfig) {
         projections_fetched_at: 0,
         weekly_fetched_at: 0,
         warnings: Vec::new(),
-        player_meta,
+        player_meta: std::sync::Arc::new(player_meta),
         // The simulation exercises the draft board only; no weekly projections
         // are needed and none are loaded.
-        weekly_points: WeeklyPoints::default(),
+        weekly_points: Default::default(),
         second_opinion_loaded_at: None,
     };
     (loaded, config)

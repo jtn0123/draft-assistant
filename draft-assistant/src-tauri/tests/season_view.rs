@@ -65,7 +65,9 @@ fn matchup_compares_my_best_lineup_against_their_set_one() {
 #[test]
 fn a_swap_between_two_players_already_on_the_field_is_not_offered() {
     let (mut loaded, season, config) = common::fixture();
-    for player in loaded.board.iter_mut() {
+    // The board is shared behind an `Arc` so the poll tick can copy the loaded
+    // league without duplicating it; a test that edits it takes its own copy.
+    for player in std::sync::Arc::make_mut(&mut loaded.board).iter_mut() {
         if player.player_id == "r2" || player.player_id == "w2" {
             player.team = Some("TB".to_string());
         }

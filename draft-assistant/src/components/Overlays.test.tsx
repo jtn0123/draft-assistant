@@ -3,10 +3,17 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmDialog, Toast } from "./Overlays";
+import type { Platform } from "../types";
 import { settle } from "../test/settle";
 
 /** The dialog as the app puts it on screen: a shell, and an opener inside it. */
-function Harness({ onConfirm = () => {} }: { onConfirm?: () => void }) {
+function Harness({
+  onConfirm = () => {},
+  platform = "sleeper",
+}: {
+  onConfirm?: () => void;
+  platform?: Platform;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div className="app">
@@ -20,6 +27,7 @@ function Harness({ onConfirm = () => {} }: { onConfirm?: () => void }) {
         <ConfirmDialog
           pickLabel="Pick 3.07 · slot 7"
           playerName="Josh Downs"
+          platform={platform}
           onConfirm={() => {
             setOpen(false);
             onConfirm();
@@ -143,5 +151,17 @@ describe("a toast with something to do about it", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
     // The failed attempt clears itself out of the way of whatever happens next.
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("naming the service", () => {
+  it("says Yahoo on a Yahoo draft rather than Sleeper for everything", async () => {
+    render(<Harness platform="yahoo" />);
+    await settle(() => screen.getByRole("button", { name: "Draft" }).click());
+
+    const note = screen.getByText(/does not draft them in/);
+    expect(note).toHaveTextContent("does not draft them in Yahoo");
+    expect(note).toHaveTextContent("live sync from Yahoo overrides it");
+    expect(note).not.toHaveTextContent("Sleeper");
   });
 });

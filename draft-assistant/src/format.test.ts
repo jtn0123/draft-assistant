@@ -82,6 +82,15 @@ describe("untilLabel", () => {
   /** A deadline `ms` from the frozen now. */
   const from = (ms: number) => untilLabel(NOW + ms);
 
+  // The season header's countdown re-renders on a ticking value rather than
+  // on new data. It could only do that once the clock came in as an argument;
+  // reading it inside meant "Locks in 6h 12m" froze there for hours.
+  it("counts down from a clock it is handed", () => {
+    expect(untilLabel(NOW + 6 * 3600_000, NOW)).toBe("6h 0m");
+    expect(untilLabel(NOW + 6 * 3600_000, NOW + 11 * 60_000)).toBe("5h 49m");
+    expect(untilLabel(NOW, NOW + 1)).toBe("now");
+  });
+
   it("counts down in the largest two units", () => {
     freeze();
     expect(from(54 * 3600_000)).toBe("2d 6h");

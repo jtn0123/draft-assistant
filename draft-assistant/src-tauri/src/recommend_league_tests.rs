@@ -275,10 +275,14 @@ fn early_depth_is_priced_off_the_slots_the_league_starts() {
         te.total,
         qb.total
     );
+    // Two dedicated tight end slots, and a board this thin has nobody left
+    // who can take the flex, so the phrase says two and the term is worth
+    // two. It used to round 2.33 up and say "about 3 with flex" over a term
+    // worth 2.33 slots, which is a card that does not add up.
     assert!(
         te.into_reasons()
             .iter()
-            .any(|r| r.contains("the league starts about 3 with flex")),
+            .any(|r| r.contains("the league starts 2 starters")),
         "the term has to name the league's own number"
     );
     // A one-TE league prices the same empty room lower.
@@ -291,7 +295,10 @@ fn early_depth_is_priced_off_the_slots_the_league_starts() {
 
 // ---------- every reason is on the card ----------
 
-fn context<'a>(inputs: &'a RecommendInputs<'a>, have: HashMap<&'a str, u32>) -> Context<'a> {
+pub(super) fn context<'a>(
+    inputs: &'a RecommendInputs<'a>,
+    have: HashMap<&'a str, u32>,
+) -> Context<'a> {
     let open: HashMap<String, u32> = inputs
         .my_roster
         .map(|r| r.open_starters.iter().cloned().collect())
@@ -304,6 +311,7 @@ fn context<'a>(inputs: &'a RecommendInputs<'a>, have: HashMap<&'a str, u32>) -> 
         need_pressure: 1.0,
         rounds_left: inputs.total_rounds - inputs.current_round + 1,
         median_cv: None,
+        demand: super::score::starting_demand(inputs.available, inputs.rules, inputs.teams),
     }
 }
 

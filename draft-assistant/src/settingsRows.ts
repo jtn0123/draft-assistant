@@ -40,6 +40,7 @@ export interface SettingsRowInput {
   onRefreshData: () => void;
   onExport: () => void;
   onImportCsv: () => void;
+  onClearKeepers: () => void;
   onAvatars: (next: AvatarMode) => void;
   onAppearance: () => void;
   onCompanion: () => void;
@@ -132,6 +133,16 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
         value: "JSON",
         on: false,
         onSelect: input.onExport,
+      },
+      {
+        label: "Clear detected keepers",
+        note:
+          input.view.draft.keeper_picks.length === 0
+            ? "Nothing is marked as kept in this draft"
+            : `${input.view.draft.keeper_picks.length} picks marked as kept; judge them again`,
+        value: "Clear",
+        on: false,
+        onSelect: input.onClearKeepers,
       },
       {
         label: "Import projections CSV…",

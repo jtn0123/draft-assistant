@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createContext, runInContext } from "node:vm";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 /**
  * The companion phone page's pure logic.
@@ -36,6 +36,7 @@ interface CompanionState {
   chat: Record<string, unknown>;
   note: Record<string, unknown>;
   health: unknown;
+  seasonHealth: unknown;
   connection: string;
 }
 
@@ -46,6 +47,7 @@ interface Action {
 
 interface Companion {
   REVOKED: string;
+  LIVE: string[];
   deviceGuess(userAgent?: string): string;
   relativeTime(atMs: number, nowMs: number): string;
   positionClass(position: string | null): string;
@@ -59,13 +61,24 @@ interface Companion {
   parseMarkdown(text: string | null): Block[];
   initialState(): CompanionState;
   reduce(state: CompanionState, action: Action): CompanionState;
+  REVOKED_CLOSE: number;
+  TICK_MS: number;
+  isRevokedClose(event: { code?: number } | null): boolean;
+  needsTicker(state: unknown): boolean;
+  createTicker(
+    timers: {
+      setInterval: (fn: () => void, ms: number) => number;
+      clearInterval: (h: number) => void;
+    },
+    onTick: () => void,
+  ): { sync(needed: boolean): void; stop(): void; running(): boolean };
 }
 
 // Resolved from the project root: vitest runs with the package as its cwd,
 // and under jsdom `import.meta.url` is not a file URL.
 // helpers.js publishes `window.Companion`; app.js only reads it back. Both
 // run so a helper app.js needs but helpers.js forgot to publish fails here.
-const source = ["helpers.js", "app.js"]
+const source = ["helpers.js", "clock.js", "app.js"]
   .map((file) => readFileSync(resolve(`src-tauri/companion-static/${file}`), "utf8"))
   .join("\n");
 
@@ -198,6 +211,82 @@ describe("the markdown subset", () => {
   });
 });
 
+describe("the frames the page acts on", () => {
+  it("listens for every event the host publishes, the season's health included", () => {
+    // `season-poll-health` was published by the host and dropped on the floor
+    // here, so a phone never heard that the season had stopped syncing.
+    expect(companion.LIVE).toEqual([
+      "draft-updated",
+      "season-updated",
+      "shared-chat",
+      "poll-health",
+      "season-poll-health",
+    ]);
+  });
+});
+
+describe("a socket that closed because the host forgot this device", () => {
+  it("tells a revoked token from a phone that walked out of Wi-Fi range", () => {
+    // The two closes want opposite reactions: pair again, or keep retrying.
+    expect(companion.isRevokedClose({ code: companion.REVOKED_CLOSE })).toBe(true);
+    expect(companion.isRevokedClose({ code: 1006 })).toBe(false);
+    expect(companion.isRevokedClose({})).toBe(false);
+    expect(companion.isRevokedClose(null)).toBe(false);
+  });
+
+  it("says why the phone is back on the pairing screen after a host restart", () => {
+    expect(companion.REVOKED).toBe("The host restarted or revoked this device. Pair again.");
+  });
+});
+
+describe("the one-second ticker", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const timers = {
+    setInterval: (fn: () => void, ms: number) => setInterval(fn, ms) as unknown as number,
+    clearInterval: (handle: number) => clearInterval(handle),
+  };
+
+  const withClock = (deadline: number | null) => ({
+    ...companion.initialState(),
+    screen: "app",
+    draft: deadline === null ? {} : { draft: { clock_deadline_ms: deadline } },
+  });
+
+  it("runs only while something on screen changes with the wall clock", () => {
+    expect(companion.needsTicker(withClock(1))).toBe(true);
+    expect(companion.needsTicker(withClock(null))).toBe(false);
+    // A chat thread ages too: "just now" becomes "4m ago" with no new frame.
+    const chatting = { ...withClock(null), chat: { draft: { entries: [{ at_ms: 1 }] } } };
+    expect(companion.needsTicker(chatting)).toBe(true);
+    // Nothing ticks behind the pairing screen.
+    expect(companion.needsTicker({ ...withClock(1), screen: "pair" })).toBe(false);
+    expect(companion.needsTicker(null)).toBe(false);
+  });
+
+  it("repaints once a second while a deadline exists, and stops when it goes", () => {
+    vi.useFakeTimers();
+    let ticks = 0;
+    const ticker = companion.createTicker(timers, () => {
+      ticks += 1;
+    });
+    ticker.sync(true);
+    vi.advanceTimersByTime(3 * companion.TICK_MS);
+    expect(ticks).toBe(3);
+    // Syncing again while it is already running must not double the rate,
+    // which is what an interval started per render would have done.
+    ticker.sync(true);
+    vi.advanceTimersByTime(companion.TICK_MS);
+    expect(ticks).toBe(4);
+    ticker.sync(false);
+    vi.advanceTimersByTime(10 * companion.TICK_MS);
+    expect(ticks).toBe(4);
+    expect(ticker.running()).toBe(false);
+  });
+});
+
 describe("the state reducer", () => {
   const start = companion.initialState();
 
@@ -260,6 +349,14 @@ describe("the state reducer", () => {
     const noted = companion.reduce(start, { type: "note", screen: "draft", message: "busy" });
     expect(noted.note).toEqual({ draft: "busy" });
     expect(companion.reduce(noted, { type: "who-knows" })).toBe(noted);
+  });
+
+  it("keeps the season's own sync health, which the host publishes", () => {
+    const noted = companion.reduce(start, {
+      type: "season-poll-health",
+      payload: { consecutive_failures: 2 },
+    });
+    expect(noted.seasonHealth).toEqual({ consecutive_failures: 2 });
   });
 
   it("tracks the connection for the reconnecting pill", () => {

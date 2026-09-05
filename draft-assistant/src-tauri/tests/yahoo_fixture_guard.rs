@@ -43,11 +43,13 @@ enum Shape {
 const FIXTURES: &[(&str, Shape)] = &[
     ("user_leagues.json", Shape::UserLeagues),
     ("league_settings.json", Shape::League),
+    ("league_settings_auction.json", Shape::League),
     ("teams.json", Shape::Teams),
     ("draft_results_predraft.json", Shape::DraftResultsEmpty),
     ("draft_results_partial.json", Shape::DraftResults),
     ("draft_results_complete.json", Shape::DraftResults),
     ("draft_results_auction.json", Shape::DraftResults),
+    ("draft_results_keepers.json", Shape::DraftResults),
     ("players_page_0.json", Shape::Players),
     ("players_page_1.json", Shape::Players),
     ("team_roster.json", Shape::Players),
@@ -117,7 +119,13 @@ fn a_leagues_listing_parses_into_leagues_that_can_be_asked_for() {
 
 #[test]
 fn the_league_resource_parses_with_the_settings_the_mapper_needs() {
-    let league = parse::league(&load("league_settings.json")).expect("league_settings.json");
+    for (name, _) in FIXTURES.iter().filter(|(_, shape)| *shape == Shape::League) {
+        one_league_parses(name);
+    }
+}
+
+fn one_league_parses(name: &str) {
+    let league = parse::league(&load(name)).unwrap_or_else(|| panic!("{name} parsed to no league"));
     assert!(league.league_key.contains(".l."));
     assert!(!league.league_id.is_empty());
     assert!(!league.name.is_empty());
@@ -141,6 +149,14 @@ fn the_league_resource_parses_with_the_settings_the_mapper_needs() {
         !league.stat_modifiers.is_empty(),
         "no stat_modifiers -- nothing could be scored"
     );
+    // An auction board is unreadable without the budget the bids are
+    // measured against, so a fixture that records one has to carry it.
+    if league.is_auction_draft {
+        assert!(
+            league.draft_budget.unwrap_or(0) > 0,
+            "{name}: an auction league with no draft_budget"
+        );
+    }
 }
 
 #[test]

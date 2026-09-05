@@ -9,8 +9,9 @@
 
 mod yahoo_stub;
 
-use draft_assistant_lib::yahoo::{YahooClient, YahooError, YahooHosts, NFL, PAGE};
+use draft_assistant_lib::yahoo::{YahooClient, YahooError, YahooHosts, NFL};
 use draft_assistant_lib::yahoo_oauth::{TokenSet, YahooCredentials};
+use draft_assistant_lib::yahoo_retry::RetryPolicy;
 use std::time::Duration;
 use yahoo_stub::{serve, Hits, Reply, Request, Stub};
 
@@ -44,8 +45,11 @@ fn live_tokens() -> TokenSet {
     }
 }
 
+/// The real client waits a second, then two, then four between attempts. A
+/// test that asserts on how many attempts there were should not sit through
+/// that, so every client here retries as often on millisecond waits.
 fn client_for(stub: &Stub, tokens: TokenSet) -> YahooClient {
-    YahooClient::with_hosts(credentials(), tokens, hosts(stub))
+    YahooClient::with_hosts(credentials(), tokens, hosts(stub)).with_retry(RetryPolicy::fast())
 }
 
 fn hosts(stub: &Stub) -> YahooHosts {
@@ -219,64 +223,6 @@ async fn one_page_of_players_is_asked_for_exactly_as_yahoo_spells_it() {
     assert_eq!(request.query(), "format=json");
 }
 
-/// A full page of `count` players, so the pager has a reason to ask again.
-fn full_page(start: u32, count: u32) -> String {
-    let mut members = serde_json::Map::new();
-    for index in 0..count {
-        let id = start + index;
-        members.insert(
-            index.to_string(),
-            serde_json::json!({"player": [[
-                {"player_key": format!("449.p.{id}")},
-                {"player_id": id.to_string()},
-                {"name": {"full": format!("Player {id}"), "first": "Player", "last": id.to_string()}},
-                {"editorial_team_abbr": "Sea"},
-                {"display_position": "WR"},
-                {"eligible_positions": [{"position": "WR"}]}
-            ]]}),
-        );
-    }
-    members.insert("count".into(), serde_json::json!(count));
-    serde_json::json!({"fantasy_content": {"league": [
-        {"league_key": LEAGUE_KEY}, {"players": members}
-    ]}})
-    .to_string()
-}
-
-#[tokio::test]
-async fn paging_walks_until_a_page_comes_back_short() {
-    let stub = serve(|request: &Request| {
-        if request.path().contains(&format!("start={}", PAGE)) {
-            Reply::ok(full_page(PAGE, 3))
-        } else if request.path().contains("start=0") {
-            Reply::ok(full_page(0, PAGE))
-        } else {
-            Reply::status(404, "{}")
-        }
-    });
-    let client = client_for(&stub, live_tokens());
-    let players = client
-        .all_players(LEAGUE_KEY, None, 500)
-        .await
-        .expect("the pool loads");
-    assert_eq!(players.len() as u32, PAGE + 3);
-    assert_eq!(stub.count(), 2, "a short page ends the walk");
-    assert_eq!(players[0].player_key, "449.p.0");
-    assert_eq!(players[PAGE as usize].player_key, "449.p.25");
-}
-
-#[tokio::test]
-async fn paging_stops_at_the_limit_even_if_yahoo_keeps_answering() {
-    let stub = serve(|_: &Request| Reply::ok(full_page(0, PAGE)));
-    let client = client_for(&stub, live_tokens());
-    let players = client
-        .all_players(LEAGUE_KEY, None, PAGE * 2)
-        .await
-        .expect("the pool loads");
-    assert_eq!(players.len() as u32, PAGE * 2);
-    assert_eq!(stub.count(), 2);
-}
-
 #[tokio::test]
 async fn a_team_roster_loads_through_the_team_resource() {
     let stub = serve(fixture_route);
@@ -310,7 +256,7 @@ async fn a_5xx_is_tried_again_and_the_third_answer_is_kept() {
 }
 
 #[tokio::test]
-async fn a_5xx_that_never_clears_fails_after_three_attempts() {
+async fn a_5xx_that_never_clears_fails_after_the_policys_attempts() {
     let stub = serve(|_: &Request| Reply::status(500, r#"{"error":"down"}"#));
     let client = client_for(&stub, live_tokens());
     let error = client
@@ -347,7 +293,8 @@ async fn a_server_that_accepts_and_says_nothing_times_out() {
         live_tokens(),
         hosts(&stub),
         Duration::from_millis(300),
-    );
+    )
+    .with_retry(RetryPolicy::fast());
     let error = client
         .league_teams(LEAGUE_KEY)
         .await
@@ -367,7 +314,8 @@ async fn nothing_listening_is_a_transport_failure_not_a_panic() {
             login_base: "http://127.0.0.1:1".into(),
             redirect_uri: "oob".into(),
         },
-    );
+    )
+    .with_retry(RetryPolicy::fast());
     let error = client
         .league_teams(LEAGUE_KEY)
         .await

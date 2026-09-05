@@ -26,6 +26,7 @@ fn reply(text: &str, cost: f64) -> ChatReply {
         thinking: None,
         model: "claude-opus-5".to_string(),
         refused: false,
+        truncated: false,
         input_tokens: 10,
         output_tokens: 20,
         cache_creation_input_tokens: 0,

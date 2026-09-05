@@ -3,112 +3,26 @@
 //! could be down all Sunday with nothing on screen to say so.
 
 mod common;
+mod poll_support;
 
 use draft_assistant_lib::engine::LoadedLeague;
-use draft_assistant_lib::poll::{season_tick, SeasonPollMemory, SeasonTick};
-use draft_assistant_lib::season_api::{Matchup, Roster};
+use draft_assistant_lib::poll::{season_tick, SeasonPollMemory};
 use draft_assistant_lib::season_engine::{LoadedSeason, SeasonLoader};
+use draft_assistant_lib::season_history::{History, HistoryStore};
+use draft_assistant_lib::season_refresh::{PlayerRefresh, PlayerRefreshData};
 use draft_assistant_lib::season_sources::LiveFetch;
 use draft_assistant_lib::sleeper::League;
-use std::cell::Cell;
-use tokio::sync::Mutex;
+use poll_support::Harness;
 
 /// The message a real total outage produces: every endpoint named, so the
 /// screen can repeat it back verbatim.
 const OUTAGE: &str = "matchups: request failed; scores: request failed; rosters: request failed";
-
-/// A season loader whose live refresh fails whenever `failing` is set, and
-/// which otherwise hands back the fixture's own rows unchanged.
-struct Flaky {
-    failing: Cell<bool>,
-    matchups: Vec<Matchup>,
-    rosters: Vec<Roster>,
-    /// What `current_week` answers, and the season a rollover reload hands
-    /// back. `None` on the season means the reload itself fails.
-    week: Cell<u32>,
-    reloads: Cell<u32>,
-    reloaded: Option<LoadedSeason>,
-}
-
-impl SeasonLoader for Flaky {
-    async fn load_season(
-        &self,
-        _league: &League,
-        _my_user_id: Option<&str>,
-        _force: bool,
-    ) -> Result<LoadedSeason, String> {
-        self.reloads.set(self.reloads.get() + 1);
-        self.reloaded
-            .clone()
-            .ok_or_else(|| "the whole season load failed".to_string())
-    }
-
-    async fn current_week(&self) -> Result<u32, String> {
-        if self.failing.get() {
-            return Err("request failed".to_string());
-        }
-        Ok(self.week.get())
-    }
-
-    async fn fetch_live(&self, _league_id: &str, _season: u32, _week: u32) -> LiveFetch {
-        if self.failing.get() {
-            return LiveFetch {
-                matchups: Err("request failed".into()),
-                scores: Err("request failed".into()),
-                rosters: Err("request failed".into()),
-            };
-        }
-        LiveFetch {
-            matchups: Ok(self.matchups.clone()),
-            scores: Ok(Vec::new()),
-            rosters: Ok(self.rosters.clone()),
-        }
-    }
-}
-
-/// The three pieces of app state a tick reads, plus the loader driving it.
-struct Harness {
-    engine: Flaky,
-    loaded: Mutex<Option<LoadedLeague>>,
-    season: Mutex<Option<LoadedSeason>>,
-    config: Mutex<draft_assistant_lib::engine::AppConfig>,
-    memory: SeasonPollMemory,
-}
-
-impl Harness {
-    fn new() -> Self {
-        let (loaded, season, config) = common::fixture();
-        Self {
-            engine: Flaky {
-                failing: Cell::new(false),
-                matchups: season.matchups.clone(),
-                rosters: season.rosters.clone(),
-                week: Cell::new(season.week),
-                reloads: Cell::new(0),
-                reloaded: None,
-            },
-            loaded: Mutex::new(Some(loaded)),
-            season: Mutex::new(Some(season)),
-            config: Mutex::new(config),
-            memory: SeasonPollMemory::new(20),
-        }
-    }
-
-    async fn tick(&mut self) -> SeasonTick {
-        season_tick(
-            &self.engine,
-            &self.loaded,
-            &self.season,
-            &self.config,
-            &mut self.memory,
-        )
-        .await
-    }
-}
+use std::cell::Cell;
+use tokio::sync::Mutex;
 
 #[tokio::test]
 async fn a_failing_refresh_is_reported_instead_of_swallowed() {
-    let mut harness = Harness::new();
+    let mut harness = Harness::named("tick");
     harness.engine.failing.set(true);
 
     let tick = harness.tick().await;
@@ -133,7 +47,7 @@ async fn a_failing_refresh_is_reported_instead_of_swallowed() {
 
 #[tokio::test]
 async fn every_failed_try_in_a_row_is_counted() {
-    let mut harness = Harness::new();
+    let mut harness = Harness::named("tick");
     harness.engine.failing.set(true);
 
     for expected in 1..=3u32 {
@@ -147,7 +61,7 @@ async fn every_failed_try_in_a_row_is_counted() {
 
 #[tokio::test]
 async fn a_working_refresh_clears_the_failure_run() {
-    let mut harness = Harness::new();
+    let mut harness = Harness::named("tick");
     harness.engine.failing.set(true);
     harness.tick().await;
     harness.tick().await;
@@ -178,7 +92,7 @@ async fn a_working_refresh_clears_the_failure_run() {
 
 #[tokio::test]
 async fn nothing_to_poll_is_not_reported_as_a_failure() {
-    let mut harness = Harness::new();
+    let mut harness = Harness::named("tick");
     harness.engine.failing.set(true);
 
     *harness.season.lock().await = None;
@@ -198,7 +112,7 @@ async fn nothing_to_poll_is_not_reported_as_a_failure() {
 
 #[tokio::test]
 async fn scores_that_have_not_moved_do_not_push_a_view() {
-    let mut harness = Harness::new();
+    let mut harness = Harness::named("tick");
     assert!(
         harness.tick().await.view.is_some(),
         "the first view must be sent"
@@ -222,6 +136,18 @@ async fn scores_that_have_not_moved_do_not_push_a_view() {
 struct Watcher {
     season: std::sync::Arc<Mutex<Option<LoadedSeason>>>,
     free_during_fetch: Cell<Option<bool>>,
+}
+
+impl HistoryStore for Watcher {
+    async fn record_history(&self, _loaded: &LoadedLeague, _season: &LoadedSeason) -> History {
+        History::default()
+    }
+}
+
+impl PlayerRefresh for Watcher {
+    async fn refresh_players(&self, _season: u32) -> Option<PlayerRefreshData> {
+        None
+    }
 }
 
 impl SeasonLoader for Watcher {
@@ -285,7 +211,7 @@ async fn the_live_requests_run_with_the_season_mutex_free() {
 /// screen to say so.
 #[tokio::test]
 async fn a_week_that_rolled_over_reloads_the_season_and_emits_the_new_one() {
-    let mut harness = Harness::new();
+    let mut harness = Harness::named("tick");
     let was = harness.season.lock().await.as_ref().expect("loaded").week;
 
     // First tick: the week has not moved, so nothing is reloaded.
@@ -326,7 +252,7 @@ async fn a_week_that_rolled_over_reloads_the_season_and_emits_the_new_one() {
 /// would be worse than showing the week we know we have data for.
 #[tokio::test]
 async fn a_failed_week_check_changes_nothing() {
-    let mut harness = Harness::new();
+    let mut harness = Harness::named("tick");
     let was = harness.season.lock().await.as_ref().expect("loaded").week;
     harness.engine.failing.set(true);
     harness.tick().await;

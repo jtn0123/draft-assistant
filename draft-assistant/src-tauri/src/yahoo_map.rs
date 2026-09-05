@@ -22,6 +22,14 @@ use std::collections::HashMap;
 /// Sleeper splits in three — id 16 is "2-point conversions" however they were
 /// scored — so the value is a list, and the modifier is applied to each.
 ///
+/// Id 15 is the one worth spelling out. Yahoo's "Return TD" is a stat a
+/// *player* scores, on a kick or a punt return; Sleeper's key for that same
+/// thing is `st_td`, and it is not `def_st_td`, `def_kr_td` or `def_pr_td` —
+/// those three are the defence unit's, which Yahoo scores under id 35 and
+/// this table already sends to `def_td`. Paying a returner's touchdown out of
+/// a DEF key would credit it to every defence in the league and to none of the
+/// returners.
+///
 /// Ids not listed here (bonus categories, IDP, Yahoo's own composite stats,
 /// and return yardage, which Yahoo counts as one number and Sleeper splits
 /// between kick and punt returns) are dropped: a wrong guess at a key would
@@ -38,6 +46,7 @@ pub const YAHOO_STAT_IDS: &[(u32, &[&str])] = &[
     (11, &["rec"]),
     (12, &["rec_yd"]),
     (13, &["rec_td"]),
+    // A player's own return TD. See the note above: not a DEF key.
     (15, &["st_td"]),
     (16, &["pass_2pt", "rush_2pt", "rec_2pt"]),
     (17, &["fum"]),
@@ -223,7 +232,7 @@ pub fn player_id(player_key: &str) -> String {
 /// (an empty `player_key`) are dropped: they are not picks yet.
 ///
 /// Auction `cost` has nowhere to live on a `Pick`; [`auction_costs`] returns
-/// it separately for whoever wants to show it.
+/// it separately, and [`auction`] pairs it with the league's budget.
 pub fn picks(
     results: &[YahooDraftPick],
     teams: &[YahooTeam],
@@ -245,10 +254,16 @@ pub fn picks(
                 position: Some(player.display_position.clone()),
                 team: Some(player.editorial_team_abbr.to_ascii_uppercase()),
             }),
-            // Yahoo marks keepers in its own settings, not on the pick. The
-            // app's real keeper test (`crate::picks::keeper_pick_nos`) works
-            // off pick numbers anyway, so `None` costs nothing.
-            is_keeper: None,
+            // Yahoo flags a keeper in two places and neither is guaranteed:
+            // on the draft result in some leagues, on the roster row in
+            // others. Whichever answered is believed, and when neither did
+            // the field stays unset so the app's own keeper test
+            // (`crate::picks::keeper_pick_nos`) still gets its turn — reading
+            // silence as "not a keeper" would draw a kept player as a normal
+            // first-round pick.
+            is_keeper: result
+                .is_keeper
+                .or_else(|| players.get(&result.player_key).and_then(|p| p.is_keeper)),
         })
         .collect()
 }
@@ -261,6 +276,34 @@ pub fn auction_costs(results: &[YahooDraftPick]) -> HashMap<String, f64> {
         .filter(|result| !result.player_key.is_empty())
         .filter_map(|result| Some((player_id(&result.player_key), result.cost?)))
         .collect()
+}
+
+/// An auction league's money: what each team had to spend, and what the picks
+/// so far went for.
+///
+/// Kept together and separate from the picks because `crate::sleeper::Pick`
+/// has no cost field and `DraftSettings` no budget one. Both live in
+/// `sleeper.rs`, which this lane does not edit, so the auction numbers travel
+/// beside the board rather than on it.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Auction {
+    /// Dollars per team. `None` in a snake league, and in an auction whose
+    /// settings Yahoo sent without one.
+    pub budget: Option<u32>,
+    /// App player id -> what that player went for.
+    pub costs: HashMap<String, f64>,
+}
+
+/// The league's auction money, or an empty [`Auction`] for a snake draft.
+pub fn auction(league: &YahooLeague, results: &[YahooDraftPick]) -> Auction {
+    let costs = auction_costs(results);
+    // A snake league sends no budget and no costs, and an empty auction is
+    // how the caller tells: no branch on draft type is needed or wanted,
+    // because Yahoo calls a live auction `draft_type: "live"`.
+    Auction {
+        budget: league.draft_budget,
+        costs,
+    }
 }
 
 /// A Yahoo player as the app's player row, plus the two facts that have no
@@ -335,3 +378,7 @@ pub fn players(rows: &[crate::yahoo_types::YahooPlayer]) -> Vec<MappedPlayer> {
 #[cfg(test)]
 #[path = "yahoo_map_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "yahoo_map_auction_tests.rs"]
+mod auction_tests;

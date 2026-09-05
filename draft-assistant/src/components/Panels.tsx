@@ -382,17 +382,32 @@ const PRICE_NOTE =
  * at-risk list names that pick and not another one.
  *
  * MIRRORS `view_signals::survival_target` in src-tauri, including the part
- * that is easy to miss: at a snake turn I hold two picks with nothing in
- * between, and those count as one window. Taking "the next one after this"
- * literally named pick 1.13 while the backend had priced everything against
- * 3.12 — the one moment the board is most dangerous, read as the safest.
+ * that is easy to miss: a turn is not one pick. Back-to-back snake picks, a
+ * traded pick that leaves three in a row, and keepers sitting between two of
+ * mine are all one window, because only one of those numbers is a selection
+ * anybody makes. Taking "the next one after this" literally named pick 1.13
+ * while the backend had priced everything against 3.12 — the one moment the
+ * board is most dangerous, read as the safest.
  */
 function survivalTargetPick(d: DraftView["draft"]): number | null {
-  const later = d.my_next_picks.filter((pick) => !d.is_my_pick || pick !== d.current_pick);
-  const next = later[0];
-  if (next === undefined) return null;
-  const after = later[1];
-  return after !== undefined && next === d.current_pick + 1 ? after : next;
+  const mine = d.my_next_picks.filter((pick) => !d.is_my_pick || pick !== d.current_pick);
+  if (mine.length === 0) return null;
+  const booked = new Set(d.keeper_picks);
+  // The window starts at the pick being made now and runs on for as long as
+  // the next number along is one nobody else gets to select at.
+  let end = d.current_pick;
+  while (mine.includes(end + 1) || booked.has(end + 1)) end += 1;
+  // The earliest pick of mine past the window; failing that — a window at the
+  // very end of the draft — the last one I hold inside it, because that is
+  // all there is left to judge anything against. Written as a scan rather
+  // than a sort because this runs on every tick of the pick clock.
+  let beyond: number | null = null;
+  let inside: number | null = null;
+  for (const pick of mine) {
+    if (pick > end) beyond = beyond === null || pick < beyond ? pick : beyond;
+    else inside = inside === null || pick > inside ? pick : inside;
+  }
+  return beyond ?? inside;
 }
 
 /** The design only alarms a survival chance once it drops to a quarter. */

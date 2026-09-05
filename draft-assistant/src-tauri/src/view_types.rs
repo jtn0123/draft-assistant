@@ -62,6 +62,10 @@ pub struct DraftStatus {
     pub my_next_picks: Vec<u32>,
     pub total_picks_made: usize,
     pub manual_picks_active: bool,
+    /// The draft is running but stopped: Sleeper's status is `paused`. The
+    /// clock is not counting and nobody is on it, so the screen has to say so
+    /// rather than showing the last manager to be named as still thinking.
+    pub paused: bool,
     /// Epoch milliseconds when the current pick's timer expires. Present only
     /// while drafting with a pick timer and a recorded last pick.
     pub clock_deadline_ms: Option<u64>,

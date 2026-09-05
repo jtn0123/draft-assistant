@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { stableAvailable } from "./boardIdentity";
 import { readFollow } from "./companion";
+import { describeError } from "./errorText";
 import { platformName, platformOf } from "./leagues";
 import { problem } from "./format";
 import type { DraftView, PollHealth, StoredLeague } from "./types";
@@ -174,7 +175,7 @@ export function useDraftSession(
       })
       .catch((e) => {
         if (cancelled) return;
-        setLaunchError(String(e));
+        setLaunchError(describeError(e));
         setAttempt((n) => Math.min(n + 1, MAX_RECONNECT_ATTEMPTS));
       })
       .finally(() => {

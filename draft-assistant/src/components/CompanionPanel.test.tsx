@@ -125,6 +125,23 @@ describe("this Mac's name", () => {
 });
 
 describe("what has joined", () => {
+  it("shows the new code when a pairing rotates it", async () => {
+    // The host retires the code after every successful pairing and pushes the
+    // device list; the code only lives in the status, so the dialog has to
+    // re-read it or keep showing six digits that no longer open anything.
+    api.companionStatus.mockResolvedValue(companionStatus({ enabled: true }));
+    open();
+    expect(await screen.findByText("418 902")).toBeInTheDocument();
+
+    api.companionStatus.mockResolvedValue(
+      companionStatus({ enabled: true, code: "776510", devices: [device()] }),
+    );
+    push.devices?.([device()]);
+
+    expect(await screen.findByText("776 510")).toBeInTheDocument();
+    expect(screen.queryByText("418 902")).not.toBeInTheDocument();
+  });
+
   it("lists nothing until a device pairs, then follows the event", async () => {
     open();
     expect(await screen.findByText("No devices yet")).toBeInTheDocument();

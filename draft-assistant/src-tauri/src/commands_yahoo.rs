@@ -332,6 +332,47 @@ pub async fn yahoo_leagues(state: State<'_, AppState>) -> Result<Vec<StoredLeagu
     Ok(sorted_stored(leagues?))
 }
 
+/// What an auction league's picks cost, and what each team had to spend.
+///
+/// Separate from the board rather than on it: the cost of a pick would belong
+/// on `crate::sleeper::Pick` and the budget on its `DraftSettings`, and both
+/// of those are Sleeper's shapes, shared with the Sleeper loader. This asks
+/// Yahoo the same two questions the board load asks and answers only the
+/// auction half, so nothing about a snake draft changes.
+///
+/// A snake league answers with no budget and no costs, which is how a caller
+/// tells: Yahoo describes a live auction as `draft_type: "live"`, so the draft
+/// type is not the thing to branch on.
+#[tauri::command]
+pub async fn yahoo_auction(
+    state: State<'_, AppState>,
+    league_key: String,
+) -> Result<crate::yahoo_map::Auction, String> {
+    let client = client_for(&state).await?;
+    let (league, results) = tokio::join!(
+        client.league(&league_key),
+        client.draft_results(&league_key)
+    );
+    // Even a failed call may have spent a refresh token getting there.
+    persist_tokens(&state, &client).await;
+    let mut auction = crate::yahoo_map::auction(
+        &league.map_err(|error| error.to_string())?,
+        &results.map_err(|error| error.to_string())?,
+    );
+    // A player the crosswalk matched sits on the board under his Sleeper id,
+    // so a cost filed under the Yahoo one would never find him.
+    let ids = match state.loaded.lock().await.as_ref() {
+        Some(loaded) => loaded.yahoo_ids.clone(),
+        None => std::collections::HashMap::new(),
+    };
+    auction.costs = auction
+        .costs
+        .into_iter()
+        .map(|(id, cost)| (ids.get(&id).cloned().unwrap_or(id), cost))
+        .collect();
+    Ok(auction)
+}
+
 /// Yahoo hands them back in whatever order it likes; the picker wants one a
 /// reader can scan, which is the order `leagues::sleeper_leagues` uses.
 fn sorted_stored(leagues: Vec<crate::yahoo_types::YahooLeague>) -> Vec<StoredLeague> {

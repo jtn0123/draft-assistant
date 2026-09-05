@@ -167,6 +167,25 @@
   white-space: nowrap;
 }
 
+/* The follower's connection state, beside the "Hosted by" pill. Only ever
+   painted when something is wrong, so it does not have to stay quiet. */
+.follow-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 9px;
+  border: 1px solid var(--rule2);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--mid);
+  white-space: nowrap;
+}
+
+.follow-note.is-revoked {
+  border-color: var(--act);
+  color: var(--act);
+}
+
 /* ---------- shared thread ---------- */
 
 .shared-byline {

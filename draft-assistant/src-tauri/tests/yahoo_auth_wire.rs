@@ -267,3 +267,83 @@ async fn a_refresh_that_yahoo_refuses_reports_an_auth_failure_without_the_secret
     assert!(message.contains("400"), "{message}");
     assert!(!message.contains(SECRET), "the secret escaped: {message}");
 }
+
+#[tokio::test]
+async fn several_calls_that_find_the_token_expired_refresh_it_once_between_them() {
+    // The failure this prevents: a board load fires its Yahoo reads together,
+    // and when the access token had just run out every one of them spent the
+    // refresh token in turn. Yahoo rotates that token on each use, so the
+    // second refresh raced the first and could sign the user out mid-draft.
+    let stub = serve(move |request: &Request| {
+        if request.path() == "/oauth2/get_token" {
+            // Slow enough that the other two callers are certainly waiting.
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            Reply::ok(FRESH_TOKEN)
+        } else {
+            Reply::ok(TEAMS)
+        }
+    });
+    let client = std::sync::Arc::new(client_for(&stub, stale_tokens()));
+    let calls: Vec<_> = (0..3)
+        .map(|_| {
+            let client = client.clone();
+            tokio::spawn(async move { client.league_teams(LEAGUE_KEY).await })
+        })
+        .collect();
+    for call in calls {
+        call.await
+            .expect("the task finished")
+            .expect("the teams load");
+    }
+    assert_eq!(
+        stub.matching("get_token").len(),
+        1,
+        "the refresh token was spent more than once"
+    );
+    // And the two that waited used what the first one brought back rather
+    // than the token they found expired.
+    for request in stub
+        .requests()
+        .iter()
+        .filter(|r| r.path().ends_with("/teams"))
+    {
+        assert_eq!(request.header("authorization"), Some("Bearer access-2"));
+    }
+    assert_eq!(client.tokens().await.access_token, "access-2");
+}
+
+#[tokio::test]
+async fn a_refresh_in_flight_does_not_freeze_everything_else_holding_the_client() {
+    // The failure this prevents: the token pair's lock used to be held across
+    // the refresh request, so a Yahoo that took ten seconds to answer froze
+    // every other caller — the poller included — for those ten seconds.
+    let stub = serve(move |request: &Request| {
+        if request.path() == "/oauth2/get_token" {
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            Reply::ok(FRESH_TOKEN)
+        } else {
+            Reply::ok(TEAMS)
+        }
+    });
+    let client = std::sync::Arc::new(client_for(&stub, stale_tokens()));
+    let loading = tokio::spawn({
+        let client = client.clone();
+        async move { client.league_teams(LEAGUE_KEY).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let asked_at = std::time::Instant::now();
+    let held = client.tokens().await;
+    assert!(
+        asked_at.elapsed() < std::time::Duration::from_millis(200),
+        "reading the tokens waited on the refresh: {:?}",
+        asked_at.elapsed()
+    );
+    // Mid-refresh the pair is still the old one, which is exactly what a
+    // caller that only wants to persist it should see.
+    assert_eq!(held.access_token, "access-stale");
+    loading
+        .await
+        .expect("the task finished")
+        .expect("the teams load");
+    assert_eq!(client.tokens().await.access_token, "access-2");
+}

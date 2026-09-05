@@ -65,6 +65,17 @@ pub struct YahooLeague {
     pub is_auction_draft: bool,
     /// `head` | `roto` | `point`.
     pub scoring_type: Option<String>,
+    /// Auction drafts only: the dollars each team has to spend. `None` in a
+    /// snake league, where Yahoo sends no budget at all.
+    ///
+    /// Defaulted on the way in so a cache written before this field existed
+    /// still deserializes.
+    #[serde(default)]
+    pub draft_budget: Option<u32>,
+    /// Keeper leagues only: how many players a team carries over. `None` when
+    /// Yahoo says nothing, which is most leagues.
+    #[serde(default)]
+    pub num_keepers: Option<u32>,
     pub roster_positions: Vec<RosterSlot>,
     pub stat_modifiers: Vec<StatModifier>,
     pub stat_categories: Vec<StatCategory>,
@@ -102,6 +113,12 @@ pub struct YahooDraftPick {
     pub player_key: String,
     /// Auction drafts only.
     pub cost: Option<f64>,
+    /// Whether Yahoo recorded this pick as a keeper. `None` when Yahoo said
+    /// nothing either way, which is not the same as "not a keeper": a league
+    /// that keeps players and a league that cannot are told apart by the
+    /// absence, and the app's own keeper test takes over from there.
+    #[serde(default)]
+    pub is_keeper: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,6 +136,10 @@ pub struct YahooPlayer {
     pub status: Option<String>,
     pub bye_week: Option<u32>,
     pub uniform_number: Option<String>,
+    /// Yahoo's keeper flag for this player on the roster it came from
+    /// (`is_keeper: {"kept": "1"}`). `None` outside a keeper league.
+    #[serde(default)]
+    pub is_keeper: Option<bool>,
 }
 
 /// A page of `league/<key>/players`: the rows plus what the caller needs to

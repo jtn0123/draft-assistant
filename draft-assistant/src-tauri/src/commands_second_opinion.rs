@@ -75,7 +75,10 @@ pub async fn import_second_opinion<R: tauri::Runtime>(
 
     let mut loaded = state.loaded.lock().await;
     let loaded = loaded.as_mut().ok_or("no league loaded")?;
-    let report: MatchReport = second_opinion::apply(&table, &mut loaded.board);
+    let report: MatchReport = second_opinion::apply(
+        &table,
+        std::sync::Arc::<Vec<_>>::make_mut(&mut loaded.board),
+    );
     loaded.second_opinion_loaded_at = Some(loaded_at);
     let config = state.config.lock().await;
     let view = view_from(loaded, &config);

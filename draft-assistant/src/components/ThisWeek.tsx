@@ -43,8 +43,12 @@ export function CallsToMake({
     <div className="calls">
       <div className="calls-head">
         <span className="calls-title">
-          {calls.length} call{calls.length === 1 ? "" : "s"} to make — {fmt(pointsOnTable, 1)}{" "}
-          points on the table
+          {calls.length} call{calls.length === 1 ? "" : "s"} to make
+          {/* The points are the sum of these same calls' gains. When they come
+              to nothing — an injury call whose replacement projects no higher —
+              the clause is dropped rather than printed as "0.0 points on the
+              table" beside a list of one. */}
+          {pointsOnTable >= 0.05 ? ` — ${fmt(pointsOnTable, 1)} points on the table` : ""}
         </span>
         <button
           type="button"
@@ -121,6 +125,7 @@ export function LineupCompare({
   which,
   onWhich,
   winOdds,
+  locked = false,
 }: {
   matchup: MatchupView | null;
   /** Which lineup is on show. Owned by the screen, because the header quotes
@@ -129,6 +134,10 @@ export function LineupCompare({
   onWhich: (next: LineupChoice) => void;
   /** 0..1 chance of winning this week with `which`, shown beside the margin. */
   winOdds: number;
+  /** True once every game has kicked off and no swap can still be made. The
+   *  best/set choice is not the user's to make any more, so the toggle goes
+   *  and the screen speaks only about the lineup that is actually playing. */
+  locked?: boolean;
 }) {
   // Remembered between sessions, in prefs.ts along with the rest of them.
   const view = useLineupView();
@@ -163,16 +172,20 @@ export function LineupCompare({
           </span>
         </span>
         <span className="lineup-head-controls">
-          <Segmented
-            options={["Best", "Set"] as const}
-            value={which}
-            onChange={onWhich}
-            titles={{
-              Best: "The lineup you should be starting",
-              Set: "The lineup you actually have set on Sleeper",
-            }}
-            label="Which lineup"
-          />
+          {locked ? (
+            <span className="muted small">lineup locked</span>
+          ) : (
+            <Segmented
+              options={["Best", "Set"] as const}
+              value={which}
+              onChange={onWhich}
+              titles={{
+                Best: "The lineup you should be starting",
+                Set: "The lineup you actually have set on Sleeper",
+              }}
+              label="Which lineup"
+            />
+          )}
           <Segmented
             options={["Table", "Scoreboard"] as const}
             value={view}

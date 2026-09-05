@@ -199,6 +199,44 @@ fn a_budget_of_zero_or_more_is_accepted_as_typed() {
     assert_eq!(checked_budget(12.5).unwrap(), 12.5);
 }
 
+/// A fallback answers on a model nobody asked for, and the answer used to be
+/// priced as the request: an Opus question answered by Fable was billed at
+/// half what it cost, so the cap let turns through on money already spent.
+#[test]
+fn a_turn_is_priced_as_the_model_that_answered_it() {
+    assert_eq!(
+        billed_model(ChatModel::Opus5, "claude-fable-5-20260219"),
+        ChatModel::Fable5
+    );
+    assert_eq!(
+        billed_model(ChatModel::Fable5, "claude-opus-5-20260219"),
+        ChatModel::Opus5
+    );
+    // An id nothing recognises leaves the requested model in place rather
+    // than pricing the turn at a rate that was never published.
+    assert_eq!(billed_model(ChatModel::Opus5, ""), ChatModel::Opus5);
+    // And the rates really do differ, which is what makes this worth doing.
+    assert_ne!(
+        ChatModel::Opus5.price_per_mtok(),
+        ChatModel::Fable5.price_per_mtok()
+    );
+}
+
+/// Two questions asked at the same moment both read the spend from before
+/// either of them, so both passed a cap with room for only one.
+#[test]
+fn two_questions_about_one_league_cannot_be_in_flight_together() {
+    let key = spend_key("draft", Some("in-flight-league"));
+    let held = crate::chat_client::reserve(&key).expect("the first is accepted");
+    let error = crate::chat_client::reserve(&key).expect_err("the second is refused");
+    assert!(error.contains("already being answered"), "{error}");
+    // The other screen of the same league keeps its own claim.
+    crate::chat_client::reserve(&spend_key("season", Some("in-flight-league")))
+        .expect("the season screen is free");
+    drop(held);
+    crate::chat_client::reserve(&key).expect("the claim is released when the turn ends");
+}
+
 /// Conversations are filed per screen *and* league; spend was filed per
 /// screen alone, so every league drew down one shared cap.
 #[test]

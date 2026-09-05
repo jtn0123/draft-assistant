@@ -57,6 +57,40 @@ impl ChatModel {
             ChatModel::Fable5 => (10.0, 50.0),
         }
     }
+
+    /// The model an answer *says* it was, mapped back to a price list.
+    ///
+    /// Not the same question as [`ChatModel::parse`], which reads a label off
+    /// the panel's picker. What comes back is a dated id
+    /// ("claude-opus-5-20260219"), and a server-side fallback can answer on a
+    /// different model from the one asked for — so pricing the answer as the
+    /// requested model charged the wrong rate, in either direction.
+    pub fn from_reported(id: &str) -> Option<Self> {
+        let id = id.to_ascii_lowercase();
+        if id.contains("fable") {
+            Some(ChatModel::Fable5)
+        } else if id.contains("opus") {
+            Some(ChatModel::Opus5)
+        } else {
+            None
+        }
+    }
+}
+
+/// What is added to an answer the model ran out of room for.
+pub const TRUNCATED_NOTE: &str = "Answer was cut off at the length limit.";
+
+/// Say so when the answer stops mid-thought. `stop_reason: "max_tokens"` used
+/// to be read past in silence, so a truncated answer reached the panel looking
+/// like a complete one that simply ended oddly.
+pub(crate) fn with_truncation_note(text: String, truncated: bool) -> String {
+    if !truncated {
+        return text;
+    }
+    if text.trim().is_empty() {
+        return TRUNCATED_NOTE.to_string();
+    }
+    format!("{text}\n\n{TRUNCATED_NOTE}")
 }
 
 /// Writing a token into the prompt cache costs a quarter more than sending it
@@ -148,6 +182,9 @@ pub struct ChatReply {
     pub model: String,
     /// True when safety classifiers declined and no fallback rescued it.
     pub refused: bool,
+    /// True when the answer hit the output limit and stops mid-thought. The
+    /// note is already in `text`; this is for anything that wants to style it.
+    pub truncated: bool,
     pub input_tokens: u32,
     pub output_tokens: u32,
     /// Prompt tokens written into the cache this turn, billed at 1.25x input.
@@ -392,13 +429,15 @@ async fn ask_at(
         .collect::<Vec<_>>()
         .join("\n\n");
     let refused = parsed.stop_reason.as_deref() == Some("refusal");
+    let truncated = parsed.stop_reason.as_deref() == Some("max_tokens");
+    let text = if text.trim().is_empty() && refused {
+        "Claude declined to answer that one.".to_string()
+    } else {
+        text
+    };
 
     Ok(ChatReply {
-        text: if text.trim().is_empty() && refused {
-            "Claude declined to answer that one.".to_string()
-        } else {
-            text
-        },
+        text: with_truncation_note(text, truncated),
         thinking: if thinking.is_empty() {
             None
         } else {
@@ -406,6 +445,7 @@ async fn ask_at(
         },
         model: parsed.model,
         refused,
+        truncated,
         input_tokens: parsed.usage.input_tokens,
         output_tokens: parsed.usage.output_tokens,
         cache_creation_input_tokens: parsed.usage.cache_creation_input_tokens,

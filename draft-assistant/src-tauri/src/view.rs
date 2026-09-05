@@ -109,8 +109,10 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         .map(|&mine| crate::picks::picks_until(current_pick, mine, &picks));
     // Survival is judged at my next pick AFTER the one I'm making now (or the
     // upcoming one if I'm not on the clock).
+    // Keepers are handed in because a pick already in the book is nobody's
+    // turn: two of my picks with only keepers between them are one window.
     let survival_pick =
-        crate::view_signals::survival_target(&my_next_picks, current_pick, is_my_pick);
+        crate::view_signals::survival_target(&my_next_picks, current_pick, is_my_pick, &keepers);
     // …and judged against the market, not the board. A keeper sitting between
     // here and that pick is already in the book: nobody selects at its number,
     // so it must not age the ADP the survival is read off. With 27 keepers the
@@ -296,10 +298,15 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             my_next_picks,
             total_picks_made: total_picks,
             manual_picks_active: !loaded.manual_picks.is_empty(),
+            // A paused draft is not on anybody's clock: Sleeper stops the
+            // timer, and the screen used to keep counting down and keep
+            // saying whose turn it was as if nothing had happened.
+            paused: !draft_over && draft.status == "paused",
             clock_deadline_ms: clock_deadline_ms(
                 &draft.status,
                 draft.last_picked,
                 draft.settings.pick_timer,
+                draft.start_time,
             )
             .filter(|_| !draft_over),
             pick_slot_overrides: ownership.overrides(),

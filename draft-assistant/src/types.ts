@@ -67,6 +67,12 @@ export interface DraftStatus {
   my_next_picks: number[];
   total_picks_made: number;
   manual_picks_active: boolean;
+  /**
+   * The draft is running but stopped — Sleeper's status is `paused`. Nobody is
+   * on the clock and no timer is counting, so the banner has to say so rather
+   * than leaving the last manager named as still thinking.
+   */
+  paused: boolean;
   /** Epoch ms when the current pick's timer expires; null when no clock runs. */
   clock_deadline_ms: number | null;
   /**

@@ -117,6 +117,33 @@ pub fn num<T: std::str::FromStr + Default>(map: &Map<String, Value>, key: &str) 
     opt_num(map, key).unwrap_or_default()
 }
 
+/// A Yahoo boolean where the absence of the key means something.
+///
+/// Keepers are the reason this exists: a pick Yahoo did not flag either way
+/// must not read as "not a keeper", because the app's own keeper test
+/// (`crate::picks::keeper_pick_nos`) is the better answer in that case and it
+/// only gets a turn while the flag is unset.
+///
+/// Yahoo also sends the roster form, an object rather than a scalar:
+/// `is_keeper: {"status": null, "cost": null, "kept": "1"}`.
+pub fn opt_flag(map: &Map<String, Value>, key: &str) -> Option<bool> {
+    match map.get(key)? {
+        Value::Object(inner) => {
+            let inner = Value::Object(inner.clone());
+            let inner = flatten(&inner);
+            // An object with none of the three keys filled in is Yahoo saying
+            // "this league has keepers, this player is not one".
+            Some(flag(&inner, "kept"))
+        }
+        Value::Null => None,
+        other => {
+            let mut one = Map::new();
+            one.insert(key.to_string(), other.clone());
+            Some(flag(&one, key))
+        }
+    }
+}
+
 /// A Yahoo boolean: `1`, `"1"` or `true`.
 pub fn flag(map: &Map<String, Value>, key: &str) -> bool {
     match map.get(key) {
@@ -190,6 +217,12 @@ fn apply_settings(league: &mut YahooLeague, settings: &Value) {
     // "auction" only through this flag, so reading the type alone would put an
     // auction league on a snake board.
     league.is_auction_draft = flag(&map, "is_auction_draft");
+    // The budget is what makes an auction board readable at all: without it a
+    // $55 bid is a number with nothing to measure it against. Yahoo spells it
+    // `draft_budget`; some payloads say `auction_budget` instead.
+    league.draft_budget = opt_num(&map, "draft_budget").or_else(|| opt_num(&map, "auction_budget"));
+    // Keeper counts arrive under either name depending on the league's age.
+    league.num_keepers = opt_num(&map, "num_keepers").or_else(|| opt_num(&map, "keeper_count"));
     if league.scoring_type.is_none() {
         league.scoring_type = opt_text(&map, "scoring_type");
     }
@@ -290,6 +323,7 @@ pub fn draft_results(root: &Value) -> Vec<YahooDraftPick> {
                 team_key: text(&pick, "team_key"),
                 player_key: text(&pick, "player_key"),
                 cost: opt_num(&pick, "cost"),
+                is_keeper: opt_flag(&pick, "is_keeper"),
             }
         })
         .filter(|pick| pick.pick > 0)
@@ -342,6 +376,7 @@ fn player_from(value: &Value) -> YahooPlayer {
             .map(flatten)
             .and_then(|weeks| opt_num(&weeks, "week")),
         uniform_number: opt_text(&map, "uniform_number"),
+        is_keeper: opt_flag(&map, "is_keeper"),
     }
 }
 

@@ -9,6 +9,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
+import { describeError } from "./errorText";
+// The follower's connection state lives in its own module so `apiRemote` can
+// set it without pulling in this file's dependency on `api`, and it is
+// re-exported here because this is where the rest of the follow state is read.
+export { useFollowStatus, followStatusMessage, type FollowStatus } from "./followStatus";
 import type { CompanionDevice, CompanionStatus, DeviceKind, FollowRecord } from "./types";
 
 const FOLLOW_KEY = "da.companion.follow";
@@ -91,7 +96,7 @@ export function parseHostAddress(typed: string): string | null {
 
 /** Errors arrive as strings or Errors; this is the sentence to show. */
 export function reason(e: unknown): string {
-  return String(e instanceof Error ? e.message : e).replace(/^Error:\s*/, "");
+  return describeError(e);
 }
 
 /** What a failed pair says, per status code. */
@@ -204,12 +209,23 @@ export function useCompanion(): Companion {
   }, [take]);
 
   // The list goes stale the moment a phone connects, so it is pushed rather
-  // than polled. Unsubscribing is awaited through the same promise it arrived
-  // on, so a dialog closed before the listener landed still detaches.
+  // than polled. The same event fires when the pairing code rotates (after a
+  // pairing, or on the idle timer), and the code only lives in the status, so
+  // each push also re-reads the status: otherwise the dialog keeps showing a
+  // code the host has already retired. Unsubscribing is awaited through the
+  // same promise it arrived on, so a dialog closed before the listener landed
+  // still detaches.
   useEffect(() => {
     let live = true;
     const pending = api.onCompanionDevices((next) => {
-      if (live) setDevices(next);
+      if (!live) return;
+      setDevices(next);
+      api
+        .companionStatus()
+        .then((fresh) => {
+          if (live) setStatus(fresh);
+        })
+        .catch(() => undefined);
     });
     return () => {
       live = false;

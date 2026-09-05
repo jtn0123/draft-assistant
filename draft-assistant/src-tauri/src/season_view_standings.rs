@@ -6,10 +6,13 @@
 //! is why the live poller hands back a cached copy instead of rebuilding it.
 
 use crate::engine::LoadedLeague;
+use crate::season_api::{matchup_for, Roster};
 use crate::season_engine::LoadedSeason;
-use crate::season_lineup::weekly_lineup_outlook;
+use crate::season_lineup::{candidates_for, optimal_lineup, weekly_lineup_outlook};
 use crate::season_lookup::Lookup;
 use crate::season_odds::{self, ScheduledGame, StandingsRow, TeamSeason};
+use crate::season_spread;
+use crate::season_view_matchup::live_score;
 
 /// True when every NFL game the scoreboard knows of this week has finished.
 ///
@@ -52,6 +55,27 @@ pub fn standings_rows(
         week
     };
 
+    // Where each NFL team's game stands. Empty before kickoff, which is what
+    // makes the live pricing below reproduce the pregame numbers exactly.
+    let remaining = crate::season_live::remaining_by_team(&season.scores);
+
+    // This week's mean and spread for one roster, priced off its games rather
+    // than off its projection alone. The lineup is the same best-available one
+    // `weekly_lineup_outlook` solves for the same week, so with no game
+    // started this returns exactly what the outlook already said.
+    let live_week = |roster: &Roster| {
+        let candidates =
+            candidates_for(roster.player_ids(), &position_of, &sidelined, weekly, week);
+        let lineup = optimal_lineup(rules, &candidates);
+        let banked = matchup_for(&season.matchups, roster.roster_id);
+        let live_of = |id: &str| live_score(banked, &remaining, &team_of, id);
+        let starters = season_spread::live_starters(&lineup, &position_of, &team_of, &live_of);
+        (
+            season_spread::total_points(&starters),
+            season_spread::team_sigma(&starters),
+        )
+    };
+
     let teams: Vec<TeamSeason> = season
         .rosters
         .iter()
@@ -67,14 +91,34 @@ pub fn standings_rows(
                 weekly,
                 first_open..=last_regular,
             );
+            let mut weekly_projection: Vec<(u32, f64)> =
+                outlook.iter().map(|w| (w.week, w.points)).collect();
+            let mut weekly_sigma: Vec<(u32, f64)> =
+                outlook.iter().map(|w| (w.week, w.sigma)).collect();
+            // The week being played is priced off where its games actually
+            // are, not off the projection it started on: banked points plus
+            // whatever share of each starter's game is still to come, with
+            // only that share carrying any spread. Without this the playoff
+            // odds redrew the whole in-progress week from projections and
+            // noise every tick, so a team fifty points up with every game
+            // final was still simulated as a coin flip.
+            // Skipped outright before kickoff: with nothing on the scoreboard
+            // there is nothing to price off, and not solving the lineup again
+            // is also the plainest guarantee that a Saturday reading is
+            // untouched by any of this.
+            if first_open == week && !remaining.is_empty() {
+                let (points, sigma) = live_week(r);
+                replace_week(&mut weekly_projection, week, points);
+                replace_week(&mut weekly_sigma, week, sigma);
+            }
             TeamSeason {
                 roster_id: r.roster_id,
                 wins: r.settings.wins,
                 losses: r.settings.losses,
                 ties: r.settings.ties,
                 points_for: r.settings.points_for(),
-                weekly_projection: outlook.iter().map(|w| (w.week, w.points)).collect(),
-                weekly_sigma: outlook.iter().map(|w| (w.week, w.sigma)).collect(),
+                weekly_projection,
+                weekly_sigma,
             }
         })
         .collect();
@@ -121,4 +165,11 @@ pub fn standings_rows(
         }
     }
     rows
+}
+
+/// Overwrite one week's entry in a (week, value) list, leaving the rest alone.
+fn replace_week(weeks: &mut [(u32, f64)], week: u32, value: f64) {
+    for entry in weeks.iter_mut().filter(|(w, _)| *w == week) {
+        entry.1 = value;
+    }
 }

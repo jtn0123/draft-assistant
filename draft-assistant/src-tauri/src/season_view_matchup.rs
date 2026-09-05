@@ -104,19 +104,20 @@ pub fn build_matchup<'a>(
     // Swaps whose players are already on the field are dropped before the
     // total is taken: a header offering 2.0 points above a panel that lists
     // no calls is worse than either half on its own.
-    //
-    // Rust's additive identity for f64 is -0.0, so an empty sum serialises as
-    // "-0.0" and would render as "−0.0 points on the table". Normalise it.
-    //
-    // Counted before the injury calls join the list: those are about a player
-    // who may not take the field at all, not about points being left on the
-    // bench, and their gain is often negative.
     facts.retain_open(&mut calls);
-    let points_on_table: f64 = calls.iter().map(|c| c.gain).sum::<f64>() + 0.0;
 
     let injury_calls = facts.injury_calls(&my_current, &my_candidates, &calls, &eligible);
     calls.extend(injury_calls);
     facts.finish(&mut calls);
+
+    // Counted over the calls that are actually listed, injury ones included.
+    // It used to be taken before those joined the list, so a week whose only
+    // advice was "your starter is Out" read "1 calls to make, 0.0 points on
+    // the table" — a count and a total describing two different sets.
+    //
+    // Rust's additive identity for f64 is -0.0, so an empty sum serialises as
+    // "-0.0" and would render as "−0.0 points on the table". Normalise it.
+    let points_on_table: f64 = calls.iter().map(|c| c.gain).sum::<f64>() + 0.0;
 
     let opp_candidates: Vec<Candidate> = opp_matchup
         .and_then(|m| {
@@ -194,7 +195,11 @@ pub fn build_matchup<'a>(
 
 /// Where one starter's week stands, or `None` when his game has not kicked
 /// off and his projection is still the whole story.
-fn live_score(
+///
+/// Shared with the standings, which prices the in-progress week the same way:
+/// the header's win odds and the playoff simulation have to be two readings of
+/// one model, not two models that disagree about who is winning.
+pub fn live_score(
     side: Option<&Matchup>,
     remaining: &HashMap<String, f64>,
     team_of: &impl Fn(&str) -> Option<String>,

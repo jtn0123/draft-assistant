@@ -4,6 +4,7 @@ pub mod board;
 pub mod cache;
 pub mod chat;
 pub mod chat_cli;
+pub mod chat_client;
 pub mod chat_context;
 pub mod chat_copy;
 /// Hand-built views for the chat context tests.
@@ -21,6 +22,7 @@ pub mod draft;
 pub mod engine;
 pub mod engine_assemble;
 pub mod engine_yahoo;
+pub mod engine_yahoo_pool;
 pub mod headshots;
 pub mod keepers;
 pub mod league_ref;
@@ -46,6 +48,7 @@ pub mod season_live;
 pub mod season_lookup;
 pub mod season_moves;
 pub mod season_odds;
+pub mod season_refresh;
 pub mod season_sources;
 pub mod season_spread;
 pub mod season_trades;
@@ -76,6 +79,8 @@ pub mod yahoo_crosswalk;
 pub mod yahoo_map;
 pub mod yahoo_oauth;
 pub mod yahoo_parse;
+pub mod yahoo_pool;
+pub mod yahoo_retry;
 pub mod yahoo_secrets;
 pub mod yahoo_types;
 
@@ -87,8 +92,8 @@ use commands_companion::{
     shared_chat_get, shared_chat_send,
 };
 use commands_draft::{
-    add_league, export_state, get_config, get_state, record_manual_pick, refresh_data,
-    refresh_picks, set_my_username, start_polling, stop_polling, undo_manual_pick,
+    add_league, clear_keepers, export_state, get_config, get_state, record_manual_pick,
+    refresh_data, refresh_picks, set_my_username, start_polling, stop_polling, undo_manual_pick,
 };
 use commands_season::{
     avatar, get_season, headshot, load_season, refresh_season, start_season_polling,
@@ -96,7 +101,7 @@ use commands_season::{
 };
 use commands_second_opinion::import_second_opinion;
 use commands_yahoo::{
-    yahoo_begin_connect, yahoo_disconnect, yahoo_finish_connect, yahoo_leagues,
+    yahoo_auction, yahoo_begin_connect, yahoo_disconnect, yahoo_finish_connect, yahoo_leagues,
     yahoo_save_credentials, yahoo_status,
 };
 use companion::CompanionServer;
@@ -179,6 +184,7 @@ pub fn run() {
             refresh_data,
             record_manual_pick,
             undo_manual_pick,
+            clear_keepers,
             export_state,
             start_polling,
             stop_polling,
@@ -204,6 +210,7 @@ pub fn run() {
             yahoo_finish_connect,
             yahoo_disconnect,
             yahoo_leagues,
+            yahoo_auction,
             companion_status,
             companion_enable,
             companion_disable,

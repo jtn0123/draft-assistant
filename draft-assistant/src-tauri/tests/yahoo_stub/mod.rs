@@ -88,6 +88,10 @@ fn percent_decode(raw: &str) -> String {
 pub enum Reply {
     /// An HTTP status and a body.
     Json(u16, String),
+    /// A status and a body plus extra response headers. `Retry-After` is the
+    /// one that matters: it is how a real Yahoo says how long its throttle
+    /// has left, and the client's backoff is supposed to read it.
+    Headed(u16, String, Vec<(String, String)>),
     /// Accept the connection, answer nothing, hang up after `0` bytes — the
     /// shape of a request that times out.
     Hang(Duration),
@@ -100,6 +104,15 @@ impl Reply {
 
     pub fn status(status: u16, body: impl Into<String>) -> Self {
         Reply::Json(status, body.into())
+    }
+
+    /// Yahoo's own throttle: status 999 and a `Retry-After` in seconds.
+    pub fn throttled(seconds: u64) -> Self {
+        Reply::Headed(
+            999,
+            r#"{"error":"rate limited"}"#.to_string(),
+            vec![("Retry-After".to_string(), seconds.to_string())],
+        )
     }
 }
 
@@ -164,21 +177,33 @@ where
     let reply = router(&request);
     seen.lock().expect("stub lock").push(request);
     match reply {
-        Reply::Json(status, body) => {
-            let response = format!(
-                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            let _ = socket.write_all(response.as_bytes());
-            let _ = socket.flush();
-            let _ = socket.shutdown(std::net::Shutdown::Write);
-        }
+        Reply::Json(status, body) => write_reply(&mut socket, status, &body, &[]),
+        Reply::Headed(status, body, headers) => write_reply(&mut socket, status, &body, &headers),
         Reply::Hang(duration) => {
             // Hold the connection open with nothing on it, which is what the
             // client's read timeout is for.
             std::thread::sleep(duration);
         }
     }
+}
+
+fn write_reply(
+    socket: &mut std::net::TcpStream,
+    status: u16,
+    body: &str,
+    extra: &[(String, String)],
+) {
+    let extra: String = extra
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}\r\n"))
+        .collect();
+    let response = format!(
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+    let _ = socket.write_all(response.as_bytes());
+    let _ = socket.flush();
+    let _ = socket.shutdown(std::net::Shutdown::Write);
 }
 
 /// Read one whole request: the head, then as much body as `Content-Length`

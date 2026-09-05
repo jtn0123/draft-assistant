@@ -6,7 +6,7 @@ import { dump } from "./fixtures";
 /**
  * The phone companion page, driven by a real browser.
  *
- * The page is three static files that the Rust host serves at `/` and
+ * The page is four static files that the Rust host serves at `/` and
  * `/static/*`; nothing builds them, so the test serves them itself out of
  * `src-tauri/companion-static/` with the same Content-Security-Policy the
  * host sets. That policy is the point of serving them rather than pasting
@@ -17,7 +17,11 @@ import { dump } from "./fixtures";
  * a `draft-updated` or `shared-chat` frame at the exact moment it wants one.
  */
 
-const CSP = "default-src 'self'; connect-src 'self' ws:";
+// The exact policy `companion/routes.rs` sets, so anything inline that ever
+// crept into the page fails here the way it would fail on a phone.
+const CSP =
+  "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+  "connect-src 'self' ws: wss:; base-uri 'none'; form-action 'none'";
 const staticDir = new URL("../src-tauri/companion-static/", import.meta.url);
 const asset = (name: string) => readFileSync(fileURLToPath(new URL(name, staticDir)), "utf8");
 
@@ -58,7 +62,9 @@ async function serve(page: Page, host: Backend): Promise<void> {
         headers: { "content-type": "text/html", "content-security-policy": CSP },
       });
     }
-    if (["/static/helpers.js", "/static/app.js", "/static/app.css"].includes(path)) {
+    if (
+      ["/static/helpers.js", "/static/clock.js", "/static/app.js", "/static/app.css"].includes(path)
+    ) {
       const type = path.endsWith(".css") ? "text/css" : "text/javascript";
       const body = asset(path.slice("/static/".length));
       return route.fulfill({ body, headers: { "content-type": type } });
@@ -95,19 +101,19 @@ async function serve(page: Page, host: Backend): Promise<void> {
       __emit: (frame: unknown) => void;
       __socketUrl: string;
       __stayDown: boolean;
-      __drop: () => void;
+      __drop: (code?: number) => void;
     };
     store.__sent = [];
     store.__stayDown = false;
     class FakeSocket {
       readyState = 0;
       onopen: (() => void) | null = null;
-      onclose: (() => void) | null = null;
+      onclose: ((event: { code: number }) => void) | null = null;
       onmessage: ((event: { data: string }) => void) | null = null;
       constructor(url: string) {
         store.__socketUrl = url;
         store.__emit = (frame) => this.onmessage?.({ data: JSON.stringify(frame) });
-        store.__drop = () => this.close();
+        store.__drop = (code?: number) => this.close(code);
         if (store.__stayDown) return;
         setTimeout(() => {
           this.readyState = 1;
@@ -117,9 +123,9 @@ async function serve(page: Page, host: Backend): Promise<void> {
       send(data: string) {
         store.__sent.push(data);
       }
-      close() {
+      close(code = 1006) {
         this.readyState = 3;
-        this.onclose?.();
+        this.onclose?.({ code });
       }
     }
     (window as unknown as { WebSocket: unknown }).WebSocket = FakeSocket;
@@ -358,7 +364,7 @@ test("a revoked frame sends the phone back to the pair screen", async ({ page })
   await serve(page, backend());
   await pair(page);
   await emit(page, { type: "revoked", payload: {} });
-  await expect(page.getByRole("alert")).toContainText("Pairing was revoked");
+  await expect(page.getByRole("alert")).toContainText("The host restarted or revoked this device");
   await expect(page.getByRole("button", { name: "Connect" })).toBeVisible();
   expect(await page.evaluate(() => window.localStorage.getItem("da.companion.token"))).toBeNull();
 });
@@ -371,10 +377,26 @@ test("a 401 on any request sends the phone back to the pair screen", async ({ pa
   host.authorised = false;
   await page.getByLabel("Ask the assistant").fill("still there?");
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByRole("alert")).toContainText("Pairing was revoked");
+  await expect(page.getByRole("alert")).toContainText("The host restarted or revoked this device");
   await expect(page.getByRole("button", { name: "Connect" })).toBeVisible();
   // The host name it already knew is still on screen.
   await expect(page.locator("#pair-host")).toHaveText("Hosted by Justin's Mac");
+});
+
+test("a socket closed with 4401 asks for the code instead of retrying", async ({ page }) => {
+  await serve(page, backend());
+  await pair(page);
+  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  // What a restarted host does to a phone holding a token it has forgotten:
+  // the page used to reconnect for ever against a socket that always refused.
+  await page.evaluate(() => {
+    const store = window as unknown as { __stayDown: boolean; __drop: (code?: number) => void };
+    store.__stayDown = true;
+    store.__drop(4401);
+  });
+  await expect(page.getByRole("alert")).toContainText("The host restarted or revoked this device");
+  await expect(page.getByRole("button", { name: "Connect" })).toBeVisible();
+  await expect(page.locator("#reconnect-pill")).toBeHidden();
 });
 
 test("the reconnecting pill shows while the socket is down", async ({ page }) => {

@@ -4,16 +4,17 @@
 //! [`Auth`] extractor, so a handler that forgets the check does not compile —
 //! the device is an argument, not something to remember to look up.
 
-use super::hub::{Device, PairOutcome};
+use super::hub::{Device, PairAttempt, PairOutcome};
 use super::media;
 use super::server::{static_file, Srv};
 use crate::headshots::ImageCache;
-use axum::extract::{Path, Query, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{header, request::Parts, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 pub fn router(srv: Arc<Srv>) -> Router {
@@ -32,19 +33,34 @@ pub fn router(srv: Arc<Srv>) -> Router {
             get(super::routes_chat::get_chat).post(super::routes_chat::post_chat),
         )
         .route("/api/events", get(super::ws::events))
-        .layer(axum::middleware::from_fn(cors))
+        .layer(axum::middleware::from_fn_with_state(srv.clone(), gate))
         .with_state(srv)
 }
 
-/// Let a page served from somewhere else call this API.
+/// What the phone page is allowed to load and talk to.
+///
+/// Everything the page needs comes from this server: its own scripts and
+/// stylesheet, the pictures under `/api/headshot` and `/api/avatar` (same
+/// origin, and `data:` for the placeholder), and the WebSocket. Nothing else
+/// is reachable, so a string that somehow became markup has nowhere to send
+/// what it found and no third-party script to run.
+pub const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; \
+     img-src 'self' data:; connect-src 'self' ws: wss:; base-uri 'none'; form-action 'none'";
+
+/// CORS, the page's security headers, and the cross-origin check.
 ///
 /// The follower desktop's webview is its own origin (`tauri://localhost`), and
-/// so is the Vite dev server; without these headers a browser refuses to hand
-/// either the response, and the preflight it sends first would be a 405. Any
-/// origin is allowed on purpose: the bearer token is the whole access control,
-/// no cookie is ever set, and a LAN page that knows the token is a paired
-/// device by definition.
-async fn cors(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+/// so is the Vite dev server; without the CORS headers a browser refuses to
+/// hand either the response, and the preflight it sends first would be a 405.
+/// Reads stay open to any origin — the bearer token is the whole access
+/// control and no cookie is ever set — but a request that *changes* something
+/// and names an origin has to name one of ours, so a page the phone has open
+/// in another tab cannot post to the host in the background.
+async fn gate(
+    State(srv): State<Arc<Srv>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
     let allow = |mut response: Response| {
         let headers = response.headers_mut();
         headers.insert(
@@ -59,12 +75,47 @@ async fn cors(request: axum::extract::Request, next: axum::middleware::Next) -> 
             header::ACCESS_CONTROL_ALLOW_METHODS,
             "GET, POST, OPTIONS".parse().expect("static"),
         );
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            CSP.parse().expect("static"),
+        );
+        headers.insert(
+            header::X_CONTENT_TYPE_OPTIONS,
+            "nosniff".parse().expect("static"),
+        );
+        headers.insert(
+            header::REFERRER_POLICY,
+            "no-referrer".parse().expect("static"),
+        );
         response
     };
     if request.method() == axum::http::Method::OPTIONS {
         return allow(StatusCode::NO_CONTENT.into_response());
     }
+    if changes_something(request.method()) && !origin_is_ours(&request, &srv) {
+        return allow(fail(StatusCode::FORBIDDEN, "that page cannot post here"));
+    }
     allow(next.run(request).await)
+}
+
+fn changes_something(method: &axum::http::Method) -> bool {
+    !matches!(
+        *method,
+        axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
+    )
+}
+
+/// Whether the `Origin` on a state-changing request is one of ours. A request
+/// with no `Origin` header is not a browser making a cross-site request, and
+/// is left to the bearer token as before.
+fn origin_is_ours(request: &axum::extract::Request, srv: &Srv) -> bool {
+    let Some(origin) = request.headers().get(header::ORIGIN) else {
+        return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    super::net::origin_allowed(origin, srv.hub.port())
 }
 
 /// Every failure this server produces: a status and `{ "error": … }`, which
@@ -123,10 +174,26 @@ struct PairRequest {
     device_name: String,
     #[serde(default)]
     kind: String,
+    /// The id this client was given the last time it paired, when it has one.
+    /// Only this replaces an existing entry; a device that cannot say which
+    /// one it was is a new device, whatever it calls itself.
+    #[serde(default)]
+    device_id: Option<String>,
 }
 
-async fn pair(State(srv): State<Arc<Srv>>, Json(body): Json<PairRequest>) -> Response {
-    match srv.hub.pair(&body.code, &body.device_name, &body.kind) {
+async fn pair(
+    State(srv): State<Arc<Srv>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(body): Json<PairRequest>,
+) -> Response {
+    let attempt = PairAttempt {
+        code: &body.code,
+        name: &body.device_name,
+        kind: &body.kind,
+        peer: peer.ip(),
+        previous_device_id: body.device_id.as_deref(),
+    };
+    match srv.hub.pair(attempt) {
         Ok(PairOutcome::Ok {
             token,
             device_id,

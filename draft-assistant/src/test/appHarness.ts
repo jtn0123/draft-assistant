@@ -45,6 +45,7 @@ const METHODS: Record<keyof Api, true> = {
   refreshData: true,
   recordManualPick: true,
   undoManualPick: true,
+  clearKeepers: true,
   exportState: true,
   importSecondOpinion: true,
   headshot: true,

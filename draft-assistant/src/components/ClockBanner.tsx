@@ -39,6 +39,10 @@ function clockSentence(d: DraftView["draft"], left: number | null): string {
   if (d.status === "pre_draft" && d.total_picks_made === 0) {
     return "The draft has not started yet.";
   }
+  // A paused draft still names a manager and a pick, and both are stale: the
+  // timer is stopped and nobody can act. Saying whose turn it is invited
+  // people to wonder why that manager was taking so long.
+  if (d.paused) return "The draft is paused.";
   const pick = `pick ${pickLabel(d.current_pick, d.teams)}`;
   const time = left === null ? "" : `, ${spanLabel(left)} left`;
   if (d.is_my_pick) return `You are on the clock — ${pick}${time}.`;
@@ -89,7 +93,10 @@ export function ClockBanner({ view }: { view: DraftView }) {
   const d = view.draft;
   const preDraft = d.status === "pre_draft" && d.total_picks_made === 0;
   const complete = d.status === "complete";
-  const deadline = complete ? null : d.clock_deadline_ms;
+  // Nothing counts down while the draft is stopped. The backend already
+  // withholds the deadline, and this makes the banner right even against an
+  // older host that does not.
+  const deadline = complete || d.paused ? null : d.clock_deadline_ms;
   const now = useNow(deadline !== null);
   const clock = clockLabel(deadline, now);
   // Everything that decides what the sentence says, and nothing that ticks.
@@ -123,6 +130,10 @@ export function ClockBanner({ view }: { view: DraftView }) {
         ) : preDraft ? (
           <span className="clock-status" aria-hidden="true">
             Draft has not started
+          </span>
+        ) : d.paused ? (
+          <span className="clock-status" aria-hidden="true">
+            Draft paused
           </span>
         ) : d.is_my_pick ? (
           <span className="clock-status is-you" aria-hidden="true">
@@ -227,7 +238,9 @@ export function SnakeStrip({ view }: { view: DraftView }) {
   const [expanded, setExpanded] = useState(false);
   const draft = view.draft;
   const rosters = view.rosters;
-  const clock = useClock(draft.status === "complete" ? null : draft.clock_deadline_ms);
+  const clock = useClock(
+    draft.status === "complete" || draft.paused ? null : draft.clock_deadline_ms,
+  );
   // The queue is 24 picks of snake arithmetic and as many roster lookups, and
   // this strip re-renders every second while the clock runs.
   const queue = useMemo(

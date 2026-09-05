@@ -1,7 +1,7 @@
 // The shell in both modes: a host with the companion rows, and a follower
 // with the pill, the trimmed menu, and no way to change the host's mind.
 
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./api", async () => ({ api: (await import("./test/appHarness")).harness().api }));
@@ -9,6 +9,7 @@ vi.mock("./api", async () => ({ api: (await import("./test/appHarness")).harness
 import "./test/warmScreens";
 import App from "./App";
 import { resetPrefs } from "./prefs";
+import { resetFollowStatus, setFollowStatus } from "./followStatus";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
 import {
@@ -47,6 +48,7 @@ const row = (label: RegExp) => screen.queryByRole("menuitemcheckbox", { name: la
 
 beforeEach(() => {
   h.reset();
+  resetFollowStatus();
   fakeStorage({ "da.screen": "draft" });
   resetPrefs();
   resetThemePreference();
@@ -129,6 +131,97 @@ describe("following a host", () => {
   it("never asks the host's app whether it is serving phones", async () => {
     await loaded();
     expect(h.api.companionStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("how the connection is doing", () => {
+  beforeEach(() => {
+    fakeStorage({ "da.screen": "draft", "da.companion.follow": FOLLOW });
+  });
+
+  it("says nothing extra while the host is being heard", async () => {
+    await loaded();
+    expect(screen.getByText("Hosted by Justin's Mac")).toBeInTheDocument();
+    expect(screen.queryByText(/Reconnecting/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pair again" })).toBeNull();
+  });
+
+  it("says it is reconnecting while the socket is away", async () => {
+    // A follower whose host had gone quiet looked exactly like one whose host
+    // simply had not picked yet.
+    await loaded();
+    await settle(() => setFollowStatus("reconnecting"));
+    expect(screen.getByText("Reconnecting to Justin's Mac…")).toBeInTheDocument();
+  });
+
+  it("stops saying it once the socket is back", async () => {
+    await loaded();
+    await settle(() => setFollowStatus("reconnecting"));
+    await settle(() => setFollowStatus("connected"));
+    expect(screen.queryByText(/Reconnecting/)).toBeNull();
+  });
+
+  it("stands its ground when the host drops this device, and offers a way back", async () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+    await loaded();
+    await settle(() => setFollowStatus("revoked"));
+
+    expect(screen.getByText(/Justin's Mac unpaired this device/)).toBeInTheDocument();
+    await settle(() => screen.getByRole("button", { name: "Pair again" }).click());
+
+    expect(localStorage.getItem("da.companion.follow")).toBeNull();
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it("keeps the message up rather than letting it time out", async () => {
+    await loaded();
+    // The message is state, not a toast, so nothing can time it out; the
+    // clock is wound on to prove it.
+    vi.useFakeTimers();
+    await settle(() => setFollowStatus("revoked"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(screen.getByText(/unpaired this device/)).toBeInTheDocument();
+  });
+});
+
+describe("messages that skipped the timer", () => {
+  it("puts the revoked note away on its own like any other news", async () => {
+    // It was set straight into state as the shell started, which skipped the
+    // timer and left it under the header for the rest of the session.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fakeStorage({ "da.screen": "draft", "da.companion.revoked": "1" });
+    await loaded();
+    expect(screen.getByText("The host revoked this device")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(screen.queryByText("The host revoked this device")).toBeNull();
+  });
+
+  it("puts 'the host records the picks' away too", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fakeStorage({ "da.screen": "draft", "da.companion.follow": FOLLOW });
+    await loaded();
+    const rows = await waitFor(() => {
+      // The first "Draft" is the screen toggle; a row action means a second.
+      const buttons = screen.getAllByRole("button", { name: "Draft" });
+      expect(buttons.length).toBeGreaterThan(1);
+      return buttons;
+    });
+    await settle(() => rows[rows.length - 1]?.click());
+    expect(screen.getByText("Justin's Mac records the picks")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(screen.queryByText("Justin's Mac records the picks")).toBeNull();
   });
 });
 

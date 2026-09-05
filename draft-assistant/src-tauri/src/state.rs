@@ -193,9 +193,25 @@ pub struct SeasonInputs {
     my_user_id: Option<String>,
 }
 
+impl SeasonInputs {
+    /// The league this build will read. Exposed so a test can prove the tick
+    /// shares the board rather than copying it — see [`season_inputs`].
+    pub fn league(&self) -> &LoadedLeague {
+        &self.league
+    }
+}
+
 /// Copy the build's inputs, taking the three mutexes in the order the rest of
 /// the app takes them (loaded, then season, then config) and releasing every
 /// one of them before returning.
+///
+/// "Copy" is cheaper than it reads. The four big things a `LoadedLeague`
+/// carries — the board, its index, the player dictionary and the weekly
+/// projections — are behind `Arc`, so cloning the league here bumps four
+/// pointers instead of duplicating megabytes of `Vec` and `HashMap` on every
+/// thirty-second poll tick. Nothing downstream of this writes to any of them,
+/// which is what makes sharing them safe; the one writer, the second-opinion
+/// import, takes the `loaded` mutex and calls `Arc::make_mut`.
 pub async fn season_inputs(
     loaded: &Mutex<Option<LoadedLeague>>,
     season: &Mutex<Option<LoadedSeason>>,

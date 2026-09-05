@@ -1,13 +1,21 @@
 //! Read-only client for the Yahoo Fantasy API.
 //!
 //! Same transport policy as [`crate::sleeper`] — pooled reqwest client, gzip,
-//! 3s connect / 8s total, three attempts with a doubling backoff for the
-//! failures that a retry could fix — plus the two things Yahoo adds:
+//! 3s connect / 8s total, several attempts for the failures that a retry could
+//! fix — plus the three things Yahoo adds:
 //!
-//! - every request carries `Authorization: Bearer <access token>`, and
+//! - every request carries `Authorization: Bearer <access token>`,
 //! - an access token lasts an hour, so the client refreshes it when it is
 //!   about to expire and once more if Yahoo answers 401 anyway (a token can
-//!   be revoked well before its clock runs out).
+//!   be revoked well before its clock runs out), and
+//! - Yahoo throttles hard and says so through `Retry-After`, so the waits
+//!   between attempts come from [`crate::yahoo_retry`] rather than from a
+//!   fixed pair of milliseconds.
+//!
+//! Only one refresh is ever in flight. A pool load fires seven requests at
+//! once, and when the access token has just expired every one of them used to
+//! spend the refresh token in turn; the first one through the gate now
+//! refreshes and the rest read what it left behind.
 //!
 //! After any call, [`YahooClient::tokens`] hands back the current pair; the
 //! caller persists it so the refresh survives a restart. The client does not
@@ -18,6 +26,7 @@
 //! `?format=json`; without it Yahoo serves XML.
 
 use crate::yahoo_oauth::{AuthError, OauthClient, TokenSet, YahooCredentials, LOGIN_BASE, OOB};
+use crate::yahoo_retry::{retry_after, RetryPolicy};
 use crate::yahoo_types::{PlayerPage, YahooDraftPick, YahooLeague, YahooTeam};
 use serde_json::Value;
 use std::time::Duration;
@@ -29,8 +38,6 @@ pub const BASE: &str = "https://fantasysports.yahooapis.com/fantasy/v2";
 pub const USER_AGENT: &str = "draft-assistant/0.1 (local second-screen tool)";
 /// The NFL game key. `nfl` resolves to the current season's numeric key.
 pub const NFL: &str = "nfl";
-/// Total attempts per request, including the first.
-const RETRIES: u32 = 3;
 /// Yahoo's own page ceiling for a players query.
 pub const PAGE: u32 = 25;
 
@@ -53,6 +60,24 @@ pub enum YahooError {
         url: String,
         detail: String,
     },
+}
+
+/// One failed attempt: the error, and how long Yahoo asked to be left alone
+/// for. Internal — `Retry-After` is a fact about this attempt rather than
+/// about the error, and it would be noise on [`YahooError`], which is what
+/// the user is eventually shown.
+struct Failure {
+    error: YahooError,
+    asked_for: Option<Duration>,
+}
+
+impl Failure {
+    fn plain(error: YahooError) -> Self {
+        Self {
+            error,
+            asked_for: None,
+        }
+    }
 }
 
 /// Yahoo answers a throttled caller with its own status 999 rather than the
@@ -136,10 +161,16 @@ pub fn url_for(base: &str, path: &str) -> String {
 
 pub struct YahooClient {
     http: reqwest::Client,
-    hosts: YahooHosts,
+    pub(crate) hosts: YahooHosts,
     oauth: OauthClient,
     credentials: YahooCredentials,
+    /// Held only long enough to read or replace the pair. Never across a
+    /// request: a lock held over the network is how one slow refresh used to
+    /// stall every other call the load had in flight.
     tokens: Mutex<TokenSet>,
+    /// The one caller allowed to be refreshing at any moment.
+    refresh_gate: Mutex<()>,
+    retry: RetryPolicy,
 }
 
 impl YahooClient {
@@ -180,7 +211,19 @@ impl YahooClient {
             oauth,
             credentials,
             tokens: Mutex::new(tokens),
+            refresh_gate: Mutex::new(()),
+            retry: RetryPolicy::default(),
         }
+    }
+
+    /// The same client with a different retry policy.
+    ///
+    /// Only a test wants this: the real waits run to sixteen seconds, and a
+    /// test that asserts on the number of attempts should not sit through
+    /// half a minute of them.
+    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
+        self
     }
 
     /// The token pair as it stands, including anything a refresh changed.
@@ -201,45 +244,67 @@ impl YahooClient {
         self.renew().await
     }
 
-    /// Spend the refresh token. Held across the request so two callers cannot
-    /// both refresh with the same token and race each other's result.
+    /// Spend the refresh token, once, however many callers want one.
+    ///
+    /// The gate is a separate lock from the token pair so that nothing holds
+    /// the pair across the ten-second round trip. Whoever gets through it
+    /// looks again first: a caller that queued behind a refresh wants the
+    /// token that refresh produced, not a second refresh of its own — and a
+    /// refresh token Yahoo has already rotated away would be spent for
+    /// nothing, signing the user out mid-draft.
     async fn renew(&self) -> Result<String, YahooError> {
-        let mut tokens = self.tokens.lock().await;
+        let stale = self.tokens.lock().await.access_token.clone();
+        let _gate = self.refresh_gate.lock().await;
+        let refresh_token = {
+            let tokens = self.tokens.lock().await;
+            if tokens.access_token != stale && !tokens.is_expired(crate::yahoo_oauth::now_secs()) {
+                return Ok(tokens.access_token.clone());
+            }
+            tokens.refresh_token.clone()
+        };
         let fresh = self
             .oauth
-            .refresh(
-                &self.credentials,
-                &tokens.refresh_token,
-                &self.hosts.redirect_uri,
-            )
+            .refresh(&self.credentials, &refresh_token, &self.hosts.redirect_uri)
             .await
             .map_err(YahooError::Auth)?;
         let access = fresh.access_token.clone();
-        *tokens = fresh;
+        *self.tokens.lock().await = fresh;
         Ok(access)
     }
 
-    async fn get_once(&self, url: &str, token: &str) -> Result<String, YahooError> {
-        let response = self
-            .http
-            .get(url)
-            .bearer_auth(token)
-            .send()
-            .await
-            .map_err(|e| YahooError::Transport {
-                url: url.to_string(),
-                detail: e.to_string(),
-            })?;
+    async fn get_once(&self, url: &str, token: &str) -> Result<String, Failure> {
+        let response = self.http.get(url).bearer_auth(token).send().await;
+        let response = match response {
+            Ok(response) => response,
+            Err(e) => {
+                return Err(Failure::plain(YahooError::Transport {
+                    url: url.to_string(),
+                    detail: e.to_string(),
+                }))
+            }
+        };
         let status = response.status();
         if !status.is_success() {
-            return Err(YahooError::Http {
-                status: status.as_u16(),
-                url: url.to_string(),
+            // Read the header before the body is dropped: it is the only
+            // thing that says how long Yahoo's throttle has left to run.
+            let asked_for = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| retry_after(value, crate::yahoo_oauth::now_secs()));
+            return Err(Failure {
+                error: YahooError::Http {
+                    status: status.as_u16(),
+                    url: url.to_string(),
+                },
+                asked_for,
             });
         }
-        response.text().await.map_err(|e| YahooError::Transport {
-            url: url.to_string(),
-            detail: e.to_string(),
+        response.text().await.map_err(|e| {
+            Failure::plain(YahooError::Transport {
+                url: url.to_string(),
+                detail: e.to_string(),
+            })
         })
     }
 
@@ -250,24 +315,25 @@ impl YahooClient {
     /// the grant is gone, and repeating it would only spend the refresh token
     /// against a door that is closed.
     async fn get_body(&self, url: &str) -> Result<String, YahooError> {
-        let mut backoff = Duration::from_millis(250);
         let mut attempts = 0;
         let mut refreshed = false;
         loop {
             let token = self.access_token().await?;
             match self.get_once(url, &token).await {
                 Ok(body) => return Ok(body),
-                Err(YahooError::Http { status: 401, .. }) if !refreshed => {
+                Err(failure)
+                    if matches!(failure.error, YahooError::Http { status: 401, .. })
+                        && !refreshed =>
+                {
                     refreshed = true;
                     self.renew().await?;
                 }
-                Err(error) => {
+                Err(failure) => {
                     attempts += 1;
-                    if !error.retryable() || attempts == RETRIES {
-                        return Err(error);
+                    if !failure.error.retryable() || attempts >= self.retry.attempts {
+                        return Err(failure.error);
                     }
-                    tokio::time::sleep(backoff).await;
-                    backoff *= 2;
+                    tokio::time::sleep(self.retry.wait(attempts, failure.asked_for)).await;
                 }
             }
         }
@@ -352,31 +418,6 @@ impl YahooClient {
         Ok(crate::yahoo_parse::players(&value))
     }
 
-    /// Every player Yahoo will hand over, one page at a time.
-    ///
-    /// Yahoo reports no total, so the end is a page that comes back shorter
-    /// than it was asked for. `limit` is a stop of last resort: without it a
-    /// server that kept answering with full pages would page forever.
-    pub async fn all_players(
-        &self,
-        league_key: &str,
-        position: Option<&str>,
-        limit: u32,
-    ) -> Result<Vec<crate::yahoo_types::YahooPlayer>, YahooError> {
-        let mut all = Vec::new();
-        let mut start = 0;
-        while start < limit {
-            let page = self.players(league_key, start, PAGE, position).await?;
-            let fetched = page.players.len() as u32;
-            all.extend(page.players);
-            if fetched < PAGE {
-                break;
-            }
-            start += PAGE;
-        }
-        Ok(all)
-    }
-
     /// The players currently on one team.
     pub async fn team_roster(
         &self,
@@ -389,91 +430,5 @@ impl YahooClient {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_path_asks_for_json() {
-        assert_eq!(
-            url_for(BASE, "/league/449.l.1/teams"),
-            "https://fantasysports.yahooapis.com/fantasy/v2/league/449.l.1/teams?format=json"
-        );
-    }
-
-    #[test]
-    fn a_path_that_already_has_a_query_gets_an_ampersand() {
-        assert_eq!(
-            url_for("http://127.0.0.1:1/v2", "/league/1/players?x=1"),
-            "http://127.0.0.1:1/v2/league/1/players?x=1&format=json"
-        );
-    }
-
-    #[test]
-    fn matrix_parameters_are_not_mistaken_for_a_query() {
-        // Yahoo separates sub-resource parameters with `;`, so the first `?`
-        // is still ours to add.
-        let url = url_for(BASE, "/league/449.l.1/players;start=0;count=25");
-        assert!(
-            url.ends_with("players;start=0;count=25?format=json"),
-            "{url}"
-        );
-    }
-
-    #[test]
-    fn keys_that_could_escape_the_path_are_refused() {
-        for bad in ["", "449.l.1/../../users", "449.l.1;out=x", "a b"] {
-            assert!(
-                check_key("league", bad).is_err(),
-                "{bad:?} should not be a legal key"
-            );
-        }
-        assert!(check_key("league", "449.l.12345.t.7").is_ok());
-    }
-
-    #[test]
-    fn a_throttled_caller_is_told_to_wait_rather_than_shown_yahoos_own_status() {
-        for status in RATE_LIMITED {
-            let error = YahooError::Http {
-                status,
-                url: "https://fantasysports.yahooapis.com/x".into(),
-            };
-            assert!(error.retryable(), "{status} should be worth repeating");
-            let said = error.to_string();
-            assert_eq!(
-                said,
-                "Yahoo is rate-limiting requests — try again in a minute"
-            );
-            assert!(!said.contains(&status.to_string()), "{said}");
-        }
-    }
-
-    #[test]
-    fn only_transport_and_server_errors_are_worth_repeating() {
-        assert!(YahooError::Transport {
-            url: "u".into(),
-            detail: "reset".into()
-        }
-        .retryable());
-        assert!(YahooError::Http {
-            status: 503,
-            url: "u".into()
-        }
-        .retryable());
-        for status in [400, 401, 404] {
-            assert!(!YahooError::Http {
-                status,
-                url: "u".into()
-            }
-            .retryable());
-        }
-        assert!(!YahooError::Invalid("no".into()).retryable());
-    }
-
-    #[test]
-    fn the_default_hosts_are_yahoos_own() {
-        let hosts = YahooHosts::default();
-        assert_eq!(hosts.api_base, BASE);
-        assert_eq!(hosts.login_base, LOGIN_BASE);
-        assert_eq!(hosts.redirect_uri, OOB);
-    }
-}
+#[path = "yahoo_tests.rs"]
+mod tests;

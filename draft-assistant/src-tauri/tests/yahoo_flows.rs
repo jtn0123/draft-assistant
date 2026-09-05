@@ -21,7 +21,7 @@ mod yahoo_stub;
 #[path = "yahoo_flows/harness.rs"]
 mod harness;
 
-use harness::{session, CLIENT_ID, CODE, LEAGUE_KEY, SECRET};
+use harness::{session, AUCTION_KEY, CLIENT_ID, CODE, LEAGUE_KEY, SECRET};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -381,5 +381,30 @@ fn forgetting_the_app_credentials_is_a_second_deliberate_step() {
     assert!(error.contains("client id"), "{error}");
     let error = s.err("yahoo_leagues", json!({}));
     assert!(error.contains("Yahoo is not set up"), "{error}");
+    s.finish();
+}
+
+#[test]
+fn an_auction_league_answers_with_its_budget_and_what_each_pick_cost() {
+    // The failure this prevents: an auction was detected and then nothing was
+    // ever done with the money — no budget was parsed and the costs Yahoo
+    // sends on every pick reached nothing that could show them.
+    let s = session("yahoo-auction");
+    s.connect();
+    let auction = s.ok("yahoo_auction", json!({"leagueKey": AUCTION_KEY}));
+    assert_eq!(auction["budget"], 200);
+    assert_eq!(auction["costs"]["yahoo:30977"], 55.0);
+    assert_eq!(auction["costs"]["yahoo:31883"], 41.0);
+    assert_eq!(
+        auction["costs"].as_object().expect("the costs").len(),
+        3,
+        "one cost per filled pick"
+    );
+
+    // A snake league answers with the same shape and nothing in it, so the
+    // caller needs no separate question about the draft type.
+    let snake = s.ok("yahoo_auction", json!({"leagueKey": LEAGUE_KEY}));
+    assert_eq!(snake["budget"], Value::Null);
+    assert!(snake["costs"].as_object().expect("the costs").is_empty());
     s.finish();
 }

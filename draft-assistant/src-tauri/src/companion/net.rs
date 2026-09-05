@@ -69,6 +69,55 @@ pub fn tailscale_url_for(port: u16) -> Option<String> {
     tailscale_ip().map(|ip| format!("http://{ip}:{port}/"))
 }
 
+/// The two origins that are not this server and are still allowed to post to
+/// it: the follower desktop's webview, and the Vite dev server it runs from
+/// while the app is being worked on.
+pub const FOLLOWER_ORIGINS: [&str; 2] = ["tauri://localhost", "http://localhost:1420"];
+
+/// Whether a browser that says it is `origin` may make a state-changing
+/// request of a server listening on `port`.
+///
+/// This is what stops a page on some other site the phone happens to have
+/// open from posting to the companion in the background: a request from a
+/// real origin has to be the phone page itself (same host and port as the
+/// server, on an address a home network actually hands out) or one of the
+/// follower origins. A request with no `Origin` at all is not a browser's
+/// cross-site request and is left to the bearer token.
+pub fn origin_allowed(origin: &str, port: Option<u16>) -> bool {
+    if FOLLOWER_ORIGINS.contains(&origin) {
+        return true;
+    }
+    let Some(port) = port else {
+        return false;
+    };
+    let Some(rest) = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    let Some((host, said_port)) = rest.rsplit_once(':') else {
+        return false;
+    };
+    said_port.parse::<u16>() == Ok(port) && is_local_address(host)
+}
+
+/// Whether a host is an address this server could be reached on: loopback, a
+/// private LAN range, or the tailnet.
+pub fn is_local_address(host: &str) -> bool {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host == "localhost" {
+        return true;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback(),
+        Ok(std::net::IpAddr::V4(ip)) => {
+            ip.is_loopback() || ip.is_private() || ip.is_link_local() || is_cgnat(&ip.to_string())
+        }
+        Err(_) => false,
+    }
+}
+
 /// Bind `0.0.0.0` on the first free port from `first`, trying
 /// [`PORT_ATTEMPTS`] of them. The port actually taken comes back with the
 /// listener, because it is what the user has to type into their phone.
@@ -129,6 +178,26 @@ mod tests {
         );
         assert_eq!(super::cgnat_address("inet 10.0.0.5\n"), None);
         assert_eq!(super::cgnat_address(""), None);
+    }
+
+    #[test]
+    fn only_this_server_and_the_follower_may_post_across_origins() {
+        use super::origin_allowed;
+        // The phone page itself, however the phone reached the Mac.
+        assert!(origin_allowed("http://192.168.1.42:7878", Some(7878)));
+        assert!(origin_allowed("http://127.0.0.1:7878", Some(7878)));
+        assert!(origin_allowed("http://100.101.102.103:7878", Some(7878)));
+        // The follower desktop, which is its own origin and always will be.
+        assert!(origin_allowed("tauri://localhost", None));
+        assert!(origin_allowed("http://localhost:1420", None));
+        // A page on the internet that found the port is not the phone page.
+        assert!(!origin_allowed("https://evil.example.com", Some(7878)));
+        assert!(!origin_allowed("http://evil.example.com:7878", Some(7878)));
+        assert!(!origin_allowed("http://8.8.8.8:7878", Some(7878)));
+        // Nor is the right address on somebody else's port.
+        assert!(!origin_allowed("http://192.168.1.42:9999", Some(7878)));
+        assert!(!origin_allowed("http://192.168.1.42", Some(7878)));
+        assert!(!origin_allowed("null", Some(7878)));
     }
 
     #[test]

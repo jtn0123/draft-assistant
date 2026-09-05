@@ -46,6 +46,7 @@
                   { "editorial_team_abbr": "Cin" },
                   { "bye_weeks": { "week": "10" } },
                   { "uniform_number": "1" },
+                  { "is_keeper": { "status": null, "cost": null, "kept": "1" } },
                   { "display_position": "WR" },
                   { "eligible_positions": [{ "position": "WR" }, { "position": "W/R/T" }] }
                 ],

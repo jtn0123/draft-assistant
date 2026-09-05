@@ -6,8 +6,8 @@ import { playChime } from "./chime";
 import { MAX_RECONNECT_ATTEMPTS, useDraftSession } from "./draftSession";
 import { setChime, setScreen, useChime, useScreen } from "./prefs";
 import { importSecondOpinion } from "./secondOpinionImport";
-import { clearFollow, readFollow, useCompanionEnabled } from "./companion";
-import { REVOKED_KEY } from "./apiRemote";
+import { clearFollow, readFollow, useCompanionEnabled, useFollowStatus } from "./companion";
+import { useToast } from "./toast";
 import { buildSettingsRows } from "./settingsRows";
 import { useSeasonSession } from "./session";
 import type { SeasonView } from "./season-types";
@@ -64,28 +64,6 @@ function useAppVersion(): string {
   return version;
 }
 
-/** The pending "put this toast away" timer. Module scope rather than a ref:
- *  `showToast` is handed to the settings rows, and a function that reads a
- *  ref cannot be passed anywhere during render. One window, one toast strip,
- *  one timer — and the unmount effect still clears it. */
-let toastTimer: number | undefined;
-
-/** The note a revoked follower left for itself, taken and cleared. Null in
- *  every ordinary launch, which is all but one of them. */
-function revokedNote(): { text: string } | null {
-  try {
-    if (localStorage.getItem(REVOKED_KEY) === null) return null;
-    localStorage.removeItem(REVOKED_KEY);
-  } catch {
-    return null;
-  }
-  return { text: "The host revoked this device" };
-}
-
-/** A line under the header. `retry` marks it as something gone wrong that the
- * user can have another go at — and that should wait for them. */
-type ToastMessage = { text: string; retry?: () => void };
-
 export default function App() {
   // Remembered between sessions, along with the rest of the preferences.
   const screen = useScreen();
@@ -94,19 +72,21 @@ export default function App() {
   // Read once, as the window opens: `api` chose its backend off the same
   // record, so a change to it mid-session would leave the two disagreeing.
   const [follow] = useState(readFollow);
-  // A revoked follower's note, read as the state is initialised so the shell
-  // paints with the explanation rather than after it.
-  const [toast, setToast] = useState<ToastMessage | null>(revokedNote);
+  // One strip, one timer, and the revoked follower's note on the way in.
+  const { toast, showToast, dismissToast } = useToast();
+  // Whether this follower can still hear its host, for the line beside the
+  // "Hosted by" pill. A host that is not following anyone has no state to show.
+  const followStatus = useFollowStatus();
   // Stable across renders so the memoised board rows are not invalidated by a
   // fresh closure on every 3-second poll. A follower has nothing to record —
   // the host keeps the picks — so it is told who does rather than being shown
   // a dialog whose only outcome is a refusal.
   const askToDraft = useCallback(
     (playerId: string, name: string) => {
-      if (follow !== null) setToast({ text: `${follow.host_name} records the picks` });
+      if (follow !== null) showToast(`${follow.host_name} records the picks`);
       else setConfirm({ playerId, name });
     },
-    [follow],
+    [follow, showToast],
   );
   const [leaguePicker, setLeaguePicker] = useState(false);
   const [companionOpen, setCompanionOpen] = useState(false);
@@ -118,21 +98,6 @@ export default function App() {
   // while the choice is "system".
   const { preference, theme } = useAppliedTheme();
   const wasMyPick = useRef(false);
-
-  // ---------- toasts ----------
-
-  const showToast = useCallback((text: string, retry?: () => void) => {
-    setToast({ text, retry });
-    window.clearTimeout(toastTimer);
-    // News gets out of the way on its own. Something that failed waits to be
-    // answered — a lost pick in the middle of a draft is the worst thing this
-    // app could shrug off.
-    if (retry === undefined) {
-      toastTimer = window.setTimeout(() => setToast(null), 5000);
-    }
-  }, []);
-
-  useEffect(() => () => window.clearTimeout(toastTimer), []);
 
   // The draft's own data lifecycle: restores the last league on launch, keeps
   // it live off the backend's poller, and owns every action that replaces the
@@ -204,6 +169,16 @@ export default function App() {
     }
   };
 
+  // Forget what the app decided about this draft's keepers and judge them
+  // again. A league branded from one bad pick list stayed branded for ever.
+  const clearKeepers = async () => {
+    try {
+      applyView(await api.clearKeepers());
+    } catch (e) {
+      showToast(problem("Could not clear the keepers", e), () => void clearKeepers());
+    }
+  };
+
   // ---------- screens without a league ----------
 
   // A league has been loaded: leave the setup screen behind and go live on it.
@@ -238,7 +213,7 @@ export default function App() {
             action={
               toast.retry === undefined ? undefined : { label: "Try again", onClick: toast.retry }
             }
-            onDismiss={() => setToast(null)}
+            onDismiss={dismissToast}
           />
         )}
         {joinOpen && <JoinHost onClose={() => setJoinOpen(false)} />}
@@ -288,6 +263,14 @@ export default function App() {
         : `Week ${season.week} · ${myRecord(season)}`
       : `Round ${d.current_round} of ${d.rounds} · ${d.total_picks_made} picks in`;
 
+  // Every screen is built against the host's data, so going home is a reload
+  // rather than a state change — the same way joining was. The settings row
+  // and the "Pair again" the header offers a revoked follower are one path.
+  const leaveHost = () => {
+    clearFollow();
+    window.location.reload();
+  };
+
   const settingsRows = buildSettingsRows({
     view,
     chime,
@@ -328,6 +311,10 @@ export default function App() {
       setSettingsOpen(false);
       void importSecondOpinion(applyView, showToast);
     },
+    onClearKeepers: () => {
+      setSettingsOpen(false);
+      void clearKeepers();
+    },
     onAvatars: setAvatarMode,
     onAppearance: cycleThemePreference,
     onCompanion: () => {
@@ -338,12 +325,7 @@ export default function App() {
       setSettingsOpen(false);
       setJoinOpen(true);
     },
-    onLeaveHost: () => {
-      // Every screen is built against the host's data, so going home is a
-      // reload rather than a state change — the same way joining was.
-      clearFollow();
-      window.location.reload();
-    },
+    onLeaveHost: leaveHost,
     onDismiss: () => setSettingsOpen(false),
   });
 
@@ -354,6 +336,8 @@ export default function App() {
           <Header
             leagueName={view.league.name}
             hostedBy={follow?.host_name ?? null}
+            followStatus={follow === null ? null : followStatus}
+            onPairAgain={leaveHost}
             onSwitchLeague={() => {
               // The host picks the league; a follower's copy of the picker
               // could only fail, so it says who to ask instead.
@@ -392,7 +376,7 @@ export default function App() {
               action={
                 toast.retry === undefined ? undefined : { label: "Try again", onClick: toast.retry }
               }
-              onDismiss={() => setToast(null)}
+              onDismiss={dismissToast}
             />
           )}
 
@@ -481,6 +465,7 @@ export default function App() {
         <ConfirmDialog
           pickLabel={`Pick ${pickLabel(d.current_pick, d.teams)} · slot ${d.on_clock_slot}`}
           playerName={confirm.name}
+          platform={view.league.platform}
           onConfirm={() => void doDraft(confirm.playerId, confirm.name)}
           onCancel={() => setConfirm(null)}
         />

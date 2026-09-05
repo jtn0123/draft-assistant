@@ -20,6 +20,8 @@ const PREDRAFT: &str = include_str!("fixtures/yahoo/draft_results_predraft.json"
 const PARTIAL: &str = include_str!("fixtures/yahoo/draft_results_partial.json");
 const COMPLETE: &str = include_str!("fixtures/yahoo/draft_results_complete.json");
 const AUCTION: &str = include_str!("fixtures/yahoo/draft_results_auction.json");
+const AUCTION_LEAGUE: &str = include_str!("fixtures/yahoo/league_settings_auction.json");
+const KEEPERS: &str = include_str!("fixtures/yahoo/draft_results_keepers.json");
 const PLAYERS_0: &str = include_str!("fixtures/yahoo/players_page_0.json");
 const PLAYERS_1: &str = include_str!("fixtures/yahoo/players_page_1.json");
 const ROSTER: &str = include_str!("fixtures/yahoo/team_roster.json");
@@ -265,4 +267,58 @@ fn the_team_a_roster_belongs_to_is_still_readable_beside_it() {
     let map = parse::flatten(parse::find(&payload, "team").expect("a team"));
     assert_eq!(parse::text(&map, "team_key"), "449.l.12345.t.1");
     assert_eq!(parse::text(&map, "name"), "Ada's Autos");
+}
+
+#[test]
+fn an_auction_leagues_settings_carry_the_budget_the_bids_are_measured_against() {
+    // The failure this prevents: the auction was detected and the budget was
+    // not read, so nothing downstream could say what a $55 bid was a share of.
+    let league = parse::league(&json(AUCTION_LEAGUE)).expect("the auction league");
+    assert!(league.is_auction_draft);
+    assert_eq!(league.draft_budget, Some(200));
+    // Yahoo sends both of these as strings, like everything else here.
+    assert_eq!(league.num_keepers, Some(2));
+    assert_eq!(league.season, "2026");
+    assert_eq!(league.roster_positions.len(), 8);
+}
+
+#[test]
+fn a_league_that_is_neither_an_auction_nor_a_keeper_league_says_so_by_omission() {
+    let league = parse::league(&json(LEAGUE)).expect("the plain league");
+    assert!(!league.is_auction_draft);
+    assert_eq!(league.draft_budget, None);
+    assert_eq!(league.num_keepers, None);
+}
+
+#[test]
+fn the_keeper_flag_on_a_draft_result_survives_the_parse() {
+    // The failure this prevents: `is_keeper` was never read off a pick, so a
+    // keeper league's first round looked like an ordinary one.
+    let picks = parse::draft_results(&json(KEEPERS));
+    assert_eq!(picks.len(), 3);
+    assert_eq!(picks[0].is_keeper, Some(true));
+    assert_eq!(picks[1].is_keeper, Some(false));
+    assert_eq!(
+        picks[2].is_keeper, None,
+        "a pick Yahoo said nothing about must not read as 'not a keeper'"
+    );
+}
+
+#[test]
+fn the_keeper_flag_yahoo_sends_as_an_object_on_a_roster_row_is_read_too() {
+    // On a roster Yahoo writes `is_keeper: {"status": .., "cost": .., "kept": "1"}`
+    // rather than a plain 1, and reading that shape as a boolean gets nothing.
+    let page = parse::players(&json(ROSTER));
+    assert_eq!(page.players[0].is_keeper, Some(true));
+    assert_eq!(
+        page.players[1].is_keeper, None,
+        "a player row without the field at all is not a keeper decision"
+    );
+}
+
+#[test]
+fn a_snake_leagues_picks_carry_no_keeper_opinion() {
+    for pick in parse::draft_results(&json(PARTIAL)) {
+        assert_eq!(pick.is_keeper, None, "pick {} invented a flag", pick.pick);
+    }
 }

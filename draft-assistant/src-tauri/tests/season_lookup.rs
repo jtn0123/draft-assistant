@@ -40,7 +40,7 @@ fn some(value: &str) -> Option<String> {
 fn league_with(metadata: &[(&str, PlayerMeta)]) -> LoadedLeague {
     let (mut loaded, _, _) = common::fixture();
     for (id, row) in metadata {
-        loaded.player_meta.insert((*id).to_string(), row.clone());
+        std::sync::Arc::make_mut(&mut loaded.player_meta).insert((*id).to_string(), row.clone());
     }
     loaded
 }
@@ -48,7 +48,9 @@ fn league_with(metadata: &[(&str, PlayerMeta)]) -> LoadedLeague {
 /// The board row for `player_id`, to be edited in place.
 fn board_row<'a>(loaded: &'a mut LoadedLeague, player_id: &str) -> &'a mut BoardPlayer {
     let i = loaded.board_index[player_id];
-    &mut loaded.board[i]
+    // Shared behind an `Arc` so the poll tick can copy the loaded league
+    // without duplicating it; editing one takes a copy of its own.
+    &mut std::sync::Arc::make_mut(&mut loaded.board)[i]
 }
 
 #[test]

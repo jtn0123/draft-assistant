@@ -39,6 +39,36 @@ describe("SidePanel", () => {
     expect(screen.queryByText("Won't last to 2.01")).not.toBeInTheDocument();
   });
 
+  it("counts three picks in a row as one window", () => {
+    const view = fixture();
+    view.draft.teams = 14;
+    view.draft.current_pick = 27;
+    view.draft.is_my_pick = true;
+    // A traded pick leaves me 27, 28 and 29 back to back. Every one of them
+    // is the same window, so the pick that matters is 55.
+    view.draft.my_next_picks = [27, 28, 29, 55];
+
+    render(<SidePanel view={view} />);
+    expect(screen.getByText("Won't last to 4.13")).toBeInTheDocument();
+    expect(screen.queryByText("Won't last to 2.14")).not.toBeInTheDocument();
+  });
+
+  it("treats a keeper between two of my picks as no gap at all", () => {
+    const view = fixture();
+    view.draft.teams = 14;
+    view.draft.current_pick = 27;
+    view.draft.is_my_pick = true;
+    // Picks 28 and 29 are keepers, already in the book: nobody selects there,
+    // so 27 and 30 are adjacent and 55 is the pick survival is judged at.
+    // Reading 30 as "my next turn" said every player was 99% to last.
+    view.draft.my_next_picks = [27, 30, 55];
+    view.draft.keeper_picks = [28, 29];
+
+    render(<SidePanel view={view} />);
+    expect(screen.getByText("Won't last to 4.13")).toBeInTheDocument();
+    expect(screen.queryByText("Won't last to 3.02")).not.toBeInTheDocument();
+  });
+
   it("uses the upcoming pick when it is not my turn", () => {
     const view = fixture();
     view.draft.teams = 14;
