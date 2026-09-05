@@ -184,6 +184,18 @@ describe("SidePanel", () => {
     render(<SidePanel view={view} />);
     expect(screen.getByText("Set your Sleeper username to track your team.")).toBeInTheDocument();
   });
+
+  it("tells a Yahoo manager to connect Yahoo, not to set a Sleeper username", () => {
+    // A Yahoo league has no Sleeper username to set; the old line sent a
+    // Yahoo user to a setting that could not help them.
+    const view = fixture();
+    view.my_roster = null;
+    view.league = { ...view.league, platform: "yahoo" };
+
+    render(<SidePanel view={view} />);
+    expect(screen.getByText("Connect Yahoo to track your team.")).toBeInTheDocument();
+    expect(screen.queryByText(/Sleeper username/)).not.toBeInTheDocument();
+  });
 });
 
 // Grade item G7. The at-risk list filters, sorts and slices several hundred

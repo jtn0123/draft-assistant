@@ -249,7 +249,11 @@ export function SidePanel({ view }: { view: DraftView }) {
           note={roster === null ? undefined : `${roster.players.length} of ${rounds}`}
         />
         {roster === null ? (
-          <Empty>Set your Sleeper username to track your team.</Empty>
+          <Empty>
+            {view.league.platform === "yahoo"
+              ? "Connect Yahoo to track your team."
+              : "Set your Sleeper username to track your team."}
+          </Empty>
         ) : roster.players.length === 0 ? (
           <Empty>No picks yet.</Empty>
         ) : (
