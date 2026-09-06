@@ -23,8 +23,20 @@ import { dump } from "./fixtures";
 // page's own scheme, and `ws://` is not `http://`.
 const CSP =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-  "connect-src 'self' ws://127.0.0.1:7878 ws://localhost:7878; base-uri 'none'; " +
-  "form-action 'none'; frame-ancestors 'none'";
+  "connect-src 'self' ws://127.0.0.1:7878 ws://localhost:7878; manifest-src 'self'; " +
+  "worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+/** The static files the shipped page loads, with the content type each is
+ *  served as; mirrors the list `routes.rs` serves. */
+const STATIC_TYPES: Record<string, string> = {
+  "helpers.js": "text/javascript",
+  "clock.js": "text/javascript",
+  "pwa.js": "text/javascript",
+  "app.js": "text/javascript",
+  "app.css": "text/css",
+  "sw.js": "text/javascript",
+  "manifest.webmanifest": "application/manifest+json",
+  "icon.svg": "image/svg+xml",
+};
 const staticDir = new URL("../src-tauri/companion-static/", import.meta.url);
 const asset = (name: string) => readFileSync(fileURLToPath(new URL(name, staticDir)), "utf8");
 
@@ -65,12 +77,12 @@ async function serve(page: Page, host: Backend): Promise<void> {
         headers: { "content-type": "text/html", "content-security-policy": CSP },
       });
     }
-    if (
-      ["/static/helpers.js", "/static/clock.js", "/static/app.js", "/static/app.css"].includes(path)
-    ) {
-      const type = path.endsWith(".css") ? "text/css" : "text/javascript";
-      const body = asset(path.slice("/static/".length));
-      return route.fulfill({ body, headers: { "content-type": type } });
+    // Every file index.html asks for. A file missing here is a 404 the page
+    // never sees in production, and app.js dies on load when pwa.js is one.
+    if (path.startsWith("/static/") && STATIC_TYPES[path.slice("/static/".length)]) {
+      const name = path.slice("/static/".length);
+      const body = asset(name);
+      return route.fulfill({ body, headers: { "content-type": STATIC_TYPES[name] } });
     }
     if (path === "/api/pair") {
       const sent = route.request().postDataJSON() as { code: string; device_name: string };
