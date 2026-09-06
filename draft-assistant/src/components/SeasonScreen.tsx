@@ -311,10 +311,14 @@ export function SeasonScreen({
 
       <div className="season-body">
         <div className="season-main">
+          {/* Every child that names the service reads the league's platform.
+              The children default to Sleeper, and a Yahoo league that did not
+              pass it was told to set its lineup on Sleeper. */}
           <CallsToMake
             calls={view.calls}
             pointsOnTable={view.points_on_table}
             started={anyStarted}
+            platform={view.league.platform}
           />
           <LineupCompare
             matchup={matchup}
@@ -322,6 +326,7 @@ export function SeasonScreen({
             onWhich={setLineup}
             winOdds={winOdds}
             locked={locked}
+            platform={view.league.platform}
           />
           <Waivers
             waivers={view.waivers}
@@ -369,7 +374,7 @@ export function SeasonScreen({
                 opponentName={header.opponent_name}
               />
             )}
-            {tab === "My team" && <TeamRoster rows={view.roster} />}
+            {tab === "My team" && <TeamRoster rows={view.roster} platform={view.league.platform} />}
             {tab === "Trends" && <TrendsTab trends={view.trends} avatars={view.team_avatars} />}
             {tab === "League" && (
               <LeagueTab

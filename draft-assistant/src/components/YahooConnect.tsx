@@ -345,26 +345,33 @@ function Connect({
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
-          <label className="field">
-            Code from Yahoo
-            <input
-              className="text-input"
-              value={code}
-              autoComplete="off"
-              onChange={(e) => onCode(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && code.trim() !== "" && !working) onFinish();
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className="btn-primary yahoo-action"
-            disabled={working || code.trim() === ""}
-            onClick={onFinish}
-          >
-            {working ? "Finishing…" : "Finish"}
-          </button>
+          {/* Only the oob flow has a code to paste. With a loopback redirect
+              the backend finishes the sign-in itself, and a field asking for
+              a code Yahoo never shows left the user hunting for one. */}
+          {pastesCode && (
+            <>
+              <label className="field">
+                Code from Yahoo
+                <input
+                  className="text-input"
+                  value={code}
+                  autoComplete="off"
+                  onChange={(e) => onCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && code.trim() !== "" && !working) onFinish();
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn-primary yahoo-action"
+                disabled={working || code.trim() === ""}
+                onClick={onFinish}
+              >
+                {working ? "Finishing…" : "Finish"}
+              </button>
+            </>
+          )}
         </>
       )}
     </>

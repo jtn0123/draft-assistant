@@ -82,6 +82,8 @@ const METHODS: Record<keyof Api, true> = {
   openLogFolder: true,
   logFrontendError: true,
   setLogLevel: true,
+  checkForUpdate: true,
+  installUpdate: true,
 };
 
 const METHOD_NAMES = Object.keys(METHODS) as (keyof Api)[];

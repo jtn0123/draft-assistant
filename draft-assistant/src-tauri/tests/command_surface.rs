@@ -41,6 +41,7 @@ use draft_assistant_lib::commands_diag as diag;
 use draft_assistant_lib::commands_draft as draft;
 use draft_assistant_lib::commands_season as season;
 use draft_assistant_lib::commands_second_opinion as second_opinion;
+use draft_assistant_lib::commands_update as update;
 use draft_assistant_lib::commands_yahoo as yahoo;
 use draft_assistant_lib::companion::CompanionServer;
 use draft_assistant_lib::engine::Engine;
@@ -210,6 +211,8 @@ fn handler_list() -> BTreeSet<String> {
         "log_frontend_error",
         "open_log_folder",
         "set_log_level",
+        "check_for_update",
+        "install_update",
     ]
     .into_iter()
     .map(str::to_string)
@@ -262,7 +265,23 @@ fn every_command_answers_over_the_ipc() {
     // Set before the first `Engine`, and so before the first `SleeperClient`:
     // `sleeper_host::host()` reads the variable once and remembers the answer
     // for the life of the process.
-    std::env::set_var("DRAFT_ASSISTANT_SLEEPER_BASE", sleeper_stub());
+    let stub = sleeper_stub();
+    std::env::set_var("DRAFT_ASSISTANT_SLEEPER_BASE", &stub);
+    // The two update commands go through `tauri-plugin-updater`, which panics
+    // rather than errors when it was never registered. It is registered here
+    // the way `lib.rs` registers it, but pointed at the same loopback stub:
+    // its 404 is the "no release feed yet" answer, and nothing leaves the
+    // machine. The plugin refuses an `http:` endpoint unless told the feed is
+    // deliberately insecure, which on loopback it is.
+    let mut context = mock_context(noop_assets());
+    context.config_mut().plugins.0.insert(
+        "updater".to_string(),
+        serde_json::json!({
+            "endpoints": [format!("{stub}/latest.json")],
+            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IHRlc3QK",
+            "dangerousInsecureTransportProtocol": true,
+        }),
+    );
 
     let data_dir = std::env::temp_dir().join(format!(
         "draft-assistant-command-surface-{}",
@@ -277,6 +296,7 @@ fn every_command_answers_over_the_ipc() {
     // of the app for 7878 and never fails for want of it.
     config.companion_port = Some(0);
     let app = mock_builder()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             draft::add_league,
             draft::set_my_username,
@@ -325,8 +345,10 @@ fn every_command_answers_over_the_ipc() {
             diag::log_frontend_error,
             diag::open_log_folder,
             diag::set_log_level,
+            update::check_for_update,
+            update::install_update,
         ])
-        .build(mock_context(noop_assets()))
+        .build(context)
         .expect("the app builds on the mock runtime");
 
     // `sandboxed`, never `default()` or `new()`: the sweep below calls

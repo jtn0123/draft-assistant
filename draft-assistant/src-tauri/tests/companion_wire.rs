@@ -9,6 +9,8 @@ mod harness;
 mod chat_tests;
 #[path = "companion/headers_tests.rs"]
 mod headers_tests;
+#[path = "companion/https_tests.rs"]
+mod https_tests;
 #[path = "companion/lifecycle_tests.rs"]
 mod lifecycle_tests;
 #[path = "companion/ws_tests.rs"]

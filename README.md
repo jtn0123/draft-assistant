@@ -73,7 +73,9 @@ other directive stays exactly as strict as it was — `default-src 'self'`,
 never loads remote code; it only fetches JSON and images from a host the user
 paired with by typing a six-digit code.
 
-**Away from the Wi-Fi.** Install Tailscale on the Mac and on the phone (there is an iOS app), sign both into the same tailnet, and the settings panel shows a second address and QR code (`http://100.x.y.z:7878/`) that works from anywhere. Same pairing code; nothing else changes.
+**Away from the Wi-Fi.** Install Tailscale on the Mac and on the phone (there is an iOS app), sign both into the same tailnet, and the settings panel shows a second address and QR code (the Mac's MagicDNS name, or `http://100.x.y.z:7878/` when there is none) that works from anywhere. Same pairing code; nothing else changes.
+
+**HTTPS over Tailscale.** When the tailnet has HTTPS certificates enabled (DNS → HTTPS Certificates in the Tailscale admin console) the companion mints a real certificate for the Mac's MagicDNS name with `tailscale cert` and serves a second, secure listener on the next port up; the tailnet URL in Settings becomes `https://<name>.ts.net:7879/`. Automatic: nothing to configure in the app, and the first mint can take a few seconds when the companion is turned on. The padlock is what lets the phone install the page from its browser's share menu (Add to Home Screen) and keep the screen awake through a draft; both are refused over plain `http://`. The certificate is renewed inside two weeks of expiry, the key is kept 0600 under the app's data folder, and a Mac with no Tailscale, or a tailnet without the feature, gets the plain listener alone as before.
 
 ## Conventions
 

@@ -176,6 +176,36 @@ describe("the sign-in step", () => {
     expect(screen.queryByText(/short code to paste/)).toBeNull();
   });
 
+  it("asks a loopback-registered app's user for no code once the browser trip has begun", async () => {
+    // The field appeared after "Sign in" whatever the redirect was, so a
+    // loopback user was left looking for a code Yahoo never shows. The
+    // address to paste into the browser still shows; the code and Finish do
+    // not.
+    await open(status({ configured: true, redirect: "http://localhost:8731/" }));
+    mocks.yahooBeginConnect.mockResolvedValue({
+      authorize_url: "https://yahoo.example/auth",
+      state: "s-loop",
+      redirect: "http://localhost:8731/",
+    });
+    await settle(() => screen.getByRole("button", { name: "Sign in to Yahoo" }).click());
+
+    expect(screen.getByText("https://yahoo.example/auth")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Code from Yahoo")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Finish" })).toBeNull();
+  });
+
+  it("still asks an oob-registered app's user for the code once the browser trip has begun", async () => {
+    await open(configured);
+    mocks.yahooBeginConnect.mockResolvedValue({
+      authorize_url: "https://yahoo.example/auth",
+      state: "s-oob",
+      redirect: "oob",
+    });
+    await settle(() => screen.getByRole("button", { name: "Sign in to Yahoo" }).click());
+    expect(screen.getByLabelText("Code from Yahoo")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Finish" })).toBeInTheDocument();
+  });
+
   it("tells an oob-registered app's user to paste the code Yahoo shows", async () => {
     await open(configured);
     expect(screen.getByText(/short code to paste back here/)).toBeInTheDocument();

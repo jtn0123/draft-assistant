@@ -358,9 +358,13 @@ attaches it with the signed `.app.tar.gz` and `.sig`, but only when the
 of the minisign keypair whose public half is `plugins.updater.pubkey` in
 `tauri.conf.json`, generated with `npx tauri signer generate` and no password.
 Without the secret a tag still produces the `.dmg`, with a warning that no
-installed copy can update to it. The plugin is registered and granted; a
-"Check for updates" row in Settings is not built yet, so nothing in the UI
-triggers a check today.
+installed copy can update to it. Settings -> "Check for updates" asks that
+feed (`check_for_update` in `src-tauri/src/commands_update.rs`): until the
+first signed release exists it says "No release feed yet"; once one does, the
+row turns into "Update to X.Y.Z" with the first line of the release notes,
+and choosing it downloads the archive, verifies the signature, swaps the
+bundle and restarts the app. A failed check or install says why in one line
+and offers a retry.
 
 Two things to tell anyone you hand the `.dmg` to:
 
@@ -369,8 +373,9 @@ Two things to tell anyone you hand the `.dmg` to:
   Open no longer gets past it: open System Settings -> Privacy & Security,
   find the message about the blocked app, click **Open Anyway**, then launch
   it again.
-- Until the Settings row exists, a new version means downloading the next
-  `.dmg` by hand.
+- Until the first signed release is published, a new version means
+  downloading the next `.dmg` by hand; after that, Settings -> "Check for
+  updates".
 
 ## Testing
 

@@ -93,6 +93,8 @@ describe("reads", () => {
     await expect(remoteApi(follow, () => undefined).getSeason()).rejects.toThrow(
       /Justin's Mac hasn't opened the Season screen yet/,
     );
+    // Copy the user reads: two sentences, not an em-dash.
+    await expect(remoteApi(follow, () => undefined).getSeason()).rejects.toThrow(/^[^—]*$/);
   });
 
   it("fills in what /api/config does not carry", async () => {
@@ -394,6 +396,10 @@ describe("what the host keeps", () => {
     fetchMock.mockResolvedValue(json({ error: "busy" }, 409));
     await expect(remoteApi(follow, () => undefined).sharedChatSend("draft", "hi")).rejects.toThrow(
       /Someone else is asking/,
+    );
+    // Copy the user reads: two sentences, not an em-dash.
+    await expect(remoteApi(follow, () => undefined).sharedChatSend("draft", "hi")).rejects.toThrow(
+      /^[^—]*$/,
     );
   });
 });

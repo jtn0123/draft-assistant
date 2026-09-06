@@ -17,6 +17,40 @@ use super::hub::Device;
 use crate::yahoo_secrets::{Item, SecretStore};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Whether this process is the headless `companion_host` rather than the
+/// desktop app. Set once, before the hub is built, and never cleared.
+///
+/// The choice lives here rather than in the server's constructor because the
+/// server builds its hub, and the hub its store, without a parameter for it;
+/// what differs between the two is only which Keychain account the device
+/// list goes under, and this module is the one place that names it.
+static HEADLESS: AtomicBool = AtomicBool::new(false);
+
+/// Keep this process's pairings apart from the desktop app's. The headless
+/// host and the desktop app on one Mac used to share `companion-devices`:
+/// pairing a phone against the host overwrote every phone paired to the
+/// desktop, and the desktop's next save overwrote the host's. Called by
+/// `companion_host` before it builds its server.
+pub fn select_headless_account() {
+    HEADLESS.store(true, Ordering::SeqCst);
+}
+
+/// The item the device list of this process goes under.
+pub fn devices_item() -> Item {
+    devices_item_for(HEADLESS.load(Ordering::SeqCst))
+}
+
+/// The pure half of [`devices_item`]: which item a headless or a desktop
+/// process keeps its pairings in.
+pub fn devices_item_for(headless: bool) -> Item {
+    if headless {
+        Item::CompanionDevicesHeadless
+    } else {
+        Item::CompanionDevices
+    }
+}
 
 /// One paired device as it survives a restart: the device the contract
 /// describes, plus the token that device authenticates with.
@@ -49,10 +83,16 @@ pub fn legacy_path_in(data_dir: &Path) -> PathBuf {
 /// the cost is re-pairing, and refusing to start the app over it would be
 /// worse.
 pub fn load(store: &dyn SecretStore, data_dir: &Path) -> Option<StoredHub> {
-    if let Some(raw) = store.read(Item::CompanionDevices) {
+    load_item(store, data_dir, devices_item())
+}
+
+/// [`load`] against a named item, so a test can show the desktop's and the
+/// headless host's lists never read as each other's.
+pub fn load_item(store: &dyn SecretStore, data_dir: &Path, item: Item) -> Option<StoredHub> {
+    if let Some(raw) = store.read(item) {
         return serde_json::from_str::<StoredHub>(&raw).ok();
     }
-    migrate_legacy_file(store, data_dir)
+    migrate_legacy_file(store, data_dir, item)
 }
 
 /// Move a pre-Keychain `companion_devices.json` into the store and delete it.
@@ -62,14 +102,14 @@ pub fn load(store: &dyn SecretStore, data_dir: &Path) -> Option<StoredHub> {
 /// whole module exists to end. It is kept only when the store refused the
 /// write, so that a later run can try the move again instead of unpairing
 /// every phone.
-fn migrate_legacy_file(store: &dyn SecretStore, data_dir: &Path) -> Option<StoredHub> {
+fn migrate_legacy_file(store: &dyn SecretStore, data_dir: &Path, item: Item) -> Option<StoredHub> {
     let path = legacy_path_in(data_dir);
     let raw = std::fs::read_to_string(&path).ok()?;
     let Ok(stored) = serde_json::from_str::<StoredHub>(&raw) else {
         let _ = std::fs::remove_file(&path);
         return None;
     };
-    if write(store, &stored).is_err() {
+    if write(store, &stored, item).is_err() {
         crate::applog::warn("could not move the paired devices into the keychain");
         return Some(stored);
     }
@@ -85,16 +125,21 @@ fn migrate_legacy_file(store: &dyn SecretStore, data_dir: &Path) -> Option<Store
 /// the pairing the user just made is already live in memory, and losing it at
 /// the next restart is not a reason to refuse it now.
 pub fn save(store: &dyn SecretStore, stored: &StoredHub) {
-    if write(store, stored).is_err() {
+    save_item(store, stored, devices_item());
+}
+
+/// [`save`] against a named item.
+pub fn save_item(store: &dyn SecretStore, stored: &StoredHub, item: Item) {
+    if write(store, stored, item).is_err() {
         // Deliberately not the error text: a store error can quote the value
         // it was handed, and that value is every paired phone's token.
         crate::applog::warn("could not save the paired devices");
     }
 }
 
-fn write(store: &dyn SecretStore, stored: &StoredHub) -> Result<(), ()> {
+fn write(store: &dyn SecretStore, stored: &StoredHub, item: Item) -> Result<(), ()> {
     let json = serde_json::to_string(stored).map_err(|_| ())?;
-    store.write(Item::CompanionDevices, &json).map_err(|_| ())
+    store.write(item, &json).map_err(|_| ())
 }
 
 #[cfg(test)]

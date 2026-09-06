@@ -390,6 +390,7 @@ Everything here is covered by tests against fixtures or a headless host; none of
 | L7 | A Sunday during the season. | Scoreboard live, "locked" only once all my starters have kicked off, Refresh rolls the week Tuesday morning. | open |
 | L8 | Settings → Diagnostics… on the Mac. | Copy diagnostics pastes clean text with no code or token; Open log folder lands in the right place; Verbose logging changes the tail. | dialog and the copy-failure message checked in the browser preview; the Mac-only actions still open |
 | L9 | Download the CI `.dmg` on a Mac that has never run the app. | Gatekeeper warning (unsigned) is the only obstacle; first launch reaches the setup screen. | dmg inspected: 8 MB, aarch64 only, ad-hoc signed with hardened runtime, `spctl` rejects it, so macOS 15 needs Settings → Privacy & Security → Open Anyway; first launch still open |
+| L10 | Open the https tailnet URL on the phone (needs HTTPS certificates enabled in the tailnet admin). | Padlock in the address bar, Add to Home Screen offered and the installed app opens standalone, and the screen stays awake during a live draft. | open |
 
 ## Still missing (2026-09-05)
 

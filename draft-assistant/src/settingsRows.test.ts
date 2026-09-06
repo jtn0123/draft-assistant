@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import fixtureJson from "../public/dev-fixture.json";
 import type { DraftView } from "./types";
 import { buildSettingsRows, type SettingsRowInput } from "./settingsRows";
+import { IDLE } from "./updateRow";
 
 function view(): DraftView {
   return structuredClone(fixtureJson) as unknown as DraftView;
@@ -22,7 +23,7 @@ function input(overrides: Partial<SettingsRowInput> = {}): SettingsRowInput {
     avatars: "logos",
     preference: "system",
     theme: "light",
-    appVersion: "0.2.0",
+    updates: { current: "0.2.0", state: IDLE, supported: true, select: vi.fn() },
     hostName: null,
     companionOn: false,
     onChime: vi.fn(),
@@ -153,5 +154,47 @@ describe("setting the Sleeper username after the first launch", () => {
     const state = input();
     state.view.league.platform = "sleeper";
     expect(row(buildSettingsRows(state), LABEL)).toBeUndefined();
+  });
+});
+
+// The updater plugin was registered and granted for a whole release cycle
+// and nothing on the menu called it, so a signed release could reach nobody.
+describe("checking for updates from the menu", () => {
+  it("offers the row on the desktop and hands it the hook's action", () => {
+    const select = vi.fn();
+    const state = input({ updates: { current: "0.2.0", state: IDLE, supported: true, select } });
+
+    const check = row(buildSettingsRows(state), "Check for updates");
+    expect(check?.value).toBe("Check");
+    check?.onSelect();
+    expect(select).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows what the check found in place of the offer", () => {
+    const state = input({
+      updates: {
+        current: "0.2.0",
+        state: { kind: "available", version: "0.3.1", notes: "- Keeper guard" },
+        supported: true,
+        select: vi.fn(),
+      },
+    });
+    const rows = buildSettingsRows(state);
+    expect(row(rows, "Update to 0.3.1")?.note).toBe("Keeper guard");
+    expect(row(rows, "Check for updates")).toBeUndefined();
+  });
+
+  it("leaves the row off where there is no updater to ask, and keeps the version line", () => {
+    const state = input({
+      updates: { current: "0.2.0", state: IDLE, supported: false, select: vi.fn() },
+    });
+    const rows = buildSettingsRows(state);
+    expect(row(rows, "Check for updates")).toBeUndefined();
+    expect(row(rows, "Version")?.value).toBe("v0.2.0");
+  });
+
+  it("sits just above the version line, the last two things on the menu", () => {
+    const labels = buildSettingsRows(input()).map((r) => r.label);
+    expect(labels.slice(-2)).toEqual(["Check for updates", "Version"]);
   });
 });

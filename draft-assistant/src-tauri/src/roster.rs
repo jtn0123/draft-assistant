@@ -53,6 +53,16 @@ impl RosterRules {
             && !DRAFTABLE.contains(&slot)
     }
 
+    /// A starting slot this board can build for: not bench or reserve, and
+    /// not one of the IDP slots the board has no players for. Every place
+    /// that counts open starters, starting demand or starters' byes asks this
+    /// one question; three of them used to ask only `is_non_starting`, so an
+    /// IDP league's DL and LB slots were excluded from the draft cards and
+    /// still counted at replacement level and in the bye clash line.
+    pub fn counts_as_open_starter(slot: &str) -> bool {
+        !Self::is_non_starting(slot) && !Self::is_unfillable(slot)
+    }
+
     /// The distinct unfillable slots on this roster, in roster order, for
     /// the warning that says the board is not drafting for them.
     pub fn unfillable_slots(&self) -> Vec<String> {
@@ -108,10 +118,7 @@ impl RosterRules {
         let mut open: HashMap<String, u32> = HashMap::new();
 
         for slot in &self.slots {
-            if Self::is_non_starting(slot)
-                || Self::is_unfillable(slot)
-                || Self::flex_eligible(slot).is_some()
-            {
+            if !Self::counts_as_open_starter(slot) || Self::flex_eligible(slot).is_some() {
                 continue;
             }
             let count = remaining.entry(slot.as_str()).or_insert(0);
@@ -239,6 +246,18 @@ mod tests {
         );
         assert!(!RosterRules::is_unfillable("BN"));
         assert!(!RosterRules::is_unfillable("FLEX"));
+    }
+
+    #[test]
+    fn an_idp_slot_never_counts_as_an_open_starter_anywhere_the_question_is_asked() {
+        // The one helper every open-starter count goes through. A site that
+        // asked only "is it bench?" counted DL and LB as starters to fill.
+        for slot in ["DL", "LB", "DB", "IDP_FLEX", "BN", "IR", "IR+", "TAXI"] {
+            assert!(!RosterRules::counts_as_open_starter(slot), "{slot}");
+        }
+        for slot in ["QB", "RB", "WR", "TE", "K", "DEF", "FLEX", "SUPER_FLEX"] {
+            assert!(RosterRules::counts_as_open_starter(slot), "{slot}");
+        }
     }
 
     #[test]

@@ -66,6 +66,16 @@ tauri-plugin-updater = "2.11"
 # pulls tokio-tungstenite in; nothing else here is new to the graph -- axum,
 # hyper, tower and http were already in it by way of tauri.
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
+# The companion's HTTPS listener, for the certificate `tailscale cert` mints
+# for this machine's MagicDNS name. Nothing here is new to the graph: rustls
+# 0.23 and tokio-rustls 0.26 were already in it by way of reqwest, on the
+# `ring` provider, and that is the provider asked for here so the lockfile
+# keeps one TLS stack rather than growing an aws-lc-rs beside it. hyper and
+# hyper-util are axum's own; they are named so the TLS accept loop can hand
+# a finished handshake to the same router the plain listener serves.
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
+hyper = { version = "1.11", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "0.1.20", default-features = false, features = ["tokio", "server", "service"] }
 # Optional, and only ever pulled in by the `wdio` feature above. `optional =
 # true` means these are absent from the dependency graph -- not merely unused
 # -- unless that feature is on; `cargo tree` proves it.
@@ -82,6 +92,11 @@ tauri = { version = "2.11", features = ["test"] }
 # graph: axum's `ws` feature already pulls this exact version in as the server
 # half. Test-only, so nothing in a shipped binary links the client side.
 tokio-tungstenite = "0.29"
+# Test certificates for the companion's HTTPS listener. The tests never run
+# `tailscale cert`; they mint a self-signed certificate for a made-up MagicDNS
+# name with a chosen expiry, and write it where the real one would be. Pure
+# Rust on the same `ring` the shipped TLS stack uses. Test-only.
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "ring"] }
 
 [profile.release]
 overflow-checks = true

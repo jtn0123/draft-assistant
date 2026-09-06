@@ -94,8 +94,11 @@ fn allocate(
     let horizon = teams.max(1);
     let mut base_demand: HashMap<String, usize> = HashMap::new();
     let mut flex_slots: Vec<&[&str]> = Vec::new();
+    // Bench and reserve add no demand, and neither does an IDP slot: the
+    // board has no DL or LB pool, and a "DL" demand of twelve reached the
+    // recommender's need model as twelve starters the league wanted.
     for slot in rules.slots() {
-        if RosterRules::is_non_starting(slot) {
+        if !RosterRules::counts_as_open_starter(slot) {
             continue;
         }
         if let Some(elig) = RosterRules::flex_eligible(slot) {

@@ -31,6 +31,9 @@
     createHeartbeat,
     clockOffset,
     needsRevive,
+    wantsWakeLock,
+    createWakeLock,
+    registerServiceWorker,
     el,
     clear,
     spans,
@@ -43,6 +46,9 @@
     let state = initialState();
     let socket = null;
     let attempt = 0;
+    // Held while a draft is live and the host is connected; see pwa.js.
+    const wakeLock = createWakeLock(navigator);
+    registerServiceWorker(window, navigator);
     // The one pending reconnect. Kept so a wake can cancel it: a timer left
     // running opened a second socket beside the one the wake had just made.
     let reconnectTimer = null;
@@ -230,7 +236,11 @@
       void loadEverything();
     };
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") revive();
+      if (document.visibilityState !== "visible") return;
+      revive();
+      // The browser let the lock go when the screen went dark or the tab
+      // was left; the page has to ask again the moment it is looked at.
+      wakeLock.sync(wantsWakeLock(state));
     });
     window.addEventListener("pageshow", revive);
     window.addEventListener("online", revive);
@@ -437,6 +447,7 @@
       $("pair-error").hidden = !state.pairError;
       $("pair-error").textContent = state.pairError ?? "";
       ticker.sync(needsTicker(state));
+      wakeLock.sync(wantsWakeLock(state));
       if (state.screen === "pair") return;
       for (const button of $("tabbar").children) {
         if (button.dataset.tab === "week") button.hidden = !state.season;

@@ -128,8 +128,12 @@ pub fn starter_byes<'a>(
     };
     // Dedicated slots first — a flex that swallowed the only tight end would
     // leave the TE slot claiming a player the roster does not have.
+    // The same slots `open_starting_slots` builds for: an IDP slot is not one
+    // of them, so a linebacker's bye is not a clash for the offensive lineup
+    // the board is filling.
     for slot in rules.slots() {
-        if RosterRules::is_non_starting(slot) || RosterRules::flex_eligible(slot).is_some() {
+        if !RosterRules::counts_as_open_starter(slot) || RosterRules::flex_eligible(slot).is_some()
+        {
             continue;
         }
         let slot = slot.clone();
@@ -366,6 +370,28 @@ mod reliability_tests {
         let byes = starter_byes(&rules, roster);
         assert_eq!(byes.get(&11), Some(&2), "{byes:?}");
         assert_eq!(byes.get(&3), Some(&2));
+    }
+
+    #[test]
+    fn an_idp_starters_bye_is_not_a_clash_for_the_lineup_the_board_builds() {
+        // An IDP league's DL slot took the drafted lineman and counted his bye
+        // among "your starters", though the board never drafts for that slot
+        // and the open-starter count already leaves it out.
+        let rules = RosterRules::new(
+            &["QB", "RB", "DL", "LB", "BN"]
+                .iter()
+                .map(|slot| (*slot).to_string())
+                .collect::<Vec<_>>(),
+        );
+        let roster: Vec<(&str, Option<u32>)> = vec![
+            ("QB", Some(9)),
+            ("DL", Some(9)),
+            ("LB", Some(9)),
+            ("RB", Some(4)),
+        ];
+        let byes = starter_byes(&rules, roster);
+        assert_eq!(byes.get(&9), Some(&1), "{byes:?}");
+        assert_eq!(byes.get(&4), Some(&1));
     }
 
     #[test]

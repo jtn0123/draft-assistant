@@ -140,6 +140,10 @@ async fn main() {
     });
 
     let host_name = draft_assistant_lib::commands_companion::default_host_name();
+    // Before the server builds its hub: the hub reads the device list as it
+    // is built, and it has to read the headless host's own, not the desktop
+    // app's, or the two overwrite each other's pairings on one Mac.
+    draft_assistant_lib::companion::store::select_headless_account();
     let companion = Arc::new(
         CompanionServer::new(host_name, args.data_dir.clone()).unwrap_or_else(|e| {
             eprintln!("companion failed to build: {e}");

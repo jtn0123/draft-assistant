@@ -183,9 +183,7 @@ pub fn recommend(inputs: &RecommendInputs) -> Vec<Recommendation> {
                 .rules
                 .slots()
                 .iter()
-                .filter(|slot| {
-                    !RosterRules::is_non_starting(slot) && !RosterRules::is_unfillable(slot)
-                })
+                .filter(|slot| RosterRules::counts_as_open_starter(slot))
                 .fold(HashMap::new(), |mut m, s| {
                     *m.entry(s.clone()).or_insert(0) += 1;
                     m

@@ -18,6 +18,7 @@ import type { ChatReply, ChatRequest, ChatSettings } from "./chat-types";
 import { ReplayFeed, replaySource } from "./replay";
 import { readFollow } from "./companion";
 import { remoteApi } from "./apiRemote";
+import type { UpdateCheck } from "./updateRow";
 
 // Kept in step with DRAFT_SCHEMA_VERSION in src-tauri/src/view_types.rs and
 // SEASON_SCHEMA_VERSION in src-tauri/src/season.rs. Bump both sides together
@@ -157,6 +158,19 @@ export interface Api {
   /** Turn verbose logging on ("debug") or off ("info"), now and for next
    *  launch. Resolves to the level that is now in force. */
   setLogLevel(level: string): Promise<string>;
+
+  // ---------- in-app updates ----------
+  //
+  // Optional, unlike everything above: the updater belongs to the shell this
+  // page runs in, and only the desktop's own `api` has one. The browser
+  // preview and a follower (whose `api` speaks to somebody else's desktop)
+  // leave both off, and the settings menu leaves the row off with them.
+
+  /** Ask the release feed whether a newer signed release exists. */
+  checkForUpdate?: () => Promise<UpdateCheck>;
+  /** Download, verify and install it, then restart. Only ever resolves by
+   *  failing: on success the app is gone before the promise settles. */
+  installUpdate?: () => Promise<void>;
 }
 
 const tauriApi: Api = {
@@ -224,6 +238,8 @@ const tauriApi: Api = {
   logFrontendError: (message, source, stack) =>
     invoke<void>("log_frontend_error", { message, source, stack }),
   setLogLevel: (level) => invoke<string>("set_log_level", { level }),
+  checkForUpdate: () => invoke<UpdateCheck>("check_for_update"),
+  installUpdate: () => invoke<void>("install_update"),
 };
 
 /**

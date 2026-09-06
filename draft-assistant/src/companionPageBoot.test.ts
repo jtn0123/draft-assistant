@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 const asset = (file: string): string =>
   readFileSync(resolve(`src-tauri/companion-static/${file}`), "utf8");
 const page = asset("index.html");
-const scripts = ["helpers.js", "clock.js", "app.js"].map(asset);
+const scripts = ["helpers.js", "clock.js", "pwa.js", "app.js"].map(asset);
 const TOKEN_KEY = "da.companion.token";
 
 /** A `WebSocket` the test opens, drops and feeds by hand. */
@@ -75,8 +75,35 @@ interface Booted {
   byId: (id: string) => HTMLElement;
 }
 
+/** What a phone's `navigator.wakeLock` hands back, and what it was asked. */
+interface FakeWakeLock {
+  request: Mock<(kind: string) => Promise<FakeSentinel>>;
+  sentinels: FakeSentinel[];
+}
+interface FakeSentinel {
+  released: boolean;
+  release: () => Promise<void>;
+  addEventListener: (type: string, fn: () => void) => void;
+}
+function fakeWakeLock(): FakeWakeLock {
+  const sentinels: FakeSentinel[] = [];
+  const request = vi.fn<(kind: string) => Promise<FakeSentinel>>(() => {
+    const sentinel: FakeSentinel = {
+      released: false,
+      release: () => {
+        sentinel.released = true;
+        return Promise.resolve();
+      },
+      addEventListener: () => undefined,
+    };
+    sentinels.push(sentinel);
+    return Promise.resolve(sentinel);
+  });
+  return { request, sentinels };
+}
+
 /** The real page, booted with a token already saved, over the given fetch. */
-function boot(fetch: Fetch): Booted {
+function boot(fetch: Fetch, wakeLock?: FakeWakeLock): Booted {
   document.body.innerHTML = page.slice(
     page.indexOf('<div id="companion-root">'),
     page.indexOf("<script"),
@@ -111,7 +138,10 @@ function boot(fetch: Fetch): Booted {
   const sandbox = {
     window,
     document,
-    navigator: { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)" },
+    navigator: {
+      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)",
+      ...(wakeLock ? { wakeLock } : {}),
+    },
     fetch: fetchSpy,
     WebSocket: FakeSocket,
   };
@@ -245,5 +275,52 @@ describe("the chat block under a finger", () => {
     expect(input.value).toBe("is Rob's trade fair?");
     expect(byId("chat-note").hidden).toBe(false);
     expect(byId("chat-note").textContent).toBe("The host did not answer.");
+  });
+});
+
+describe("the screen during a draft", () => {
+  const drafting = {
+    draft: { status: "drafting", current_pick: 12, current_round: 2, on_clock_slot: 3 },
+    recommendations: [],
+    recent_picks: [],
+    my_roster: { players: [], open_starters: [] },
+    data_health: { board_size: 300 },
+  };
+
+  it("is held awake while a draft is live and connected, and let go when the host drops", async () => {
+    const wakeLock = fakeWakeLock();
+    boot(() => okJson(null), wakeLock);
+    await flush();
+    const socket = FakeSocket.instances[0];
+    if (!socket) throw new Error("no socket");
+    socket.open();
+    // Connected, but nothing is being drafted: the phone may sleep.
+    expect(wakeLock.request).not.toHaveBeenCalled();
+    socket.frame("draft-updated", drafting);
+    await flush();
+    // The failure this prevents: the phone dimmed and locked mid-draft, and
+    // the pick clock was behind a lock screen when it mattered.
+    expect(wakeLock.request).toHaveBeenCalledWith("screen");
+    expect(wakeLock.request).toHaveBeenCalledTimes(1);
+    // A repaint with the draft still live does not ask twice.
+    socket.frame("poll-health", { consecutive_failures: 0 });
+    await flush();
+    expect(wakeLock.request).toHaveBeenCalledTimes(1);
+    // The host goes away: the lock is released rather than burning the
+    // battery on a "Reconnecting" pill.
+    socket.drop();
+    await flush();
+    expect(wakeLock.sentinels[0]?.released).toBe(true);
+  });
+
+  it("does nothing on a phone or address with no wake lock", async () => {
+    // The plain http LAN address has no `navigator.wakeLock` at all; the
+    // page must not throw its way out of render for want of one.
+    const { byId } = boot(() => okJson(null));
+    await flush();
+    const socket = FakeSocket.instances[0];
+    socket?.open();
+    socket?.frame("draft-updated", drafting);
+    expect(byId("clock-strip").textContent).toContain("Pick 12");
   });
 });

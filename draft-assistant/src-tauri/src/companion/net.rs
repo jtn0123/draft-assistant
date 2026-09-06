@@ -111,14 +111,61 @@ pub struct Reach {
     pub tailscale_url: Option<String>,
 }
 
+/// The HTTPS listener, while there is one: the host the certificate names
+/// and the port it answers on. The certificate `tailscale cert` mints is for
+/// the MagicDNS name alone, so that is the only host it is ever listed under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Https {
+    pub host: String,
+    pub port: u16,
+}
+
+impl Https {
+    pub fn origin(&self) -> String {
+        format!("https://{}:{}", self.host, self.port)
+    }
+
+    pub fn url(&self) -> String {
+        format!("{}/", self.origin())
+    }
+}
+
 /// One lookup for both. The Tailscale CLI is asked once here, on the server's
 /// slow timer, rather than once per status read: `companion_status` runs on
 /// every devices event, and a process spawn per event stalled the runtime.
 pub fn reach(port: u16) -> Reach {
+    reach_with(port, None)
+}
+
+/// The same, with the HTTPS listener in the picture when one is up.
+pub fn reach_with(port: u16, https: Option<&Https>) -> Reach {
     let this = tailscale_self();
+    reach_from(port, &lan_ip(), this.as_ref(), https)
+}
+
+/// The reading over addresses the caller already has. Pure.
+///
+/// With an HTTPS listener up its origin joins the list, so the page loaded
+/// over it passes the cross-origin check and its `connect-src` names the
+/// `wss://` socket, and it is the URL put on screen: it is the one that
+/// gives the phone a padlock, the wake lock and Add to Home Screen.
+pub fn reach_from(
+    port: u16,
+    lan: &str,
+    this: Option<&TailscaleSelf>,
+    https: Option<&Https>,
+) -> Reach {
+    let mut origins = origins_from(port, lan, this);
+    if let Some(https) = https {
+        origins.push(https.origin());
+    }
+    let tailscale_url = match https {
+        Some(https) => Some(https.url()),
+        None => this.and_then(|t| tailscale_url_from(t, port)),
+    };
     Reach {
-        origins: origins_from(port, &lan_ip(), this.as_ref()),
-        tailscale_url: this.as_ref().and_then(|t| tailscale_url_from(t, port)),
+        origins,
+        tailscale_url,
     }
 }
 
@@ -317,6 +364,54 @@ mod tests {
         );
         // A machine on no tailnet lists its LAN address once and nothing else.
         assert_eq!(sockets.len(), ours.len());
+    }
+
+    #[test]
+    fn https_origin_is_accepted_once_the_cert_listener_is_up() {
+        use super::{origin_allowed, reach_from, ws_origins, Https};
+        let https = Https {
+            host: "justins-mac.tail1234.ts.net".to_string(),
+            port: 7879,
+        };
+        let reach = reach_from(7878, "192.168.1.24", Some(&on_tailnet()), Some(&https));
+        // The failure this prevents: the page loaded over https, and the
+        // server's own origin check refused its pairing POST as another site.
+        assert!(origin_allowed(
+            "https://justins-mac.tail1234.ts.net:7879",
+            &reach.origins
+        ));
+        // And the page's own policy names the secure socket.
+        assert!(ws_origins(&reach.origins)
+            .contains(&"wss://justins-mac.tail1234.ts.net:7879".to_string()));
+        // The https URL is the one on screen: it is the one with the padlock.
+        assert_eq!(
+            reach.tailscale_url.as_deref(),
+            Some("https://justins-mac.tail1234.ts.net:7879/")
+        );
+        // The plain origins are all still there for the phone on the LAN.
+        assert!(origin_allowed("http://192.168.1.24:7878", &reach.origins));
+        // The certificate names one host; the address is not served https.
+        assert!(!origin_allowed(
+            "https://100.101.102.103:7879",
+            &reach.origins
+        ));
+    }
+
+    #[test]
+    fn no_cert_means_http_only_and_the_same_origins_as_before() {
+        use super::{origins_from, reach_from};
+        let reach = reach_from(7878, "192.168.1.24", Some(&on_tailnet()), None);
+        assert_eq!(
+            reach.origins,
+            origins_from(7878, "192.168.1.24", Some(&on_tailnet()))
+        );
+        assert!(reach.origins.iter().all(|o| o.starts_with("http://")));
+        assert_eq!(
+            reach.tailscale_url.as_deref(),
+            Some("http://justins-mac.tail1234.ts.net:7878/")
+        );
+        let off_tailnet = reach_from(7878, "192.168.1.24", None, None);
+        assert_eq!(off_tailnet.tailscale_url, None);
     }
 
     #[test]

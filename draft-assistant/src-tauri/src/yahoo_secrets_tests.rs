@@ -123,10 +123,11 @@ fn load_and_clear_name_the_item_the_same_way() {
 /// Every item this store knows about. A new variant added without a line
 /// here is a variant nothing below checks, which is how two items end up
 /// sharing one Keychain account and overwriting each other.
-const ALL_ITEMS: [Item; 4] = [
+const ALL_ITEMS: [Item; 5] = [
     Item::Token,
     Item::Credentials,
     Item::CompanionDevices,
+    Item::CompanionDevicesHeadless,
     Item::AnthropicKey,
 ];
 
@@ -192,6 +193,29 @@ fn the_companion_item_is_named_under_the_same_service_as_the_rest() {
             "-a",
             "companion-devices",
         ]
+    );
+}
+
+/// The headless host paired a phone into the desktop app's own item, and the
+/// two overwrote each other's device lists. Its item is a different account
+/// under the same service, so a `find-generic-password` for one never
+/// returns the other.
+#[test]
+fn the_headless_hosts_devices_are_a_different_keychain_account_from_the_desktops() {
+    assert_eq!(
+        args_for(Op::Load, Item::CompanionDevicesHeadless, None),
+        [
+            "find-generic-password",
+            "-s",
+            "draft-assistant",
+            "-a",
+            "companion-devices-headless",
+            "-w",
+        ]
+    );
+    assert_ne!(
+        Item::CompanionDevicesHeadless.account(),
+        Item::CompanionDevices.account()
     );
 }
 

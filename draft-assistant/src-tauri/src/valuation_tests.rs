@@ -221,3 +221,28 @@ fn a_pool_too_short_to_measure_keeps_the_default_threshold() {
     let points = vec![300.0, 200.0, 100.0];
     assert!((tier_gap_threshold_for("K", &points) - tier_gap_threshold("K")).abs() < 1e-9);
 }
+
+#[test]
+fn idp_slots_add_no_starting_demand_at_replacement_level() {
+    // An IDP league: DL and LB slots have no pool on this board. They used to
+    // put "DL": 12 into the demand map the need model reads as starters the
+    // league wants, while the offensive demand stayed as it should be.
+    let slots = ["QB", "RB", "DL", "LB", "IDP_FLEX", "BN"]
+        .iter()
+        .map(|slot| (*slot).to_string())
+        .collect::<Vec<_>>();
+    let players = vec![
+        sp("QB", 300.0),
+        sp("QB", 290.0),
+        sp("RB", 200.0),
+        sp("RB", 190.0),
+    ];
+    let model = compute_replacement(&players, &RosterRules::new(&slots), 12, None);
+    assert_eq!(model.demand.get("DL"), None, "{:?}", model.demand);
+    assert_eq!(model.demand.get("LB"), None);
+    assert_eq!(model.demand.get("IDP_FLEX"), None);
+    assert_eq!(model.demand.get("QB"), Some(&12));
+    assert_eq!(model.demand.get("RB"), Some(&12));
+    let demand = allocate_demand(&players, &RosterRules::new(&slots), 12, None);
+    assert!(!demand.contains_key("DL"), "{demand:?}");
+}

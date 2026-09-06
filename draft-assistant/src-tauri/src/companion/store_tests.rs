@@ -2,9 +2,11 @@
 //! [`FileStore`] in a scratch directory: nothing here may write to the
 //! developer's real login Keychain.
 
-use super::{legacy_path_in, load, save, StoredDevice, StoredHub};
+use super::{
+    devices_item_for, legacy_path_in, load, load_item, save, save_item, StoredDevice, StoredHub,
+};
 use crate::companion::hub::Device;
-use crate::yahoo_secrets::{FileStore, SecretStore};
+use crate::yahoo_secrets::{FileStore, Item, SecretStore};
 use std::path::{Path, PathBuf};
 
 fn dir(label: &str) -> PathBuf {
@@ -153,4 +155,36 @@ fn an_old_file_that_will_not_parse_is_deleted_rather_than_left_lying_there() {
     std::fs::write(&path, "{ not json").expect("the file writes");
     assert!(load(scratch.store.as_ref(), &scratch.data_dir).is_none());
     assert!(!path.exists(), "an unreadable token file was left on disk");
+}
+
+#[test]
+/// The failure this prevents: the headless host and the desktop app on one
+/// Mac kept their pairings under one account, so pairing a phone against the
+/// host replaced every phone paired to the desktop, and the other way round.
+/// Same store, two items: a save under one is invisible to a load under the
+/// other, and a second save does not disturb the first.
+fn the_headless_host_and_the_desktop_do_not_read_each_others_pairings() {
+    let scratch = scratch("two-accounts");
+    let desktop = devices_item_for(false);
+    let headless = devices_item_for(true);
+    assert_eq!(desktop, Item::CompanionDevices);
+    assert_eq!(headless, Item::CompanionDevicesHeadless);
+
+    save_item(scratch.store.as_ref(), &sample(), desktop);
+    assert!(
+        load_item(scratch.store.as_ref(), &scratch.data_dir, headless).is_none(),
+        "the headless host read the desktop's pairings"
+    );
+
+    let mut hosts = sample();
+    hosts.code = "919191".to_string();
+    hosts.devices[0].token = "host-tok".to_string();
+    save_item(scratch.store.as_ref(), &hosts, headless);
+
+    let desk = load_item(scratch.store.as_ref(), &scratch.data_dir, desktop).expect("desktop");
+    assert_eq!(desk.code, "424242");
+    assert_eq!(desk.devices[0].token, "tok");
+    let host = load_item(scratch.store.as_ref(), &scratch.data_dir, headless).expect("host");
+    assert_eq!(host.code, "919191");
+    assert_eq!(host.devices[0].token, "host-tok");
 }

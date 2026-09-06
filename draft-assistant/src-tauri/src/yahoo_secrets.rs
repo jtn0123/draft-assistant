@@ -53,6 +53,11 @@ pub enum Item {
     /// The companion's pairing code and the bearer token of every paired
     /// phone, as one blob of JSON. See [`crate::companion::store`].
     CompanionDevices,
+    /// The same blob for the headless `companion_host` binary. Its own
+    /// account, because the host and the desktop app on one Mac shared
+    /// `companion-devices`: pairing a phone against the host overwrote the
+    /// desktop's pairings, and the next desktop save overwrote the host's.
+    CompanionDevicesHeadless,
     /// The Anthropic API key, `sk-ant-...`, as the text it is. Filed under
     /// the account [`crate::secrets`] used when it was a store of its own, so
     /// a key an older build stored keeps reading. See [`crate::secrets`].
@@ -65,6 +70,7 @@ impl Item {
             Item::Credentials => "yahoo-app-credentials",
             Item::Token => "yahoo-oauth-token",
             Item::CompanionDevices => "companion-devices",
+            Item::CompanionDevicesHeadless => "companion-devices-headless",
             Item::AnthropicKey => "anthropic-api-key",
         }
     }

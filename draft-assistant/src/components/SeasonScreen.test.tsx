@@ -293,3 +293,43 @@ describe("SeasonScreen header", () => {
     expect(screen.getByText("In the playoffs — seed 3")).toBeInTheDocument();
   });
 });
+
+describe("a Yahoo league", () => {
+  // The children default to Sleeper, and the screen never passed the
+  // league's platform to three of them, so a Yahoo league was told to set
+  // its lineup on Sleeper and to set a Sleeper username to see its roster.
+  function yahoo() {
+    const v = view({
+      matchup: matchup(),
+      calls: [
+        {
+          slot: "QB",
+          player_in: "A. Rodgers",
+          player_in_id: "qb2",
+          player_in_team: "NYJ",
+          player_out: "B. Purdy",
+          player_out_id: "qb1",
+          gain: 3.1,
+          why: "why",
+        },
+      ],
+      roster: [],
+    });
+    v.league = { ...v.league, platform: "yahoo" };
+    return v;
+  }
+
+  it("names Yahoo, not Sleeper, everywhere the service is named", () => {
+    render(<SeasonScreen view={yahoo()} pollHealth={null} />);
+    expect(screen.getByText(/Set it on Yahoo\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Set it on Sleeper/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Set" })).toHaveAttribute(
+      "title",
+      "The lineup you actually have set on Yahoo",
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "My team" }));
+    expect(screen.getByText(/connected Yahoo account/)).toBeInTheDocument();
+    expect(screen.queryByText(/Sleeper username/)).toBeNull();
+  });
+});

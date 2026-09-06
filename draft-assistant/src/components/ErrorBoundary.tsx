@@ -46,7 +46,14 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
     // thrown: "TypeError: x is undefined" on its own named no screen.
     const frames = firstFrames(info.componentStack);
     const where = frames.length === 0 ? "" : ` (${frames.join(" < ")})`;
-    reportError(`${error.name}: ${error.message}${where}`, "render");
+    // The component stack travels as the stack too: the reporter keeps its
+    // first frames for the log line, and a report without one was a message
+    // with nowhere attached. Empty is left out so nothing logs "stack=".
+    reportError(
+      `${error.name}: ${error.message}${where}`,
+      "render",
+      stack === "" ? undefined : stack,
+    );
   }
 
   private copy = async () => {

@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
     <title>Draft Assistant companion</title>
+    <meta name="theme-color" content="#f7f7f5" />
+    <!-- Installable as an app from the https tailnet address; ignored over http. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Draft Assistant" />
+    <link rel="manifest" href="/static/manifest.webmanifest" />
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/static/icon.svg" />
     <link rel="stylesheet" href="/static/app.css" />
   </head>
   <body>
@@ -85,6 +93,7 @@
     </div>
     <script src="/static/helpers.js"></script>
     <script src="/static/clock.js"></script>
+    <script src="/static/pwa.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

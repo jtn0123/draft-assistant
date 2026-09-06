@@ -67,10 +67,23 @@ pub async fn host(label: &str) -> Host {
 /// The same, over state and a data directory the caller already has. This is
 /// what a restart looks like: the threads on disk outlive the server.
 pub async fn host_over(data_dir: std::path::PathBuf, state: Arc<AppState>) -> Host {
+    host_over_tls(data_dir, state, None).await
+}
+
+/// The same, serving HTTPS from the given certificate beside the plain
+/// listener. `None` is the sandboxed default: no certificate, no `tailscale`.
+pub async fn host_over_tls(
+    data_dir: std::path::PathBuf,
+    state: Arc<AppState>,
+    tls: Option<draft_assistant_lib::companion::tls::TlsSource>,
+) -> Host {
     let companion = Arc::new(
         CompanionServer::sandboxed("Justin's Mac".to_string(), data_dir.clone())
             .expect("the companion builds"),
     );
+    if let Some(tls) = tls {
+        companion.set_tls(tls);
+    }
     let emitted: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = emitted.clone();
     companion.attach(

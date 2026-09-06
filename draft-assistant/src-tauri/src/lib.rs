@@ -17,6 +17,7 @@ pub mod commands_diag;
 pub mod commands_draft;
 pub mod commands_season;
 pub mod commands_second_opinion;
+pub mod commands_update;
 pub mod commands_yahoo;
 pub mod companion;
 pub mod draft;
@@ -105,6 +106,7 @@ use commands_season::{
     stop_season_polling,
 };
 use commands_second_opinion::import_second_opinion;
+use commands_update::{check_for_update, install_update};
 use commands_yahoo::{
     yahoo_auction, yahoo_begin_connect, yahoo_disconnect, yahoo_finish_connect, yahoo_leagues,
     yahoo_save_credentials, yahoo_status,
@@ -255,6 +257,8 @@ pub fn run() {
             log_frontend_error,
             open_log_folder,
             set_log_level,
+            check_for_update,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

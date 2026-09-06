@@ -50,8 +50,9 @@ impl TailscaleSelf {
 ///
 /// The bare name covers a `PATH` that already has it; the app bundle is where
 /// the Mac App Store build puts it, and `/usr/local/bin` is the symlink the
-/// standalone installer makes.
-const CLI_PATHS: [&str; 3] = [
+/// standalone installer makes. Shared with the certificate minting in
+/// [`super::tls`], which has to find the same binary.
+pub const CLI_PATHS: [&str; 3] = [
     "tailscale",
     "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
     "/usr/local/bin/tailscale",

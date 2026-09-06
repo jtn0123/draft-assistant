@@ -143,7 +143,23 @@ describe("what gets reported", () => {
     expect(reportError).toHaveBeenCalledWith(
       expect.stringMatching(/^Error: chunk missing/),
       "render",
+      expect.any(String),
     );
+  });
+
+  it("hands the component stack to the reporter so the log line carries it", () => {
+    // The boundary computed the component stack and then reported without
+    // it, so the frontend-error line in the log had no stack for a render
+    // failure while a window error had one.
+    render(
+      <ErrorBoundary>
+        <Boom />
+      </ErrorBoundary>,
+    );
+    const stack = vi.mocked(reportError).mock.calls[0]?.[2];
+    expect(stack).toEqual(expect.any(String));
+    expect(String(stack)).toMatch(/^at Boom/);
+    expect(String(stack)).toContain("at ErrorBoundary");
   });
 
   it("names where in the tree it happened, not only what was thrown", () => {

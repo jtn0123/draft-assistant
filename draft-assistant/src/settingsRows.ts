@@ -12,6 +12,8 @@ import type { ThemePreference } from "./theme";
 import { age } from "./format";
 import { importNote } from "./secondOpinionImport";
 import { platformName } from "./leagues";
+import { updateRow } from "./updateRow";
+import type { UpdateRowState } from "./useUpdateRow";
 import { yahooNote } from "./yahoo";
 
 export interface SettingsRowInput {
@@ -26,7 +28,10 @@ export interface SettingsRowInput {
   avatars: AvatarMode;
   preference: ThemePreference;
   theme: "light" | "dark";
-  appVersion: string;
+  /** The running version and the "Check for updates" row's state. The row is
+   *  left off where `supported` is false: the browser preview and a follower
+   *  have no updater of their own to ask. */
+  updates: UpdateRowState;
   /** The host this app follows, when it is a follower. Everything the host
    *  owns — the league, the keys, the budget, Yahoo — is left off the menu
    *  rather than shown disabled: a follower cannot act on any of it. */
@@ -228,14 +233,22 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
       on: false,
       onSelect: input.onDiagnostics,
     },
-    {
-      label: "Version",
-      note: "Draft Assistant",
-      value: `v${input.appVersion}`,
-      on: false,
-      onSelect: input.onDismiss,
-    },
   );
+
+  // Desktop only. A follower's `api` speaks to the host, and the browser
+  // preview has no shell, so neither has a check to offer; the row is left
+  // off rather than shown disabled, as every other host-owned row is.
+  if (input.updates.supported) {
+    rows.push(updateRow(input.updates.current, input.updates.state, input.updates.select));
+  }
+
+  rows.push({
+    label: "Version",
+    note: "Draft Assistant",
+    value: `v${input.updates.current}`,
+    on: false,
+    onSelect: input.onDismiss,
+  });
 
   return rows;
 }

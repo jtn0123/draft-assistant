@@ -66,6 +66,12 @@ pub fn optimal_lineup(rules: &RosterRules, candidates: &[Candidate]) -> Vec<Line
                     },
                 ));
             }
+            // An empty slot is shown as a starter to fill. An IDP slot with
+            // nobody on the roster for it is not that: in season the roster
+            // can hold a DL or LB, and when it does the slot fills like any
+            // other, but the pool has nobody to put there and the empty row
+            // nagged the user to fill a slot nothing in this app can fill.
+            None if RosterRules::is_unfillable(slot) => {}
             None => filled.push((
                 index,
                 LineupSlot {

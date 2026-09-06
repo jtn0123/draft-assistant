@@ -201,7 +201,7 @@ export const NO_SEASON_ON_HOST = "NoSeasonOnHost";
  *  place rather than as a toast. */
 function noSeasonOnHost(hostName: string): Error {
   const error = new Error(
-    `${hostName} hasn't opened the Season screen yet — the season shows here once it does`,
+    `${hostName} hasn't opened the Season screen yet. The season shows here once it does.`,
   );
   error.name = NO_SEASON_ON_HOST;
   return error;
@@ -351,7 +351,7 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
         throw new Error("The host revoked this device");
       }
       if (response.status === 409)
-        throw new Error("Someone else is asking — try again in a moment");
+        throw new Error("Someone else is asking. Try again in a moment.");
       if (response.status === 429) throw new Error("That's a lot of questions. Give it a minute.");
       if (!response.ok) throw new Error(`${follow.host_name} answered ${response.status}`);
     },

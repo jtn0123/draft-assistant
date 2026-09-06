@@ -218,3 +218,18 @@ fn an_empty_starting_slot_is_reported_as_a_call() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].player_out, "an empty slot");
 }
+
+#[test]
+fn an_idp_slot_nobody_on_the_roster_can_fill_is_not_shown_as_an_empty_starter() {
+    // A DL slot with no lineman on the roster read as a starter the user
+    // should fill; nothing in this app can fill it. A DL who is on the roster
+    // still starts there, and an empty offensive slot is still reported.
+    let rules = rules(&["QB", "DL", "LB", "TE", "BN"]);
+    let lineup = optimal_lineup(
+        &rules,
+        &[candidate("qb1", "QB", 25.0), candidate("dl1", "DL", 8.0)],
+    );
+    let slots: Vec<&str> = lineup.iter().map(|s| s.slot.as_str()).collect();
+    assert_eq!(slots, vec!["QB", "DL", "TE"], "{lineup:?}");
+    assert_eq!(ids(&lineup), vec!["qb1", "dl1", "-"]);
+}

@@ -3,6 +3,8 @@
 
 use super::hub::{now_ms, CompanionHub, Emit};
 use super::net;
+use super::tls::{self, TlsSource};
+use super::tls_serve;
 use crate::shared_chat::SharedChat;
 use crate::state::AppState;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -21,12 +23,17 @@ pub struct CompanionServer {
     /// through the same objects.
     srv: OnceLock<Arc<Srv>>,
     running: Mutex<Option<Running>>,
+    /// Where the HTTPS listener's certificate comes from. The desktop asks
+    /// Tailscale; the tests and the headless host run with it off.
+    tls: Mutex<TlsSource>,
 }
 
 struct Running {
     port: u16,
     /// Dropped or fired to bring the listener down.
     shutdown: oneshot::Sender<()>,
+    /// The HTTPS listener beside it, when a certificate was there to serve.
+    https: Option<tls_serve::Listener>,
     /// The code rotation and the origin refresh. Aborted on stop: both used
     /// to end on their own by noticing the port was gone, and a toggle off
     /// and on inside one tick left the old pair running beside the new one.
@@ -45,9 +52,12 @@ impl CompanionServer {
     pub fn new(host_name: String, data_dir: std::path::PathBuf) -> Result<Self, String> {
         Ok(Self {
             hub: Arc::new(CompanionHub::new(host_name, data_dir.clone())?),
-            chat: Arc::new(SharedChat::new(data_dir)),
+            chat: Arc::new(SharedChat::new(data_dir.clone())),
             srv: OnceLock::new(),
             running: Mutex::new(None),
+            tls: Mutex::new(TlsSource::Tailscale {
+                dir: data_dir.join("companion-tls"),
+            }),
         })
     }
 
@@ -68,7 +78,21 @@ impl CompanionServer {
             chat: Arc::new(SharedChat::new(data_dir)),
             srv: OnceLock::new(),
             running: Mutex::new(None),
+            // Never the real Tailscale from a test: `tailscale cert` on the
+            // developer's machine would mint a real certificate into a
+            // scratch directory and count against Let's Encrypt's limits.
+            tls: Mutex::new(TlsSource::Off),
         })
+    }
+
+    /// Where the next start looks for a certificate. Takes effect on the next
+    /// `start`; a running listener keeps what it has.
+    pub fn set_tls(&self, source: TlsSource) {
+        *self.tls.lock().unwrap_or_else(|e| e.into_inner()) = source;
+    }
+
+    fn tls_source(&self) -> TlsSource {
+        self.tls.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Give the companion the app state and the way back to the webview.
@@ -100,6 +124,14 @@ impl CompanionServer {
         self.running().as_ref().map(|r| r.port)
     }
 
+    /// The port the HTTPS listener took, while there is one.
+    pub fn https_port(&self) -> Option<u16> {
+        self.running()
+            .as_ref()
+            .and_then(|r| r.https.as_ref())
+            .map(|l| l.https.port)
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.running().is_some()
     }
@@ -116,6 +148,20 @@ impl CompanionServer {
         let listener = tokio::net::TcpListener::from_std(listener)
             .map_err(|e| format!("could not start the phone connection: {e}"))?;
         let router = super::routes::router(srv);
+        // Who this machine is on its tailnet, and the certificate for that
+        // name if there is one to serve. Both shell out (the Tailscale CLI,
+        // and `tailscale cert` on a first mint can take a few seconds), so
+        // neither runs on the runtime's own threads.
+        let source = self.tls_source();
+        let (this, materials) = tokio::task::spawn_blocking(move || {
+            let this = net::tailscale_self();
+            let name = this.as_ref().and_then(|t| t.dns_name.as_deref());
+            let materials = tls::materials(&source, name);
+            (this, materials)
+        })
+        .await
+        .map_err(|e| format!("could not start the phone connection: {e}"))?;
+        let https = materials.and_then(|m| tls_serve::start(port, m, router.clone()));
         let (shutdown, wait) = oneshot::channel();
         tokio::spawn(async move {
             // With the peer's address attached to every request: the pairing
@@ -138,14 +184,23 @@ impl CompanionServer {
         // tailnet name shells out to `ifconfig` and the Tailscale CLI, and
         // doing that per request or per status read would put a process
         // spawn in front of every page load and every devices event.
-        self.hub.set_reach(net::reach(port));
+        let secure = https.as_ref().map(|l| l.https.clone());
+        self.hub.set_reach(net::reach_from(
+            port,
+            &net::lan_ip(),
+            this.as_ref(),
+            secure.as_ref(),
+        ));
         let tasks = vec![
             spawn_rotation(self.hub.clone(), ROTATE_EVERY, now_ms),
-            spawn_origin_refresh(self.hub.clone(), REFRESH_ORIGINS_EVERY, net::reach),
+            spawn_origin_refresh(self.hub.clone(), REFRESH_ORIGINS_EVERY, move |port| {
+                net::reach_with(port, secure.as_ref())
+            }),
         ];
         *self.running() = Some(Running {
             port,
             shutdown,
+            https,
             tasks,
         });
         Ok(port)
@@ -169,6 +224,9 @@ impl CompanionServer {
                 task.abort();
             }
             let _ = running.shutdown.send(());
+            if let Some(https) = running.https {
+                let _ = https.shutdown.send(());
+            }
         }
     }
 
@@ -312,6 +370,13 @@ pub const HELPERS_JS: &str = include_str!("../../companion-static/helpers.js");
 pub const CLOCK_JS: &str = include_str!("../../companion-static/clock.js");
 pub const APP_JS: &str = include_str!("../../companion-static/app.js");
 pub const APP_CSS: &str = include_str!("../../companion-static/app.css");
+/// The installed-app half: the manifest and icon that make the page
+/// installable, the service worker the browser requires for it (it caches
+/// nothing), and the script that asks for the screen wake lock.
+pub const PWA_JS: &str = include_str!("../../companion-static/pwa.js");
+pub const SW_JS: &str = include_str!("../../companion-static/sw.js");
+pub const MANIFEST: &str = include_str!("../../companion-static/manifest.webmanifest");
+pub const ICON_SVG: &str = include_str!("../../companion-static/icon.svg");
 
 /// The static file behind a `/static/{file}` path, with its content type.
 ///
@@ -324,6 +389,10 @@ pub fn static_file(name: &str) -> Option<(&'static str, &'static str)> {
         "clock.js" => Some(("text/javascript; charset=utf-8", CLOCK_JS)),
         "app.js" => Some(("text/javascript; charset=utf-8", APP_JS)),
         "app.css" => Some(("text/css; charset=utf-8", APP_CSS)),
+        "pwa.js" => Some(("text/javascript; charset=utf-8", PWA_JS)),
+        "sw.js" => Some(("text/javascript; charset=utf-8", SW_JS)),
+        "manifest.webmanifest" => Some(("application/manifest+json", MANIFEST)),
+        "icon.svg" => Some(("image/svg+xml", ICON_SVG)),
         _ => None,
     }
 }
@@ -334,7 +403,17 @@ mod tests {
 
     #[test]
     fn only_the_page_files_are_served() {
-        for name in ["index.html", "helpers.js", "clock.js", "app.js", "app.css"] {
+        for name in [
+            "index.html",
+            "helpers.js",
+            "clock.js",
+            "pwa.js",
+            "app.js",
+            "app.css",
+            "sw.js",
+            "manifest.webmanifest",
+            "icon.svg",
+        ] {
             let (mime, body) = static_file(name).expect("{name} is served");
             assert!(!mime.is_empty());
             assert!(!body.is_empty(), "{name} is empty");

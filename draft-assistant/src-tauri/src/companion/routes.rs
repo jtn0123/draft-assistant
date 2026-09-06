@@ -49,6 +49,9 @@ pub fn router(srv: Arc<Srv>) -> Router {
 /// `ws:` scheme, which admitted a socket to any host on the network: a
 /// browser reads `'self'` as the page's scheme, so `ws://` has to be spelled
 /// out. `frame-ancestors 'none'` keeps the page out of anyone else's iframe.
+/// `manifest-src` and `worker-src` are what let the phone install the page
+/// as an app: both fall back to `default-src 'none'` when unnamed, and the
+/// browser then refused the manifest and the service worker without a word.
 pub fn csp_for(ws_origins: &[String]) -> String {
     let mut connect = String::from("'self'");
     for origin in ws_origins {
@@ -57,7 +60,8 @@ pub fn csp_for(ws_origins: &[String]) -> String {
     }
     format!(
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; \
-         connect-src {connect}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+         connect-src {connect}; manifest-src 'self'; worker-src 'self'; base-uri 'none'; \
+         form-action 'none'; frame-ancestors 'none'"
     )
 }
 
@@ -177,10 +181,19 @@ fn html(body: &'static str) -> Response {
 }
 
 async fn static_route(Path(file): Path<String>) -> Response {
-    match static_file(&file) {
-        Some((mime, body)) => ([(header::CONTENT_TYPE, mime)], body).into_response(),
-        None => fail(StatusCode::NOT_FOUND, "no such file"),
+    let Some((mime, body)) = static_file(&file) else {
+        return fail(StatusCode::NOT_FOUND, "no such file");
+    };
+    let mut response = ([(header::CONTENT_TYPE, mime)], body).into_response();
+    // A service worker may only control paths under where it was served
+    // from, and this one lives under `/static/`; the header is what lets it
+    // register for the whole page, which is what installing it needs.
+    if file == "sw.js" {
+        response
+            .headers_mut()
+            .insert("service-worker-allowed", "/".parse().expect("static"));
     }
+    response
 }
 
 #[derive(Deserialize)]
@@ -360,6 +373,17 @@ mod tests {
         assert!(!policy.contains("connect-src 'self' ws:;"), "{policy}");
         assert!(!policy.contains(" wss:;"), "{policy}");
         assert!(policy.contains("frame-ancestors 'none'"), "{policy}");
+        // A secure socket is spelled out the same way.
+        let secure = csp_for(&["wss://justins-mac.tail1234.ts.net:7879".to_string()]);
+        assert!(
+            secure.contains(" wss://justins-mac.tail1234.ts.net:7879;"),
+            "{secure}"
+        );
+        // The failure this prevents: the manifest and the service worker
+        // both fell back to `default-src 'none'` and the phone could not
+        // install the page.
+        assert!(policy.contains("manifest-src 'self';"), "{policy}");
+        assert!(policy.contains("worker-src 'self';"), "{policy}");
         // With nothing bound the page may still reach its own origin.
         assert!(csp_for(&[]).contains("connect-src 'self';"));
     }

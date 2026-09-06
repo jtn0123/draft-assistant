@@ -1,7 +1,7 @@
 import { Suspense, useState } from "react";
 import { api } from "./api";
 import { headerSubtitle } from "./appSubtitle";
-import { useAppVersion } from "./appVersion";
+import { useUpdateRow } from "./useUpdateRow";
 import { setAvatarMode, useAvatarMode } from "./avatars";
 import { MAX_RECONNECT_ATTEMPTS, useDraftSession } from "./draftSession";
 import { useMarkDrafted } from "./markDrafted";
@@ -124,7 +124,7 @@ export default function App() {
   // Asked once for the settings row and the picker's Yahoo lookup; the
   // connect dialog hands back every newer answer it is given.
   const yahoo = useYahooStatus();
-  const appVersion = useAppVersion();
+  const updates = useUpdateRow();
   // Only the host has a server to ask about, and the answer is re-read as the
   // dialog closes so the row never contradicts what was just switched.
   const companionOn = useCompanionEnabled(follow === null, companionOpen);
@@ -286,7 +286,7 @@ export default function App() {
     avatars,
     preference,
     theme,
-    appVersion,
+    updates,
     hostName: follow?.host_name ?? null,
     companionOn,
     onChime: (next) => setChime(next),
@@ -480,7 +480,7 @@ export default function App() {
       {joinOpen && <JoinHost onClose={() => setJoinOpen(false)} />}
 
       {diagnosticsOpen && (
-        <Diagnostics appVersion={appVersion} onClose={() => setDiagnosticsOpen(false)} />
+        <Diagnostics appVersion={updates.current} onClose={() => setDiagnosticsOpen(false)} />
       )}
 
       {confirm && (

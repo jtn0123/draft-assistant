@@ -1,0 +1,14 @@
+{
+  "name": "Draft Assistant",
+  "short_name": "Draft",
+  "description": "The draft board, the clock and the shared chat, on your phone.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f7f7f5",
+  "theme_color": "#f7f7f5",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
