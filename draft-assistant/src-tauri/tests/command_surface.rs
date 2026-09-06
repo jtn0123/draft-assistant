@@ -326,7 +326,7 @@ fn every_command_answers_over_the_ipc() {
     // The same pair `lib.rs` installs: the companion is built at startup and
     // handed the state every other command works through.
     let companion = Arc::new(
-        CompanionServer::new("Test Mac".to_string(), data_dir.clone())
+        CompanionServer::sandboxed("Test Mac".to_string(), data_dir.clone())
             .expect("the companion builds"),
     );
     companion.attach(Arc::new(state.share()), Arc::new(|_kind, _payload| {}));

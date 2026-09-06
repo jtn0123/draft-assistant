@@ -80,6 +80,24 @@ describe("turning it on", () => {
     expect(screen.getAllByRole("img", { name: /QR code for/ })).toHaveLength(2);
   });
 
+  it("shows the MagicDNS name when Tailscale gave the Mac one", async () => {
+    // The failure this prevents: the tailnet address can change, and a QR
+    // code with an old number sends the phone nowhere, so the name is what
+    // goes on screen when there is one.
+    api.companionEnable.mockResolvedValue(
+      companionStatus({
+        enabled: true,
+        tailscale_url: "http://justins-mac.tail1234.ts.net:7878/",
+      }),
+    );
+    open();
+    await userEvent.click(await screen.findByRole("button", { name: "Turn on" }));
+
+    expect(await screen.findByText("http://justins-mac.tail1234.ts.net:7878/")).toBeInTheDocument();
+    expect(screen.getByText("Or, over Tailscale, from anywhere")).toBeInTheDocument();
+    await screen.findByRole("img", { name: /QR code for http:\/\/justins-mac\.tail1234\.ts\.net/ });
+  });
+
   it("shows no second address when there is no tailnet", async () => {
     api.companionEnable.mockResolvedValue(companionStatus({ enabled: true }));
     open();

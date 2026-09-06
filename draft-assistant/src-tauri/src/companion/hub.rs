@@ -10,6 +10,7 @@ use super::names::{display_name, unique_name};
 use super::pairing::{Lockout, Paired};
 use super::rand;
 use super::store::{self, StoredDevice, StoredHub};
+use crate::yahoo_secrets::SecretStore;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -65,8 +66,10 @@ pub struct CompanionHub {
     /// A socket authenticated with one of these closes itself when it hears
     /// its own token here.
     closes: broadcast::Sender<String>,
-    /// Where the pairings are written so a restart does not forget them.
-    store_path: PathBuf,
+    /// Where the pairings and the code are kept so a restart does not forget
+    /// them. The machine's Keychain in the app; a file in a scratch directory
+    /// in the tests, which must never write to a real login Keychain.
+    secrets: Box<dyn SecretStore>,
 }
 
 impl CompanionHub {
@@ -75,10 +78,20 @@ impl CompanionHub {
     /// is not a state to carry on from: a guessable pairing code is the one
     /// thing this must never have.
     pub fn new(host_name: String, data_dir: PathBuf) -> Result<Self, String> {
+        let secrets = crate::yahoo_secrets::store_for(&data_dir);
+        Self::with_secrets(host_name, data_dir, secrets)
+    }
+
+    /// The same hub against a given store. This is what the tests build, so
+    /// that a test run never puts a device token in the developer's Keychain.
+    pub fn with_secrets(
+        host_name: String,
+        data_dir: PathBuf,
+        secrets: Box<dyn SecretStore>,
+    ) -> Result<Self, String> {
         let (events, _) = broadcast::channel(EVENT_BACKLOG);
         let (closes, _) = broadcast::channel(EVENT_BACKLOG);
-        let store_path = store::path_in(&data_dir);
-        let stored = store::load(&store_path).unwrap_or_default();
+        let stored = store::load(secrets.as_ref(), &data_dir).unwrap_or_default();
         let code = if stored.code.len() == 6 {
             stored.code
         } else {
@@ -112,7 +125,7 @@ impl CompanionHub {
             }),
             events,
             closes,
-            store_path,
+            secrets,
         })
     }
 
@@ -141,7 +154,7 @@ impl CompanionHub {
                     .collect(),
             }
         };
-        store::save(&self.store_path, &stored);
+        store::save(self.secrets.as_ref(), &stored);
     }
 
     /// The code on the host's screen, rotated first if it has sat there
@@ -416,10 +429,26 @@ impl CompanionHub {
         let _ = self.closes.send(token);
     }
 
+    /// Whether any socket is on the far end of the event fan-out.
+    ///
+    /// The publish path asks this before it builds anything. A draft or season
+    /// view is tens of kilobytes of JSON every three second tick, and
+    /// `broadcast::send` drops the frame when no receiver exists, so with the
+    /// companion server off or no phone connected the whole serialisation was
+    /// paid for and then thrown away. Nothing is lost by skipping it: a socket
+    /// that connects later gets its own opening snapshot from `ws.rs` before
+    /// it starts reading this stream.
+    pub fn has_listeners(&self) -> bool {
+        self.events.receiver_count() > 0
+    }
+
     /// Fan one `{type, payload}` frame out to every open socket. Nothing is
     /// sent when nobody is listening, and a full channel is not an error —
     /// the events are a live feed, not a queue anyone replays.
     pub fn publish_json(&self, kind: &str, payload: serde_json::Value) {
+        if !self.has_listeners() {
+            return;
+        }
         let frame = serde_json::json!({ "type": kind, "payload": payload });
         let _ = self.events.send(frame.to_string());
     }
@@ -427,6 +456,11 @@ impl CompanionHub {
     /// The same for anything serialisable. A value that will not serialise is
     /// dropped with a note rather than taking a poll tick down.
     pub fn publish<T: Serialize>(&self, kind: &str, payload: &T) {
+        // Before `to_value`, not after: the serialisation is the expensive
+        // half, and with nobody listening it has no reader to reach.
+        if !self.has_listeners() {
+            return;
+        }
         match serde_json::to_value(payload) {
             Ok(value) => self.publish_json(kind, value),
             Err(e) => crate::applog::warn(format!(
@@ -440,6 +474,10 @@ impl CompanionHub {
     /// the desktop already has a `devices` of its own meaning nothing like it.
     pub fn publish_devices(&self) {
         let devices = self.devices();
+        // Only the broadcast half is skipped when no socket is listening. The
+        // webview emit below has to run either way, or the host's settings
+        // screen would stop hearing about the first device to pair, which is
+        // exactly the moment there is still no subscriber.
         self.publish("devices", &devices);
         match serde_json::to_value(&devices) {
             Ok(value) => self.to_webview("companion-devices", value),

@@ -399,7 +399,7 @@ mod tests {
         // A companion that was never attached to the app state: no socket, no
         // network, and every command through it fails on the first line.
         let companion = Arc::new(
-            CompanionServer::new("Test Mac".to_string(), dir.clone()).expect("a companion"),
+            CompanionServer::sandboxed("Test Mac".to_string(), dir.clone()).expect("a companion"),
         );
         let out: Result<SharedChatThread, String> = crate::applog::logged!(
             "shared_chat_get",

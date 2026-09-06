@@ -47,6 +47,26 @@ impl CompanionServer {
         })
     }
 
+    /// The same, but with the paired devices kept in a file inside the given
+    /// data directory rather than in the machine's Keychain. This is what the
+    /// tests build: a test run must never write a device token to the
+    /// developer's real login Keychain.
+    pub fn sandboxed(host_name: String, data_dir: std::path::PathBuf) -> Result<Self, String> {
+        let secrets = Box::new(crate::yahoo_secrets::FileStore::in_dir(
+            data_dir.join("secrets"),
+        ));
+        Ok(Self {
+            hub: Arc::new(CompanionHub::with_secrets(
+                host_name,
+                data_dir.clone(),
+                secrets,
+            )?),
+            chat: Arc::new(SharedChat::new(data_dir)),
+            srv: OnceLock::new(),
+            running: Mutex::new(None),
+        })
+    }
+
     /// Give the companion the app state and the way back to the webview.
     /// Called once, at startup; a second call is ignored rather than swapping
     /// the state out from under a running server.
@@ -111,9 +131,9 @@ impl CompanionServer {
         *self.running() = Some(Running { port, shutdown });
         self.hub.set_port(Some(port));
         // What the CSP and the cross-origin check are built from, read here
-        // and then on a slow timer: `tailscale_ip` shells out, and doing
-        // that per request would put a process spawn in front of every page
-        // load.
+        // and then on a slow timer: working out the tailnet name shells out
+        // to `ifconfig` and the Tailscale CLI, and doing that per request
+        // would put a process spawn in front of every page load.
         self.hub.set_origins(net::server_origins(port));
         spawn_rotation(self.hub.clone(), ROTATE_EVERY, now_ms);
         spawn_origin_refresh(self.hub.clone(), REFRESH_ORIGINS_EVERY, net::server_origins);
@@ -137,6 +157,9 @@ impl CompanionServer {
     }
 
     /// The same server over Tailscale, when this machine is on a tailnet.
+    ///
+    /// This is the MagicDNS name where Tailscale can report one, so the QR
+    /// code on screen survives the tailnet handing this node a new address.
     pub fn tailscale_url(&self) -> Option<String> {
         self.port().and_then(net::tailscale_url_for)
     }

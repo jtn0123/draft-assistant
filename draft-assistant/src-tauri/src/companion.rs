@@ -10,6 +10,7 @@ pub mod hub;
 pub mod media;
 pub mod names;
 pub mod net;
+pub mod net_tailscale;
 pub mod pairing;
 pub mod rand;
 pub mod routes;

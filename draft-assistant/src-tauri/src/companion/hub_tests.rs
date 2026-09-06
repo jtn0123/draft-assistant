@@ -4,9 +4,14 @@
 use super::*;
 use std::net::IpAddr;
 
+/// A directory of this test's own. The counter is what makes it its own: two
+/// tests running in the same millisecond used to land on the same path, and
+/// the second hub then started up holding the first one's paired devices.
 fn scratch(label: &str) -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
-        "companion-hub-{label}-{}-{}",
+        "companion-hub-{label}-{}-{}-{seq}",
         std::process::id(),
         now_ms()
     ));
@@ -18,8 +23,12 @@ fn hub() -> CompanionHub {
     hub_in(scratch("hub"))
 }
 
+/// Always through the file store in the scratch directory. A test that used
+/// `CompanionHub::new` would put a pairing code and a device token in the
+/// developer's own login Keychain.
 fn hub_in(dir: PathBuf) -> CompanionHub {
-    CompanionHub::new("Test Mac".to_string(), dir).expect("the hub builds")
+    let secrets = Box::new(crate::yahoo_secrets::FileStore::in_dir(dir.join("secrets")));
+    CompanionHub::with_secrets("Test Mac".to_string(), dir, secrets).expect("the hub builds")
 }
 
 fn peer(last: u8) -> IpAddr {
@@ -294,4 +303,60 @@ fn the_token_a_re_pair_replaced_is_announced_so_its_socket_can_close() {
         Some(first_token.as_str())
     );
     assert!(hub.device_for(&second_token).is_some());
+}
+
+/// A payload that records whether anything ever asked it to serialise, so a
+/// test can tell a skipped publish from one that merely went nowhere.
+struct CountedPayload {
+    serialised: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Serialize for CountedPayload {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.serialised
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        serializer.serialize_str("payload")
+    }
+}
+
+#[test]
+fn publishing_with_nobody_listening_does_not_serialise_the_payload() {
+    let hub = hub();
+    let serialised = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let payload = CountedPayload {
+        serialised: serialised.clone(),
+    };
+    // The failure this prevents: every three second poll tick turned a whole
+    // draft view into tens of kilobytes of JSON and handed it to a broadcast
+    // channel with no receivers, which threw it straight away.
+    hub.publish("draft-updated", &payload);
+    assert_eq!(serialised.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    let mut rx = hub.subscribe();
+    hub.publish("draft-updated", &payload);
+    assert_eq!(serialised.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let frame = rx.try_recv().expect("the subscriber got the frame");
+    let value: serde_json::Value = serde_json::from_str(&frame).expect("valid JSON");
+    assert_eq!(value["type"], "draft-updated");
+    assert_eq!(value["payload"], "payload");
+}
+
+#[test]
+fn publish_devices_still_reaches_the_webview_with_no_subscriber() {
+    let hub = hub();
+    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorded = seen.clone();
+    hub.set_emit(Arc::new(move |kind: &str, _payload: serde_json::Value| {
+        recorded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(kind.to_string());
+    }));
+    assert!(!hub.has_listeners());
+    // The failure this prevents: skipping the broadcast when nobody is
+    // listening must not take the host's own settings screen with it, since
+    // the first device pairs before any socket exists.
+    paired(&hub);
+    let kinds = seen.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    assert!(kinds.iter().any(|k| k == "companion-devices"), "{kinds:?}");
 }

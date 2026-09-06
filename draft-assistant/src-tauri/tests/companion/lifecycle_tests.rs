@@ -12,7 +12,8 @@ async fn a_server_the_user_left_on_comes_back_up_by_itself() {
     let data_dir = harness::scratch_dir("autostart");
     let state = std::sync::Arc::new(harness::fixture_state(&data_dir));
     let companion = std::sync::Arc::new(
-        CompanionServer::new("Justin's Mac".to_string(), data_dir).expect("the companion builds"),
+        CompanionServer::sandboxed("Justin's Mac".to_string(), data_dir)
+            .expect("the companion builds"),
     );
     companion.attach(
         state,

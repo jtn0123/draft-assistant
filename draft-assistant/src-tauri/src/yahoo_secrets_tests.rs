@@ -89,10 +89,19 @@ fn load_and_clear_name_the_item_the_same_way() {
     );
 }
 
+/// Every item this store knows about. A new variant added without a line
+/// here is a variant nothing below checks, which is how two items end up
+/// sharing one Keychain account and overwriting each other.
+const ALL_ITEMS: [Item; 3] = [Item::Token, Item::Credentials, Item::CompanionDevices];
+
 #[test]
-fn the_two_items_do_not_share_an_account_with_each_other_or_the_anthropic_key() {
-    assert_ne!(Item::Token.account(), Item::Credentials.account());
-    for item in [Item::Token, Item::Credentials] {
+fn the_items_do_not_share_an_account_with_each_other_or_the_anthropic_key() {
+    let mut accounts: Vec<&str> = ALL_ITEMS.iter().map(|item| item.account()).collect();
+    accounts.sort_unstable();
+    let unique = accounts.len();
+    accounts.dedup();
+    assert_eq!(accounts.len(), unique, "two items share a Keychain account");
+    for item in ALL_ITEMS {
         assert_ne!(item.account(), "anthropic-api-key");
         assert_eq!(crate::secrets::args_for(crate::secrets::Op::Load)[3], "-a");
         assert_ne!(
@@ -105,7 +114,7 @@ fn the_two_items_do_not_share_an_account_with_each_other_or_the_anthropic_key() 
 #[test]
 fn no_operation_can_put_a_value_in_the_argument_list() {
     for op in [Op::Store, Op::Load, Op::Clear] {
-        for item in [Item::Token, Item::Credentials] {
+        for item in ALL_ITEMS {
             let args = args_for(op, item);
             assert!(
                 args.iter().all(|arg| arg.len() < 32),
@@ -113,6 +122,32 @@ fn no_operation_can_put_a_value_in_the_argument_list() {
             );
         }
     }
+}
+
+#[test]
+fn the_companion_item_is_named_under_the_same_service_as_the_rest() {
+    assert_eq!(
+        args_for(Op::Store, Item::CompanionDevices),
+        [
+            "add-generic-password",
+            "-U",
+            "-s",
+            "draft-assistant",
+            "-a",
+            "companion-devices",
+            "-w",
+        ]
+    );
+    assert_eq!(
+        args_for(Op::Clear, Item::CompanionDevices),
+        [
+            "delete-generic-password",
+            "-s",
+            "draft-assistant",
+            "-a",
+            "companion-devices",
+        ]
+    );
 }
 
 #[test]

@@ -1,0 +1,89 @@
+# Cutting a release: push a tag `vX.Y.Z` and this builds the macOS bundle and
+# attaches the .dmg to a GitHub release for that tag. Nothing else publishes a
+# build a person can install; `ci.yml`'s bundle job only uploads an artifact
+# that expires in fourteen days.
+#
+# The .dmg is UNSIGNED and UNNOTARISED (Tauri ad-hoc signs it), so Gatekeeper
+# blocks the first launch and the user has to allow it once in System Settings
+# -> Privacy & Security. Signing needs a paid Apple Developer account; once
+# there is one, add these repository secrets and pass them to the build step as
+# env, which is all Tauri's bundler needs:
+#
+#   env:
+#     APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}            # base64 .p12
+#     APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+#     APPLE_SIGNING_IDENTITY: "Developer ID Application: ... (TEAMID)"
+#     APPLE_ID: ${{ secrets.APPLE_ID }}
+#     APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}                  # app-specific
+#     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+#
+# Every action is pinned to a commit SHA rather than a tag, for the same reason
+# ci.yml does it: a tag is mutable, and this job holds a token that can write
+# releases. The trailing comment names the version the SHA corresponds to.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build and publish the macOS .dmg
+    runs-on: macos-latest
+    timeout-minutes: 40
+    # Only this job gets write access, and only to releases and contents.
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: draft-assistant
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: draft-assistant/.nvmrc
+          cache: npm
+          cache-dependency-path: draft-assistant/package-lock.json
+
+      - name: Read the pinned Rust version
+        id: rust
+        working-directory: .
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master, 2026-08
+        with:
+          toolchain: ${{ steps.rust.outputs.channel }}
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: draft-assistant/src-tauri
+          key: bundle
+
+      # Before the twenty-minute build, not after: Tauri stamps the .dmg name
+      # and the About box from tauri.conf.json, so a tag pushed against stale
+      # version numbers would publish v0.3.0 containing an installer that calls
+      # itself 0.2.0.
+      - name: Check the tag matches the version in the repo
+        run: node scripts/check-version.mjs "$GITHUB_REF_NAME"
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the desktop bundle
+        run: npm run tauri build
+
+      # A tag with a `-` in it (v0.3.0-rc1) is a prerelease, so it does not
+      # become the "latest release" people land on.
+      - name: Publish the release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: draft-assistant/src-tauri/target/release/bundle/dmg/*.dmg
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

@@ -68,7 +68,7 @@ pub async fn host(label: &str) -> Host {
 /// what a restart looks like: the threads on disk outlive the server.
 pub async fn host_over(data_dir: std::path::PathBuf, state: Arc<AppState>) -> Host {
     let companion = Arc::new(
-        CompanionServer::new("Justin's Mac".to_string(), data_dir.clone())
+        CompanionServer::sandboxed("Justin's Mac".to_string(), data_dir.clone())
             .expect("the companion builds"),
     );
     let emitted: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));

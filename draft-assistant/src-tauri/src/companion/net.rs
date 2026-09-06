@@ -1,5 +1,6 @@
 //! Finding the address to put on screen, and a port to listen on.
 
+use super::net_tailscale::{self, TailscaleSelf};
 use std::net::{SocketAddr, UdpSocket};
 
 /// The first port tried, and how many after it.
@@ -32,12 +33,22 @@ pub fn url_for(port: u16) -> String {
     format!("http://{}:{port}/", lan_ip())
 }
 
+/// This machine on its tailnet, by name when Tailscale can tell us one.
+///
+/// The CLI is asked first because the MagicDNS name it reports outlives any
+/// address change, and reads as a machine rather than a number. When no CLI
+/// is installed, or the backend is not running, the address off `ifconfig` is
+/// still a working answer, so that is the fallback rather than nothing.
+pub fn tailscale_self() -> Option<TailscaleSelf> {
+    net_tailscale::tailscale_status().or_else(|| tailscale_ip().map(TailscaleSelf::from_ip))
+}
+
 /// This machine's Tailscale address, when it has one.
 ///
 /// Tailscale hands every node an address in `100.64.0.0/10`, the carrier-grade
 /// NAT range nothing on a home LAN uses, so an interface carrying one is the
-/// tailnet. Read off `ifconfig` rather than a Tailscale CLI whose install
-/// path varies; a phone on the tailnet can reach this address from anywhere.
+/// tailnet. Read off `ifconfig`, which is there on every Mac whatever the
+/// Tailscale install looks like.
 pub fn tailscale_ip() -> Option<String> {
     let output = std::process::Command::new("ifconfig").output().ok()?;
     cgnat_address(&String::from_utf8_lossy(&output.stdout))
@@ -66,7 +77,15 @@ fn is_cgnat(ip: &str) -> bool {
 
 /// The tailnet URL for the same port, when this machine is on one.
 pub fn tailscale_url_for(port: u16) -> Option<String> {
-    tailscale_ip().map(|ip| format!("http://{ip}:{port}/"))
+    tailscale_self().and_then(|this| tailscale_url_from(&this, port))
+}
+
+/// The same URL over a machine the caller already looked up. The MagicDNS
+/// name wins over the address, so a QR code taken now still works after the
+/// tailnet hands this node a different number.
+pub fn tailscale_url_from(this: &TailscaleSelf, port: u16) -> Option<String> {
+    this.preferred_host()
+        .map(|host| format!("http://{host}:{port}/"))
 }
 
 /// The two origins that are not this server and are still allowed to post to
@@ -81,18 +100,24 @@ pub const FOLLOWER_ORIGINS: [&str; 2] = ["tauri://localhost", "http://localhost:
 /// than "anything that looks private". Loopback is in the list because the
 /// host's own browser is a legitimate client.
 pub fn server_origins(port: u16) -> Vec<String> {
-    origins_from(port, &lan_ip(), tailscale_ip().as_deref())
+    origins_from(port, &lan_ip(), tailscale_self().as_ref())
 }
 
 /// The same list, over addresses the caller already has. Pure, so a test can
 /// say what this machine's addresses are.
-pub fn origins_from(port: u16, lan: &str, tailscale: Option<&str>) -> Vec<String> {
+///
+/// Both tailnet hosts are listed when both are known: the QR code carries the
+/// MagicDNS name, but somebody who typed the address by hand is on the same
+/// server and must not have their requests refused by the origin check, nor
+/// their event socket refused by the page's own `connect-src`.
+pub fn origins_from(port: u16, lan: &str, tailscale: Option<&TailscaleSelf>) -> Vec<String> {
     let mut origins = vec![
         format!("http://127.0.0.1:{port}"),
         format!("http://localhost:{port}"),
         format!("http://[::1]:{port}"),
     ];
-    for host in std::iter::once(lan).chain(tailscale) {
+    let tailnet = tailscale.into_iter().flat_map(TailscaleSelf::hosts);
+    for host in std::iter::once(lan).chain(tailnet) {
         let origin = format!("http://{host}:{port}");
         if !origins.contains(&origin) {
             origins.push(origin);
@@ -170,7 +195,31 @@ pub fn bind_from(first: u16) -> Result<(std::net::TcpListener, u16), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{bind_from, lan_ip, url_for, DEFAULT_PORT};
+    use super::{bind_from, lan_ip, url_for, TailscaleSelf, DEFAULT_PORT};
+
+    fn on_tailnet() -> TailscaleSelf {
+        TailscaleSelf {
+            dns_name: Some("justins-mac.tail1234.ts.net".to_string()),
+            ip: Some("100.101.102.103".to_string()),
+        }
+    }
+
+    #[test]
+    fn the_url_on_screen_names_the_machine_and_falls_back_to_its_address() {
+        use super::tailscale_url_from;
+        assert_eq!(
+            tailscale_url_from(&on_tailnet(), 7878).as_deref(),
+            Some("http://justins-mac.tail1234.ts.net:7878/")
+        );
+        // The failure this prevents: with only an address known there was
+        // still a working URL to show, and returning nothing hid the tailnet.
+        let numbered = TailscaleSelf::from_ip("100.101.102.103".to_string());
+        assert_eq!(
+            tailscale_url_from(&numbered, 7878).as_deref(),
+            Some("http://100.101.102.103:7878/")
+        );
+        assert_eq!(tailscale_url_from(&TailscaleSelf::default(), 7878), None);
+    }
 
     #[test]
     fn an_address_is_always_produced_even_with_no_network() {
@@ -200,11 +249,23 @@ mod tests {
     #[test]
     fn only_this_server_and_the_follower_may_post_across_origins() {
         use super::{origin_allowed, origins_from};
-        let ours = origins_from(7878, "192.168.1.24", Some("100.101.102.103"));
+        let ours = origins_from(7878, "192.168.1.24", Some(&on_tailnet()));
         // The phone page itself, however the phone reached the Mac.
         assert!(origin_allowed("http://192.168.1.24:7878", &ours));
         assert!(origin_allowed("http://127.0.0.1:7878", &ours));
+        // Both tailnet hosts: the name the QR carries, and the address a
+        // phone may have been given by hand. The failure this prevents is
+        // the typed-address phone being refused once the QR moved to a name.
+        assert!(origin_allowed(
+            "http://justins-mac.tail1234.ts.net:7878",
+            &ours
+        ));
         assert!(origin_allowed("http://100.101.102.103:7878", &ours));
+        // Somebody else's node on the same tailnet is still not us.
+        assert!(!origin_allowed(
+            "http://other-mac.tail1234.ts.net:7878",
+            &ours
+        ));
         // The follower desktop, which is its own origin and always will be.
         assert!(origin_allowed("tauri://localhost", &[]));
         assert!(origin_allowed("http://localhost:1420", &[]));

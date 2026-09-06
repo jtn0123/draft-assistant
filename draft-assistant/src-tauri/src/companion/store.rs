@@ -1,13 +1,20 @@
 //! Where the companion remembers who is paired, between runs of the app.
 //!
-//! Without this file every restart of the host silently unpaired every phone:
-//! the tokens only ever lived in memory, so a phone that woke up with a token
-//! in `localStorage` was told "not paired" by a host that had simply forgotten
-//! it. What is written here is a secret — the device tokens are bearer tokens
-//! for the whole read API — so the file is owner-only and nothing in it is
-//! ever logged.
+//! Without this the app silently unpaired every phone on restart: the tokens
+//! only ever lived in memory, so a phone that woke up with a token in
+//! `localStorage` was told "not paired" by a host that had simply forgotten
+//! it.
+//!
+//! What is kept here is a secret. A device token is a bearer token for the
+//! whole read API and the pairing code is what turns a stranger on the LAN
+//! into a paired device, so both go in the machine's Keychain through
+//! [`crate::yahoo_secrets`] rather than into a file. They used to sit in a
+//! plaintext `companion_devices.json`, owner-only but still readable by
+//! anything running as the user; that file is now migrated into the store the
+//! first time it is seen and deleted. Nothing in here is ever logged.
 
 use super::hub::Device;
+use crate::yahoo_secrets::{Item, SecretStore};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -30,115 +37,66 @@ pub struct StoredHub {
     pub devices: Vec<StoredDevice>,
 }
 
-/// The file the hub is written to, inside the app's data directory.
-pub fn path_in(data_dir: &Path) -> PathBuf {
+/// The plaintext file older builds wrote. Nothing writes it any more; it is
+/// only looked for once, so what an upgrading user had paired is carried over.
+pub fn legacy_path_in(data_dir: &Path) -> PathBuf {
     data_dir.join("companion_devices.json")
 }
 
-/// What was written last time, or nothing. A file that will not parse is
-/// treated as absent rather than as an error: the cost is re-pairing, and
-/// refusing to start the app over it would be worse.
-pub fn load(path: &Path) -> Option<StoredHub> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str::<StoredHub>(&raw).ok()
+/// What was stored last time, or nothing.
+///
+/// A value that will not parse is treated as absent rather than as an error:
+/// the cost is re-pairing, and refusing to start the app over it would be
+/// worse.
+pub fn load(store: &dyn SecretStore, data_dir: &Path) -> Option<StoredHub> {
+    if let Some(raw) = store.read(Item::CompanionDevices) {
+        return serde_json::from_str::<StoredHub>(&raw).ok();
+    }
+    migrate_legacy_file(store, data_dir)
 }
 
-/// Write the pairings down, owner-only, through a temp file.
+/// Move a pre-Keychain `companion_devices.json` into the store and delete it.
+///
+/// The file is removed even when it will not parse: it cannot be used for
+/// anything, and leaving a file of bearer tokens on disk is the failure this
+/// whole module exists to end. It is kept only when the store refused the
+/// write, so that a later run can try the move again instead of unpairing
+/// every phone.
+fn migrate_legacy_file(store: &dyn SecretStore, data_dir: &Path) -> Option<StoredHub> {
+    let path = legacy_path_in(data_dir);
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let Ok(stored) = serde_json::from_str::<StoredHub>(&raw) else {
+        let _ = std::fs::remove_file(&path);
+        return None;
+    };
+    if write(store, &stored).is_err() {
+        crate::applog::warn("could not move the paired devices into the keychain");
+        return Some(stored);
+    }
+    if std::fs::remove_file(&path).is_err() {
+        crate::applog::warn("could not delete the old paired devices file");
+    }
+    Some(stored)
+}
+
+/// Put the pairings and the code in the store.
 ///
 /// A failed write is logged without any of its content and otherwise ignored:
 /// the pairing the user just made is already live in memory, and losing it at
 /// the next restart is not a reason to refuse it now.
-pub fn save(path: &Path, stored: &StoredHub) {
-    if let Some(parent) = path.parent() {
-        if std::fs::create_dir_all(parent).is_ok() {
-            crate::cache::owner_only_dir(parent);
-        }
-    }
-    let Ok(json) = serde_json::to_string(stored) else {
-        crate::applog::warn("could not prepare the paired devices to be saved");
-        return;
-    };
-    let tmp = crate::cache::temp_sibling(path);
-    if crate::cache::replace_file(tmp, path.to_path_buf(), json).is_err() {
-        // Deliberately not the error text: it carries the path, and the path
-        // is the one place on disk the tokens live.
+pub fn save(store: &dyn SecretStore, stored: &StoredHub) {
+    if write(store, stored).is_err() {
+        // Deliberately not the error text: a store error can quote the value
+        // it was handed, and that value is every paired phone's token.
         crate::applog::warn("could not save the paired devices");
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{load, path_in, save, StoredDevice, StoredHub};
-    use crate::companion::hub::Device;
-
-    fn dir(label: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "companion-store-{label}-{}-{:?}",
-            std::process::id(),
-            std::time::SystemTime::now()
-        ));
-        std::fs::create_dir_all(&dir).expect("the scratch directory is creatable");
-        dir
-    }
-
-    fn sample() -> StoredHub {
-        StoredHub {
-            code: "424242".to_string(),
-            devices: vec![StoredDevice {
-                token: "tok".to_string(),
-                device: Device {
-                    device_id: "dev".to_string(),
-                    name: "Rob's iPhone".to_string(),
-                    kind: "phone".to_string(),
-                    paired_at_ms: 7,
-                    last_seen_ms: 8,
-                    connected: true,
-                },
-            }],
-        }
-    }
-
-    #[test]
-    /// Only the round trip. Whether a restored device counts as connected is
-    /// the hub's business, not the file's -- the hub clears the flag when it
-    /// reads this back, and `hub_tests` is where that is asserted.
-    fn every_field_of_a_paired_device_survives_the_round_trip() {
-        let path = path_in(&dir("roundtrip"));
-        assert!(load(&path).is_none(), "nothing has been written yet");
-        save(&path, &sample());
-        let back = load(&path).expect("the file reads back");
-        assert_eq!(back.code, "424242");
-        assert_eq!(back.devices.len(), 1);
-        assert_eq!(back.devices[0].token, "tok");
-        let device = &back.devices[0].device;
-        assert_eq!(device.device_id, "dev");
-        assert_eq!(device.name, "Rob's iPhone");
-        assert_eq!(device.kind, "phone");
-        assert_eq!(device.paired_at_ms, 7);
-        assert_eq!(device.last_seen_ms, 8);
-        // The file records what was true when it was written; nothing here
-        // reinterprets it.
-        assert!(device.connected);
-    }
-
-    #[test]
-    fn the_file_holding_the_tokens_is_readable_only_by_its_owner() {
-        let path = path_in(&dir("mode"));
-        save(&path, &sample());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&path)
-                .expect("the file exists")
-                .permissions();
-            assert_eq!(mode.mode() & 0o777, 0o600, "the token file is not private");
-        }
-    }
-
-    #[test]
-    fn a_file_that_will_not_parse_is_treated_as_nobody_being_paired() {
-        let path = path_in(&dir("corrupt"));
-        std::fs::write(&path, "{ not json").expect("the file writes");
-        assert!(load(&path).is_none());
-    }
+fn write(store: &dyn SecretStore, stored: &StoredHub) -> Result<(), ()> {
+    let json = serde_json::to_string(stored).map_err(|_| ())?;
+    store.write(Item::CompanionDevices, &json).map_err(|_| ())
 }
+
+#[cfg(test)]
+#[path = "store_tests.rs"]
+mod tests;

@@ -22,14 +22,21 @@ use std::process::{Command, Stdio};
 
 const SERVICE: &str = "draft-assistant";
 
-/// The two things worth keeping. Kept as an enum so an account name cannot be
+/// The things worth keeping. Kept as an enum so an account name cannot be
 /// mistyped into existence at a call site.
+///
+/// Not all of them are Yahoo's: the companion's device tokens live here too,
+/// because this module is the one path to the Keychain that keeps a value out
+/// of `argv` and can be swapped for a file in a test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Item {
     /// `{"client_id": .., "client_secret": ..}` from developer.yahoo.com.
     Credentials,
     /// `{"access_token": .., "refresh_token": .., "expires_at": ..}`.
     Token,
+    /// The companion's pairing code and the bearer token of every paired
+    /// phone, as one blob of JSON. See [`crate::companion::store`].
+    CompanionDevices,
 }
 
 impl Item {
@@ -37,6 +44,7 @@ impl Item {
         match self {
             Item::Credentials => "yahoo-app-credentials",
             Item::Token => "yahoo-oauth-token",
+            Item::CompanionDevices => "companion-devices",
         }
     }
 }
