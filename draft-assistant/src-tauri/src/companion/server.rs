@@ -110,11 +110,13 @@ impl CompanionServer {
         });
         *self.running() = Some(Running { port, shutdown });
         self.hub.set_port(Some(port));
-        // What the CSP and the cross-origin check are built from, read once
-        // here: `tailscale_ip` shells out, and doing that per request would
-        // put a process spawn in front of every page load.
+        // What the CSP and the cross-origin check are built from, read here
+        // and then on a slow timer: `tailscale_ip` shells out, and doing
+        // that per request would put a process spawn in front of every page
+        // load.
         self.hub.set_origins(net::server_origins(port));
         spawn_rotation(self.hub.clone(), ROTATE_EVERY, now_ms);
+        spawn_origin_refresh(self.hub.clone(), REFRESH_ORIGINS_EVERY, net::server_origins);
         Ok(port)
     }
 
@@ -169,6 +171,51 @@ where
         while hub.is_running() {
             ticker.tick().await;
             hub.rotate_if_idle(clock());
+        }
+    })
+}
+
+/// How often the machine's own addresses are looked at again.
+pub const REFRESH_ORIGINS_EVERY: Duration = Duration::from_secs(30);
+
+/// Keep the allowed origins matching the addresses the machine actually has.
+///
+/// They were read once when the server started, which was wrong the moment
+/// Tailscale was installed or switched on afterwards: the phone could load
+/// the page over the tailnet, and then the page's own `connect-src` refused
+/// it the WebSocket until the server was turned off and on again. The same
+/// went for a Wi-Fi change. `read` is what turns the port into the current
+/// list, injected so a test can move the machine without moving it.
+///
+/// Nothing is written when nothing changed, and the task ends with the
+/// server, the same as the rotation.
+pub fn spawn_origin_refresh<R>(
+    hub: Arc<CompanionHub>,
+    every: Duration,
+    read: R,
+) -> tokio::task::JoinHandle<()>
+where
+    R: Fn(u16) -> Vec<String> + Send + 'static,
+{
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(every);
+        ticker.tick().await;
+        while let Some(port) = hub.port() {
+            ticker.tick().await;
+            // The server may have stopped, or been restarted on another port,
+            // during the wait; only the port this loop was told about is ours
+            // to write for.
+            if hub.port() != Some(port) {
+                break;
+            }
+            let fresh = read(port);
+            if fresh != hub.origins() {
+                crate::applog::info(format!(
+                    "the phone connection's addresses changed: {}",
+                    fresh.join(" ")
+                ));
+                hub.set_origins(fresh);
+            }
         }
     })
 }

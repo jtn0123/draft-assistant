@@ -77,3 +77,68 @@ async fn an_idle_code_rotates_with_nobody_looking_at_it() {
         .expect("the rotation task stops with the server")
         .expect("the rotation task did not panic");
 }
+
+#[tokio::test]
+async fn origins_follow_the_machine_onto_a_tailnet() {
+    use draft_assistant_lib::companion::server::spawn_origin_refresh;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let host = host("refresh").await;
+    let before = host.companion.hub.origins();
+    assert!(!before.iter().any(|o| o.contains("100.101.102.103")));
+    // Tailscale comes up after the server did: the machine grows an address.
+    let on_tailnet = std::sync::Arc::new(AtomicBool::new(false));
+    let seen = on_tailnet.clone();
+    let same = before.clone();
+    let task = spawn_origin_refresh(
+        host.companion.hub.clone(),
+        std::time::Duration::from_millis(10),
+        move |port| {
+            let mut now = same.clone();
+            if seen.load(Ordering::SeqCst) {
+                now.push(format!("http://100.101.102.103:{port}"));
+            }
+            now
+        },
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    // Nothing changed, so nothing was written.
+    assert_eq!(host.companion.hub.origins(), before);
+    on_tailnet.store(true, Ordering::SeqCst);
+    let port = host.companion.port().expect("running");
+    let want = format!("http://100.101.102.103:{port}");
+    for _ in 0..100 {
+        if host.companion.hub.origins().contains(&want) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(
+        host.companion.hub.origins().contains(&want),
+        "the tailnet address never made it into the origins"
+    );
+    // And the page a phone loads now names the tailnet socket, so the
+    // WebSocket is not refused by the page's own policy.
+    let page = host
+        .http
+        .get(format!("{}/", host.base))
+        .send()
+        .await
+        .expect("page");
+    let csp = page
+        .headers()
+        .get("content-security-policy")
+        .expect("csp")
+        .to_str()
+        .expect("ascii")
+        .to_string();
+    assert!(
+        csp.contains(&format!("ws://100.101.102.103:{port}")),
+        "{csp}"
+    );
+    host.companion.stop();
+    tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .expect("the refresh task stops with the server")
+        .expect("the refresh task did not panic");
+}
