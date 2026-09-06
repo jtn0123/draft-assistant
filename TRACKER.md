@@ -373,3 +373,32 @@ All 15 headline items, the three honourable mentions, and a new **Logging / erro
 - **Logging / error reporting (new area): D → B.** `applog::{error,warn,info,debug}` with redaction (keys, bearer tokens, `token=`/`code=` values, six-digit codes in URLs) and `context()`; panic hook; `failing(cmd, ctx)` on the nine most important commands; poll-health transitions logged once; `window.onerror`/`unhandledrejection` → `log_frontend_error`; ErrorBoundary reports and offers "Copy details"; Settings → Diagnostics… (version, ids, poll health, companion status, log path, last 200 lines, Copy diagnostics, Open log folder). Still missing for A: season loop on `HealthWatch`, tail across generations, ~30 commands still unlogged, debug level env-only.
 
 **Logging / error reporting: B → A** (`cf9e09d`). Season poller on `HealthWatch` with league/week context; `tail` splices `.log.1` before the current file; every failing `#[tauri::command]` (41) logs an ERROR line naming the command via `applog::logged!`; runtime log level (`set_log_level`, `AppConfig.log_level`, "Verbose logging" in Diagnostics); INFO lines for app start, league load/switch, season load, companion on/off; panic line carries the version. Dependabot #22 (vite 8 + plugin-react 6) and #21 (lxml) merged; verify:mid, `npm run build`, Playwright 36/36 all green under vite 8.
+
+---
+## Live-test list (2026-09-05) — needs a person at the machine
+
+Everything here is covered by tests against fixtures or a headless host; none of it has been driven end to end on the real app by the user. Tick off as each is done, and note what broke.
+
+| # | What to try | Expect | Status |
+|---|---|---|---|
+| L1 | Install Tailscale on the Mac and phone, same tailnet. Turn the companion on in Settings. | Within 30 s the panel shows "Or, over Tailscale, from anywhere" with a `100.x` URL (`c5b481b` refreshes origins live). Phone on cellular scans it, pairs, sees the clock tick. | open |
+| L2 | The native Settings → Phone companion toggle, on a LAN phone. | QR scans, code pairs, device listed, revoke throws it off with a "pairing ended" message. (Only the headless `companion_host` was driven live.) | open |
+| L3 | Ask one question from the phone in the shared chat. | Answer lands on both screens, cost shown, spend counter moves. Bills the real key once. | open |
+| L4 | Join from a second Mac with "Join another Draft Assistant…". | Full board and clock render read-only with the "hosted by" pill; leaving returns the local leagues. | open |
+| L5 | Live Yahoo: paste client id/secret, connect, load a real league. | Sign-in completes on the local redirect; league, keepers and budget match the Yahoo site. Capture the responses as recorded-shape fixtures (`Source::RecordedShape`) so the hand-written ones can go. | open |
+| L6 | A Sleeper mock draft start to finish with the app open. | Chime on my pick, Mark drafted once, undo, the last pick reaches the feed, pause banner during a pause. | open |
+| L7 | A Sunday during the season. | Scoreboard live, "locked" only once all my starters have kicked off, Refresh rolls the week Tuesday morning. | open |
+| L8 | Settings → Diagnostics… on the Mac. | Copy diagnostics pastes clean text with no code or token; Open log folder lands in the right place; Verbose logging changes the tail. | open |
+| L9 | Download the CI `.dmg` on a Mac that has never run the app. | Gatekeeper warning (unsigned) is the only obstacle; first launch reaches the setup screen. | open |
+
+## Still missing (2026-09-05)
+
+Code work, cheapest first. Nothing here is blocked on a live test.
+
+1. **Tagged release workflow.** Nothing built on CI ever reaches an installed user; there is no tag, changelog or updater. Add a `v*` tag workflow that builds the `.dmg` and attaches it to a GitHub release. Real signing and notarisation need the user's Apple developer account; ship unsigned first.
+2. **Companion tokens and pairing code into the Keychain** instead of the 0600 JSON store, via the same `/usr/bin/security` path Yahoo uses.
+3. **Skip publishing when nobody is subscribed.** `hub.publish` serialises every draft and season snapshot on every tick even with the companion idle.
+4. **MagicDNS name in the QR** from `tailscale status --json`, so the URL survives a tailnet address change.
+5. **`tailscale cert` HTTPS.** Serve the tailnet's real certificate when present: a padlock on the phone, and PWA install and wake lock, which need a secure context. Roughly a day; pulls the rustls chain in.
+6. **Grade 6 regrade** after the release workflow lands.
+7. Deferred from earlier cards: last-season narrative (needs bracket data), the two Dependabot alerts that cannot be fixed upstream (extract-zip in the e2e dev tree, glib via Tauri on Linux).
