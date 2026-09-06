@@ -258,7 +258,7 @@ All twelve items of the cheapest-first list. Verified on the combined tree: Rust
 
 For the user: the updater private key was generated locally and never committed. Add it as the `TAURI_SIGNING_PRIVATE_KEY` repository secret to get signed updater artifacts from a tag; without it a tag still produces the dmg.
 
-### Grade-7 prep batch (2026-09-06) — three Fable lanes, commit `0a121c5`, release `v0.3.0` at `620a5b6`
+### Grade-7 prep batch (2026-09-06) — three Fable lanes, commit `0a121c5`, release `v0.3.0` at `2534563` (first tag at `620a5b6` failed its gate: the companion browser spec 404ed `pwa.js`; fixed, tag moved, dmg published)
 
 - **Updater row:** Settings → "Check for updates" (`commands_update.rs`, `updateRow.ts` state machine, `useUpdateRow.ts`); plugin errors mapped to plain sentences; hidden where the desktop api is absent (follower, web preview). Idle value is "Check" because the Version row sits directly under it.
 - **Companion HTTPS:** when `tailscale cert` mints for the MagicDNS name, a second listener on port+1 serves the same router over TLS (`companion/tls.rs`, `tls_x509.rs`, `tls_serve.rs`; tokio-rustls on ring, hyper 1); the https origin joins CSP and the WebSocket origin set; the tailnet URL prefers https. Phone page: manifest, pass-through service worker, `pwa.js` wake lock held while a draft is live. L10 added.
