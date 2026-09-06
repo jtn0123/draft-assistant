@@ -382,14 +382,14 @@ Everything here is covered by tests against fixtures or a headless host; none of
 | # | What to try | Expect | Status |
 |---|---|---|---|
 | L1 | Install Tailscale on the Mac and phone, same tailnet. Turn the companion on in Settings. | Within 30 s the panel shows "Or, over Tailscale, from anywhere" with a `100.x` URL (`c5b481b` refreshes origins live). Phone on cellular scans it, pairs, sees the clock tick. | open |
-| L2 | The native Settings → Phone companion toggle, on a LAN phone. | QR scans, code pairs, device listed, revoke throws it off with a "pairing ended" message. (Only the headless `companion_host` was driven live.) | open |
+| L2 | The native Settings → Phone companion toggle, on a LAN phone. | QR scans, code pairs, device listed, revoke throws it off with a "pairing ended" message. (Only the headless `companion_host` was driven live.) | open; pairing, restart-survival and the phone page re-driven in the browser pane on 2026-09-05 against the headless host, see below |
 | L3 | Ask one question from the phone in the shared chat. | Answer lands on both screens, cost shown, spend counter moves. Bills the real key once. | open |
-| L4 | Join from a second Mac with "Join another Draft Assistant…". | Full board and clock render read-only with the "hosted by" pill; leaving returns the local leagues. | open |
+| L4 | Join from a second Mac with "Join another Draft Assistant…". | Full board and clock render read-only with the "hosted by" pill; leaving returns the local leagues. | half done: the web preview joined the headless host by `localhost:7878` + code, showed the hosted-by pill, live board and season placeholder; a real second Mac still open |
 | L5 | Live Yahoo: paste client id/secret, connect, load a real league. | Sign-in completes on the local redirect; league, keepers and budget match the Yahoo site. Capture the responses as recorded-shape fixtures (`Source::RecordedShape`) so the hand-written ones can go. | open |
 | L6 | A Sleeper mock draft start to finish with the app open. | Chime on my pick, Mark drafted once, undo, the last pick reaches the feed, pause banner during a pause. | open |
 | L7 | A Sunday during the season. | Scoreboard live, "locked" only once all my starters have kicked off, Refresh rolls the week Tuesday morning. | open |
-| L8 | Settings → Diagnostics… on the Mac. | Copy diagnostics pastes clean text with no code or token; Open log folder lands in the right place; Verbose logging changes the tail. | open |
-| L9 | Download the CI `.dmg` on a Mac that has never run the app. | Gatekeeper warning (unsigned) is the only obstacle; first launch reaches the setup screen. | open |
+| L8 | Settings → Diagnostics… on the Mac. | Copy diagnostics pastes clean text with no code or token; Open log folder lands in the right place; Verbose logging changes the tail. | dialog and the copy-failure message checked in the browser preview; the Mac-only actions still open |
+| L9 | Download the CI `.dmg` on a Mac that has never run the app. | Gatekeeper warning (unsigned) is the only obstacle; first launch reaches the setup screen. | dmg inspected: 8 MB, aarch64 only, ad-hoc signed with hardened runtime, `spctl` rejects it, so macOS 15 needs Settings → Privacy & Security → Open Anyway; first launch still open |
 
 ## Still missing (2026-09-05)
 
@@ -402,3 +402,11 @@ Code work, cheapest first. Nothing here is blocked on a live test.
 5. **`tailscale cert` HTTPS.** Serve the tailnet's real certificate when present: a padlock on the phone, and PWA install and wake lock, which need a secure context. Roughly a day; pulls the rustls chain in.
 6. **Grade 6 regrade** after the release workflow lands.
 7. Deferred from earlier cards: last-season narrative (needs bracket data), the two Dependabot alerts that cannot be fixed upstream (extract-zip in the e2e dev tree, glib via Tauri on Linux).
+
+### Pre-tests run without the user (2026-09-05, after `127d12c`)
+
+- **Found and fixed a real bug in the Keychain path.** The `security` tool's password prompt keeps 128 bytes and silently drops the rest, and every Keychain write in `yahoo_secrets.rs` went through that prompt. The companion's device list came back as a 128-byte stub after a host restart (every phone unpaired), and a Yahoo token set is longer still, so live Yahoo sign-in would never have survived a restart either. The Anthropic key is under 128 bytes, which is why `secrets.rs` never showed it. Fix: the value travels as a hex-encoded argument (`-w <hex>`), decoded on read; plain legacy items still read. Verified live: pair a phone, restart the headless host, the phone is still paired and the Keychain item parses with both devices.
+- Phone page against the headless host: pairing by code, live board, restart survival, second device listed. Follower join from the web preview: hosted-by pill, live Draft board, season placeholder with Try again when the host has no season loaded.
+- Diagnostics dialog in the browser preview renders every row and hides the log actions; a refused clipboard write shows its error in the dialog rather than nothing.
+- CI dmg inspected (see L9). The Mac's LAN address moved from 192.168.1.242 to 192.168.2.10 since yesterday, which is exactly the case the origin refresh and the MagicDNS name are for.
+- Note: the headless `companion_host` and the desktop app share one Keychain item, so running both on the same Mac makes them overwrite each other's device list. Fine for a test host, worth a `--data-dir`-scoped account if the headless host becomes a real deployment.

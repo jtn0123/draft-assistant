@@ -1,9 +1,20 @@
 //! Where the Yahoo credentials and tokens live.
 //!
 //! Same deal as [`crate::secrets`], which keeps the Anthropic key in the macOS
-//! login Keychain through `/usr/bin/security` and never puts the value in
-//! `argv`. Two differences:
+//! login Keychain through `/usr/bin/security`. Three differences:
 //!
+//! - The value goes to `security` as an argument, hex-encoded, not on stdin.
+//!   The stdin route answers the tool's password prompt, and that prompt
+//!   keeps 128 bytes and silently drops the rest: an Anthropic key fits, a
+//!   Yahoo token set or the companion's device list does not, and what came
+//!   back was an unparseable stub that read as "nothing stored". The
+//!   argument is visible in `ps` for the milliseconds the tool runs, to
+//!   processes of the same user, and those same processes can already read
+//!   the item back with one `find-generic-password -w`; the tool that wrote
+//!   the item is trusted to read it without a prompt. Hex rather than the
+//!   text itself because `find-generic-password -w` prints an item as hex
+//!   the moment it holds one non-ASCII byte and as text otherwise, and a
+//!   host called "Justin’s MacBook Air" is one such byte.
 //! - There are two items, not one: the app credentials Yahoo issues
 //!   (client id **and** secret) and the token pair from the OAuth flow. They
 //!   get their own Keychain accounts under the app's existing service, so
@@ -16,7 +27,6 @@
 //! against a directory in `/tmp` and never touch a real login Keychain.
 
 use crate::yahoo_oauth::{TokenSet, YahooCredentials};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -26,8 +36,8 @@ const SERVICE: &str = "draft-assistant";
 /// mistyped into existence at a call site.
 ///
 /// Not all of them are Yahoo's: the companion's device tokens live here too,
-/// because this module is the one path to the Keychain that keeps a value out
-/// of `argv` and can be swapped for a file in a test.
+/// because this module is the one path to the Keychain that takes a value of
+/// any length and can be swapped for a file in a test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Item {
     /// `{"client_id": .., "client_secret": ..}` from developer.yahoo.com.
@@ -57,12 +67,13 @@ pub enum Op {
     Clear,
 }
 
-/// The `security` invocation for one operation on one item.
+/// The `security` invocation for one operation on one item. `value` is what
+/// a store writes; the other two operations ignore it.
 ///
-/// The value is never an argument: `add-generic-password -w` with nothing
-/// after it reads from stdin, which keeps a refresh token out of the `ps`
-/// output every process on the machine can read.
-pub fn args_for(op: Op, item: Item) -> Vec<String> {
+/// The stored value is always the hex of the UTF-8 text (see the module
+/// doc), so what `-w` prints on the way back is always plain ASCII that
+/// [`decode_stored`] turns into the text again.
+pub fn args_for(op: Op, item: Item, value: Option<&str>) -> Vec<String> {
     let mut args: Vec<String> = match op {
         Op::Store => vec!["add-generic-password".into(), "-U".into()],
         Op::Load => vec!["find-generic-password".into()],
@@ -74,10 +85,42 @@ pub fn args_for(op: Op, item: Item) -> Vec<String> {
         "-a".into(),
         item.account().into(),
     ]);
-    if matches!(op, Op::Store | Op::Load) {
-        args.push("-w".into());
+    match op {
+        Op::Store => args.extend(["-w".into(), hex_of(value.unwrap_or_default())]),
+        Op::Load => args.push("-w".into()),
+        Op::Clear => {}
     }
     args
+}
+
+/// Lower-case hex of the text's UTF-8 bytes.
+pub fn hex_of(text: &str) -> String {
+    text.bytes().map(|b| format!("{b:02x}")).collect()
+}
+
+/// What `find-generic-password -w` printed, back to text.
+///
+/// Hex written by [`hex_of`] decodes to the text it came from. Anything else
+/// is an item written before values were hex-encoded, or an item the tool
+/// printed as text, and is handed back as it is; a legacy value that happens
+/// to be entirely hex digits is not a case that arises, because every value
+/// this module has ever stored is JSON and starts with a brace.
+pub fn decode_stored(printed: &str) -> String {
+    let printed = printed.trim();
+    let is_hex = !printed.is_empty()
+        && printed.len().is_multiple_of(2)
+        && printed.bytes().all(|b| b.is_ascii_hexdigit());
+    if !is_hex {
+        return printed.to_string();
+    }
+    let bytes: Option<Vec<u8>> = (0..printed.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&printed[i..i + 2], 16).ok())
+        .collect();
+    match bytes.and_then(|b| String::from_utf8(b).ok()) {
+        Some(text) => text,
+        None => printed.to_string(),
+    }
 }
 
 /// Somewhere a secret can be kept.
@@ -97,30 +140,12 @@ pub fn available() -> bool {
 
 impl Keychain {
     fn run(op: Op, item: Item, value: Option<&str>) -> Result<String, String> {
-        let mut child = Command::new("/usr/bin/security")
-            .args(args_for(op, item))
-            .stdin(if value.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
+        let output = Command::new("/usr/bin/security")
+            .args(args_for(op, item, value))
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("keychain: {e}"))?;
-        if let Some(value) = value {
-            // `security` prompts for the password and then for a confirmation,
-            // so it wants the value twice.
-            let mut stdin = child
-                .stdin
-                .take()
-                .ok_or_else(|| "keychain: no stdin".to_string())?;
-            stdin
-                .write_all(format!("{value}\n{value}\n").as_bytes())
-                .map_err(|e| format!("keychain: {e}"))?;
-        }
-        let output = child
-            .wait_with_output()
+            .output()
             .map_err(|e| format!("keychain: {e}"))?;
         if !output.status.success() {
             return Err(format!(
@@ -137,6 +162,7 @@ impl SecretStore for Keychain {
     fn read(&self, item: Item) -> Option<String> {
         Self::run(Op::Load, item, None)
             .ok()
+            .map(|printed| decode_stored(&printed))
             .filter(|value| !value.is_empty())
     }
 

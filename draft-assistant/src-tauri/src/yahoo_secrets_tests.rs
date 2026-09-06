@@ -49,9 +49,9 @@ fn credentials() -> YahooCredentials {
 }
 
 #[test]
-fn store_builds_an_upserting_add_that_reads_the_value_from_stdin() {
+fn store_builds_an_upserting_add_with_the_value_hex_encoded_in_argv() {
     assert_eq!(
-        args_for(Op::Store, Item::Token),
+        args_for(Op::Store, Item::Token, Some("{\"a\":1}")),
         [
             "add-generic-password",
             "-U",
@@ -60,14 +60,45 @@ fn store_builds_an_upserting_add_that_reads_the_value_from_stdin() {
             "-a",
             "yahoo-oauth-token",
             "-w",
+            "7b2261223a317d",
         ]
     );
+}
+
+/// The stdin route answered the tool's password prompt, which keeps 128
+/// bytes and drops the rest without a word. A Yahoo token set and the
+/// companion's device list are both longer, and both came back as a stub
+/// that would not parse. The value has to travel whole.
+#[test]
+fn a_value_longer_than_the_password_prompt_keeps_is_passed_whole() {
+    let long = format!("{{\"tok\":\"{}\"}}", "x".repeat(6000));
+    let args = args_for(Op::Store, Item::Token, Some(&long));
+    let sent = args.last().expect("a value");
+    assert_eq!(sent.len(), long.len() * 2);
+    assert_eq!(decode_stored(sent), long);
+}
+
+/// `find-generic-password -w` prints an item as hex once it holds a
+/// non-ASCII byte and as text otherwise, so the reader has to take both.
+#[test]
+fn what_the_tool_prints_decodes_back_to_the_text() {
+    let curly = "{\"host\":\"Justin’s MacBook Air\"}";
+    assert_eq!(decode_stored(&hex_of(curly)), curly);
+    assert_eq!(decode_stored(&format!("{}\n", hex_of("plain"))), "plain");
+    // An item written before values were hex-encoded reads as it was.
+    assert_eq!(
+        decode_stored("{\"client_id\":\"abc\"}"),
+        "{\"client_id\":\"abc\"}"
+    );
+    // Hex that is not UTF-8 is not silently turned into something else.
+    assert_eq!(decode_stored("ff"), "ff");
+    assert_eq!(decode_stored(""), "");
 }
 
 #[test]
 fn load_and_clear_name_the_item_the_same_way() {
     assert_eq!(
-        args_for(Op::Load, Item::Credentials),
+        args_for(Op::Load, Item::Credentials, None),
         [
             "find-generic-password",
             "-s",
@@ -78,7 +109,7 @@ fn load_and_clear_name_the_item_the_same_way() {
         ]
     );
     assert_eq!(
-        args_for(Op::Clear, Item::Credentials),
+        args_for(Op::Clear, Item::Credentials, None),
         [
             "delete-generic-password",
             "-s",
@@ -112,22 +143,27 @@ fn the_items_do_not_share_an_account_with_each_other_or_the_anthropic_key() {
 }
 
 #[test]
-fn no_operation_can_put_a_value_in_the_argument_list() {
-    for op in [Op::Store, Op::Load, Op::Clear] {
-        for item in ALL_ITEMS {
-            let args = args_for(op, item);
+fn only_a_store_carries_the_value_and_never_as_plain_text() {
+    for item in ALL_ITEMS {
+        for op in [Op::Load, Op::Clear] {
+            let args = args_for(op, item, Some("{\"secret\":\"do-not-send\"}"));
             assert!(
                 args.iter().all(|arg| arg.len() < 32),
-                "{op:?}/{item:?} has an argument long enough to be a token: {args:?}"
+                "{op:?}/{item:?} carries a value it has no use for: {args:?}"
             );
         }
+        let args = args_for(Op::Store, item, Some("{\"secret\":\"do-not-send\"}"));
+        assert!(
+            args.iter().all(|arg| !arg.contains("do-not-send")),
+            "{item:?} puts the text of a secret in argv: {args:?}"
+        );
     }
 }
 
 #[test]
 fn the_companion_item_is_named_under_the_same_service_as_the_rest() {
     assert_eq!(
-        args_for(Op::Store, Item::CompanionDevices),
+        args_for(Op::Store, Item::CompanionDevices, Some("{}")),
         [
             "add-generic-password",
             "-U",
@@ -136,10 +172,11 @@ fn the_companion_item_is_named_under_the_same_service_as_the_rest() {
             "-a",
             "companion-devices",
             "-w",
+            "7b7d",
         ]
     );
     assert_eq!(
-        args_for(Op::Clear, Item::CompanionDevices),
+        args_for(Op::Clear, Item::CompanionDevices, None),
         [
             "delete-generic-password",
             "-s",
