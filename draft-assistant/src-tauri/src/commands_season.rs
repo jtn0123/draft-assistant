@@ -57,12 +57,21 @@ pub async fn load_season(
     )
 }
 
+/// What the season screen says for a league that is not on Sleeper.
+pub const SEASON_SLEEPER_ONLY: &str = "Season view is Sleeper-only for now";
+
 async fn load_season_inner(state: &AppState, force: Option<bool>) -> Result<SeasonView, String> {
     let force = force.unwrap_or(false);
     let league = {
         let loaded = state.loaded.lock().await;
         loaded.as_ref().ok_or("no league loaded")?.league.clone()
     };
+    // Every season feed is a Sleeper endpoint keyed by a Sleeper league id.
+    // A Yahoo league key sent down that path came back as a failed request,
+    // forever, with a toast naming an endpoint the user had never heard of.
+    if crate::view_types::platform_for(&league.league_id) != crate::view_types::SLEEPER {
+        return Err(SEASON_SLEEPER_ONLY.to_string());
+    }
     let my_user_id = state.config.lock().await.my_user_id.clone();
     let mut fresh = state
         .engine
@@ -341,6 +350,24 @@ mod tests {
             capture.saw("ERROR get_season failed: no league loaded"),
             "{:?}",
             capture.lines()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The bug: the Season tab was offered for a Yahoo league, and this
+    /// command sent the Yahoo league key to Sleeper's roster endpoint, which
+    /// failed with a request error every time and said nothing about why.
+    #[tokio::test]
+    async fn a_yahoo_league_is_told_the_season_view_is_sleeper_only_before_any_request() {
+        let (state, dir) = AppState::scratch("season-yahoo");
+        *state.loaded.lock().await = Some(loaded_league("461.l.12345"));
+        let error = load_season_inner(&state, None)
+            .await
+            .expect_err("a Yahoo league has no Sleeper season");
+        assert_eq!(error, SEASON_SLEEPER_ONLY);
+        assert!(
+            state.season.lock().await.is_none(),
+            "nothing was loaded for a league the season feeds cannot serve"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

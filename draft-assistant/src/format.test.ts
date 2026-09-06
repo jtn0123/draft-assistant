@@ -15,6 +15,7 @@ import {
   spanLabel,
   untilLabel,
   lockLabel,
+  problem,
 } from "./format";
 
 // Grade item D8. Everything below that reads the wall clock does so through a
@@ -263,5 +264,16 @@ describe("injuryWord", () => {
 
   it("passes anything else through rather than inventing a word", () => {
     expect(injuryWord("IR")).toBe("IR");
+  });
+});
+
+describe("problem", () => {
+  it("joins the app's words to the backend's with a colon, not an em-dash", () => {
+    // The toasts are UI copy, and the house rule is no em-dashes in it; this
+    // one helper wrote one into every failure message the app showed.
+    expect(problem("Could not re-pull the picks", new Error("network timeout"))).toBe(
+      "Could not re-pull the picks: network timeout",
+    );
+    expect(problem("Could not re-pull the picks", "")).toBe("Could not re-pull the picks");
   });
 });

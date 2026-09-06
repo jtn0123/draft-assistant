@@ -135,6 +135,15 @@ describe("looking the account up on Sleeper", () => {
     expect(screen.getByText("Sleeper: no Sleeper account saved")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Mock draft/ })).toBeInTheDocument();
   });
+
+  it("announces the failure rather than leaving it to be noticed", async () => {
+    // The button just went back to its resting label; the reason was a line
+    // of red text further down that a screen reader was never told about.
+    mocks.sleeperLeagues.mockRejectedValue(new Error("no Sleeper account saved"));
+    open();
+    await settle(() => screen.getByRole("button", { name: /Find my leagues/ }).click());
+    expect(screen.getByRole("alert")).toHaveTextContent("Sleeper: no Sleeper account saved");
+  });
 });
 
 describe("Yahoo leagues", () => {

@@ -49,13 +49,31 @@ enum Shape {
 /// be absent from the live resource often enough to matter. Anything read out
 /// of a `HandWritten` fixture needs a fallback for the leagues that do not
 /// send it, and the fallback needs its own test.
+///
+/// Every file here is `HandWritten` today. Ten of them used to be labelled
+/// as recorded shapes, and nothing could say against which request or on
+/// what date, because no real response has been captured yet (TRACKER L5).
+/// A fixture may be promoted only once a recording exists, and promoting it
+/// means adding a `Recorded` variant to this enum carrying, for that file:
+///
+///   * the request path it answers, exactly as `yahoo.rs` spells it
+///     (`/league/<key>/teams;out=roster?format=json`), so a later reader can
+///     tell a `teams` payload from a `teams;out=roster` one;
+///   * the date it was captured, because Yahoo changes these payloads
+///     between seasons and a 2026 recording says nothing about 2028;
+///   * what was redacted and how: league and team keys, player ids, manager
+///     guids and nicknames, team names, and anything else that identifies a
+///     real league or person, each replaced consistently so the ids still
+///     cross-reference within the file. Nothing else may be edited; a field
+///     that was absent stays absent, which is the whole point of recording.
+///
+/// The guard then holds a `Recorded` fixture to a stricter standard than
+/// this file does today: none of its values may be asserted as universal
+/// without a second recording agreeing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Source {
-    /// The shape is a real Yahoo response's, with the names, ids and numbers
-    /// replaced by fictional ones.
-    RecordedShape,
-    /// Assembled by hand from a recorded fixture of the same resource, to
-    /// stand in for a league nobody had a recording of.
+    /// Assembled by hand to the shape Yahoo's documentation and the parser
+    /// agree on, to stand in for a league nobody has a recording of.
     HandWritten,
 }
 
@@ -63,59 +81,55 @@ enum Source {
 /// file that is not in this list, which is the point: adding a fixture means
 /// saying what it holds.
 const FIXTURES: &[(&str, Shape, Source)] = &[
-    (
-        "user_leagues.json",
-        Shape::UserLeagues,
-        Source::RecordedShape,
-    ),
-    ("league_settings.json", Shape::League, Source::RecordedShape),
-    // No auction league was recorded: this one is the plain settings payload
-    // with `is_auction_draft` and `draft_budget` written into it. Yahoo does
-    // not always send the budget, which is why `yahoo_map::derived_budget`
-    // exists and is tested against results that carry no budget at all.
+    ("user_leagues.json", Shape::UserLeagues, Source::HandWritten),
+    ("league_settings.json", Shape::League, Source::HandWritten),
+    // The plain settings payload with `is_auction_draft` and `draft_budget`
+    // written into it. Yahoo does not always send the budget, which is why
+    // `yahoo_map::derived_budget` exists and is tested against results that
+    // carry no budget at all.
     (
         "league_settings_auction.json",
         Shape::League,
         Source::HandWritten,
     ),
-    ("teams.json", Shape::Teams, Source::RecordedShape),
+    ("teams.json", Shape::Teams, Source::HandWritten),
     (
         "teams_rosters.json",
         Shape::TeamsWithRosters,
-        Source::RecordedShape,
+        Source::HandWritten,
     ),
     (
         "draft_results_predraft.json",
         Shape::DraftResultsEmpty,
-        Source::RecordedShape,
+        Source::HandWritten,
     ),
     (
         "draft_results_partial.json",
         Shape::DraftResults,
-        Source::RecordedShape,
+        Source::HandWritten,
     ),
     (
         "draft_results_complete.json",
         Shape::DraftResults,
-        Source::RecordedShape,
+        Source::HandWritten,
     ),
-    // Costs written onto a recorded result set by hand.
+    // Costs written onto the complete result set.
     (
         "draft_results_auction.json",
         Shape::DraftResults,
         Source::HandWritten,
     ),
-    // `is_keeper` written onto a recorded result set by hand. The live
-    // `draftresults` resource does not send it, which is why the keeper flags
-    // are read off `teams_rosters.json`'s shape instead.
+    // `is_keeper` written onto the result set. The live `draftresults`
+    // resource is believed not to send it, which is why the keeper flags are
+    // read off `teams_rosters.json`'s shape instead.
     (
         "draft_results_keepers.json",
         Shape::DraftResults,
         Source::HandWritten,
     ),
-    ("players_page_0.json", Shape::Players, Source::RecordedShape),
-    ("players_page_1.json", Shape::Players, Source::RecordedShape),
-    ("team_roster.json", Shape::Players, Source::RecordedShape),
+    ("players_page_0.json", Shape::Players, Source::HandWritten),
+    ("players_page_1.json", Shape::Players, Source::HandWritten),
+    ("team_roster.json", Shape::Players, Source::HandWritten),
 ];
 
 fn fixture_dir() -> std::path::PathBuf {
@@ -144,6 +158,25 @@ fn load(name: &str) -> Value {
     let text =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("{name} is not valid JSON any more: {e}"))
+}
+
+/// Nothing in the directory claims to be a recording until one exists.
+///
+/// The failure this prevents: ten files labelled as recorded shapes were
+/// taken as evidence of what Yahoo sends, and two fields they carried turned
+/// out to be absent from the live resource. Until TRACKER L5 captures a real
+/// response, with the request path, the date and the redactions the `Source`
+/// doc asks for, every fixture stays hand-written and every field read out
+/// of one keeps its fallback.
+#[test]
+fn no_fixture_claims_to_be_a_recording_before_one_has_been_captured() {
+    for (name, _, source) in FIXTURES {
+        assert_eq!(
+            *source,
+            Source::HandWritten,
+            "{name} claims a source the directory cannot back up"
+        );
+    }
 }
 
 /// The list and the directory describe the same set of files.

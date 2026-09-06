@@ -205,14 +205,13 @@ function LocksIn({ ms }: { ms: number | null }) {
  * days before a single Sunday starter had taken the field and while every one
  * of those swaps was still there to be made.
  *
- * Bench players do not enter into it. A swap needs both halves benchable, so
- * once every starter is playing there is no swap left however free the bench
- * is. A week with nothing of mine on the scoreboard at all — a bye, or a
- * scoreboard that has not loaded — is never locked.
+ * The decision is the backend's (`live.lineup_locked`). Reading it off the
+ * scoreboard chips here missed empty and bye slots, which have no chip, so a
+ * lineup with a hole in it read as locked while the swap to fill the hole
+ * was still there to be made.
  */
 function lineupLocked(view: SeasonView): boolean {
-  const mine = view.live.games.flatMap((game) => game.chips.filter((chip) => chip.is_mine));
-  return mine.length > 0 && mine.every((chip) => chip.state !== "pre");
+  return view.live.lineup_locked;
 }
 
 export function SeasonScreen({

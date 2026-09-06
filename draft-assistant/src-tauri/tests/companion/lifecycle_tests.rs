@@ -79,32 +79,43 @@ async fn an_idle_code_rotates_with_nobody_looking_at_it() {
         .expect("the rotation task did not panic");
 }
 
+/// Also the failure Companion 7 names: `companion_status` used to shell out
+/// to the Tailscale CLI on every devices event to answer `tailscale_url`.
+/// Now the URL on screen is whatever this refresh last read.
 #[tokio::test]
-async fn origins_follow_the_machine_onto_a_tailnet() {
+async fn origins_and_the_tailnet_url_follow_the_machine_onto_a_tailnet() {
+    use draft_assistant_lib::companion::net::Reach;
     use draft_assistant_lib::companion::server::spawn_origin_refresh;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let host = host("refresh").await;
     let before = host.companion.hub.origins();
+    let url_before = host.companion.tailscale_url();
     assert!(!before.iter().any(|o| o.contains("100.101.102.103")));
     // Tailscale comes up after the server did: the machine grows an address.
     let on_tailnet = std::sync::Arc::new(AtomicBool::new(false));
     let seen = on_tailnet.clone();
     let same = before.clone();
+    let same_url = url_before.clone();
     let task = spawn_origin_refresh(
         host.companion.hub.clone(),
         std::time::Duration::from_millis(10),
         move |port| {
-            let mut now = same.clone();
+            let mut reach = Reach {
+                origins: same.clone(),
+                tailscale_url: same_url.clone(),
+            };
             if seen.load(Ordering::SeqCst) {
-                now.push(format!("http://100.101.102.103:{port}"));
+                reach.origins.push(format!("http://100.101.102.103:{port}"));
+                reach.tailscale_url = Some(format!("http://100.101.102.103:{port}/"));
             }
-            now
+            reach
         },
     );
     tokio::time::sleep(std::time::Duration::from_millis(40)).await;
     // Nothing changed, so nothing was written.
     assert_eq!(host.companion.hub.origins(), before);
+    assert_eq!(host.companion.tailscale_url(), url_before);
     on_tailnet.store(true, Ordering::SeqCst);
     let port = host.companion.port().expect("running");
     let want = format!("http://100.101.102.103:{port}");
@@ -117,6 +128,11 @@ async fn origins_follow_the_machine_onto_a_tailnet() {
     assert!(
         host.companion.hub.origins().contains(&want),
         "the tailnet address never made it into the origins"
+    );
+    // The status the Settings panel shows reads the same cache; no CLI runs.
+    assert_eq!(
+        host.companion.tailscale_url().as_deref(),
+        Some(format!("http://100.101.102.103:{port}/").as_str())
     );
     // And the page a phone loads now names the tailnet socket, so the
     // WebSocket is not refused by the page's own policy.

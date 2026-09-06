@@ -25,12 +25,23 @@
 //! Responses come back as JSON only because every path here appends
 //! `?format=json`; without it Yahoo serves XML.
 
-use crate::yahoo_oauth::{AuthError, OauthClient, TokenSet, YahooCredentials, LOGIN_BASE, OOB};
+use crate::yahoo_oauth::{
+    redirect_uri, AuthError, OauthClient, TokenSet, YahooCredentials, LOGIN_BASE,
+};
 use crate::yahoo_retry::{retry_after, RetryPolicy};
 use crate::yahoo_types::{PlayerPage, YahooDraftPick, YahooLeague, YahooTeam};
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::Mutex;
+
+/// The error type and the status tables it reads. A child module so that
+/// `yahoo::YahooError` keeps its name while this file stays under the line
+/// cap; nothing else changes about how it is reached.
+#[path = "yahoo_error.rs"]
+mod error;
+use error::Failure;
+pub use error::{YahooError, GRANT_GONE, RATE_LIMITED, SIGNED_OUT};
 
 /// The documented v2 root.
 pub const BASE: &str = "https://fantasysports.yahooapis.com/fantasy/v2";
@@ -40,81 +51,6 @@ pub const USER_AGENT: &str = "draft-assistant/0.1 (local second-screen tool)";
 pub const NFL: &str = "nfl";
 /// Yahoo's own page ceiling for a players query.
 pub const PAGE: u32 = 25;
-
-/// A failed read from Yahoo.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum YahooError {
-    /// The request was never made: a key that cannot go in a URL.
-    Invalid(String),
-    /// The token could not be obtained or renewed.
-    Auth(AuthError),
-    Http {
-        status: u16,
-        url: String,
-    },
-    Transport {
-        url: String,
-        detail: String,
-    },
-    Decode {
-        url: String,
-        detail: String,
-    },
-}
-
-/// One failed attempt: the error, and how long Yahoo asked to be left alone
-/// for. Internal — `Retry-After` is a fact about this attempt rather than
-/// about the error, and it would be noise on [`YahooError`], which is what
-/// the user is eventually shown.
-struct Failure {
-    error: YahooError,
-    asked_for: Option<Duration>,
-}
-
-impl Failure {
-    fn plain(error: YahooError) -> Self {
-        Self {
-            error,
-            asked_for: None,
-        }
-    }
-}
-
-/// Yahoo answers a throttled caller with its own status 999 rather than the
-/// documented 429. Both mean the same thing and both clear on their own.
-pub const RATE_LIMITED: [u16; 2] = [429, 999];
-
-impl YahooError {
-    /// Whether repeating the identical request could plausibly succeed.
-    pub fn retryable(&self) -> bool {
-        match self {
-            YahooError::Transport { .. } => true,
-            YahooError::Http { status, .. } => {
-                (500..600).contains(status) || RATE_LIMITED.contains(status)
-            }
-            YahooError::Invalid(_) | YahooError::Auth(_) | YahooError::Decode { .. } => false,
-        }
-    }
-}
-
-impl std::fmt::Display for YahooError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            YahooError::Invalid(message) => f.write_str(message),
-            YahooError::Auth(error) => write!(f, "{error}"),
-            // "HTTP 999" is Yahoo's, and means nothing to anybody; the one
-            // thing the user can do about it is wait, so say that instead.
-            YahooError::Http { status, .. } if RATE_LIMITED.contains(status) => {
-                f.write_str("Yahoo is rate-limiting requests — try again in a minute")
-            }
-            YahooError::Http { status, url } => write!(f, "HTTP {status} for {url}"),
-            YahooError::Transport { url, detail } => write!(f, "request failed: {url}: {detail}"),
-            YahooError::Decode { url, detail } => write!(f, "bad JSON from {url}: {detail}"),
-        }
-    }
-}
-
-impl std::error::Error for YahooError {}
 
 /// Where a client's two hosts point. Overridable so a test can serve both the
 /// fantasy API and the login host from one stub socket.
@@ -132,7 +68,7 @@ impl Default for YahooHosts {
         Self {
             api_base: BASE.to_string(),
             login_base: LOGIN_BASE.to_string(),
-            redirect_uri: OOB.to_string(),
+            redirect_uri: redirect_uri(),
         }
     }
 }
@@ -171,6 +107,9 @@ pub struct YahooClient {
     /// The one caller allowed to be refreshing at any moment.
     refresh_gate: Mutex<()>,
     retry: RetryPolicy,
+    /// Set once Yahoo has said the grant is gone. Read by whoever persists the
+    /// tokens afterwards, which is how a dead pair leaves the Keychain.
+    signed_out: AtomicBool,
 }
 
 impl YahooClient {
@@ -213,6 +152,7 @@ impl YahooClient {
             tokens: Mutex::new(tokens),
             refresh_gate: Mutex::new(()),
             retry: RetryPolicy::default(),
+            signed_out: AtomicBool::new(false),
         }
     }
 
@@ -230,6 +170,17 @@ impl YahooClient {
     /// Persist this after a call to keep the refresh across restarts.
     pub async fn tokens(&self) -> TokenSet {
         self.tokens.lock().await.clone()
+    }
+
+    /// Whether a call on this client has found the grant gone. Once true the
+    /// pair is not worth persisting; it is worth clearing.
+    pub fn signed_out(&self) -> bool {
+        self.signed_out.load(Ordering::SeqCst)
+    }
+
+    fn sign_out(&self) -> YahooError {
+        self.signed_out.store(true, Ordering::SeqCst);
+        YahooError::SignedOut
     }
 
     /// A usable access token, renewing first if the stored one is expired or
@@ -262,11 +213,20 @@ impl YahooClient {
             }
             tokens.refresh_token.clone()
         };
-        let fresh = self
+        let fresh = match self
             .oauth
             .refresh(&self.credentials, &refresh_token, &self.hosts.redirect_uri)
             .await
-            .map_err(YahooError::Auth)?;
+        {
+            Ok(fresh) => fresh,
+            // Yahoo's own word that the refresh token is dead. The user
+            // revoked the app, or a rotation was lost; either way the next
+            // attempt would be refused the same way.
+            Err(AuthError::Http { status, .. }) if GRANT_GONE.contains(&status) => {
+                return Err(self.sign_out())
+            }
+            Err(error) => return Err(YahooError::Auth(error)),
+        };
         let access = fresh.access_token.clone();
         *self.tokens.lock().await = fresh;
         Ok(access)
@@ -313,7 +273,9 @@ impl YahooClient {
     /// A 401 is not counted as an attempt: it is answered by renewing the
     /// token and going again immediately, and only once — a second 401 means
     /// the grant is gone, and repeating it would only spend the refresh token
-    /// against a door that is closed.
+    /// against a door that is closed. That second 401 is reported as
+    /// [`YahooError::SignedOut`], not as an HTTP status: the user has to sign
+    /// in again and nothing else they could do would help.
     async fn get_body(&self, url: &str) -> Result<String, YahooError> {
         let mut attempts = 0;
         let mut refreshed = false;
@@ -321,10 +283,10 @@ impl YahooClient {
             let token = self.access_token().await?;
             match self.get_once(url, &token).await {
                 Ok(body) => return Ok(body),
-                Err(failure)
-                    if matches!(failure.error, YahooError::Http { status: 401, .. })
-                        && !refreshed =>
-                {
+                Err(failure) if matches!(failure.error, YahooError::Http { status: 401, .. }) => {
+                    if refreshed {
+                        return Err(self.sign_out());
+                    }
                     refreshed = true;
                     self.renew().await?;
                 }

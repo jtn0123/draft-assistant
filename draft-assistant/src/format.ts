@@ -214,5 +214,5 @@ export function problem(what: string, e: unknown): string {
   const detail = String(e)
     .replace(/^Error:\s*/, "")
     .trim();
-  return detail === "" ? what : `${what} — ${detail}`;
+  return detail === "" ? what : `${what}: ${detail}`;
 }

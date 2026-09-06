@@ -1,8 +1,9 @@
 /* Draft Assistant companion page. Plain script, no build step: it is
    include_str!'d into the desktop binary and served under a CSP that allows
    nothing inline, so every behaviour lives in this file.
-   The pure parts live in helpers.js (loaded first) on `window.Companion`;
-   this file is the DOM: boot, sockets, fetches and painting. */
+   The pure parts and the node builders live in helpers.js (loaded first) on
+   `window.Companion`; this file is the page: boot, sockets, fetches and
+   painting. */
 (() => {
   "use strict";
   const {
@@ -30,55 +31,33 @@
     createHeartbeat,
     clockOffset,
     needsRevive,
+    el,
+    clear,
+    spans,
+    markdownNodes,
   } = window.Companion;
 
-  // ----------------------------------------------------------------- DOM --
-
-  const el = (tag, className, text) => {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text !== undefined && text !== null) node.textContent = String(text);
-    return node;
-  };
-  const clear = (node) => {
-    while (node.firstChild) node.removeChild(node.firstChild);
-    return node;
-  };
-  /** Append a run of `[className, text]` spans, skipping the empty ones. */
-  const spans = (parent, ...pairs) => {
-    for (const [className, text] of pairs) {
-      if (text) parent.appendChild(el("span", className, text));
-    }
-    return parent;
-  };
-  const inlineNodes = (parent, parsed) => {
-    for (const span of parsed) {
-      if (span.bold) parent.appendChild(el("strong", null, span.text));
-      else if (span.code) parent.appendChild(el("code", null, span.text));
-      else parent.appendChild(document.createTextNode(span.text));
-    }
-  };
-  /** Markdown tokens as real nodes; text only ever arrives via textContent. */
-  const markdownNodes = (text) => {
-    const wrap = el("div", "md");
-    for (const block of parseMarkdown(text)) {
-      if (block.type === "code") {
-        wrap.appendChild(el("pre")).appendChild(el("code", null, block.text));
-      } else if (block.items) {
-        const list = wrap.appendChild(el(block.type));
-        for (const item of block.items) inlineNodes(list.appendChild(el("li")), item);
-      } else {
-        inlineNodes(wrap.appendChild(el("p")), block.spans);
-      }
-    }
-    return wrap;
-  };
   function boot() {
     if (!document.getElementById("companion-root")) return;
     const $ = (id) => document.getElementById(id);
     let state = initialState();
     let socket = null;
     let attempt = 0;
+    // The one pending reconnect. Kept so a wake can cancel it: a timer left
+    // running opened a second socket beside the one the wake had just made.
+    let reconnectTimer = null;
+    const cancelReconnect = () => {
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    };
+    /** Let go of the current socket without its onclose scheduling anything. */
+    const detachSocket = () => {
+      if (!socket) return;
+      socket.onclose = null;
+      socket.onmessage = null;
+      socket.close();
+      socket = null;
+    };
     // Private browsing can refuse storage: the page works, it just forgets.
     const store = (key, value) => {
       try {
@@ -103,8 +82,8 @@
     };
     const dropToken = () => {
       store(TOKEN_KEY, null);
-      if (socket) socket.close();
-      socket = null;
+      cancelReconnect();
+      detachSocket();
       dispatch({ type: "unauthorized" });
     };
     /** A read allowed to be absent: 404 only means "nothing loaded there". */
@@ -121,13 +100,20 @@
         "/api/chat?screen=draft",
         "/api/chat?screen=season",
       ];
-      const [draft, season, draftChat, seasonChat] = await Promise.all(paths.map(read));
-      if (state.screen !== "app") return;
-      dispatch({ type: "draft-updated", payload: draft });
-      dispatch({ type: "season-updated", payload: season });
-      dispatch({ type: "shared-chat", payload: draftChat });
-      dispatch({ type: "shared-chat", payload: seasonChat });
-      connect();
+      try {
+        const [draft, season, draftChat, seasonChat] = await Promise.all(paths.map(read));
+        if (state.screen !== "app") return;
+        dispatch({ type: "draft-updated", payload: draft });
+        dispatch({ type: "season-updated", payload: season });
+        dispatch({ type: "shared-chat", payload: draftChat });
+        dispatch({ type: "shared-chat", payload: seasonChat });
+      } catch {
+        // The host is away. The socket below is what retries, with backoff,
+        // and it is opened whether or not the reads worked: without this a
+        // phone that woke with the host down sat on "Reconnecting" for ever.
+      } finally {
+        connect();
+      }
     }
     // ---- pairing -------------------------------------------------------
     $("pair-device").value = load(DEVICE_KEY) || deviceGuess(navigator.userAgent);
@@ -185,6 +171,9 @@
     });
     function connect() {
       if (!state.token) return;
+      // One socket at a time: whatever is pending or open goes first.
+      cancelReconnect();
+      detachSocket();
       const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
       socket = new WebSocket(`${scheme}//${window.location.host}/api/events?token=${state.token}`);
       socket.onopen = () => {
@@ -219,7 +208,8 @@
           return;
         }
         dispatch({ type: "connection", status: "reconnecting" });
-        window.setTimeout(connect, backoffDelay(attempt));
+        cancelReconnect();
+        reconnectTimer = window.setTimeout(connect, backoffDelay(attempt));
         attempt += 1;
       };
     }
@@ -230,15 +220,11 @@
     const revive = () => {
       if (!state.token || state.screen !== "app") return;
       if (!needsRevive(socket)) return;
-      if (socket) {
-        // Detached first: its `onclose` would otherwise schedule a reconnect
-        // of its own and the page would end up with two sockets.
-        socket.onclose = null;
-        socket.onmessage = null;
-        socket.close();
-      }
+      // Detached, and the pending retry cancelled: either would otherwise
+      // open a socket of its own beside the one this wake is about to make.
+      cancelReconnect();
+      detachSocket();
       heartbeat.stop();
-      socket = null;
       attempt = 0;
       dispatch({ type: "connection", status: "reconnecting" });
       void loadEverything();
@@ -259,11 +245,20 @@
       if (!text) return;
       $("chat-input").value = "";
       dispatch({ type: "note", screen, message: null });
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
-        body: JSON.stringify({ screen, text }),
-      });
+      let response;
+      try {
+        response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+          body: JSON.stringify({ screen, text }),
+        });
+      } catch {
+        // The host did not answer: the question is put back so it is not
+        // lost, and the note says why nothing happened.
+        $("chat-input").value = text;
+        dispatch({ type: "note", screen, message: "The host did not answer." });
+        return;
+      }
       if (response.status === 401) dropToken();
       else if (!response.ok) {
         dispatch({ type: "note", screen, message: NOTES[response.status] ?? "That did not send." });
@@ -347,28 +342,53 @@
       if (!picks.length) list.appendChild(el("li", "muted", "No picks yet."));
     }
 
-    function renderChat() {
-      const screen = chatScreen();
-      $(state.tab === "week" ? "tab-week" : "tab-chat").appendChild($("chat-block"));
-      const thread = state.chat[screen];
-      const list = clear($("chat-list"));
-      const entries = thread?.entries ?? [];
-      const now = Date.now();
+    // Where the chat block sits and which thread its list was built from.
+    // Both are checked before touching the DOM: this runs on every clock
+    // tick, and moving the block or rebuilding the list each second took the
+    // focus off the input while someone was typing on a phone.
+    let chatShownIn = null;
+    let chatBuiltFrom = { screen: null, thread: undefined, fresh: true };
+    function buildChatList(list, entries, now) {
+      clear(list);
       for (const entry of entries) {
         const item = list.appendChild(el("li", `entry ${entry.role}`));
         const who = entry.device?.name ?? "Someone";
+        const meta = item.appendChild(el("div", "entry-meta"));
         spans(
-          item.appendChild(el("div", "entry-meta")),
+          meta,
           [null, entry.role === "assistant" ? `Answer for ${who}` : `${who} asked`],
           ["kind", entry.device?.kind],
-          [null, relativeTime(entry.at_ms, now)],
-          [null, formatCost(entry.cost_usd)],
         );
+        const when = meta.appendChild(el("span", null, relativeTime(entry.at_ms, now)));
+        when.dataset.at = String(entry.at_ms);
+        spans(meta, [null, formatCost(entry.cost_usd)]);
         if (entry.error) item.appendChild(el("p", "error", entry.error));
         else if (entry.role === "assistant") item.appendChild(markdownNodes(entry.text));
         else item.appendChild(el("p", null, entry.text));
       }
       if (!entries.length) list.appendChild(el("li", "muted", "Nothing asked yet."));
+    }
+    function renderChat() {
+      const screen = chatScreen();
+      const shownIn = state.tab === "week" ? "tab-week" : "tab-chat";
+      if (chatShownIn !== shownIn) {
+        $(shownIn).appendChild($("chat-block"));
+        chatShownIn = shownIn;
+      }
+      const thread = state.chat[screen];
+      const list = $("chat-list");
+      const now = Date.now();
+      const same =
+        !chatBuiltFrom.fresh && chatBuiltFrom.screen === screen && chatBuiltFrom.thread === thread;
+      if (same) {
+        // Only the "4m ago" lines move on a tick; the nodes stay put.
+        for (const when of list.querySelectorAll("[data-at]")) {
+          when.textContent = relativeTime(Number(when.dataset.at), now);
+        }
+      } else {
+        buildChatList(list, thread?.entries ?? [], now);
+        chatBuiltFrom = { screen, thread, fresh: false };
+      }
       $("chat-note").hidden = !state.note[screen];
       $("chat-note").textContent = state.note[screen] ?? "";
       const busy = Boolean(thread?.busy);

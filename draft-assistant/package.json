@@ -28,11 +28,16 @@
     "verify:fast": "npm run check:loc && npm run check:css && npm run format:check && npm run lint && npm run typecheck",
     "check:version": "node scripts/check-version.mjs",
     "test:scripts": "node --test \"scripts/*.test.mjs\"",
+    "audit": "npm run audit:npm && npm run audit:cargo",
+    "audit:npm": "node scripts/check-npm-audit.mjs . e2e",
+    "audit:cargo": "cd src-tauri && cargo audit",
     "verify:mid": "npm run check:version && npm run verify:fast && npm run test:scripts && npm run test:frontend",
     "lint:rust:wdio": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --features wdio --target-dir src-tauri/target/wdio-lint -- -D warnings",
     "build:e2e": "CARGO_TARGET_DIR=\"$PWD/src-tauri/target/wdio\" tauri build --features wdio --no-bundle",
     "test:e2e": "npm run build:e2e && npm --prefix e2e ci && npm --prefix e2e test",
     "test:e2e:browser": "playwright test",
+    "test:e2e:browser:ci": "PW_WEB_SERVER=preview playwright test",
+    "preview:e2e": "vite preview --strictPort --port \"${PW_PORT:-1420}\"",
     "replay": "node scripts/replay-sleeper.mjs"
   },
   "dependencies": {

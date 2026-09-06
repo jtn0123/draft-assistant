@@ -34,6 +34,14 @@ pub struct PlayerPool {
     pub next_start: u32,
     /// Whether Yahoo has run out of players to hand over.
     pub complete: bool,
+    /// Rows Yahoo said it sent that this app could not read (no player key,
+    /// usually a free-agent row mid-rebuild). Kept so that a resumed walk
+    /// can tell "rows I dropped on purpose" from "rows that are missing";
+    /// without it, a pool that dropped more than a page's worth of rows
+    /// looked like a stale cache and was thrown away on every resume.
+    /// Defaulted so a pool cached before the field existed still reads.
+    #[serde(default)]
+    pub unreadable: u32,
 }
 
 impl PlayerPool {
@@ -90,6 +98,7 @@ impl YahooClient {
             // could read. Paging on the second one ends the walk on the first
             // row Yahoo sends in a shape the parser drops.
             let sent = page.count as u32;
+            pool.unreadable += sent.saturating_sub(page.players.len() as u32);
             pool.players.extend(page.players);
             pool.next_start += PAGE;
             if sent < PAGE {

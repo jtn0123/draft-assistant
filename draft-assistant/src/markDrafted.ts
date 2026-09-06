@@ -5,7 +5,7 @@
 // happens when the button is pressed twice, which is worth exercising on its
 // own rather than only through the whole rendered shell.
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { describeError } from "./errorText";
 import { problem } from "./format";
@@ -39,11 +39,14 @@ function alreadyDrafted(e: unknown): boolean {
 /**
  * @param hostName set on a follower, which has no picks of its own to record
  *   and is told who does rather than shown a dialog that could only refuse
+ * @param leagueId the league on screen; the memory of recorded picks is
+ *   this league's alone
  */
 export function useMarkDrafted(
   applyView: (next: DraftView) => void,
   showToast: (text: string, retry?: () => void) => void,
   hostName: string | null,
+  leagueId: string | null,
 ): MarkDrafted {
   const [confirm, setConfirm] = useState<DraftConfirm | null>(null);
   const [drafting, setDrafting] = useState(false);
@@ -54,6 +57,13 @@ export function useMarkDrafted(
   // out ends with the second one refused for a pick the first one made, which
   // is the app arguing with itself in front of the user.
   const recorded = useRef(new Set<string>());
+  // Those players are this league's. Sleeper ids are shared across leagues,
+  // so after a switch the set said a player had been recorded here when he
+  // had been recorded in the last league, and the new league's genuine
+  // "already drafted" refusal was swallowed as if it were our own success.
+  useEffect(() => {
+    recorded.current.clear();
+  }, [leagueId]);
 
   // Named so the retry it offers can be itself, the same way `startLive` in
   // draftSession.ts is.

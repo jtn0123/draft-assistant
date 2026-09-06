@@ -57,12 +57,15 @@ export interface SettingsRowInput {
 
 /** Where headshots come from, named by platform.
  *
- * Sleeper serves them; Yahoo's do not come from Sleeper at all, and telling a
- * Yahoo-only user that their pictures come from a service they have never
- * connected read as a bug in the app. */
-function headshotNote(platform: string): string {
-  const source = platform === "yahoo" ? "your league" : "Sleeper";
-  return `Headshots from ${source}, saved on this Mac after the first look`;
+ * Sleeper's photo library is the only source there is. A Yahoo player gets a
+ * photo only when the app matches them to a Sleeper player, and none at all
+ * otherwise; the row used to say "from your league", which is not where any
+ * of them come from. */
+export function headshotNote(platform: string): string {
+  if (platform === "yahoo") {
+    return "Sleeper's photos for players the app can match, none for the rest; saved on this Mac";
+  }
+  return "Headshots from Sleeper, saved on this Mac after the first look";
 }
 
 export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
@@ -127,7 +130,7 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
   rows.push({
     label: "Phone & second screen",
     note: follower
-      ? "Hosted elsewhere — the host serves the phones"
+      ? "Hosted elsewhere. The host serves the phones"
       : "Let a phone or another Mac watch this league",
     value: follower ? "Host's" : input.companionOn ? "On" : "Off",
     on: input.companionOn && !follower,
@@ -137,7 +140,7 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
   if (follower) {
     rows.push({
       label: "Leave host",
-      note: `Following ${input.hostName ?? ""} — go back to this Mac's own leagues`,
+      note: `Following ${input.hostName ?? ""}. Go back to this Mac's own leagues`,
       value: "Leave",
       on: true,
       onSelect: input.onLeaveHost,
@@ -198,7 +201,7 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
       note:
         input.avatars === "headshots"
           ? headshotNote(input.view.league.platform)
-          : "Team logos only — no photo downloads",
+          : "Team logos only, no photo downloads",
       value: input.avatars === "headshots" ? "Headshots" : "Team logos",
       on: input.avatars === "headshots",
       onSelect: () => input.onAvatars(input.avatars === "headshots" ? "logos" : "headshots"),

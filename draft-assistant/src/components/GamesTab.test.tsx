@@ -46,6 +46,7 @@ function live(byeTeams: string[]): LiveSection {
     totals: { my_playing: 0, my_pre: 1, my_done: 0, my_live_points: 0, opp_live_points: 0 },
     next_kickoff_ms: g.kickoff_ms,
     bye_teams: byeTeams,
+    lineup_locked: false,
   };
 }
 

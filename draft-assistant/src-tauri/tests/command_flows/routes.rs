@@ -37,9 +37,12 @@ pub const DRAFT_TICK: &str = "2000000000000000017";
 /// The league that agrees a pick trade in the middle of its own draft.
 pub const LEAGUE_TRADE: &str = "1000000000000000018";
 pub const DRAFT_TRADE: &str = "2000000000000000018";
+/// The league whose pick list comes back with a hole in it mid-draft.
+pub const LEAGUE_HOLE: &str = "1000000000000000019";
+pub const DRAFT_HOLE: &str = "2000000000000000019";
 
 /// Every league this stub serves, with the draft it points at.
-const LEAGUES: [(&str, &str); 8] = [
+const LEAGUES: [(&str, &str); 9] = [
     (LEAGUE_ID, DRAFT_ID),
     (LEAGUE_SWITCH, DRAFT_SWITCH),
     (LEAGUE_VANISH, DRAFT_VANISH),
@@ -48,6 +51,7 @@ const LEAGUES: [(&str, &str); 8] = [
     (LEAGUE_LIVE, DRAFT_LIVE),
     (LEAGUE_TICK, DRAFT_TICK),
     (LEAGUE_TRADE, DRAFT_TRADE),
+    (LEAGUE_HOLE, DRAFT_HOLE),
 ];
 
 /// One endpoint a test can stop mid-answer.
@@ -112,6 +116,29 @@ pub static DRAFT_IS_BROKEN: AtomicBool = AtomicBool::new(false);
 /// Set once `LEAGUE_TRADE` has been loaded: from then on its traded-pick list
 /// carries the trade the managers agreed while the draft was running.
 pub static TRADE_AGREED: AtomicBool = AtomicBool::new(false);
+/// What `LEAGUE_HOLE` answers `/picks` with: the full list (0), the list with
+/// pick 2 missing but 3 and 4 still in it (1), or the list with the last
+/// pick taken back (2).
+pub static HOLE_PICKS: AtomicUsize = AtomicUsize::new(0);
+pub const HOLE_FULL: usize = 0;
+pub const HOLE_MISSING_ONE: usize = 1;
+pub const HOLE_LAST_UNDONE: usize = 2;
+
+/// Four picks of a two-team, three-round draft, in a form the hole scenario
+/// can drop rows from.
+fn hole_picks(without: &[u32]) -> String {
+    let rows: Vec<String> = [(1, 1, "rb-1"), (2, 2, "wr-1"), (3, 2, "qb-1"), (4, 1, "x-4")]
+        .iter()
+        .filter(|(pick_no, _, _)| !without.contains(pick_no))
+        .map(|(pick_no, slot, player)| {
+            format!(
+                r#"{{"round": {}, "pick_no": {pick_no}, "draft_slot": {slot}, "player_id": "{player}"}}"#,
+                (pick_no - 1) / 2 + 1
+            )
+        })
+        .collect();
+    format!("[{}]", rows.join(","))
+}
 
 /// Slot 1's third-round pick, sold to slot 2's roster mid-draft. Rosters are
 /// deliberately not equal to slots (slot 1 is roster 10, slot 2 is roster 20)
@@ -222,6 +249,11 @@ fn draft_reply(draft_id: &str, rest: &str) -> Option<stub::Reply> {
             // list, and it parses as "no picks at all".
             DRAFT_VANISH if PICKS_VANISHED.load(Ordering::SeqCst) => ok("null".to_string()),
             DRAFT_VANISH => ok(ONE_PICK.to_string()),
+            DRAFT_HOLE => match HOLE_PICKS.load(Ordering::SeqCst) {
+                HOLE_MISSING_ONE => ok(hole_picks(&[2])),
+                HOLE_LAST_UNDONE => ok(hole_picks(&[4])),
+                _ => ok(hole_picks(&[])),
+            },
             _ => ok("[]".to_string()),
         },
         "/traded_picks" => match draft_id {

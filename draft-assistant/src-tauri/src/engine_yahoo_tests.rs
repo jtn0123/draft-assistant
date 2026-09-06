@@ -1,4 +1,7 @@
-use super::{cache_name, current_login, draft_for, picks_for, rounds_from, team_names};
+use super::{
+    cache_name, current_login, draft_for, is_reserve_slot, picks_for, rounds_from, team_names,
+};
+use crate::engine_yahoo_keepers::pick_context;
 use crate::yahoo_crosswalk;
 use crate::yahoo_types::{
     RosterSlot, YahooDraftPick, YahooLeague, YahooManager, YahooPlayer, YahooTeam,
@@ -70,6 +73,23 @@ fn the_rounds_are_the_seats_that_get_drafted_into() {
     // QB 1 + RB 2 + flex 1 + bench 5 = 9; the two IR slots are not drafted.
     assert_eq!(rounds_from(&league().roster_positions), 9);
     assert_eq!(rounds_from(&[]), 0);
+}
+
+#[test]
+fn an_ir_plus_league_does_not_get_an_extra_round_for_its_reserve_seats() {
+    // The failure this prevents: Yahoo spells the wider reserve slot `IR+`
+    // and matching `IR` exactly counted it as a drafted seat, so an IR+
+    // league's board ran a round long.
+    assert_eq!(
+        rounds_from(&slots(&[("QB", 1), ("BN", 4), ("IR+", 2), ("IR2", 1)])),
+        5
+    );
+    for reserve in ["IR", "IR+", "IR2", "IL", "ir+"] {
+        assert!(is_reserve_slot(reserve), "{reserve} is a reserve seat");
+    }
+    for seat in ["QB", "W/R/T", "BN", "D", "K"] {
+        assert!(!is_reserve_slot(seat), "{seat} is drafted into");
+    }
 }
 
 #[test]
@@ -250,7 +270,7 @@ fn a_pick_names_the_player_by_the_id_the_board_put_him_on() {
             is_keeper: None,
         },
     ];
-    let picks = picks_for(&results, &teams, &pool, &crosswalk);
+    let picks = picks_for(&results, &teams, &pick_context(pool, vec![]), &crosswalk);
     assert_eq!(picks.len(), 2);
     // Matched: the Sleeper id, so the board and the projections find him.
     assert_eq!(picks[0].player_id, "6794");
@@ -258,4 +278,34 @@ fn a_pick_names_the_player_by_the_id_the_board_put_him_on() {
     // Unmatched: still a pick, still leaves the board, under his Yahoo id.
     assert_eq!(picks[1].player_id, "yahoo:99999");
     assert_eq!(picks[1].draft_slot, 2);
+}
+
+#[test]
+fn a_kept_player_who_is_not_in_the_pool_is_named_on_the_first_load() {
+    // The failure this prevents: the load built its picks from the pool
+    // alone while the tick built them from pool plus rosters, so a kept
+    // player Yahoo ranked past the pool ceiling had no name, position or
+    // keeper flag on the board until the first tick filled them in.
+    let pool = vec![yahoo_player("449.p.30977", "Ja'Marr Chase", "Cin", "WR")];
+    let mut kept = yahoo_player("449.p.900", "Kept Elsewhere", "Was", "TE");
+    kept.is_keeper = Some(true);
+    let crosswalk = yahoo_crosswalk::build(&crate::yahoo_map::players(&pool), &HashMap::new());
+    let teams = vec![team(1, "Ada's Autos", Some(1), true)];
+    let results = vec![YahooDraftPick {
+        pick: 1,
+        round: 1,
+        team_key: "449.l.12345.t.1".into(),
+        player_key: "449.p.900".into(),
+        cost: None,
+        is_keeper: None,
+    }];
+    let context = pick_context(pool, vec![kept]);
+    let picks = picks_for(&results, &teams, &context, &crosswalk);
+    let meta = picks[0]
+        .metadata
+        .as_ref()
+        .expect("the roster row names him");
+    assert_eq!(meta.last_name.as_deref(), Some("Elsewhere"));
+    assert_eq!(meta.position.as_deref(), Some("TE"));
+    assert_eq!(picks[0].is_keeper, Some(true));
 }

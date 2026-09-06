@@ -5,7 +5,7 @@
 
 mod yahoo_stub;
 
-use draft_assistant_lib::yahoo::{YahooClient, YahooError, YahooHosts};
+use draft_assistant_lib::yahoo::{YahooClient, YahooError, YahooHosts, SIGNED_OUT};
 use draft_assistant_lib::yahoo_oauth::{AuthError, OauthClient, TokenSet, YahooCredentials, OOB};
 use yahoo_stub::{serve, Hits, Reply, Request, Stub};
 
@@ -238,20 +238,25 @@ async fn a_second_401_gives_up_rather_than_spending_the_refresh_token_again() {
         .league_teams(LEAGUE_KEY)
         .await
         .expect_err("the grant is gone");
-    assert!(
-        matches!(error, YahooError::Http { status: 401, .. }),
-        "{error:?}"
-    );
     assert_eq!(stub.matching("get_token").len(), 1, "one refresh, not two");
+    // The failure this prevents: a revoked grant read "HTTP 401 for <url>"
+    // and Settings went on saying "Connected". The error names the fix, and
+    // the client says the pair is dead so whoever persists it clears it.
+    assert_eq!(error, YahooError::SignedOut, "{error:?}");
+    assert_eq!(error.to_string(), SIGNED_OUT);
+    assert!(
+        client.signed_out(),
+        "the client did not mark the grant gone"
+    );
 }
 
 #[tokio::test]
-async fn a_refresh_that_yahoo_refuses_reports_an_auth_failure_without_the_secret() {
+async fn a_refresh_that_yahoo_refuses_signs_the_user_out_without_the_secret() {
     let stub = serve(move |request: &Request| {
         if request.path() == "/oauth2/get_token" {
             Reply::status(
                 400,
-                format!(r#"{{"error":"invalid_client","description":"{SECRET} is wrong"}}"#),
+                format!(r#"{{"error":"invalid_grant","description":"{SECRET} is wrong"}}"#),
             )
         } else {
             Reply::ok(TEAMS)
@@ -262,10 +267,42 @@ async fn a_refresh_that_yahoo_refuses_reports_an_auth_failure_without_the_secret
         .league_teams(LEAGUE_KEY)
         .await
         .expect_err("no token, no call");
+    // A 400 from the token endpoint is Yahoo's word that the refresh token
+    // is dead; the user has to sign in again and is told so in those words.
+    assert_eq!(error, YahooError::SignedOut, "{error:?}");
+    assert_eq!(error.to_string(), SIGNED_OUT);
+    assert!(!error.to_string().contains(SECRET), "the secret escaped");
+    assert!(client.signed_out());
+    assert_eq!(
+        stub.matching("/teams").len(),
+        0,
+        "a call went out with no token"
+    );
+}
+
+#[tokio::test]
+async fn a_token_endpoint_outage_is_not_a_sign_out() {
+    // Yahoo being down for a minute must not cost the user the pair: a 5xx
+    // stays an auth failure the next call can retry, and nothing is cleared.
+    let stub = serve(move |request: &Request| {
+        if request.path() == "/oauth2/get_token" {
+            Reply::status(503, r#"{"error":"try later"}"#)
+        } else {
+            Reply::ok(TEAMS)
+        }
+    });
+    let client = client_for(&stub, stale_tokens());
+    let error = client
+        .league_teams(LEAGUE_KEY)
+        .await
+        .expect_err("no token, no call");
     assert!(matches!(error, YahooError::Auth(_)), "{error:?}");
-    let message = error.to_string();
-    assert!(message.contains("400"), "{message}");
-    assert!(!message.contains(SECRET), "the secret escaped: {message}");
+    assert!(error.to_string().contains("503"), "{error}");
+    assert!(
+        !client.signed_out(),
+        "an outage was mistaken for a revoked grant"
+    );
+    assert_eq!(client.tokens().await.refresh_token, "refresh-1");
 }
 
 #[tokio::test]

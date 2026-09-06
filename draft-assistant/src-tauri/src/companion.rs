@@ -42,3 +42,15 @@ where
         }
     }
 }
+
+/// The host opened another league: send the phones what the switch changed.
+///
+/// A no-op with no companion managed or with it turned off, the same as
+/// [`publish`], so the command tests and a host with the toggle off pay
+/// nothing for it.
+pub async fn league_switched<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::Manager;
+    if let Some(companion) = app.try_state::<Arc<CompanionServer>>() {
+        companion.league_switched().await;
+    }
+}

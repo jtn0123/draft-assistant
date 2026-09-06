@@ -5,15 +5,18 @@
 //! the move: it is the same generation bookkeeping, the same backoff, and the
 //! same `HealthWatch`.
 
+use super::notes::{NoteWatch, SlowTickWatch};
 use super::tick::{
-    adopt_traded, backoff_secs, draft_update, fetch_tick, save_keepers_off_lock,
-    save_picks_off_lock, tick_target, traded_update, DraftUpdate, TickFetch, EMPTY_PICKS,
+    adopt_traded, backoff_secs, build_view_off_lock, draft_update, fetch_tick, picks_rewound,
+    save_keepers_off_lock, save_picks_off_lock, tick_target, traded_update, DraftUpdate, TickFetch,
+    EMPTY_PICKS,
 };
 use crate::keepers;
 use crate::picks;
 use crate::poll::{self, record_poll_outcome, DraftPollMemory};
-use crate::state::{view_from, AppState};
+use crate::state::AppState;
 use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 use tauri::{Emitter, State};
 
 /// Start polling Sleeper picks every `interval_secs` (default 3). Emits a
@@ -41,6 +44,10 @@ pub async fn start_polling<R: tauri::Runtime>(
         // What was last said about this poller's health. Without it the choice
         // is a line every three seconds or, as it was, no line at all.
         let mut watch = crate::applog::HealthWatch::default();
+        // The same rule for the notes and for a slow tick: a line when it
+        // starts, a line when it stops, nothing in between.
+        let mut note_watch = NoteWatch::default();
+        let mut slow_watch = SlowTickWatch::default();
         // How many consecutive failures the tick has seen, read back off the
         // loaded league where the poll outcome is recorded.
         let mut failures = 0u32;
@@ -55,11 +62,24 @@ pub async fn start_polling<R: tauri::Runtime>(
                 loaded.as_ref().map(tick_target)
             };
             if let Some((draft_id, yahoo_ids)) = target {
+                let started = Instant::now();
+                let fetch_started = std::time::Instant::now();
                 let TickFetch {
                     picks,
                     draft,
                     traded,
                 } = fetch_tick(&engine, &yahoo, &draft_id, &yahoo_ids).await;
+                // The tick boundary at the verbose level: which draft, how
+                // many picks came back or what the request said instead, and
+                // how long the round trip took.
+                crate::applog::debug(format!(
+                    "tick fetched draft={draft_id} {} in {}ms",
+                    match &picks {
+                        Ok(picks) => format!("picks={}", picks.len()),
+                        Err(error) => format!("picks=error {error}"),
+                    },
+                    fetch_started.elapsed().as_millis()
+                ));
                 let mut changed = false;
                 let mut errors = Vec::new();
                 // Problems that are worth a log line but are not a failed
@@ -85,6 +105,11 @@ pub async fn start_polling<R: tauri::Runtime>(
                                 // not a cleared board.
                                 if picks.is_empty() && !loaded.api_picks.is_empty() {
                                     errors.push(EMPTY_PICKS.to_string());
+                                } else if let Some(hole) = rewound_to(loaded, &picks) {
+                                    // And an answer with a hole behind the
+                                    // clock is a partial one, not a draft
+                                    // that went backwards.
+                                    errors.push(picks_rewound(hole));
                                 } else {
                                     changed |= memory.picks_changed(&picks);
                                     loaded.api_picks = picks;
@@ -143,8 +168,13 @@ pub async fn start_polling<R: tauri::Runtime>(
                 if let Some(keepers) = keepers_to_save {
                     notes.extend(save_keepers_off_lock(&engine, draft_id.clone(), keepers).await);
                 }
-                for note in notes {
-                    crate::applog::warn(note);
+                // Each note once when it appears and once when it clears,
+                // rather than every three seconds for as long as it lasts.
+                for line in note_watch.observe(&notes) {
+                    crate::applog::warn(format!(
+                        "{line}{}",
+                        crate::applog::context(&[("draft", &draft_id)])
+                    ));
                 }
                 if applied {
                     let mut loaded = loaded_ref.lock().await;
@@ -169,13 +199,36 @@ pub async fn start_polling<R: tauri::Runtime>(
                     crate::companion::publish(&app, "poll-health", &health);
                 }
                 if changed {
-                    let loaded = loaded_ref.lock().await;
-                    let config = config_ref.lock().await;
-                    if let Some(loaded) = loaded.as_ref() {
-                        let view = view_from(loaded, &config);
-                        app.emit("draft-updated", &view).ok();
-                        crate::companion::publish(&app, "draft-updated", &view);
+                    // A copy is taken under the locks and the view is built
+                    // off them, on the blocking pool. Built under both
+                    // mutexes on a runtime thread, every command and the
+                    // other poller waited for the length of the build.
+                    let snapshot = {
+                        let loaded = loaded_ref.lock().await;
+                        let config = config_ref.lock().await;
+                        loaded
+                            .as_ref()
+                            .map(|loaded| (loaded.clone(), config.clone()))
+                    };
+                    if let Some((loaded, config)) = snapshot {
+                        match build_view_off_lock(loaded, config).await {
+                            Ok(view) => {
+                                app.emit("draft-updated", &view).ok();
+                                crate::companion::publish(&app, "draft-updated", &view);
+                            }
+                            Err(error) => crate::applog::warn(error),
+                        }
                     }
+                }
+                // How long the whole tick took is otherwise invisible: the
+                // badge reads success or failure, never how late either was.
+                if let Some(line) =
+                    slow_watch.observe(started.elapsed(), Duration::from_secs(interval))
+                {
+                    crate::applog::warn(format!(
+                        "{line}{}",
+                        crate::applog::context(&[("draft", &draft_id)])
+                    ));
                 }
             } else {
                 // Nothing loaded to poll: the next league starts at full
@@ -189,6 +242,15 @@ pub async fn start_polling<R: tauri::Runtime>(
         }
     });
     Ok(())
+}
+
+/// The hole a partial `/picks` answer would move the clock back to, judged
+/// against the picks on screen and the keepers known to sit ahead of them.
+fn rewound_to(loaded: &crate::engine::LoadedLeague, picks: &[crate::sleeper::Pick]) -> Option<u32> {
+    let teams = loaded.draft.settings.teams.max(1);
+    let rounds = loaded.draft.settings.rounds.max(1);
+    let keepers = keepers::known_keepers(loaded, teams, rounds);
+    picks::rewound_to(&loaded.api_picks, picks, teams, rounds, &keepers)
 }
 
 #[tauri::command]

@@ -12,6 +12,7 @@
 use crate::board::{AvailablePlayer, BoardPlayer};
 use crate::draft::TeamRoster;
 use crate::roster::RosterRules;
+use crate::sleeper::League;
 use crate::view_types::PositionRun;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -161,6 +162,18 @@ impl<'a> RecommendInputs<'a> {
     }
 }
 
+/// Weeks of the season a draft is drafting for.
+///
+/// The draft loader knows nothing about the NFL calendar; what it has is the
+/// league's own `start_week`, which is one for a league drafted in August
+/// and the current week for a league created and drafted mid-season. The
+/// full season when the league does not say. Never zero, because the
+/// one-week tag divides by it.
+pub fn weeks_left(league: &League) -> u32 {
+    let start_week = league.settings.start_week.unwrap_or(1).max(1);
+    crate::board::WEEKS.saturating_sub(start_week - 1).max(1)
+}
+
 pub fn recommend(inputs: &RecommendInputs) -> Vec<Recommendation> {
     let open: HashMap<String, u32> = inputs
         .my_roster
@@ -170,7 +183,9 @@ pub fn recommend(inputs: &RecommendInputs) -> Vec<Recommendation> {
                 .rules
                 .slots()
                 .iter()
-                .filter(|slot| !RosterRules::is_non_starting(slot))
+                .filter(|slot| {
+                    !RosterRules::is_non_starting(slot) && !RosterRules::is_unfillable(slot)
+                })
                 .fold(HashMap::new(), |mut m, s| {
                     *m.entry(s.clone()).or_insert(0) += 1;
                     m

@@ -177,7 +177,7 @@ export function LeaguePicker({
           Switch league
         </span>
         <span className="mid dialog-note">
-          Everything on screen is rebuilt for the league you pick — the board, the season, and both
+          Everything on screen is rebuilt for the league you pick: the board, the season, and both
           pollers. Recorded manual picks stay with the draft they were made in.
         </span>
 
@@ -241,8 +241,18 @@ export function LeaguePicker({
           />
         </label>
 
-        {error !== null && <div className="error">{error}</div>}
-        {yahooError !== null && <div className="error">{yahooError}</div>}
+        {/* Announced: the lookup button just goes back to its resting label,
+            and the reason it failed is a line of red text further down. */}
+        {error !== null && (
+          <div className="error" role="alert">
+            {error}
+          </div>
+        )}
+        {yahooError !== null && (
+          <div className="error" role="alert">
+            {yahooError}
+          </div>
+        )}
 
         <div className="dialog-actions">
           <button

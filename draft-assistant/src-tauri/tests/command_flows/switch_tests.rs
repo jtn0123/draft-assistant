@@ -11,9 +11,9 @@
 
 use super::session;
 use crate::routes::{
-    Gate, DRAFT_ID, DRAFT_IS_BROKEN, LEAGUE_BROKEN, LEAGUE_ID, LEAGUE_LIVE, LEAGUE_REBUILD,
-    LEAGUE_SWITCH, LEAGUE_TICK, LEAGUE_VANISH, LIVE_MATCHUPS, PICKS_VANISHED, REBUILD_PICKS,
-    SWITCH_PICKS, TICK_PICKS,
+    Gate, DRAFT_ID, DRAFT_IS_BROKEN, HOLE_FULL, HOLE_LAST_UNDONE, HOLE_MISSING_ONE, HOLE_PICKS,
+    LEAGUE_BROKEN, LEAGUE_HOLE, LEAGUE_ID, LEAGUE_LIVE, LEAGUE_REBUILD, LEAGUE_SWITCH, LEAGUE_TICK,
+    LEAGUE_VANISH, LIVE_MATCHUPS, PICKS_VANISHED, REBUILD_PICKS, SWITCH_PICKS, TICK_PICKS,
 };
 use draft_assistant_lib::engine::LoadedLeague;
 use draft_assistant_lib::state::AppState;
@@ -230,6 +230,47 @@ fn a_pick_list_that_vanishes_mid_draft_does_not_wipe_the_board() {
         reported.contains("empty"),
         "the reason must be said: {health}"
     );
+    s.finish();
+}
+
+/// `/picks` dropping one row of a running draft moved the clock back to the
+/// hole: the banner named the manager who had made that pick, and every pick
+/// after it fell off the feed until the next answer.
+#[test]
+fn a_pick_list_with_a_hole_behind_the_clock_does_not_rewind_the_draft() {
+    HOLE_PICKS.store(HOLE_FULL, Ordering::SeqCst);
+    let s = session("holed-picks");
+    let view = s.ok(
+        "add_league",
+        json!({"leagueId": LEAGUE_HOLE, "force": true}),
+    );
+    assert_eq!(view["draft"]["current_pick"], 5, "four picks are in");
+
+    // The next answer is missing pick 2, with 3 and 4 still in it.
+    HOLE_PICKS.store(HOLE_MISSING_ONE, Ordering::SeqCst);
+    let error = s.err("refresh_picks", json!({}));
+    assert!(
+        error.contains("without pick 2") && error.contains("already on the board"),
+        "the toast has to say what happened: {error}"
+    );
+    let kept = s.ok("get_state", json!({}));
+    assert_eq!(
+        kept["draft"]["current_pick"], 5,
+        "a partial answer moved the clock back to the hole"
+    );
+    assert_eq!(
+        kept["recent_picks"].as_array().expect("picks").len(),
+        4,
+        "the picks after the hole fell off the feed"
+    );
+    assert_eq!(kept["data_health"]["poll_consecutive_failures"], 1);
+
+    // A commissioner taking the last pick back is a shorter list, not a
+    // hole, and has to be adopted or the board never moves again.
+    HOLE_PICKS.store(HOLE_LAST_UNDONE, Ordering::SeqCst);
+    let undone = s.ok("refresh_picks", json!({}));
+    assert_eq!(undone["draft"]["current_pick"], 4, "the undo was refused");
+    assert_eq!(undone["data_health"]["poll_consecutive_failures"], 0);
     s.finish();
 }
 

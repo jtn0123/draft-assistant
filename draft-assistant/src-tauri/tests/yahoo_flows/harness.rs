@@ -44,8 +44,21 @@ pub(crate) const CODE: &str = "abcd1234";
 /// session's stub starts serving the finished draft instead of the partial
 /// one. Per-session so the two tests that use it can run side by side, which
 /// is how `cargo test` runs them.
-fn yahoo_route(request: &Request, advanced: &AtomicBool, pool_calls: &AtomicU64) -> Reply {
+fn yahoo_route(
+    request: &Request,
+    advanced: &AtomicBool,
+    revoked: &AtomicBool,
+    pool_calls: &AtomicU64,
+) -> Reply {
     let path = request.path();
+    // The user has revoked the app on Yahoo's side: every call is refused
+    // and so is the refresh token, which is how a dead grant actually looks.
+    if revoked.load(Ordering::SeqCst) {
+        return match path.ends_with("/oauth2/get_token") {
+            true => Reply::status(400, r#"{"error":"invalid_grant"}"#),
+            false => Reply::status(401, r#"{"error":"invalid_token"}"#),
+        };
+    }
     if path.ends_with("/oauth2/get_token") {
         // The exchange must carry the app's identity, and the code has to be
         // the one Yahoo issued — a mistyped code is answered the way Yahoo
@@ -140,6 +153,9 @@ pub(crate) struct Session {
     data_dir: std::path::PathBuf,
     /// Flip it and this session's Yahoo stub serves the finished draft.
     pub(crate) advanced: Arc<AtomicBool>,
+    /// Flip it and this session's Yahoo refuses every call and every refresh,
+    /// which is what a grant the user revoked looks like from here.
+    pub(crate) revoked: Arc<AtomicBool>,
     /// How many player-pool pages this session's stub has served. The pool is
     /// 25 rows a page, so it is the one call worth not repeating.
     pub(crate) pool_calls: Arc<AtomicU64>,
@@ -147,16 +163,26 @@ pub(crate) struct Session {
 }
 
 pub(crate) fn session(label: &str) -> Session {
+    session_with_redirect(label, "oob")
+}
+
+/// A session whose app is registered with `redirect_uri` rather than `oob`:
+/// how the loopback flow is driven without flipping the constant the app
+/// ships with.
+pub(crate) fn session_with_redirect(label: &str, redirect_uri: &str) -> Session {
     stub::serve(sleeper_route);
     let advanced = Arc::new(AtomicBool::new(false));
     let served = advanced.clone();
+    let revoked = Arc::new(AtomicBool::new(false));
+    let refused = revoked.clone();
     let pool_calls = Arc::new(AtomicU64::new(0));
     let counted = pool_calls.clone();
-    let yahoo_stub = yahoo_stub::serve(move |request| yahoo_route(request, &served, &counted));
+    let yahoo_stub =
+        yahoo_stub::serve(move |request| yahoo_route(request, &served, &refused, &counted));
     let hosts = YahooHosts {
         api_base: format!("{}/fantasy/v2", yahoo_stub.base()),
         login_base: yahoo_stub.base(),
-        redirect_uri: "oob".into(),
+        redirect_uri: redirect_uri.to_string(),
     };
     let data_dir = stub::scratch_dir(label);
     let engine = Engine::new(data_dir.clone());
@@ -199,9 +225,21 @@ pub(crate) fn session(label: &str) -> Session {
         webview,
         data_dir,
         advanced,
+        revoked,
         pool_calls,
         _stub: yahoo_stub,
     }
+}
+
+/// A loopback port nobody is listening on right now. Bound and released
+/// rather than fixed, so two sessions in the same `cargo test` do not fight
+/// over one number.
+pub(crate) fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind an ephemeral port")
+        .local_addr()
+        .expect("its address")
+        .port()
 }
 
 impl Session {

@@ -121,6 +121,71 @@ fn my_own_out_starter_leaves_the_lineup_i_set_alone() {
     );
 }
 
+/// The bug: an injury tag was applied to every remaining week of the outlook,
+/// so a Doubtful listing on a Wednesday zeroed the player for the rest of the
+/// season in the playoff odds. A tag is about one game; only this week moves.
+#[test]
+fn a_doubtful_tag_zeroes_this_week_only_in_the_playoff_odds() {
+    let healthy = view_with_injury("r3", None);
+    let doubtful = view_with_injury("r3", Some("Doubtful"));
+    // Rival Back projects 14.0 a week and the fixture has two weeks left
+    // (this one and the last regular week). With no back behind him the RB
+    // slot goes empty for the week he is doubtful and only that week.
+    let drop = projected_points(&healthy, 2) - projected_points(&doubtful, 2);
+    assert!(
+        (drop - 14.0).abs() < 1e-9,
+        "the tag cost {drop} points, one week is 14.0"
+    );
+}
+
+/// The same tag on the Trends strength line: one week out of the mean, not
+/// every week.
+#[test]
+fn a_doubtful_tag_zeroes_this_week_only_in_the_trends_strength() {
+    use draft_assistant_lib::season_history::take_snapshot;
+    use draft_assistant_lib::season_lookup::Lookup;
+
+    let (mut loaded, season, _) = common::fixture();
+    let before = take_snapshot(&loaded, &season, &Lookup { loaded: &loaded }, 1);
+    mark(&mut loaded, "r3", "Doubtful");
+    let after = take_snapshot(&loaded, &season, &Lookup { loaded: &loaded }, 1);
+    let strength = |snap: &draft_assistant_lib::season_history::Snapshot| {
+        snap.teams
+            .iter()
+            .find(|t| t.roster_id == 2)
+            .map(|t| t.strength)
+            .expect("roster 2 is in the snapshot")
+    };
+    // Strength is the mean over the two remaining weeks: 14.0 off one of
+    // them is 7.0 off the mean.
+    let drop = strength(&before) - strength(&after);
+    assert!((drop - 7.0).abs() < 1e-9, "the tag cost {drop} a week");
+}
+
+/// The bug: `Roster.reserve` was parsed and never read, so a back on injured
+/// reserve was offered as the start/sit call of the week.
+#[test]
+fn a_player_on_injured_reserve_is_not_offered_as_a_start_sit_call() {
+    let (loaded, mut season, config) = common::fixture();
+    season.scores = std::sync::Arc::new(Vec::new());
+    let before = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+    assert_eq!(before.calls.len(), 1, "{:?}", before.calls);
+    assert_eq!(before.calls[0].player_in_id, "r2");
+
+    // Bench Back goes on IR. Sleeper keeps him in `players` either way.
+    std::sync::Arc::make_mut(&mut season.rosters)[0].reserve = Some(vec!["r2".to_string()]);
+    let after = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+    assert!(
+        after.calls.is_empty(),
+        "a player on IR was offered as a call: {:?}",
+        after.calls
+    );
+    assert!(
+        after.header.my_projected < before.header.my_projected,
+        "the best lineup available no longer has him in it"
+    );
+}
+
 /// The header used to count the calls one way and total their points another:
 /// the total was taken before the injury calls joined the list, so a week whose
 /// only advice was "your starter is Out" read "1 calls to make, 0.0 points on

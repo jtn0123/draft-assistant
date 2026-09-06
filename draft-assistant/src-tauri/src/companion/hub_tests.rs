@@ -2,6 +2,7 @@
 //! side of all of this is in `tests/companion_wire.rs`.
 
 use super::*;
+use serde::Serialize;
 use std::net::IpAddr;
 
 /// A directory of this test's own. The counter is what makes it its own: two
@@ -175,6 +176,7 @@ fn a_device_name_is_trimmed_bounded_and_never_blank() {
 #[test]
 fn events_reach_a_subscriber_as_type_and_payload() {
     let hub = hub();
+    hub.set_port(Some(1));
     let mut rx = hub.subscribe();
     hub.publish_json("poll-health", serde_json::json!({ "ok": true }));
     let frame = rx.try_recv().expect("the frame was sent");
@@ -298,10 +300,7 @@ fn the_token_a_re_pair_replaced_is_announced_so_its_socket_can_close() {
     let (second_token, _) = paired_as(&hub, "Phone", Some(&first_id));
     // The failure this prevents: the device id is unchanged, so nothing else
     // tells the socket opened on the old token that the host has replaced it.
-    assert_eq!(
-        closes.try_recv().ok().as_deref(),
-        Some(first_token.as_str())
-    );
+    assert_eq!(closes.try_recv().ok(), Some(Closing::Token(first_token)));
     assert!(hub.device_for(&second_token).is_some());
 }
 
@@ -322,6 +321,7 @@ impl Serialize for CountedPayload {
 #[test]
 fn publishing_with_nobody_listening_does_not_serialise_the_payload() {
     let hub = hub();
+    hub.set_port(Some(1));
     let serialised = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let payload = CountedPayload {
         serialised: serialised.clone(),
@@ -359,4 +359,35 @@ fn publish_devices_still_reaches_the_webview_with_no_subscriber() {
     paired(&hub);
     let kinds = seen.lock().unwrap_or_else(|e| e.into_inner()).clone();
     assert!(kinds.iter().any(|k| k == "companion-devices"), "{kinds:?}");
+}
+
+#[test]
+fn a_server_that_is_off_publishes_nothing_even_to_a_socket_still_closing() {
+    let hub = hub();
+    let mut rx = hub.subscribe();
+    // The failure this prevents: the toggle went off, the sockets were still
+    // draining, and the publish path only asked whether anyone was listening.
+    // They were, so the next poll tick still reached every phone.
+    hub.publish_json("draft-updated", serde_json::json!({ "picks": 3 }));
+    assert!(
+        rx.try_recv().is_err(),
+        "a frame went out with the server off"
+    );
+    hub.set_port(Some(1));
+    hub.publish_json("draft-updated", serde_json::json!({ "picks": 4 }));
+    assert!(rx.try_recv().is_ok());
+    hub.set_port(None);
+    hub.publish("draft-updated", &serde_json::json!({ "picks": 5 }));
+    assert!(
+        rx.try_recv().is_err(),
+        "a frame went out after the server stopped"
+    );
+}
+
+#[test]
+fn stopping_tells_every_socket_to_go_without_calling_it_revoked() {
+    let hub = hub();
+    let mut closes = hub.subscribe_closes();
+    hub.close_everyone();
+    assert_eq!(closes.try_recv().expect("a close"), Closing::Everyone);
 }

@@ -50,7 +50,7 @@ export function RecCard({
         {rec.survival_next !== null && ` · survives ${pct(rec.survival_next)}`}
       </span>
       <ul className="rec-reasons">
-        {rec.reasons.slice(0, 2).map((reason, i) => (
+        {shownReasons(rec.reasons).map((reason, i) => (
           <li key={i}>{reason}</li>
         ))}
       </ul>
@@ -63,6 +63,15 @@ export function RecCard({
       </button>
     </div>
   );
+}
+
+/** The two reasons worth the card's two lines. The VORP line is the stats
+ * line said again, and being the largest term on nearly every card it came
+ * first, so the reason that actually separated two candidates was the one
+ * pushed off. The backend no longer sends it; a fixture or an older backend
+ * still might, and the card reads the same either way. */
+function shownReasons(reasons: string[]): string[] {
+  return reasons.filter((reason) => !reason.includes("VORP under league scoring")).slice(0, 2);
 }
 
 // ---------- left rail ----------

@@ -252,6 +252,9 @@ describe("SeasonScreen header", () => {
       totals: { my_playing: 1, my_pre: 0, my_done: 0, my_live_points: 71.5, opp_live_points: 64.2 },
       next_kickoff_ms: null,
       bye_teams: [],
+      // My one starter is on the field once the game is live or final, and
+      // there is nobody on the bench, so the backend calls that locked.
+      lineup_locked: state !== "pre",
     };
   }
 

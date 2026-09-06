@@ -227,14 +227,51 @@ async fn a_picture_nobody_has_is_a_404_rather_than_an_error() {
     assert_eq!(response.status(), 404);
 }
 
+/// The failure this prevents: the toggle went off, the listener closed, and
+/// the phone that was already connected kept receiving every board update,
+/// because an upgraded WebSocket is not the listener's to close.
 #[tokio::test]
-async fn turning_the_server_off_closes_the_door() {
+async fn turning_the_server_off_closes_the_door_and_every_open_socket() {
+    use futures_util::StreamExt;
+    use tokio_tungstenite::tungstenite::Message;
+
     let host = host("stop").await;
     let paired = host.pair_ok("Rob's iPhone", "phone").await;
     assert_eq!(host.get("/api/devices", &paired.token).await.0, 200);
+    let mut socket = ws_tests::open(&host.base, &paired.token).await;
+    ws_tests::next_of(&mut socket, "devices").await;
+
     host.companion.stop();
     assert!(!host.companion.is_enabled());
     assert!(host.companion.url().is_none());
+    assert!(host.companion.tailscale_url().is_none());
+
+    // The socket is closed from the host's side, and with a plain close, not
+    // the revoked one: the phone keeps its token and waits for the host.
+    let mut closed = false;
+    for _ in 0..20 {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), socket.next()).await {
+            Ok(Some(Ok(Message::Close(frame)))) => {
+                let code = frame.as_ref().map(|f| u16::from(f.code));
+                assert_ne!(code, Some(4401), "the toggle is not Revoke: {frame:?}");
+                closed = true;
+                break;
+            }
+            Ok(None) | Ok(Some(Err(_))) => {
+                closed = true;
+                break;
+            }
+            Ok(Some(Ok(_))) => continue,
+            Err(_) => break,
+        }
+    }
+    assert!(closed, "the phone's socket stayed open after the toggle");
+    // And nothing published now goes anywhere.
+    host.companion
+        .hub
+        .publish("draft-updated", &serde_json::json!({ "picks": 3 }));
+    assert!(!host.companion.hub.has_listeners() || !host.companion.hub.is_running());
+
     let refused = host
         .http
         .get(format!("{}/api/devices", host.base))

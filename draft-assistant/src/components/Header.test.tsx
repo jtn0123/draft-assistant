@@ -2,8 +2,8 @@ import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PollHealth } from "../types";
-import { Header, type SettingsRow } from "./Header";
+import type { Platform, PollHealth } from "../types";
+import { Header, SEASON_SLEEPER_ONLY, type SettingsRow } from "./Header";
 import { resetPrefs, setChime } from "../prefs";
 import { settle } from "../test/settle";
 
@@ -26,12 +26,14 @@ function Harness({
   pollHealth = null,
   onRefreshPicks = () => {},
   refreshingPicks = false,
+  platform = "sleeper",
 }: {
   onSelect?: () => void;
   onSwitchLeague?: () => void;
   pollHealth?: PollHealth | null;
   onRefreshPicks?: () => void;
   refreshingPicks?: boolean;
+  platform?: Platform;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -46,6 +48,7 @@ function Harness({
         meta="14-team full-PPR"
         screen="draft"
         onScreen={() => {}}
+        platform={platform}
         polling
         pollHealth={pollHealth}
         onRefreshPicks={onRefreshPicks}
@@ -175,6 +178,25 @@ describe("the settings menu", () => {
   });
 });
 
+describe("the Season button", () => {
+  // The season screen reads Sleeper's endpoints. Offering it on a Yahoo league
+  // sent a Yahoo key to Sleeper and failed on every open, with nothing to say
+  // why the button never worked.
+  it("is switched off on a Yahoo league, and says why", () => {
+    render(<Harness platform="yahoo" />);
+    const season = screen.getByRole("button", { name: "Season" });
+    expect(season).toBeDisabled();
+    expect(season).toHaveAttribute("title", SEASON_SLEEPER_ONLY);
+    expect(screen.getByText(SEASON_SLEEPER_ONLY)).toBeInTheDocument();
+  });
+
+  it("stays on for a Sleeper league, with nothing extra to say", () => {
+    render(<Harness platform="sleeper" />);
+    expect(screen.getByRole("button", { name: "Season" })).toBeEnabled();
+    expect(screen.queryByText(SEASON_SLEEPER_ONLY)).toBeNull();
+  });
+});
+
 describe("the sync pill", () => {
   it("writes out why sync is failing rather than hiding it in a tooltip", () => {
     render(
@@ -201,6 +223,7 @@ describe("the sync pill", () => {
         followStatus={null}
         onPairAgain={() => {}}
         onSwitchLeague={() => {}}
+        platform="sleeper"
         subtitle="Week 3"
         meta="14-team full-PPR"
         screen={screen_}
@@ -242,7 +265,7 @@ describe("the sync pill", () => {
 describe("the chime button", () => {
   it("reads the preference itself, so nobody has to hand it down", async () => {
     render(<Harness />);
-    const button = () => screen.getByRole("button", { name: "Pick chime on — click to mute" });
+    const button = () => screen.getByRole("button", { name: "Pick chime on, click to mute" });
     expect(button()).toHaveAttribute("aria-pressed", "true");
 
     await settle(() => {
@@ -284,6 +307,7 @@ describe("re-pulling the picks", () => {
         followStatus={null}
         onPairAgain={() => {}}
         onSwitchLeague={() => {}}
+        platform="sleeper"
         subtitle="Week 3"
         meta="14-team full-PPR"
         screen="season"

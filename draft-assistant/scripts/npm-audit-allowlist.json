@@ -1,0 +1,6 @@
+{
+  "comment": "Advisories `npm run audit:npm` (scripts/check-npm-audit.mjs) accepts at high severity. Each entry says which tree it lives in and why it cannot be fixed; the script fails when an unlisted high or critical advisory appears, and warns when a listed one has gone so the entry can be removed.",
+  "advisories": {
+    "GHSA-jmr9-qjv8-65gv": "extract-zip symlink traversal, in the e2e dev tree only: pulled by WebdriverIO's tauri-service and every @wdio package above it, no fixed release exists, and nothing in a shipped build links it. Remove once `npm --prefix e2e audit` is clean."
+  }
+}

@@ -103,6 +103,25 @@ pub fn server_origins(port: u16) -> Vec<String> {
     origins_from(port, &lan_ip(), tailscale_self().as_ref())
 }
 
+/// Where the server can be reached, as one reading: the origins the checks
+/// are built from and the tailnet URL the Settings panel shows.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Reach {
+    pub origins: Vec<String>,
+    pub tailscale_url: Option<String>,
+}
+
+/// One lookup for both. The Tailscale CLI is asked once here, on the server's
+/// slow timer, rather than once per status read: `companion_status` runs on
+/// every devices event, and a process spawn per event stalled the runtime.
+pub fn reach(port: u16) -> Reach {
+    let this = tailscale_self();
+    Reach {
+        origins: origins_from(port, &lan_ip(), this.as_ref()),
+        tailscale_url: this.as_ref().and_then(|t| tailscale_url_from(t, port)),
+    }
+}
+
 /// The same list, over addresses the caller already has. Pure, so a test can
 /// say what this machine's addresses are.
 ///

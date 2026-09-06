@@ -4,8 +4,14 @@
 import { useState } from "react";
 import type { LineupCall, LineupChoice, MatchupView, WaiverTarget } from "../season-types";
 import { fmt, ideasAgeNote, injuryWord, kickoffLabel, pct, signed } from "../format";
+import { platformName } from "../leagues";
+import type { Platform } from "../types";
 import { Headshot, PlayerName, PanelHead, PosBadge, TeamAvatar, Empty, Segmented } from "./bits";
 import { setLineupView, useLineupView } from "../prefs";
+
+/** The placeholder for a cell with nothing in it, the same glyph `fmt` prints
+ *  for a missing number so an empty name and an empty score read alike. */
+const BLANK = "–";
 
 // ---------- calls to make ----------
 
@@ -13,6 +19,7 @@ export function CallsToMake({
   calls,
   pointsOnTable,
   started = false,
+  platform = "sleeper",
 }: {
   calls: LineupCall[];
   pointsOnTable: number;
@@ -20,6 +27,9 @@ export function CallsToMake({
    *  already on the field is dropped in Rust, so an empty list on a Sunday
    *  afternoon means "too late", not "nothing to fix". */
   started?: boolean;
+  /** Which service the lineup is set on, so the footer tells a Yahoo player
+   *  to go to Yahoo rather than to a service they have never used. */
+  platform?: Platform;
 }) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [allOpen, setAllOpen] = useState(false);
@@ -48,7 +58,7 @@ export function CallsToMake({
               to nothing — an injury call whose replacement projects no higher —
               the clause is dropped rather than printed as "0.0 points on the
               table" beside a list of one. */}
-          {pointsOnTable >= 0.05 ? ` — ${fmt(pointsOnTable, 1)} points on the table` : ""}
+          {pointsOnTable >= 0.05 ? `: ${fmt(pointsOnTable, 1)} points on the table` : ""}
         </span>
         <button
           type="button"
@@ -93,7 +103,9 @@ export function CallsToMake({
           </div>
         );
       })}
-      <span className="mid call-foot">Set it on Sleeper — this app reads, it doesn't write.</span>
+      <span className="mid call-foot">
+        Set it on {platformName(platform)}. This app reads, it doesn't write.
+      </span>
     </div>
   );
 }
@@ -126,6 +138,7 @@ export function LineupCompare({
   onWhich,
   winOdds,
   locked = false,
+  platform = "sleeper",
 }: {
   matchup: MatchupView | null;
   /** Which lineup is on show. Owned by the screen, because the header quotes
@@ -138,6 +151,8 @@ export function LineupCompare({
    *  best/set choice is not the user's to make any more, so the toggle goes
    *  and the screen speaks only about the lineup that is actually playing. */
   locked?: boolean;
+  /** Which service the set lineup lives on, named in the Set tab's tooltip. */
+  platform?: Platform;
 }) {
   // Remembered between sessions, in prefs.ts along with the rest of them.
   const view = useLineupView();
@@ -146,7 +161,7 @@ export function LineupCompare({
     return (
       <section className="lineup">
         <PanelHead title="Lineups, slot by slot" />
-        <Empty>No matchup this week — you're on a bye.</Empty>
+        <Empty>No matchup this week: you're on a bye.</Empty>
       </section>
     );
   }
@@ -181,7 +196,7 @@ export function LineupCompare({
               onChange={onWhich}
               titles={{
                 Best: "The lineup you should be starting",
-                Set: "The lineup you actually have set on Sleeper",
+                Set: `The lineup you actually have set on ${platformName(platform)}`,
               }}
               label="Which lineup"
             />
@@ -230,7 +245,7 @@ export function LineupCompare({
               <span className="eyebrow">{row.slot}</span>
               <span className="lineup-player">
                 <PlayerName
-                  name={row.my_name || "—"}
+                  name={row.my_name || BLANK}
                   team={row.my_team}
                   playerId={row.my_player_id}
                   {...injuryProps(row.my_injury)}
@@ -241,7 +256,7 @@ export function LineupCompare({
               <span className="mid strong">{fmt(row.opp_points, 1)}</span>
               <span className="lineup-player mid">
                 <PlayerName
-                  name={row.opp_name || "—"}
+                  name={row.opp_name || BLANK}
                   team={row.opp_team}
                   playerId={row.opp_player_id}
                   {...injuryProps(row.opp_injury)}
@@ -258,7 +273,7 @@ export function LineupCompare({
               <div className="scoreboard-side is-mine">
                 <span className="ellipsis scoreboard-name">
                   <Headshot playerId={row.my_player_id} team={row.my_team} name={row.my_name} />
-                  {row.my_name || "—"}
+                  {row.my_name || BLANK}
                 </span>
                 <span className="strong">{fmt(row.my_points, 1)}</span>
                 <span className="bar is-mine" style={{ width: barWidth(row.my_points, peak) }} />
@@ -268,7 +283,7 @@ export function LineupCompare({
                 <span className="bar is-theirs" style={{ width: barWidth(row.opp_points, peak) }} />
                 <span className="mid strong">{fmt(row.opp_points, 1)}</span>
                 <span className="muted ellipsis scoreboard-name">
-                  {row.opp_name || "—"}
+                  {row.opp_name || BLANK}
                   <Headshot playerId={row.opp_player_id} team={row.opp_team} name={row.opp_name} />
                 </span>
               </div>
@@ -283,7 +298,7 @@ export function LineupCompare({
 /** The gap for one slot, sitting between the two teams: signed from my side,
  * so a plus is a slot I am winning and a minus is one I am losing. */
 function Lean({ margin }: { margin: number }) {
-  if (Math.abs(margin) < 0.05) return <span className="lean is-even">—</span>;
+  if (Math.abs(margin) < 0.05) return <span className="lean is-even">{BLANK}</span>;
   return <span className={margin > 0 ? "lean is-mine" : "lean is-theirs"}>{signed(margin)}</span>;
 }
 
@@ -321,7 +336,7 @@ export function Waivers({
         note={ideasAge === null ? budget : `${budget} · ${ideasAge}`}
       />
       {waivers.length === 0 ? (
-        <Empty>No free agent would crack your starting lineup — nothing worth spending on.</Empty>
+        <Empty>No free agent would crack your starting lineup. Nothing worth spending on.</Empty>
       ) : (
         <div className="waiver-list">
           {waivers.map((w) => (
@@ -330,7 +345,7 @@ export function Waivers({
               <PlayerName name={w.name} team={w.team} playerId={w.player_id} />
               <span className="waiver-gain">+{pct(w.gain_fraction)}</span>
               <span className="muted waiver-bid">
-                {w.suggested_bid === null ? "—" : `$${w.suggested_bid}`} ·{" "}
+                {w.suggested_bid === null ? BLANK : `$${w.suggested_bid}`} ·{" "}
                 {w.rivals === 0 ? "nobody" : `${w.rivals} rival${w.rivals === 1 ? "" : "s"}`}
               </span>
             </div>

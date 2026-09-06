@@ -6,8 +6,10 @@
 //! `#[serde(default)]`, because a config written by an older build has to keep
 //! loading rather than resetting the user's settings on upgrade.
 
+use crate::engine::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
@@ -72,4 +74,205 @@ pub struct StoredLeague {
 /// The platform a stored league has when its config predates the field.
 fn sleeper() -> String {
     crate::view_types::SLEEPER.to_string()
+}
+
+/// What reading one settings file found.
+enum ConfigFile {
+    /// No file at all: a first run, or a live file already set aside.
+    Missing,
+    /// A file that is there and cannot be used, with the reason.
+    Broken(String),
+    Parsed(Box<AppConfig>),
+}
+
+fn read_config_file(path: &Path) -> ConfigFile {
+    match std::fs::read_to_string(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ConfigFile::Missing,
+        Err(error) => ConfigFile::Broken(error.to_string()),
+        Ok(text) => match serde_json::from_str::<AppConfig>(&text) {
+            Ok(config) => ConfigFile::Parsed(Box::new(config)),
+            Err(error) => ConfigFile::Broken(error.to_string()),
+        },
+    }
+}
+
+/// Move a settings file that cannot be read out of the way, keeping it for
+/// the user to recover by hand, and say where it went.
+fn set_aside(live: &Path) -> String {
+    let kept = live.with_extension(format!("json.broken-{}", crate::engine::now_secs()));
+    match std::fs::rename(live, &kept) {
+        Ok(()) => kept.display().to_string(),
+        Err(error) => format!("{} (could not be moved: {error})", live.display()),
+    }
+}
+
+impl Engine {
+    /// Read the config, falling back to the last good copy if the live file
+    /// cannot be used. A key still sitting in the file from before Keychain
+    /// storage existed is moved there on the way in.
+    ///
+    /// A file that is *there* and cannot be parsed is not a first run. It
+    /// used to be treated as one: the leagues, the username and every
+    /// setting vanished with nothing in the log, and the next save wrote a
+    /// fresh file over the only copy of what had been lost. The broken file
+    /// is now kept beside the live one under `.broken-<time>`, the loss is
+    /// an ERROR line, and the `.bak` is used when it parses.
+    pub fn load_config(&self) -> AppConfig {
+        let live = self.cache_path("config.json");
+        let backup = self.cache_path("config.json.bak");
+        let mut config = match read_config_file(&live) {
+            ConfigFile::Parsed(config) => *config,
+            ConfigFile::Missing => match read_config_file(&backup) {
+                ConfigFile::Parsed(config) => {
+                    crate::applog::info(
+                        "settings read from config.json.bak; config.json is missing",
+                    );
+                    *config
+                }
+                ConfigFile::Missing => AppConfig::default(),
+                ConfigFile::Broken(reason) => {
+                    crate::applog::error(format!(
+                        "config.json is missing and config.json.bak cannot be read, starting with default settings: {reason}"
+                    ));
+                    AppConfig::default()
+                }
+            },
+            ConfigFile::Broken(reason) => {
+                let kept = set_aside(&live);
+                crate::applog::error(format!(
+                    "config.json cannot be read and was set aside as {kept}: {reason}"
+                ));
+                match read_config_file(&backup) {
+                    ConfigFile::Parsed(config) => {
+                        crate::applog::warn("settings restored from config.json.bak");
+                        *config
+                    }
+                    _ => {
+                        crate::applog::error(
+                            "config.json.bak cannot be read either, starting with default settings",
+                        );
+                        AppConfig::default()
+                    }
+                }
+            }
+        };
+        if let Some(key) = config.anthropic_api_key.take() {
+            if crate::secrets::available() && crate::secrets::store(&key).is_ok() {
+                // The key is safely in the Keychain either way; if rewriting
+                // the file to drop it fails, the next save tries again.
+                let _ = self.save_config(&config);
+            } else {
+                config.anthropic_api_key = Some(key);
+            }
+        }
+        config
+    }
+
+    /// Write the config atomically: to a temp file first, then swapped into
+    /// place, with the previous copy kept as `config.json.bak`. A crash
+    /// mid-write can never leave a half-written config behind.
+    ///
+    /// Every failure comes back to the caller: a save that quietly did nothing
+    /// loses the user's league list at the next launch with nothing said.
+    pub fn save_config(&self, config: &AppConfig) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(config)
+            .map_err(|e| format!("could not prepare your settings to be saved: {e}"))?;
+        let live = self.cache_path("config.json");
+        let tmp = crate::cache::temp_sibling(&live);
+        crate::cache::write_synced(&tmp, json.as_bytes())
+            .map_err(|e| format!("could not save your settings to {}: {e}", tmp.display()))?;
+        crate::cache::owner_only(&tmp);
+        if live.exists() {
+            crate::cache::back_up(&live, &self.cache_path("config.json.bak"));
+        }
+        std::fs::rename(&tmp, &live)
+            .map_err(|e| format!("could not save your settings to {}: {e}", live.display()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn test_dir(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "draft-assistant-config-{label}-{}-{}",
+            std::process::id(),
+            crate::engine::now_secs()
+        ))
+    }
+
+    fn broken_files(dir: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("config.json.broken-"))
+            })
+            .collect()
+    }
+
+    /// A config.json that would not parse was treated as a first run: every
+    /// league and setting vanished silently, and the next save overwrote the
+    /// only copy of them.
+    #[test]
+    fn an_unreadable_config_is_kept_aside_and_reported_rather_than_treated_as_a_first_run() {
+        let dir = test_dir("broken");
+        let engine = Engine::new(dir.clone());
+        let mut config = AppConfig {
+            my_user_id: Some("user-1".into()),
+            ..AppConfig::default()
+        };
+        engine.save_config(&config).unwrap();
+        config.my_user_id = Some("user-2".into());
+        engine.save_config(&config).unwrap(); // live = user-2, bak = user-1
+        std::fs::write(dir.join("config.json"), "{ not json").unwrap();
+
+        let capture = crate::applog::Capture::start();
+        let loaded = engine.load_config();
+        assert_eq!(
+            loaded.my_user_id.as_deref(),
+            Some("user-1"),
+            "the backup is used when it parses"
+        );
+        assert!(
+            capture.saw("ERROR config.json cannot be read"),
+            "{:?}",
+            capture.lines()
+        );
+        drop(capture);
+        let kept = broken_files(&dir);
+        assert_eq!(
+            kept.len(),
+            1,
+            "the broken file is kept, not overwritten: {kept:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&kept[0]).unwrap(), "{ not json");
+        assert!(
+            !dir.join("config.json").exists(),
+            "the broken file is moved, so a save cannot overwrite it"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_config_is_a_first_run_and_nothing_is_reported() {
+        let dir = test_dir("missing");
+        let engine = Engine::new(dir.clone());
+        let capture = crate::applog::Capture::start();
+        let loaded = engine.load_config();
+        assert!(loaded.my_user_id.is_none());
+        assert!(
+            !capture.lines().iter().any(|line| line.contains("ERROR")),
+            "{:?}",
+            capture.lines()
+        );
+        drop(capture);
+        assert!(broken_files(&dir).is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

@@ -11,7 +11,6 @@ use super::pairing::{Lockout, Paired};
 use super::rand;
 use super::store::{self, StoredDevice, StoredHub};
 use crate::yahoo_secrets::SecretStore;
-use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -53,19 +52,32 @@ struct HubInner {
     /// private address", so a page on another machine's LAN address cannot
     /// name itself into the allow-list.
     origins: Vec<String>,
+    /// The tailnet URL to show, read with the origins. Cached because working
+    /// it out shells out to the Tailscale CLI, and the status command that
+    /// shows it runs on every devices event.
+    tailscale_url: Option<String>,
     host_name: String,
     /// Set once at startup. Absent in the tests, which have no webview.
     emit: Option<Emit>,
+}
+
+/// Why a live socket has to close, from the hub's side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Closing {
+    /// This one token was replaced or revoked; the phone holding it pairs again.
+    Token(String),
+    /// The server is going down. Every socket closes, and a phone keeps its
+    /// token and retries, because the toggle is not Revoke.
+    Everyone,
 }
 
 /// What both the phone and the desktop read the companion's world through.
 pub struct CompanionHub {
     inner: Mutex<HubInner>,
     events: broadcast::Sender<String>,
-    /// Tokens that have stopped being valid while a socket still held them.
-    /// A socket authenticated with one of these closes itself when it hears
-    /// its own token here.
-    closes: broadcast::Sender<String>,
+    /// Sockets told to go: a token that stopped being valid while a socket
+    /// still held it, or every socket at once when the server is turned off.
+    closes: broadcast::Sender<Closing>,
     /// Where the pairings and the code are kept so a restart does not forget
     /// them. The machine's Keychain in the app; a file in a scratch directory
     /// in the tests, which must never write to a real login Keychain.
@@ -120,6 +132,7 @@ impl CompanionHub {
                 lockout: Lockout::default(),
                 port: None,
                 origins: Vec::new(),
+                tailscale_url: None,
                 host_name,
                 emit: None,
             }),
@@ -232,8 +245,17 @@ impl CompanionHub {
         self.lock().origins.clone()
     }
 
-    pub fn set_origins(&self, origins: Vec<String>) {
-        self.lock().origins = origins;
+    /// Every address the server answers on, plus the one tailnet URL to show,
+    /// written together because they come from the same lookup.
+    pub fn set_reach(&self, reach: super::net::Reach) {
+        let mut inner = self.lock();
+        inner.origins = reach.origins;
+        inner.tailscale_url = reach.tailscale_url;
+    }
+
+    /// The tailnet URL the server was last seen at. `None` while it is down.
+    pub fn tailscale_url(&self) -> Option<String> {
+        self.lock().tailscale_url.clone()
     }
 
     pub fn is_running(&self) -> bool {
@@ -269,10 +291,18 @@ impl CompanionHub {
         let outcome = {
             let mut inner = self.lock();
             if inner.lockout.locked(attempt.peer, now) {
+                crate::applog::debug(format!(
+                    "companion: pairing refused, address locked out peer={}",
+                    attempt.peer
+                ));
                 return Ok(PairOutcome::LockedOut);
             }
             if !rand::secrets_match(attempt.code, &inner.code) {
                 inner.lockout.note_failure(attempt.peer, now);
+                crate::applog::debug(format!(
+                    "companion: pairing refused, wrong code peer={}",
+                    attempt.peer
+                ));
                 return Ok(PairOutcome::WrongCode);
             }
             inner.lockout.forgive(attempt.peer);
@@ -337,6 +367,9 @@ impl CompanionHub {
         }
         self.persist();
         self.publish_devices();
+        if let PairOutcome::Ok { device_id, .. } = &outcome {
+            crate::applog::debug(format!("companion: paired device={device_id}"));
+        }
         Ok(outcome)
     }
 
@@ -362,6 +395,12 @@ impl CompanionHub {
 
     /// Note that a device opened or closed a WebSocket.
     pub fn socket_changed(&self, device_id: &str, opened: bool) {
+        // The device id and never the token: this line is for reading back
+        // which phone dropped at 8:40, not for pairing as it.
+        crate::applog::debug(format!(
+            "companion: socket {} device={device_id}",
+            if opened { "opened" } else { "closed" }
+        ));
         {
             let mut inner = self.lock();
             let Some(found) = inner
@@ -420,71 +459,26 @@ impl CompanionHub {
     /// A receiver for tokens that have stopped working. The socket task
     /// listens on this so a token replaced under it closes its connection
     /// rather than leaving the old holder reading on.
-    pub fn subscribe_closes(&self) -> broadcast::Receiver<String> {
+    pub fn subscribe_closes(&self) -> broadcast::Receiver<Closing> {
         self.closes.subscribe()
     }
 
     /// Tell any socket holding this token that it is finished.
     fn close_token(&self, token: String) {
-        let _ = self.closes.send(token);
+        let _ = self.closes.send(Closing::Token(token));
     }
 
-    /// Whether any socket is on the far end of the event fan-out.
-    ///
-    /// The publish path asks this before it builds anything. A draft or season
-    /// view is tens of kilobytes of JSON every three second tick, and
-    /// `broadcast::send` drops the frame when no receiver exists, so with the
-    /// companion server off or no phone connected the whole serialisation was
-    /// paid for and then thrown away. Nothing is lost by skipping it: a socket
-    /// that connects later gets its own opening snapshot from `ws.rs` before
-    /// it starts reading this stream.
-    pub fn has_listeners(&self) -> bool {
-        self.events.receiver_count() > 0
-    }
-
-    /// Fan one `{type, payload}` frame out to every open socket. Nothing is
-    /// sent when nobody is listening, and a full channel is not an error —
-    /// the events are a live feed, not a queue anyone replays.
-    pub fn publish_json(&self, kind: &str, payload: serde_json::Value) {
-        if !self.has_listeners() {
-            return;
-        }
-        let frame = serde_json::json!({ "type": kind, "payload": payload });
-        let _ = self.events.send(frame.to_string());
-    }
-
-    /// The same for anything serialisable. A value that will not serialise is
-    /// dropped with a note rather than taking a poll tick down.
-    pub fn publish<T: Serialize>(&self, kind: &str, payload: &T) {
-        // Before `to_value`, not after: the serialisation is the expensive
-        // half, and with nobody listening it has no reader to reach.
-        if !self.has_listeners() {
-            return;
-        }
-        match serde_json::to_value(payload) {
-            Ok(value) => self.publish_json(kind, value),
-            Err(e) => crate::applog::warn(format!(
-                "companion: could not send a '{kind}' update to the paired devices: {e}"
-            )),
-        }
-    }
-
-    /// The device list, to the paired devices and to the host's own settings
-    /// screen. The webview event is named separately in the contract because
-    /// the desktop already has a `devices` of its own meaning nothing like it.
-    pub fn publish_devices(&self) {
-        let devices = self.devices();
-        // Only the broadcast half is skipped when no socket is listening. The
-        // webview emit below has to run either way, or the host's settings
-        // screen would stop hearing about the first device to pair, which is
-        // exactly the moment there is still no subscriber.
-        self.publish("devices", &devices);
-        match serde_json::to_value(&devices) {
-            Ok(value) => self.to_webview("companion-devices", value),
-            Err(e) => crate::applog::warn(format!("companion: could not list the devices: {e}")),
-        }
+    /// Close every live socket. `stop()` calls this: axum's graceful shutdown
+    /// only stops the listener, and the upgraded WebSockets are detached
+    /// from it, so without this a phone went on receiving frames after the
+    /// host had switched the companion off.
+    pub fn close_everyone(&self) {
+        let _ = self.closes.send(Closing::Everyone);
     }
 }
+
+#[path = "hub_publish.rs"]
+mod publish;
 
 #[cfg(test)]
 #[path = "hub_tests.rs"]

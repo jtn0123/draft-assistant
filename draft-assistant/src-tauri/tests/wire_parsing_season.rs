@@ -2,14 +2,17 @@
 
 use draft_assistant_lib::season_api::{NflState, Roster, Transaction};
 
+/// `week` drives scoring and the rollover; `display_week`, which runs a week
+/// ahead from the end of Monday night until Tuesday, is a label only.
 #[test]
-fn nfl_state_current_week_prefers_display_week() {
+fn nfl_state_scoring_week_is_week_not_display_week() {
     let state: NflState = serde_json::from_str(
         r#"{"week": 3, "display_week": 4, "season": "2025",
             "season_type": "regular", "previous_season": "2024"}"#,
     )
     .unwrap();
-    assert_eq!(state.current_week(), 4);
+    assert_eq!(state.current_week(), 3);
+    assert_eq!(state.display_week, Some(4));
     assert_eq!(state.season, "2025");
     assert_eq!(state.previous_season.as_deref(), Some("2024"));
 }

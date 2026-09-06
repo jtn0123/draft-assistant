@@ -376,3 +376,28 @@ fn the_early_defence_veto_says_why_it_vetoed() {
         "{reasons:?}"
     );
 }
+
+// ---------- IDP ----------
+
+#[test]
+fn idp_slots_the_board_cannot_fill_do_not_inflate_the_need_pressure() {
+    // An IDP league starts three defenders this board has no players for.
+    // Those slots were counted as open starters from the first pick to the
+    // last, so every "fills open slot" bonus on every card was paid at a
+    // pressure nearly twice what the fillable slots justified.
+    let available = vec![player("wr", "WR", 30.0)];
+    let offence = rules(&["QB", "RB", "WR", "TE", "FLEX", "BN"]);
+    let idp = rules(&["QB", "RB", "WR", "TE", "FLEX", "DL", "LB", "DB", "BN"]);
+    let plain = recs(&available, None, &offence, 1, 15, 1);
+    let with_idp = recs(&available, None, &idp, 1, 15, 1);
+    for mode in MODES {
+        let plain = of_mode(&plain, mode);
+        let with_idp = of_mode(&with_idp, mode);
+        assert!(
+            (plain.score - with_idp.score).abs() < 1e-9,
+            "{mode}: {} without IDP slots, {} with them",
+            plain.score,
+            with_idp.score
+        );
+    }
+}

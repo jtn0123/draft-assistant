@@ -8,7 +8,7 @@
 use crate::engine::LoadedLeague;
 use crate::season_api::{matchup_for, opponent_of, Matchup, Roster};
 use crate::season_engine::LoadedSeason;
-use crate::season_lineup::weekly_lineup_outlook;
+use crate::season_lineup::{weekly_lineup_outlook, Sidelined};
 use crate::season_lookup::Lookup;
 use crate::season_odds::{self, ScheduledGame, StandingsRow, TeamSeason};
 use crate::season_spread;
@@ -106,12 +106,18 @@ pub fn standings_rows(
         .map(|r| {
             // Positions are resolved once per roster here, not once per
             // (roster, week) — the answer cannot change from week to week.
+            // The IR slot is left out: a player on injured reserve cannot be
+            // started, whatever his projection says, and the tag on him is
+            // about this week only.
             let outlook = weekly_lineup_outlook(
                 rules,
-                r.player_ids(),
+                &r.active_player_ids(),
                 &position_of,
                 &team_of,
-                &sidelined,
+                Sidelined {
+                    week,
+                    is_out: &sidelined,
+                },
                 weekly,
                 first_open..=last_regular,
             );
@@ -137,7 +143,7 @@ pub fn standings_rows(
                 }
             }
             let counted = just_finished.get(&r.roster_id).copied();
-            let result = counted.filter(|_| games_counted(r) < week);
+            let result = counted.filter(|_| !result_already_counted(season, r, week));
             TeamSeason {
                 roster_id: r.roster_id,
                 wins: r.settings.wins + u32::from(result == Some(WeekResult::Won)),
@@ -206,6 +212,33 @@ enum WeekResult {
 /// once it has a win, a loss or a tie against it.
 fn games_counted(roster: &Roster) -> u32 {
     roster.settings.wins + roster.settings.losses + roster.settings.ties
+}
+
+/// True when Sleeper's standings already include this week's result for the
+/// roster, so counting it off the matchups again would count it twice.
+///
+/// Decided by which weeks the roster actually had a game in, not by how many
+/// games are on its record. The record was compared against the week number,
+/// and in an odd-team league every roster sits out one week: a team on 3-0
+/// after four weeks with its bye behind it read as "one short", so the week
+/// it had just won was added to its record a second time and its playoff odds
+/// ran on a win it never had.
+fn result_already_counted(season: &LoadedSeason, roster: &Roster, week: u32) -> bool {
+    let played_weeks = season.schedule.iter().filter(|(w, _)| *w <= week);
+    let mut scheduled = 0u32;
+    let mut any_schedule = false;
+    for (_, pairs) in played_weeks {
+        any_schedule = true;
+        scheduled += pairs
+            .iter()
+            .filter(|(home, away)| *home == roster.roster_id || *away == roster.roster_id)
+            .count() as u32;
+    }
+    if !any_schedule {
+        // No sweep to read the byes off, so the week count is the best guess.
+        return games_counted(roster) >= week;
+    }
+    games_counted(roster) >= scheduled
 }
 
 /// Who won this week, read off the matchup scores rather than the standings.

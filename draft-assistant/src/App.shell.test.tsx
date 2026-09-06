@@ -70,7 +70,34 @@ describe("the live sync row on a Yahoo league", () => {
     await settle(() => {
       settingsRow(/Live sync/).click();
     });
-    expect(screen.getByText("Live sync on — polling Yahoo every 3s")).toBeInTheDocument();
+    expect(screen.getByText("Live sync on: polling Yahoo every 3s")).toBeInTheDocument();
+  });
+});
+
+describe("the Season button on a Yahoo league", () => {
+  // The season screen reads Sleeper's endpoints, so on a Yahoo key it failed
+  // on every open, forever, with nothing to say why.
+  it("is disabled, with a line saying why", async () => {
+    const view = draftFixture();
+    view.league.platform = "yahoo";
+    view.league.league_id = "449.l.12345";
+    await loaded(view);
+
+    expect(screen.getByRole("button", { name: "Season" })).toBeDisabled();
+    expect(screen.getByText("Season view is Sleeper-only for now")).toBeInTheDocument();
+  });
+
+  it("shows the draft board even when Season was the remembered screen", async () => {
+    fakeStorage({ "da.screen": "season" });
+    resetPrefs();
+    const view = draftFixture();
+    view.league.platform = "yahoo";
+    view.league.league_id = "449.l.12345";
+    await loaded(view);
+
+    expect(screen.getByRole("button", { name: "Draft", pressed: true })).toBeInTheDocument();
+    expect(screen.queryByText("Loading this week…")).toBeNull();
+    expect(h.api.loadSeason).not.toHaveBeenCalled();
   });
 });
 
@@ -121,7 +148,7 @@ describe("re-pulling the picks", () => {
     });
 
     const failure = screen.getByRole("alert");
-    expect(failure).toHaveTextContent("Could not re-pull the picks — network timeout");
+    expect(failure).toHaveTextContent("Could not re-pull the picks: network timeout");
     await settle(() => {
       screen.getByRole("button", { name: "Try again" }).click();
     });

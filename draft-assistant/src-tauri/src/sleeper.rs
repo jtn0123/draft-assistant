@@ -17,6 +17,15 @@ pub(crate) const BASE: &str = "https://api.sleeper.app/v1";
 pub(crate) const BASE_UNDOC: &str = "https://api.sleeper.app";
 /// Total attempts per request, including the first.
 const RETRIES: u32 = 3;
+/// The deadline for a call a poll tick only takes a note from: `/draft` and
+/// `/traded_picks`. Each of those retried three times at the eight-second
+/// client timeout, so a tick could sit for 25 seconds while the picks had
+/// long since arrived, and the sync badge stayed green the whole time. What
+/// they refresh was read at load and is still right, so one short try is
+/// all they are worth.
+pub(crate) const NOTE_TIMEOUT: Duration = Duration::from_secs(3);
+
+mod endpoints;
 
 /// How long the players dictionary may take. The client-wide timeout suits
 /// the small JSON endpoints; this body is ~14.6 MB, needing ~15 Mbps to land
@@ -297,19 +306,21 @@ impl SleeperClient {
 
     /// One attempt, no retry. The returned `SleeperError` carries whether
     /// another try could help; `get_json` asks it rather than guessing.
+    /// `timeout` gives the request a deadline of its own; `None` keeps the
+    /// client's.
     pub(crate) async fn get_json_once<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
+        timeout: Option<Duration>,
     ) -> Result<T, SleeperError> {
-        let resp = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| SleeperError::Transport {
-                url: url.to_string(),
-                detail: e.to_string(),
-            })?;
+        let mut request = self.http.get(url);
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
+        let resp = request.send().await.map_err(|e| SleeperError::Transport {
+            url: url.to_string(),
+            detail: e.to_string(),
+        })?;
         let status = resp.status();
         if !status.is_success() {
             return Err(SleeperError::Http {
@@ -393,7 +404,18 @@ impl SleeperClient {
         url: &str,
     ) -> Result<T, SleeperError> {
         let url = crate::sleeper_host::route_to(url, &self.host);
-        self.with_retries(|| self.get_json_once(&url)).await
+        self.with_retries(|| self.get_json_once(&url, None)).await
+    }
+
+    /// A GET with one attempt and the short [`NOTE_TIMEOUT`], for the calls
+    /// a poll tick makes beside the picks and only takes a note from when
+    /// they fail.
+    pub(crate) async fn get_json_quick<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+    ) -> Result<T, SleeperError> {
+        let url = crate::sleeper_host::route_to(url, &self.host);
+        self.get_json_once(&url, Some(NOTE_TIMEOUT)).await
     }
 
     /// A GET that hands back the raw body, for payloads too big to parse on
@@ -408,91 +430,5 @@ impl SleeperClient {
         let url = crate::sleeper_host::route_to(url, &self.host);
         self.with_retries(|| self.get_bytes_once(&url, timeout))
             .await
-    }
-
-    /// Resolve a Sleeper username to its user id.
-    ///
-    /// Sleeper usernames are alphanumerics plus `_` and `-`; anything else is
-    /// refused rather than escaped, because it would be interpolated into the
-    /// request path.
-    pub async fn user(&self, username: &str) -> Result<SleeperUser, SleeperError> {
-        let username = username.trim();
-        let legal = !username.is_empty()
-            && username.len() <= 32
-            && username
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
-        if !legal {
-            return Err(SleeperError::Invalid(format!(
-                "'{username}' is not a valid Sleeper username"
-            )));
-        }
-        let user: Option<SleeperUser> = self.get_json(&format!("{BASE}/user/{username}")).await?;
-        user.ok_or_else(|| SleeperError::NotFound(format!("Sleeper user '{username}' not found")))
-    }
-
-    pub async fn league(&self, league_id: &str) -> Result<League, SleeperError> {
-        let v: Option<League> = self.get_json(&format!("{BASE}/league/{league_id}")).await?;
-        v.ok_or_else(|| {
-            SleeperError::NotFound(format!(
-                "league {league_id} not found (Sleeper returned null)"
-            ))
-        })
-    }
-
-    pub async fn draft(&self, draft_id: &str) -> Result<Draft, SleeperError> {
-        let v: Option<Draft> = self.get_json(&format!("{BASE}/draft/{draft_id}")).await?;
-        v.ok_or_else(|| {
-            SleeperError::NotFound(format!(
-                "draft {draft_id} not found (Sleeper returned null)"
-            ))
-        })
-    }
-
-    pub async fn picks(&self, draft_id: &str) -> Result<Vec<Pick>, SleeperError> {
-        let v: Option<Vec<Pick>> = self
-            .get_json(&format!("{BASE}/draft/{draft_id}/picks"))
-            .await?;
-        Ok(v.unwrap_or_default())
-    }
-
-    /// All members of a league (for slot display names). One call.
-    pub async fn league_users(&self, league_id: &str) -> Result<Vec<LeagueUser>, SleeperError> {
-        let v: Option<Vec<LeagueUser>> = self
-            .get_json(&format!("{BASE}/league/{league_id}/users"))
-            .await?;
-        Ok(v.unwrap_or_default())
-    }
-
-    /// Full player dictionary, unparsed: ~14.6 MB of JSON, cached on disk.
-    ///
-    /// Bytes rather than a `HashMap` because the caller parses it on the
-    /// blocking pool — see `projections::players`.
-    pub async fn players_bytes(&self) -> Result<Vec<u8>, SleeperError> {
-        self.get_bytes_within(&format!("{BASE}/players/nfl"), Some(PLAYERS_TIMEOUT))
-            .await
-    }
-
-    /// Undocumented: full-season raw-stat projections for one season.
-    pub async fn season_projections(
-        &self,
-        season: u32,
-    ) -> Result<Vec<ProjectionRow>, SleeperError> {
-        let url = format!(
-            "{BASE_UNDOC}/projections/nfl/{season}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF&order_by=adp_ppr"
-        );
-        self.get_json(&url).await
-    }
-
-    /// Undocumented: one week's raw-stat projections (for per-game bonus modeling).
-    pub async fn weekly_projections(
-        &self,
-        season: u32,
-        week: u32,
-    ) -> Result<Vec<ProjectionRow>, SleeperError> {
-        let url = format!(
-            "{BASE_UNDOC}/projections/nfl/{season}/{week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF"
-        );
-        self.get_json(&url).await
     }
 }

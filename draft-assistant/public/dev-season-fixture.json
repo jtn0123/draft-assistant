@@ -1241,7 +1241,8 @@
       "opp_live_points": 0.0
     },
     "next_kickoff_ms": 1789086900000,
-    "bye_teams": []
+    "bye_teams": [],
+    "lineup_locked": false
   },
   "roster": [
     {

@@ -1,7 +1,7 @@
-//! Nothing here runs `/usr/bin/security`. The Keychain side is tested the way
-//! `crate::secrets` tests it — by pinning the exact argument list, which is
-//! where the mistakes that leak a secret would show up — and the round trips
-//! run against a [`FileStore`] in a scratch directory.
+//! Nothing here runs `/usr/bin/security`. The Keychain side is tested by
+//! pinning the exact argument list, which is where the mistakes that leak a
+//! secret would show up, and the round trips run against a [`FileStore`] in a
+//! scratch directory.
 
 use super::*;
 
@@ -123,23 +123,31 @@ fn load_and_clear_name_the_item_the_same_way() {
 /// Every item this store knows about. A new variant added without a line
 /// here is a variant nothing below checks, which is how two items end up
 /// sharing one Keychain account and overwriting each other.
-const ALL_ITEMS: [Item; 3] = [Item::Token, Item::Credentials, Item::CompanionDevices];
+const ALL_ITEMS: [Item; 4] = [
+    Item::Token,
+    Item::Credentials,
+    Item::CompanionDevices,
+    Item::AnthropicKey,
+];
 
 #[test]
-fn the_items_do_not_share_an_account_with_each_other_or_the_anthropic_key() {
+fn the_items_do_not_share_an_account_with_each_other() {
     let mut accounts: Vec<&str> = ALL_ITEMS.iter().map(|item| item.account()).collect();
     accounts.sort_unstable();
     let unique = accounts.len();
     accounts.dedup();
     assert_eq!(accounts.len(), unique, "two items share a Keychain account");
-    for item in ALL_ITEMS {
-        assert_ne!(item.account(), "anthropic-api-key");
-        assert_eq!(crate::secrets::args_for(crate::secrets::Op::Load)[3], "-a");
-        assert_ne!(
-            crate::secrets::args_for(crate::secrets::Op::Load)[4],
-            item.account()
-        );
-    }
+}
+
+/// The Anthropic key was filed under this account back when `crate::secrets`
+/// was a store of its own. Rename it and every Mac that already has a key in
+/// its Keychain asks for the key again.
+#[test]
+fn the_anthropic_key_keeps_the_account_older_builds_stored_it_under() {
+    assert_eq!(Item::AnthropicKey.account(), "anthropic-api-key");
+    let args = crate::secrets::args_for(crate::secrets::Op::Load, None);
+    assert_eq!(args[3], "-a");
+    assert_eq!(args[4], "anthropic-api-key");
 }
 
 #[test]

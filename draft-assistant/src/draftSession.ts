@@ -212,7 +212,7 @@ export function useDraftSession(
         await api.stopPolling();
         setPolling(false);
       } else if (await startLive()) {
-        showToast(`Live sync on — polling ${service} every 3s`);
+        showToast(`Live sync on: polling ${service} every 3s`);
       }
     } catch (e) {
       showToast(problem("Could not change live sync", e), () => void togglePolling());
@@ -234,7 +234,7 @@ export function useDraftSession(
     try {
       const next = await api.refreshPicks();
       applyView(next);
-      showToast(`Picks re-pulled from ${service} — ${next.draft.total_picks_made} in`);
+      showToast(`Picks re-pulled from ${service}: ${next.draft.total_picks_made} in`);
     } catch (e) {
       showToast(problem("Could not re-pull the picks", e), () => void refreshPicks());
     } finally {
@@ -294,8 +294,8 @@ export function useDraftSession(
       if (!(await startLive())) return;
       showToast(
         listed
-          ? `Switched to ${next.league.name} — the last league is still in the list`
-          : `Switched to ${next.league.name} — the league list could not be re-read`,
+          ? `Switched to ${next.league.name}. The last league is still in the list`
+          : `Switched to ${next.league.name}. The league list could not be re-read`,
       );
     } finally {
       setBusy(false);
@@ -329,7 +329,7 @@ export function useDraftSession(
       // the old ones is stale until it reloads too.
       onBoardRebuilt();
       showToast(
-        `Projections refreshed — board rebuilt from ${refreshed.data_health.board_size} players`,
+        `Projections refreshed: board rebuilt from ${refreshed.data_health.board_size} players`,
       );
     } catch (e) {
       showToast(

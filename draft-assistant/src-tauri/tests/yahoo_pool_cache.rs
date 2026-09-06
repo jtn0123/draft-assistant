@@ -204,7 +204,86 @@ fn partial(rows: u32, next_start: u32) -> PlayerPool {
         players: draft_assistant_lib::yahoo_parse::players(&page).players,
         next_start,
         complete: false,
+        unreadable: 0,
     }
+}
+
+/// A full page of which only `readable` rows carry a player key. The rest
+/// are what a free-agent row mid-rebuild looks like: counted by Yahoo, dropped
+/// by the parser.
+fn page_with_blanks(start: u32, readable: u32) -> String {
+    let mut value: serde_json::Value =
+        serde_json::from_str(&page(start, PAGE)).expect("the page is valid JSON");
+    let members = value["fantasy_content"]["league"][1]["players"]
+        .as_object_mut()
+        .expect("the players collection");
+    for index in readable..PAGE {
+        members.insert(
+            index.to_string(),
+            serde_json::json!({"player": [[{"name": {"full": "Unlisted"}}]]}),
+        );
+    }
+    value.to_string()
+}
+
+#[tokio::test]
+async fn a_resumed_walk_that_dropped_more_than_a_page_of_rows_is_not_restarted_as_a_hole() {
+    // The failure this prevents: the resume check compared the rows held to
+    // the pages read, so a pool in which Yahoo had sent more than 25 rows the
+    // parser could not use failed it on every resume, was thrown away, and
+    // the next load paid the throttle for the same pages again.
+    let hits = Hits::new();
+    let counter = hits.clone();
+    let stub = serve(move |request: &Request| {
+        let path = request.path().to_string();
+        if path.contains(&format!("start={THROTTLED_PAGE}"))
+            && counter.bump("throttled page") <= RetryPolicy::fast().attempts
+        {
+            return Reply::throttled(0);
+        }
+        // Pages 0, 25 and 50 each carry only 5 readable rows: 60 dropped.
+        for start in [0u32, 25, 50] {
+            if path.contains(&format!("start={start}")) {
+                return Reply::ok(page_with_blanks(start, 5));
+            }
+        }
+        Reply::ok(page(THROTTLED_PAGE, 2))
+    });
+    let dir = scratch_dir("blank-resume");
+    let engine = Engine::new(dir.clone());
+    let client = client_for(&stub);
+
+    let (partial, warning) = engine
+        .yahoo_pool(&client, LEAGUE_KEY, false)
+        .await
+        .expect("the pages that did arrive are worth having");
+    assert_eq!(partial.len(), 15);
+    assert!(warning
+        .expect("a partial is said")
+        .contains("part of the player pool"));
+
+    let (whole, warning) = engine
+        .yahoo_pool(&client, LEAGUE_KEY, false)
+        .await
+        .expect("the second load finishes the pool");
+    assert_eq!(
+        warning, None,
+        "rows the walk itself dropped were mistaken for a hole in the cache"
+    );
+    assert_eq!(whole.len(), 17, "the pool came back whole");
+    assert_eq!(
+        starts(&stub).last().map(String::as_str),
+        Some("start=75"),
+        "the second load did not resume where the throttle stopped it"
+    );
+    let text = std::fs::read_to_string(dir.join(cache_name(LEAGUE_KEY, "players")))
+        .expect("the pool was cached");
+    let envelope: serde_json::Value = serde_json::from_str(&text).expect("valid cache JSON");
+    let cached: PlayerPool =
+        serde_json::from_value(envelope["data"].clone()).expect("a pool in the cache");
+    assert!(cached.complete, "the finished pool was cached as a partial");
+    assert_eq!(cached.unreadable, 60, "the dropped rows were not counted");
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[tokio::test]

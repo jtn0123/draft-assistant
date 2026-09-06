@@ -9,6 +9,7 @@
 
 use super::{Mode, RecommendInputs, Score};
 use crate::board::AvailablePlayer;
+use crate::injury_class::{self, InjuryClass};
 
 /// The floor under a season-ending tag, in score points. A replacement-level
 /// body on injured reserve is still worse than the same body healthy, and
@@ -27,41 +28,42 @@ enum Tag {
 }
 
 fn classify(status: &str, weeks_left: u32) -> Option<Tag> {
-    let code = status.trim().to_ascii_uppercase();
-    match code.as_str() {
-        "" => None,
-        // Out for the year, or as near as makes no difference.
-        "IR" | "PUP" | "NA" | "DNR" => Some(Tag::Missing(
-            0.9,
-            format!("on {status}: most of the season gone"),
-        )),
+    // The spellings are the shared table's business. This file used to keep
+    // its own, which knew "SUS" and not "Suspended", so a suspended player was
+    // priced as an unfamiliar weekly tag: six points for missing weeks.
+    Some(match injury_class::classify(status)? {
+        InjuryClass::SeasonEnding => {
+            Tag::Missing(0.9, format!("on {status}: most of the season gone"))
+        }
         // "Out" is a ruling for one game. Pricing it at a quarter of the
         // season charged a man eighteen times what his absence costs, and in
         // week fifteen it charged him for weeks that will never be played.
-        "OUT" => Some(Tag::Missing(
+        InjuryClass::OneWeek => Tag::Missing(
             1.0 / f64::from(weeks_left.max(1)),
             format!("tagged {status}: a week of the season gone"),
-        )),
+        ),
         // A suspension and a reserve list both have a length, and it is
         // measured in weeks rather than in Sundays.
-        "SUS" | "COV" => Some(Tag::Missing(
+        InjuryClass::MultiWeek => Tag::Missing(
             0.25,
             format!("tagged {status}: several weeks of the season gone"),
-        )),
-        "DOUBTFUL" => Some(Tag::Weekly(6.0)),
-        "QUESTIONABLE" => Some(Tag::Weekly(2.0)),
+        ),
+        InjuryClass::Doubtful => Tag::Weekly(6.0),
+        InjuryClass::Questionable => Tag::Weekly(2.0),
         // An unfamiliar tag is still a tag, and Sleeper adds them.
-        _ => Some(Tag::Weekly(6.0)),
-    }
+        InjuryClass::Unknown => Tag::Weekly(6.0),
+    })
 }
 
 /// A practice-report tag, which before a draft is left over from last season
 /// and says nothing about the one being drafted. "Doubtful" is one of these
-/// exactly as much as "Questionable" is — dropping only the latter left a
+/// exactly as much as "Questionable" is; dropping only the latter left a
 /// stale August "Doubtful" taking nine points off a safe-mode card.
 fn is_practice_report(status: &str) -> bool {
-    let code = status.trim().to_ascii_uppercase();
-    matches!(code.as_str(), "QUESTIONABLE" | "DOUBTFUL")
+    matches!(
+        injury_class::classify(status),
+        Some(InjuryClass::Questionable | InjuryClass::Doubtful)
+    )
 }
 
 /// Injuries, priced by what the tag actually takes away.

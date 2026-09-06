@@ -85,7 +85,7 @@ describe("CallsToMake", () => {
       />,
     );
 
-    expect(screen.getByText("2 calls to make — 7.7 points on the table")).toBeInTheDocument();
+    expect(screen.getByText("2 calls to make: 7.7 points on the table")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Show all reasons" }));
     expect(screen.getByText("reason one")).toBeInTheDocument();
     expect(screen.getByText("reason two")).toBeInTheDocument();
@@ -179,10 +179,36 @@ const matchup: MatchupView = {
   ],
 };
 
+describe("CallsToMake on a Yahoo league", () => {
+  it("sends the user to Yahoo to make the change, not to Sleeper", () => {
+    render(<CallsToMake calls={[call("QB", 3.1, "why")]} pointsOnTable={3.1} platform="yahoo" />);
+    expect(screen.getByText(/Set it on Yahoo\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Sleeper/)).toBeNull();
+  });
+});
+
+describe("LineupCompare on a Yahoo league", () => {
+  it("says the set lineup lives on Yahoo", () => {
+    render(
+      <LineupCompare
+        matchup={matchup}
+        which="Best"
+        onWhich={() => undefined}
+        winOdds={0.5}
+        platform="yahoo"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Set" })).toHaveAttribute(
+      "title",
+      "The lineup you actually have set on Yahoo",
+    );
+  });
+});
+
 describe("LineupCompare", () => {
   it("explains a bye week instead of rendering an empty table", () => {
     render(<Compare matchup={null} />);
-    expect(screen.getByText("No matchup this week — you're on a bye.")).toBeInTheDocument();
+    expect(screen.getByText("No matchup this week: you're on a bye.")).toBeInTheDocument();
   });
 
   it("toggles between the lineup you should start and the one you have set", async () => {
@@ -271,7 +297,7 @@ describe("LineupCompare", () => {
     expect(leans[0].textContent).toBe("+7.2");
     expect(leans[1].className).toContain("is-theirs");
     expect(leans[1].textContent).toBe("−8.8");
-    expect(leans[2].textContent).toBe("—");
+    expect(leans[2].textContent).toBe("–");
   });
 
   it("flags an injured starter with a tag that spells itself out without hovering", () => {
@@ -339,7 +365,7 @@ describe("Waivers", () => {
   it("handles a league with no FAAB budget", () => {
     render(<Waivers waivers={[waiver("Kraft", null, 1)]} budgetLeft={null} budgetTotal={null} />);
     expect(screen.getByText("no FAAB budget")).toBeInTheDocument();
-    expect(screen.getByText("— · 1 rival")).toBeInTheDocument();
+    expect(screen.getByText("– · 1 rival")).toBeInTheDocument();
   });
 
   it("explains an empty list instead of showing a blank panel", () => {

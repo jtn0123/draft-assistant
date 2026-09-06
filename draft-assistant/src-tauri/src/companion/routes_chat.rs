@@ -19,10 +19,17 @@ use std::time::Duration;
 
 /// How long a shared question may run before the thread stops waiting for it.
 ///
-/// Generous next to a model call and short next to "forever": nothing used to
-/// bound this, so an answer that hung left `busy` set, and every paired
-/// device's composer greyed out, until the app was restarted.
-const ANSWER_TIMEOUT: Duration = Duration::from_secs(300);
+/// Nothing used to bound this, so an answer that hung left `busy` set, and
+/// every paired device's composer greyed out, until the app was restarted.
+/// The bound was then set at five minutes, which is shorter than the HTTP
+/// client's own ten: a long answer was abandoned here while the request was
+/// still running and still being billed, so it was paid for, thrown away, and
+/// never counted against the cap. The limit now sits past the client's
+/// timeout, so the client gives up first and the answer path records what the
+/// turn cost before this ever fires. What is left for this to catch is a call
+/// that hangs without the client noticing, which is the case it was for.
+pub(crate) const ANSWER_TIMEOUT: Duration =
+    Duration::from_secs(crate::chat_client::REQUEST_TIMEOUT.as_secs() + 30);
 
 /// The screens a shared question may be asked about — the same two the desktop
 /// panel answers for.
@@ -305,7 +312,20 @@ impl Drop for BusyGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::check_screen;
+    use super::{check_screen, ANSWER_TIMEOUT};
+
+    /// The shared limit used to be five minutes against a ten-minute client
+    /// timeout, so an answer in its sixth minute was abandoned here while the
+    /// request ran on: billed, discarded, and never counted. Whatever the
+    /// client's timeout becomes, this must stay on the far side of it.
+    #[test]
+    fn a_shared_answer_is_not_abandoned_before_the_client_has_given_up() {
+        assert!(
+            ANSWER_TIMEOUT > crate::chat_client::REQUEST_TIMEOUT,
+            "{ANSWER_TIMEOUT:?} vs {:?}",
+            crate::chat_client::REQUEST_TIMEOUT
+        );
+    }
 
     #[test]
     fn only_the_two_real_screens_have_a_shared_thread() {

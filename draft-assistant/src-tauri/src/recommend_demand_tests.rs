@@ -206,12 +206,12 @@ fn falling_pays_for_the_distance_the_reason_quotes() {
 
 #[test]
 fn a_reach_past_the_market_is_priced_by_its_distance_too() {
-    // Measured at one pick, against three ADPs: inside the band, forty picks
-    // early, and two hundred early.
+    // Measured at one pick, against three ADPs: inside the band (a round is
+    // where a reach starts), forty picks early, and two hundred early.
     let level = score_with(30.0, 30);
     assert!(
-        (score_with(50.0, 30) - level).abs() < 1e-9,
-        "twenty picks early is inside the band and must cost nothing"
+        (score_with(40.0, 30) - level).abs() < 1e-9,
+        "ten picks early is inside the band and must cost nothing"
     );
     let mild = level - score_with(70.0, 30);
     let wild = level - score_with(230.0, 30);

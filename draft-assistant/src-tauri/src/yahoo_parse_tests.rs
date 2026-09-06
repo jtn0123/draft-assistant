@@ -228,6 +228,37 @@ fn the_count_yahoo_did_send_still_wins_over_the_row_tally() {
 }
 
 #[test]
+fn yahoos_all_null_keeper_object_is_silence_not_a_no() {
+    // The failure this prevents: every roster row in every league carries
+    // `is_keeper: {status: null, cost: null, kept: null}`, and reading it as
+    // "not a keeper" marked every rostered player decided, which switched the
+    // app's own keeper inference off league-wide.
+    let row = |keeper: serde_json::Value| {
+        let mut map = Map::new();
+        map.insert("is_keeper".into(), keeper);
+        opt_flag(&map, "is_keeper")
+    };
+    assert_eq!(
+        row(json!({"status": null, "cost": null, "kept": null})),
+        None
+    );
+    assert_eq!(row(json!({})), None);
+    assert_eq!(
+        row(json!({"status": "1", "cost": "12", "kept": "1"})),
+        Some(true)
+    );
+    assert_eq!(
+        row(json!({"status": null, "cost": null, "kept": "0"})),
+        Some(false)
+    );
+    assert_eq!(row(json!({"kept": 1})), Some(true));
+    // The scalar forms are unchanged.
+    assert_eq!(row(json!("1")), Some(true));
+    assert_eq!(row(json!(0)), Some(false));
+    assert_eq!(row(json!(null)), None);
+}
+
+#[test]
 fn every_teams_roster_is_read_and_not_just_the_first() {
     // `players` finds the first collection it meets, which on the
     // `teams;out=roster` resource is team one's roster. Keepers are read off

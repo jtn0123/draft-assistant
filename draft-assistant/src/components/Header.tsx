@@ -2,12 +2,16 @@
 // settings menu that hangs off it.
 
 import { useEffect, useRef } from "react";
-import type { PollHealth } from "../types";
+import type { Platform, PollHealth } from "../types";
 import { age } from "../format";
 import { setChime, useChime, type Screen } from "../prefs";
 import { followStatusMessage, type FollowStatus } from "../followStatus";
 
 import "../companion.css";
+
+/** Why the Season button is off on a Yahoo league. The season screen reads
+ *  Sleeper's endpoints, so on a Yahoo key it could only fail, forever. */
+export const SEASON_SLEEPER_ONLY = "Season view is Sleeper-only for now";
 
 export interface SettingsRow {
   label: string;
@@ -150,6 +154,7 @@ export function Header({
   meta,
   screen,
   onScreen,
+  platform,
   polling,
   pollHealth,
   onRefreshPicks,
@@ -179,6 +184,9 @@ export function Header({
   meta: string;
   screen: Screen;
   onScreen: (screen: Screen) => void;
+  /** Which service the league is read from. Season is offered on Sleeper
+   *  only; on Yahoo the button is disabled and the header says why. */
+  platform: Platform;
   polling: boolean;
   pollHealth: PollHealth | null;
   /** Ask the backend for the picks again now. Live sync gets there on its own
@@ -201,6 +209,7 @@ export function Header({
   // branches: null while all is well, a sentence when it is not.
   const followNote =
     followStatus === null ? null : followStatusMessage(followStatus, hostedBy ?? "the host");
+  const seasonOff = platform === "yahoo";
   // Wraps the gear and the menu together, so focus moving between the two
   // does not read as leaving.
   const menuRef = useRef<HTMLDivElement>(null);
@@ -322,6 +331,8 @@ export function Header({
               className={screen === "season" ? "mode is-on" : "mode"}
               onClick={() => onScreen("season")}
               aria-pressed={screen === "season"}
+              disabled={seasonOff}
+              title={seasonOff ? SEASON_SLEEPER_ONLY : undefined}
             >
               Season
             </button>
@@ -335,6 +346,7 @@ export function Header({
             </button>
           </div>
           <span className="muted header-meta">{meta}</span>
+          {seasonOff && <span className="muted header-meta">{SEASON_SLEEPER_ONLY}</span>}
         </div>
       </div>
 
@@ -368,7 +380,7 @@ export function Header({
               type="button"
               className={`btn-ghost btn-square${chime ? " is-on" : ""}`}
               onClick={() => setChime(!chime)}
-              title={chime ? "Pick chime on — click to mute" : "Pick chime muted"}
+              title={chime ? "Pick chime on, click to mute" : "Pick chime muted"}
               aria-pressed={chime}
             >
               <ChimeIcon on={chime} />

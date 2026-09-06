@@ -84,7 +84,17 @@ pub(crate) fn temp_sibling(final_path: &Path) -> PathBuf {
 /// its temp file forever, and with unique names those accumulate one per
 /// crash rather than being overwritten. Anything older than
 /// [`TEMP_STALE_SECS`] cannot belong to a write still in progress.
+///
+/// The headshot cache writes its pictures the same way, into `headshots/`
+/// under the data directory, and a picture interrupted mid-write left its
+/// temp file there for the life of the install: the sweep only ever looked
+/// at the top level.
 pub(crate) fn sweep_stale_temp_files(dir: &Path) {
+    sweep_dir(dir);
+    sweep_dir(&dir.join("headshots"));
+}
+
+fn sweep_dir(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -323,22 +333,34 @@ mod tests {
         let stale = dir.join("players.json.1.0.tmp");
         let fresh = dir.join("players.json.1.1.tmp");
         let keeper = dir.join("players.json");
-        for path in [&stale, &fresh, &keeper] {
+        // A headshot write killed between its temp file and its rename. The
+        // sweep never looked in here, so these lasted the life of the install.
+        std::fs::create_dir_all(dir.join("headshots")).unwrap();
+        let stale_photo = dir.join("headshots").join("4046.img.1.0.tmp");
+        let photo = dir.join("headshots").join("4046.img");
+        for path in [&stale, &fresh, &keeper, &stale_photo, &photo] {
             std::fs::write(path, "{}").unwrap();
         }
         let old =
             std::time::SystemTime::now() - std::time::Duration::from_secs(TEMP_STALE_SECS * 2);
-        std::fs::File::options()
-            .write(true)
-            .open(&stale)
-            .unwrap()
-            .set_modified(old)
-            .unwrap();
+        for path in [&stale, &stale_photo] {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
 
         sweep_stale_temp_files(&dir);
         assert!(!stale.exists(), "the old temp file should have been swept");
         assert!(fresh.exists(), "a fresh temp file may be a write in flight");
         assert!(keeper.exists(), "the cache itself is not a temp file");
+        assert!(
+            !stale_photo.exists(),
+            "a stale headshot temp file is swept too"
+        );
+        assert!(photo.exists(), "the picture itself is not a temp file");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -27,6 +27,10 @@ struct Running {
     port: u16,
     /// Dropped or fired to bring the listener down.
     shutdown: oneshot::Sender<()>,
+    /// The code rotation and the origin refresh. Aborted on stop: both used
+    /// to end on their own by noticing the port was gone, and a toggle off
+    /// and on inside one tick left the old pair running beside the new one.
+    tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
 /// Everything a request handler is given.
@@ -128,15 +132,22 @@ impl CompanionServer {
                 crate::applog::warn(format!("the phone connection stopped: {e}"));
             }
         });
-        *self.running() = Some(Running { port, shutdown });
         self.hub.set_port(Some(port));
-        // What the CSP and the cross-origin check are built from, read here
-        // and then on a slow timer: working out the tailnet name shells out
-        // to `ifconfig` and the Tailscale CLI, and doing that per request
-        // would put a process spawn in front of every page load.
-        self.hub.set_origins(net::server_origins(port));
-        spawn_rotation(self.hub.clone(), ROTATE_EVERY, now_ms);
-        spawn_origin_refresh(self.hub.clone(), REFRESH_ORIGINS_EVERY, net::server_origins);
+        // What the CSP, the cross-origin check and the tailnet URL on screen
+        // are built from, read here and then on a slow timer: working out the
+        // tailnet name shells out to `ifconfig` and the Tailscale CLI, and
+        // doing that per request or per status read would put a process
+        // spawn in front of every page load and every devices event.
+        self.hub.set_reach(net::reach(port));
+        let tasks = vec![
+            spawn_rotation(self.hub.clone(), ROTATE_EVERY, now_ms),
+            spawn_origin_refresh(self.hub.clone(), REFRESH_ORIGINS_EVERY, net::reach),
+        ];
+        *self.running() = Some(Running {
+            port,
+            shutdown,
+            tasks,
+        });
         Ok(port)
     }
 
@@ -144,11 +155,21 @@ impl CompanionServer {
     /// and on again is not the same gesture as Revoke, which is what throws
     /// devices off.
     pub fn stop(&self) {
-        if let Some(running) = self.running().take() {
+        let running = self.running().take();
+        // Off first, so nothing published between here and the last socket
+        // closing reaches a phone; then every socket is told to go. The
+        // graceful shutdown alone only stops the listener: an upgraded
+        // WebSocket is detached from it, and the phones kept receiving
+        // frames after the toggle was off.
+        self.hub.set_port(None);
+        self.hub.set_reach(net::Reach::default());
+        self.hub.close_everyone();
+        if let Some(running) = running {
+            for task in running.tasks {
+                task.abort();
+            }
             let _ = running.shutdown.send(());
         }
-        self.hub.set_port(None);
-        self.hub.set_origins(Vec::new());
     }
 
     /// The URL to show, when there is one.
@@ -160,8 +181,34 @@ impl CompanionServer {
     ///
     /// This is the MagicDNS name where Tailscale can report one, so the QR
     /// code on screen survives the tailnet handing this node a new address.
+    /// Read from the hub's cache, which the origin refresh keeps current;
+    /// nothing is spawned to answer this.
     pub fn tailscale_url(&self) -> Option<String> {
-        self.port().and_then(net::tailscale_url_for)
+        self.hub.tailscale_url()
+    }
+
+    /// The host opened another league. The phones hold the old league's
+    /// chat and week until told otherwise, and nothing on the poll path says
+    /// so: the draft loop publishes the new board, but the season is gone
+    /// until its own screen is opened and the shared threads belong to the
+    /// league now loaded. Both are sent here, as the socket's opening frames
+    /// would send them.
+    pub async fn league_switched(&self) {
+        if !self.is_enabled() {
+            return;
+        }
+        let Ok(srv) = self.srv() else {
+            return;
+        };
+        self.hub
+            .publish_json("season-updated", serde_json::Value::Null);
+        let Ok(league_id) = super::routes_chat::active_league(&srv).await else {
+            return;
+        };
+        for screen in ["draft", "season"] {
+            let thread = srv.chat.thread(&league_id, screen).await;
+            self.hub.publish("shared-chat", &thread);
+        }
     }
 }
 
@@ -201,14 +248,15 @@ where
 /// How often the machine's own addresses are looked at again.
 pub const REFRESH_ORIGINS_EVERY: Duration = Duration::from_secs(30);
 
-/// Keep the allowed origins matching the addresses the machine actually has.
+/// Keep the allowed origins, and the tailnet URL on screen, matching the
+/// addresses the machine actually has.
 ///
 /// They were read once when the server started, which was wrong the moment
 /// Tailscale was installed or switched on afterwards: the phone could load
 /// the page over the tailnet, and then the page's own `connect-src` refused
 /// it the WebSocket until the server was turned off and on again. The same
 /// went for a Wi-Fi change. `read` is what turns the port into the current
-/// list, injected so a test can move the machine without moving it.
+/// reading, injected so a test can move the machine without moving it.
 ///
 /// Nothing is written when nothing changed, and the task ends with the
 /// server, the same as the rotation.
@@ -218,7 +266,7 @@ pub fn spawn_origin_refresh<R>(
     read: R,
 ) -> tokio::task::JoinHandle<()>
 where
-    R: Fn(u16) -> Vec<String> + Send + 'static,
+    R: Fn(u16) -> net::Reach + Send + 'static,
 {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(every);
@@ -232,12 +280,13 @@ where
                 break;
             }
             let fresh = read(port);
-            if fresh != hub.origins() {
+            let same = fresh.origins == hub.origins() && fresh.tailscale_url == hub.tailscale_url();
+            if !same {
                 crate::applog::info(format!(
                     "the phone connection's addresses changed: {}",
-                    fresh.join(" ")
+                    fresh.origins.join(" ")
                 ));
-                hub.set_origins(fresh);
+                hub.set_reach(fresh);
             }
         }
     })

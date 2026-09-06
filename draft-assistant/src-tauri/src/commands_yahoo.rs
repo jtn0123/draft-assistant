@@ -13,6 +13,7 @@
 //! put a password prompt in front of the user, and holding a lock across that
 //! stops both pollers for as long as the user takes to answer.
 
+mod loopback;
 mod secrets;
 
 use crate::engine::Engine;
@@ -156,7 +157,7 @@ async fn yahoo_begin_connect_inner(state: &AppState) -> Result<YahooConnectStart
         "Yahoo is not set up — paste your Yahoo app's client id and secret in Settings first",
     )?;
     let redirect = state.yahoo.hosts.redirect_uri.clone();
-    let nonce = nonce();
+    let nonce = nonce()?;
     let authorize_url = authorize_url_on(
         &state.yahoo.hosts.login_base,
         &credentials.client_id,
@@ -164,6 +165,9 @@ async fn yahoo_begin_connect_inner(state: &AppState) -> Result<YahooConnectStart
         &nonce,
     );
     state.yahoo.expect_state(&nonce).await;
+    // A loopback redirect has to be listened for before the browser is sent
+    // off, or the one request it makes on the way back finds nobody home.
+    loopback::listen_if_loopback(&redirect, state.engine.clone(), state.yahoo.clone())?;
     if state.yahoo.open_browser {
         open_in_browser(&authorize_url);
     }
@@ -199,7 +203,20 @@ async fn yahoo_finish_connect_inner(
     code: String,
     state: String,
 ) -> Result<YahooStatus, String> {
-    let Some(expected) = app.yahoo.take_state().await else {
+    finish_with(&app.engine, &app.yahoo, code, state).await?;
+    status_now(app).await
+}
+
+/// The exchange itself, on the parts rather than the state: the loopback
+/// listener finishes a sign-in from a background task that owns clones of
+/// these two and has no `State` to hand.
+pub(crate) async fn finish_with(
+    engine: &Engine,
+    yahoo: &YahooState,
+    code: String,
+    state: String,
+) -> Result<(), String> {
+    let Some(expected) = yahoo.take_state().await else {
         return Err("no Yahoo sign-in is in progress — use Connect first".to_string());
     };
     if expected != state.trim() {
@@ -207,11 +224,11 @@ async fn yahoo_finish_connect_inner(
         // stays consumed and the user starts again.
         return Err("that code belongs to a different sign-in — start Connect again".to_string());
     }
-    let store = store_for(app.engine.data_dir.clone(), app.yahoo.keychain).await?;
+    let store = store_for(engine.data_dir.clone(), yahoo.keychain).await?;
     let (credentials, _) = read_secrets(store.clone()).await?;
     let credentials = credentials.ok_or("Yahoo is not set up — save your app credentials first")?;
-    let tokens = match OauthClient::with_base(app.yahoo.hosts.login_base.clone())
-        .exchange_code(&credentials, &code, &app.yahoo.hosts.redirect_uri)
+    let tokens = match OauthClient::with_base(yahoo.hosts.login_base.clone())
+        .exchange_code(&credentials, &code, &yahoo.hosts.redirect_uri)
         .await
     {
         Ok(tokens) => tokens,
@@ -220,7 +237,7 @@ async fn yahoo_finish_connect_inner(
             // user's screen — so the pending state goes back and the dialog can
             // take another try at the code rather than sending them round the
             // browser again.
-            app.yahoo.expect_state(&expected).await;
+            yahoo.expect_state(&expected).await;
             // The error itself carries whatever Yahoo said back, code and all,
             // which is exactly why it goes through the redacting log — the
             // wrapper above writes the line now, so this returns plainly.
@@ -236,8 +253,8 @@ async fn yahoo_finish_connect_inner(
         .await
         .map_err(|e| format!("Yahoo tokens: {e}"))??;
     // The next call builds a client around the pair just stored.
-    app.yahoo.set_client(None).await;
-    status_now(app).await
+    yahoo.set_client(None).await;
+    Ok(())
 }
 
 /// Sign out of the Yahoo account.
@@ -366,18 +383,18 @@ fn sorted_stored(leagues: Vec<crate::yahoo_types::YahooLeague>) -> Vec<StoredLea
     stored
 }
 
-/// One unguessable-enough value to tie a redirect to the request that started
-/// it. Not a secret: it is echoed back through the browser, and its whole job
-/// is to be different every time.
-fn nonce() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-    format!("{now:x}{count:x}{:x}", std::process::id())
+/// The value that ties a redirect to the sign-in that started it: sixteen
+/// bytes from the OS random source, as hex.
+///
+/// It is echoed back through the browser, so it is not a secret, but it does
+/// have to be unguessable: on the loopback flow it is the only thing that
+/// stops a page the user happens to have open from posting a code of its own
+/// choosing to the listener. The clock and the process id, which it used to
+/// be built from, are both things such a page can estimate.
+fn nonce() -> Result<String, String> {
+    let bytes = crate::companion::rand::bytes(16)
+        .map_err(|error| format!("could not start a Yahoo sign-in: {error}"))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 /// Put the authorize URL in front of the user. Best effort on purpose: the

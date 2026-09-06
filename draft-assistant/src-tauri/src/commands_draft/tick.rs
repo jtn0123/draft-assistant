@@ -14,6 +14,14 @@ use crate::traded_picks::{self, TradedPick};
 pub(super) const EMPTY_PICKS: &str =
     "the pick list came back empty — keeping the picks already on the board";
 
+/// What a tick says when `/picks` answers without a pick the last answer
+/// had, while still carrying the picks made after it. Adopted, that answer
+/// moved the clock back to the hole, named a manager who had already picked
+/// and dropped every later pick off the feed; see `picks::rewound_to`.
+pub(super) fn picks_rewound(hole: u32) -> String {
+    format!("the pick list came back without pick {hole} — keeping the picks already on the board")
+}
+
 /// The message for a refreshed draft that cannot be laid out, or `None` when
 /// it can be.
 ///
@@ -136,10 +144,14 @@ pub(super) async fn fetch_tick(
             traded: None,
         };
     }
+    // The picks get the full retry policy; the two beside them get one short
+    // try. A failure of either of those is a note, and the tick used to wait
+    // three tries of eight seconds on each — 25 seconds under a green badge
+    // — for a resource it was going to keep the last copy of anyway.
     let (picks, draft, traded) = tokio::join!(
         engine.client.picks(draft_id),
-        engine.client.draft(draft_id),
-        engine.client.traded_picks(draft_id)
+        engine.client.draft_quick(draft_id),
+        engine.client.traded_picks_quick(draft_id)
     );
     TickFetch {
         picks: picks.map_err(to_message),
@@ -179,13 +191,40 @@ pub(super) fn remove_entered(picks: &mut Vec<Pick>, entered: &Pick) {
     }
 }
 
-/// Build the view for whatever is loaded now. Used by the commands that let
-/// go of the lock to write to disk and have to take it again afterwards.
-pub(super) async fn view_now(state: &AppState) -> Result<DraftView, String> {
+/// Build the view for whatever is loaded now, provided it is still the draft
+/// the command started on. Used by the commands that let go of the lock to
+/// write to disk and have to take it again afterwards.
+///
+/// The failure paths of those commands already check the draft id when they
+/// take the lock back; this success path did not, so a pick recorded just as
+/// the user switched leagues answered with the *new* league's view, and the
+/// screen showed it as the result of a pick it never contained.
+pub(super) async fn view_now(state: &AppState, draft_id: &str) -> Result<DraftView, String> {
     let loaded = state.loaded.lock().await;
     let loaded = loaded.as_ref().ok_or("no league loaded")?;
+    if loaded.draft.draft_id != draft_id {
+        return Err(LEAGUE_CHANGED.to_string());
+    }
     let config = state.config.lock().await;
     Ok(view_from(loaded, &config))
+}
+
+/// Build a view on the blocking pool from a copy of the league, with no lock
+/// held.
+///
+/// The poll loop used to build under both mutexes on a runtime thread: every
+/// undrafted player is copied into the view, and for the length of that copy
+/// every command, the companion's sockets and the other poller waited on the
+/// locks or the thread. The copy of `LoadedLeague` taken to get here is
+/// cheap, because the board and the dictionaries behind it are shared
+/// `Arc`s; the view that comes out is the same one `view_from` builds.
+pub(super) async fn build_view_off_lock(
+    loaded: LoadedLeague,
+    config: AppConfig,
+) -> Result<DraftView, String> {
+    tokio::task::spawn_blocking(move || view_from(&loaded, &config))
+        .await
+        .map_err(|error| format!("the draft view was not built: {error}"))
 }
 
 /// Save a manual-pick list on the blocking pool, with no lock held.
@@ -234,9 +273,11 @@ pub(crate) fn backoff_secs(interval: u64, failures: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        backoff_secs, draft_update, remove_entered, traded_update, DraftUpdate, TradedPick,
+        backoff_secs, build_view_off_lock, draft_update, remove_entered, traded_update, view_now,
+        DraftUpdate, TradedPick,
     };
     use crate::sleeper::{Draft, DraftSettings, Pick};
+    use crate::state::AppState;
 
     fn draft(teams: u32, rounds: u32) -> Draft {
         Draft {
@@ -359,5 +400,43 @@ mod tests {
             previous_owner_id: Some(10),
         }];
         assert!(matches!(traded_update(Some(Ok(fresh))), Ok(Some(list)) if list.len() == 1));
+    }
+
+    /// A pick recorded just as the user switched leagues came back with the
+    /// new league's view: the failure path checked the draft id when it took
+    /// the lock back, and the success path did not.
+    #[tokio::test]
+    async fn a_view_asked_for_after_a_league_switch_says_so_rather_than_showing_the_new_league() {
+        let (state, dir) = AppState::scratch("view-now-switch");
+        *state.loaded.lock().await = Some(crate::keepers::bare_league("draft-old"));
+        assert!(view_now(&state, "draft-old").await.is_ok());
+
+        // The user switched while the command's write was on the blocking pool.
+        *state.loaded.lock().await = Some(crate::keepers::bare_league("draft-new"));
+        let error = view_now(&state, "draft-old")
+            .await
+            .expect_err("the old command must not answer with the new league");
+        assert!(error.contains("league changed"), "{error}");
+        assert!(view_now(&state, "draft-new").await.is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Moving the build off the lock must not change what is emitted.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_view_built_off_the_lock_is_the_view_built_under_it() {
+        let loaded = crate::keepers::bare_league("draft-1");
+        let config = crate::engine::AppConfig::default();
+        let under = serde_json::to_value(crate::state::view_from(&loaded, &config)).unwrap();
+        let off = serde_json::to_value(
+            build_view_off_lock(loaded, config)
+                .await
+                .expect("the pool built it"),
+        )
+        .unwrap();
+        let strip = |mut view: serde_json::Value| {
+            view.as_object_mut().unwrap().remove("generated_at");
+            view
+        };
+        assert_eq!(strip(under), strip(off));
     }
 }

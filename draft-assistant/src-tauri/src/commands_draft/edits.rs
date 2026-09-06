@@ -87,7 +87,7 @@ async fn record_manual_pick_inner(
         // it here as well wrote the same failure to the file twice.
         return Err(error);
     }
-    view_now(state).await
+    view_now(state, &draft_id).await
 }
 
 #[tauri::command]
@@ -115,7 +115,7 @@ async fn undo_manual_pick_inner(state: &AppState) -> Result<DraftView, String> {
         }
         return Err(error);
     }
-    view_now(state).await
+    view_now(state, &draft_id).await
 }
 
 /// Forget every keeper this app has decided on for the draft on screen, and
@@ -169,7 +169,7 @@ async fn clear_keepers_inner(state: &AppState) -> Result<DraftView, String> {
         ),
     };
     drop(guard);
-    view_now(state).await
+    view_now(state, &draft_id).await
 }
 
 #[cfg(test)]

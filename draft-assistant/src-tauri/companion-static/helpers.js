@@ -154,6 +154,49 @@
     "clock-offset": (s, a) => ({ ...s, offset: a.offset }),
   };
   const reduce = (state, action) => ACTIONS[action.type]?.(state, action) ?? state;
+  // ---------------------------------------------------- node builders --
+  // Nothing here reads the page; each makes nodes for app.js to place.
+  // Here rather than in app.js only to keep that file under the size cap.
+
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  };
+  const clear = (node) => {
+    while (node.firstChild) node.removeChild(node.firstChild);
+    return node;
+  };
+  /** Append a run of `[className, text]` spans, skipping the empty ones. */
+  const spans = (parent, ...pairs) => {
+    for (const [className, text] of pairs) {
+      if (text) parent.appendChild(el("span", className, text));
+    }
+    return parent;
+  };
+  const inlineNodes = (parent, parsed) => {
+    for (const span of parsed) {
+      if (span.bold) parent.appendChild(el("strong", null, span.text));
+      else if (span.code) parent.appendChild(el("code", null, span.text));
+      else parent.appendChild(document.createTextNode(span.text));
+    }
+  };
+  /** Markdown tokens as real nodes; text only ever arrives via textContent. */
+  const markdownNodes = (text) => {
+    const wrap = el("div", "md");
+    for (const block of parseMarkdown(text)) {
+      if (block.type === "code") {
+        wrap.appendChild(el("pre")).appendChild(el("code", null, block.text));
+      } else if (block.items) {
+        const list = wrap.appendChild(el(block.type));
+        for (const item of block.items) inlineNodes(list.appendChild(el("li")), item);
+      } else {
+        inlineNodes(wrap.appendChild(el("p")), block.spans);
+      }
+    }
+    return wrap;
+  };
   window.Companion = {
     TOKEN_KEY,
     DEVICE_KEY,
@@ -174,5 +217,9 @@
     parseMarkdown,
     initialState,
     reduce,
+    el,
+    clear,
+    spans,
+    markdownNodes,
   };
 })();

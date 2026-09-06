@@ -167,6 +167,21 @@ describe("the sign-in step", () => {
     expect(mocks.yahooFinishConnect).toHaveBeenCalledWith("xy7q9", "s-2");
   });
 
+  it("tells a loopback-registered app's user that nothing needs pasting", async () => {
+    // The words follow the redirect the backend reports. With `oob` Yahoo
+    // shows a code; with a localhost address it never does, and a user told
+    // to wait for one would wait forever.
+    await open(status({ configured: true, redirect: "http://localhost:8731/" }));
+    expect(screen.getByText(/finishes signing in on its own/)).toBeInTheDocument();
+    expect(screen.queryByText(/short code to paste/)).toBeNull();
+  });
+
+  it("tells an oob-registered app's user to paste the code Yahoo shows", async () => {
+    await open(configured);
+    expect(screen.getByText(/short code to paste back here/)).toBeInTheDocument();
+    expect(screen.queryByText(/finishes signing in on its own/)).toBeNull();
+  });
+
   it("says why the browser trip could not be started", async () => {
     await open(configured);
     mocks.yahooBeginConnect.mockRejectedValue(new Error("no client id saved"));

@@ -90,12 +90,16 @@ describe("where the player pictures come from", () => {
     expect(row(buildSettingsRows(state), "Player pictures")?.note).toContain("from Sleeper");
   });
 
-  it("does not name Sleeper on a Yahoo league", () => {
+  it("tells a Yahoo player which of their players get a photo, and from where", () => {
+    // The row said "from your league". Nothing comes from Yahoo: a Yahoo
+    // player the app matches to a Sleeper one gets Sleeper's photo, and the
+    // rest get none, so that is what the row has to say.
     const state = input({ avatars: "headshots" });
     state.view.league.platform = "yahoo";
     const note = row(buildSettingsRows(state), "Player pictures")?.note;
-    expect(note).not.toContain("Sleeper");
-    expect(note).toContain("saved on this Mac");
+    expect(note).toContain("Sleeper's photos for players the app can match");
+    expect(note).toContain("none for the rest");
+    expect(note).not.toContain("from your league");
   });
 
   it("says nothing about a source while only logos are drawn", () => {

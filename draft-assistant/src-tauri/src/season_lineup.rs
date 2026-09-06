@@ -101,6 +101,20 @@ pub struct WeekOutlook {
     pub sigma: f64,
 }
 
+/// Who is ruled out this week, and which week that ruling is about.
+///
+/// An injury tag is a statement about one game. Out and Doubtful were applied
+/// to every remaining week of the outlook, so a Doubtful listing on a
+/// Wednesday zeroed the player for the rest of the season in the playoff odds
+/// and in the Trends strength line. Longer absences are the IR slot's job, and
+/// rosters drop those players before they reach this solver.
+pub struct Sidelined<'a> {
+    /// The week the injury report is about.
+    pub week: u32,
+    /// Listed Out or Doubtful for that week.
+    pub is_out: &'a dyn Fn(&str) -> bool,
+}
+
 /// The best lineup this roster can field, week by week, with its spread.
 ///
 /// A player's position does not change from one week to the next, so the
@@ -114,22 +128,25 @@ pub fn weekly_lineup_outlook(
     player_ids: &[String],
     position_of: &impl Fn(&str) -> Option<String>,
     team_of: &impl Fn(&str) -> Option<String>,
-    sidelined: &impl Fn(&str) -> bool,
+    sidelined: Sidelined<'_>,
     weekly: &WeeklyPoints,
     weeks: impl IntoIterator<Item = u32>,
 ) -> Vec<WeekOutlook> {
     // Week 0 scores nothing; every entry is overwritten below before it is read.
-    let mut candidates = candidates_for(player_ids, position_of, sidelined, weekly, 0);
+    let is_out = |id: &str| (sidelined.is_out)(id);
+    let mut candidates = candidates_for(player_ids, position_of, &is_out, weekly, 0);
     // Whether each candidate is sidelined is settled once, alongside his
     // position: the dictionary does not change between the weeks of one
     // rebuild, and asking it again per (player, week) is the lookup storm the
     // single candidate list exists to avoid.
-    let benched: Vec<bool> = candidates.iter().map(|c| sidelined(&c.player_id)).collect();
+    let benched: Vec<bool> = candidates.iter().map(|c| is_out(&c.player_id)).collect();
     weeks
         .into_iter()
         .map(|week| {
+            // The tag only zeroes the week it was issued for.
+            let tag_applies = week == sidelined.week;
             for (candidate, out) in candidates.iter_mut().zip(&benched) {
-                candidate.points = if *out {
+                candidate.points = if *out && tag_applies {
                     0.0
                 } else {
                     weekly.get_or_zero(&candidate.player_id, week)
@@ -153,7 +170,7 @@ pub fn weekly_lineup_totals(
     player_ids: &[String],
     position_of: &impl Fn(&str) -> Option<String>,
     team_of: &impl Fn(&str) -> Option<String>,
-    sidelined: &impl Fn(&str) -> bool,
+    sidelined: Sidelined<'_>,
     weekly: &WeeklyPoints,
     weeks: impl IntoIterator<Item = u32>,
 ) -> Vec<(u32, f64)> {

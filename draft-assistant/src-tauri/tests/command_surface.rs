@@ -237,6 +237,24 @@ fn handler_list_matches_lib_rs() {
     );
 }
 
+/// The sweep below calls `yahoo_disconnect`, which runs `clear_tokens` against
+/// whatever the state's secrets live in. Built with the default state that
+/// was the machine's Keychain, and `cargo test` deleted a live Yahoo sign-in.
+/// This reads its own source so the sandboxed state cannot quietly become the
+/// real one again. The needles are assembled at runtime so this test's own
+/// text does not trip it.
+#[test]
+fn the_command_sweep_is_never_pointed_at_the_real_keychain() {
+    let own = std::fs::read_to_string(file!()).expect("read this test's own source");
+    for real in ["default()", "new("] {
+        let needle = format!("YahooState::{real}");
+        assert!(
+            !own.contains(&needle),
+            "{needle} would point the command sweep at the real Keychain; use YahooState::sandboxed"
+        );
+    }
+}
+
 /// Boots the app on the mock runtime with the same state `lib.rs`'s `setup`
 /// installs, then asks every command to answer over the IPC.
 #[test]
@@ -311,6 +329,16 @@ fn every_command_answers_over_the_ipc() {
         .build(mock_context(noop_assets()))
         .expect("the app builds on the mock runtime");
 
+    // `sandboxed`, never `default()` or `new()`: the sweep below calls
+    // `yahoo_disconnect`, which clears the Yahoo tokens wherever this state
+    // keeps them. With the real state that is the machine's Keychain, and
+    // `cargo test` deleted a live Yahoo sign-in on its way past. The sandboxed
+    // state keeps its secrets in a file under the scratch data directory.
+    let yahoo = YahooState::sandboxed(Default::default());
+    assert!(
+        !yahoo.keychain,
+        "the command sweep must never be pointed at the real Keychain"
+    );
     let state = AppState {
         engine: Arc::new(engine),
         loaded: Arc::new(Mutex::new(None)),
@@ -321,7 +349,7 @@ fn every_command_answers_over_the_ipc() {
         season_polling: Arc::new(AtomicBool::new(false)),
         season_generation: Arc::new(AtomicU64::new(0)),
         last_season_view: Arc::new(Mutex::new(None)),
-        yahoo: Arc::new(YahooState::default()),
+        yahoo: Arc::new(yahoo),
     };
     // The same pair `lib.rs` installs: the companion is built at startup and
     // handed the state every other command works through.

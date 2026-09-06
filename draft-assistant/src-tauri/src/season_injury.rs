@@ -5,20 +5,25 @@
 //! anything to someone who just wants to know whether to start him. Everything
 //! downstream works in three tags and the three words behind them.
 
+use crate::injury_class::{classify, InjuryClass};
+
 /// The three tags worth showing, in their shortest form.
 pub const OUT: &str = "O";
 const DOUBTFUL: &str = "D";
 const QUESTIONABLE: &str = "Q";
 
 /// Sleeper's `injury_status` boiled down to one letter, or nothing at all.
+///
+/// The spellings live in `injury_class`, shared with the draft recommender:
+/// this screen used to know "Suspended" while the recommender did not, and
+/// the same man was sidelined here and priced as a weekly tag there.
 pub fn injury_code(status: Option<&str>) -> Option<&'static str> {
-    match status?.trim().to_ascii_lowercase().as_str() {
-        "questionable" => Some(QUESTIONABLE),
-        "doubtful" => Some(DOUBTFUL),
-        "out" | "ir" | "pup" | "sus" | "susp" | "suspended" | "na" | "dnr" | "cov" | "covid" => {
-            Some(OUT)
-        }
-        _ => None,
+    match classify(status?)? {
+        InjuryClass::Questionable => Some(QUESTIONABLE),
+        InjuryClass::Doubtful => Some(DOUBTFUL),
+        InjuryClass::SeasonEnding | InjuryClass::OneWeek | InjuryClass::MultiWeek => Some(OUT),
+        // A tag nobody can read is not a reason to bench a starter.
+        InjuryClass::Unknown => None,
     }
 }
 
@@ -59,6 +64,8 @@ mod tests {
             ("IR", Some(OUT)),
             ("PUP", Some(OUT)),
             ("Sus", Some(OUT)),
+            ("Suspended", Some(OUT)),
+            ("COV", Some(OUT)),
             ("  Out  ", Some(OUT)),
             ("Probable", None),
             ("", None),

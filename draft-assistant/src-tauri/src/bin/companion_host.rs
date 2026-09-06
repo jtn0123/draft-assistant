@@ -10,9 +10,11 @@
 //! mode against something real. Prints the address and the pairing code, then
 //! runs until interrupted. No poller runs here, so the board is a snapshot.
 
+use draft_assistant_lib::applog;
 use draft_assistant_lib::companion::CompanionServer;
 use draft_assistant_lib::engine::{AppConfig, Engine};
 use draft_assistant_lib::state::{AppState, YahooState};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -65,6 +67,25 @@ fn parse_args_from<I: IntoIterator<Item = String>>(args: I) -> Option<Args> {
     })
 }
 
+/// Point the log at the host's data directory and hand back where it is.
+///
+/// The failure this prevents: the headless host never initialised the log, so
+/// every warning it raised over an evening of phone testing went to a stderr
+/// that had scrolled away, and a panic left nothing at all. The same two
+/// calls the desktop app makes first thing, then the same first line.
+fn start_logging(data_dir: &Path) -> PathBuf {
+    applog::init(data_dir.to_path_buf());
+    applog::install_panic_hook();
+    applog::info(format!(
+        "companion_host started version={} platform={} {} data={}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        data_dir.display(),
+    ));
+    data_dir.join(applog::LOG_NAME)
+}
+
 fn parse_args() -> Args {
     match parse_args_from(std::env::args().skip(1)) {
         Some(args) => args,
@@ -75,6 +96,8 @@ fn parse_args() -> Args {
 #[tokio::main]
 async fn main() {
     let args = parse_args();
+    let log = start_logging(&args.data_dir);
+    eprintln!("log: {}", log.display());
     let engine = Arc::new(Engine::new(args.data_dir.clone()));
 
     let mut config = AppConfig::default();
@@ -148,8 +171,34 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_data_dir, parse_args_from};
+    use super::{default_data_dir, parse_args_from, start_logging};
+    use draft_assistant_lib::applog;
     use draft_assistant_lib::companion::net::DEFAULT_PORT;
+
+    /// The headless host used to write no log at all. This is the only test in
+    /// this binary that may call `start_logging`: the log directory is set
+    /// once per process.
+    #[test]
+    fn the_headless_host_writes_its_log_under_its_data_dir_and_says_where() {
+        let dir = std::env::temp_dir().join(format!(
+            "draft-assistant-companion-host-log-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let announced = start_logging(&dir);
+        assert_eq!(announced, dir.join(applog::LOG_NAME));
+        assert_eq!(
+            applog::log_path().as_deref(),
+            Some(announced.as_path()),
+            "the path printed at start is the one the lines go to"
+        );
+        let text = std::fs::read_to_string(&announced).expect("the first line created the file");
+        assert!(
+            text.contains("INFO companion_host started version="),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn args(words: &[&str]) -> Option<super::Args> {
         parse_args_from(words.iter().map(|w| w.to_string()))

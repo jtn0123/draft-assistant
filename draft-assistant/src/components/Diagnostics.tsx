@@ -73,9 +73,25 @@ export function Diagnostics({
     };
   }, []);
 
+  /** Every action starts from a clean slate. "Copied" used to stay on
+   *  screen under a later failure, and a stale error under a later success,
+   *  so the dialog was reporting two outcomes at once. */
+  const begin = () => {
+    setNote(null);
+    setError(null);
+  };
+
   const copy = (text: string, said: string) => {
-    void navigator.clipboard
-      ?.writeText(text)
+    begin();
+    // Absent in a plain http page and in some webviews. The old `?.` made the
+    // button do nothing at all there, which reads as a broken button.
+    const clipboard = navigator.clipboard as Clipboard | undefined;
+    if (clipboard === undefined) {
+      setError("Copying is not available here");
+      return;
+    }
+    void clipboard
+      .writeText(text)
       .then(() => setNote(said))
       .catch((e: unknown) => setError(describeError(e)));
   };
@@ -88,6 +104,7 @@ export function Diagnostics({
    */
   const setVerbose = (wanted: boolean) => {
     const asked = wanted ? "debug" : "info";
+    begin();
     setLevel(asked);
     void api.setLogLevel(asked).then(
       (inForce) => {
@@ -102,6 +119,7 @@ export function Diagnostics({
   };
 
   const openFolder = () => {
+    begin();
     void api.openLogFolder().then(
       (path) => setNote(`Log folder: ${path}`),
       (e: unknown) => setError(describeError(e)),
@@ -132,7 +150,18 @@ export function Diagnostics({
         </span>
 
         {report === null ? (
-          <span className="diag-empty">{error ?? "Reading…"}</span>
+          <>
+            <span className="diag-empty">{error ?? "Reading…"}</span>
+            {/* Escape and the scrim still worked, but a dialog whose only
+                visible content is an error and no button reads as stuck. */}
+            {error !== null && (
+              <div className="dialog-actions">
+                <button type="button" className="btn-ghost" onClick={onClose}>
+                  Close
+                </button>
+              </div>
+            )}
+          </>
         ) : (
           <>
             <div className="diag-facts">

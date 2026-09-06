@@ -21,9 +21,14 @@
 //! full turns a warning into a crash, which is strictly worse than a lost log
 //! line.
 
+#[cfg(test)]
+mod capture;
 mod file;
 mod health;
 mod redact;
+
+#[cfg(test)]
+pub(crate) use capture::{captured, Capture};
 
 pub use file::{tail, LOG_NAME};
 pub use health::HealthWatch;
@@ -257,78 +262,6 @@ fn install_hook(sink: impl Fn(String) + Send + Sync + 'static) {
     }));
 }
 
-/// Lines written while a test is capturing them, instead of the file.
-///
-/// `DIR` is a `OnceLock` no test may set — one test claiming it would wedge it
-/// for every other test in the binary — so this is how a test reads back what
-/// was actually logged.
-#[cfg(test)]
-static CAPTURED: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
-
-/// Everything written to the log while this is alive, for a test to read.
-///
-/// Capturing is process-wide, so only one of these exists at a time: holding
-/// the gate is what makes that true rather than a race.
-#[cfg(test)]
-pub(crate) struct Capture {
-    _held: std::sync::MutexGuard<'static, ()>,
-}
-
-#[cfg(test)]
-static CAPTURE_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-#[cfg(test)]
-impl Capture {
-    pub(crate) fn start() -> Self {
-        let held = CAPTURE_GATE.lock().unwrap_or_else(|e| e.into_inner());
-        *CAPTURED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Vec::new());
-        Self { _held: held }
-    }
-
-    /// The lines written so far, in the order they were written.
-    pub(crate) fn lines(&self) -> Vec<String> {
-        CAPTURED
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-            .unwrap_or_default()
-    }
-
-    /// Whether any captured line contains `needle`.
-    pub(crate) fn saw(&self, needle: &str) -> bool {
-        self.lines().iter().any(|line| line.contains(needle))
-    }
-}
-
-/// Run an async test body with the log captured, and hand back what it
-/// returned together with every line it wrote.
-///
-/// A plain `fn` driving its own runtime rather than a `#[tokio::test]` holding
-/// a `Capture`: the capture and the level are guarded by ordinary blocking
-/// mutexes, and holding one of those across an `.await` is the deadlock
-/// `clippy::await_holding_lock` exists to stop. Here the guard is held across
-/// `block_on` in synchronous code, where it cannot.
-#[cfg(test)]
-pub(crate) fn captured<F>(body: impl FnOnce() -> F) -> (F::Output, Vec<String>)
-where
-    F: std::future::Future,
-{
-    let capture = Capture::start();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("a runtime for the test");
-    let out = runtime.block_on(body());
-    (out, capture.lines())
-}
-
-#[cfg(test)]
-impl Drop for Capture {
-    fn drop(&mut self) {
-        *CAPTURED.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    }
-}
-
 /// One line: timestamp, level, redacted message.
 fn write(level: &str, msg: &str) {
     let line = format!(
@@ -337,12 +270,8 @@ fn write(level: &str, msg: &str) {
         redact(msg)
     );
     #[cfg(test)]
-    {
-        let mut captured = CAPTURED.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(lines) = captured.as_mut() {
-            lines.push(line.clone());
-            return;
-        }
+    if capture::intercept(&line) {
+        return;
     }
     match log_path() {
         Some(path) => {

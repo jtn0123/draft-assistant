@@ -80,13 +80,35 @@ impl Lockout {
     /// Count one wrong code against the address it came from, and lock that
     /// address out once it has spent five inside the window.
     pub fn note_failure(&mut self, peer: IpAddr, now: u64) {
+        self.prune(now);
         let recent = self.failures.entry(peer).or_default();
-        recent.retain(|at| now.saturating_sub(*at) < PAIR_WINDOW_MS);
         recent.push(now);
         if recent.len() >= PAIR_MAX_FAILURES {
             recent.clear();
             self.locked_until_ms.insert(peer, now + PAIR_LOCKOUT_MS);
         }
+        self.failures.retain(|_, at| !at.is_empty());
+    }
+
+    /// Forget every address whose window and lockout have both passed. Only
+    /// the guessing address used to be trimmed, so a scan across the LAN left
+    /// one entry per address behind for the life of the app.
+    fn prune(&mut self, now: u64) {
+        self.locked_until_ms.retain(|_, until| now < *until);
+        self.failures.retain(|_, at| {
+            at.retain(|at| now.saturating_sub(*at) < PAIR_WINDOW_MS);
+            !at.is_empty()
+        });
+    }
+
+    /// How many addresses are being remembered, for the test that says the
+    /// maps do not grow for ever.
+    pub fn tracked(&self) -> usize {
+        let mut peers: Vec<&IpAddr> = self.failures.keys().collect();
+        peers.extend(self.locked_until_ms.keys());
+        peers.sort_unstable();
+        peers.dedup();
+        peers.len()
     }
 
     /// A code that worked wipes the slate for that address.
@@ -139,5 +161,25 @@ mod tests {
         }
         lockout.forgive(peer(66));
         assert!(!lockout.locked(peer(66), 1_000));
+    }
+
+    #[test]
+    fn addresses_whose_minute_has_passed_are_forgotten_rather_than_kept_for_ever() {
+        let mut lockout = Lockout::default();
+        // A scan: one wrong code from each of two hundred addresses, and one
+        // of them locked out. Nothing here is worth remembering a minute on.
+        for last in 0..200u8 {
+            lockout.note_failure(peer(last), 1_000);
+        }
+        for _ in 0..5 {
+            lockout.note_failure(peer(250), 1_000);
+        }
+        assert!(lockout.locked(peer(250), 1_000));
+        assert_eq!(lockout.tracked(), 201);
+        // The next wrong code from anyone, after the window and the lockout
+        // have both passed, is the only one left on the books.
+        lockout.note_failure(peer(251), 1_000 + 60_001);
+        assert_eq!(lockout.tracked(), 1);
+        assert!(!lockout.locked(peer(250), 1_000 + 60_001));
     }
 }

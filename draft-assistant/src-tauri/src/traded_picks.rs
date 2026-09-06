@@ -40,6 +40,19 @@ impl SleeperClient {
             .await?;
         Ok(v.unwrap_or_default())
     }
+
+    /// The same list with one attempt and a short deadline, for the poll
+    /// tick, which keeps the last list when this does not answer. See
+    /// [`crate::sleeper::NOTE_TIMEOUT`].
+    pub async fn traded_picks_quick(
+        &self,
+        draft_id: &str,
+    ) -> Result<Vec<TradedPick>, SleeperError> {
+        let v: Option<Vec<TradedPick>> = self
+            .get_json_quick(&format!("{BASE}/draft/{draft_id}/traded_picks"))
+            .await?;
+        Ok(v.unwrap_or_default())
+    }
 }
 
 /// Who owns each pick that changed hands: (round, the roster the pick started
@@ -60,8 +73,14 @@ pub type OwnedPicks = BTreeMap<(u32, u32), u32>;
 /// as likely to be shown as roster 7's — the intermediate owner, a manager
 /// who no longer holds the pick at all — as roster 11's.
 ///
-/// The walk is bounded by the number of links, so a list that loops back on
-/// itself stops rather than spinning.
+/// The links form a trail from the origin, and the trail's end is the one
+/// roster that received the pick once more than it sent it on. Counting
+/// arrivals against departures finds that roster whatever order the rows
+/// come in, and however many times the pick passed through the same hands:
+/// walking the links by "first match" followed 3 -> 7, 7 -> 3 and then
+/// 3 -> 7 *again*, so a pick that went 3 -> 7 -> 3 -> 9 was drawn as 7's.
+/// A trail that comes back to where it started has no such roster, and the
+/// pick is the origin's.
 fn final_owner(origin: u32, links: &[(u32, u32)]) -> u32 {
     if !links.iter().any(|(previous, _)| *previous == origin) {
         // Nothing starts at the roster the pick came from, so the chain
@@ -69,12 +88,30 @@ fn final_owner(origin: u32, links: &[(u32, u32)]) -> u32 {
         // chains were followed at all.
         return links.last().map(|(_, owner)| *owner).unwrap_or(origin);
     }
+    let mut balance: BTreeMap<u32, i32> = BTreeMap::new();
+    for (previous, owner) in links {
+        *balance.entry(*previous).or_default() -= 1;
+        *balance.entry(*owner).or_default() += 1;
+    }
+    let mut ends = balance
+        .iter()
+        .filter(|(_, net)| **net > 0)
+        .map(|(roster, _)| *roster);
+    match (ends.next(), ends.next()) {
+        (Some(end), None) => end,
+        // Back where it started, or a list that is not one trail at all (a
+        // duplicated row, say): follow the links once each from the origin
+        // and take wherever that stops.
+        _ => walk_once(origin, links),
+    }
+}
+
+/// Follow the links out from `origin`, using each at most once.
+fn walk_once(origin: u32, links: &[(u32, u32)]) -> u32 {
+    let mut unused: Vec<(u32, u32)> = links.to_vec();
     let mut current = origin;
-    for _ in 0..links.len() {
-        let Some(&(_, next)) = links.iter().find(|(previous, _)| *previous == current) else {
-            break;
-        };
-        current = next;
+    while let Some(at) = unused.iter().position(|(previous, _)| *previous == current) {
+        current = unused.swap_remove(at).1;
     }
     current
 }
@@ -392,6 +429,31 @@ mod tests {
     /// A list whose rows do not link back to the roster the pick came from
     /// (no `previous_owner_id`, or a partial list) keeps the plain last-row
     /// answer rather than pretending nothing was traded.
+    /// A pick that went 3 -> 7, back 7 -> 3 and on 3 -> 9 was drawn as
+    /// roster 7's: the walk took the first link out of 3 both times it passed
+    /// through, and 7 no longer held the pick at all.
+    #[test]
+    fn a_pick_that_passes_through_the_same_roster_twice_ends_where_it_was_sent_last() {
+        let rows = [(3, 7), (7, 3), (3, 9)];
+        // Sleeper does not order the array, so every order has to agree.
+        let orders = [
+            [rows[0], rows[1], rows[2]],
+            [rows[0], rows[2], rows[1]],
+            [rows[1], rows[0], rows[2]],
+            [rows[1], rows[2], rows[0]],
+            [rows[2], rows[0], rows[1]],
+            [rows[2], rows[1], rows[0]],
+        ];
+        for links in orders {
+            assert_eq!(final_owner(3, &links), 9, "{links:?}");
+        }
+        // Away and back again is nobody's override.
+        assert_eq!(final_owner(3, &[(7, 3), (3, 7)]), 3);
+        // A duplicated row is not a trail; the once-each walk still ends
+        // somewhere sensible rather than spinning.
+        assert_eq!(final_owner(3, &[(3, 7), (3, 7)]), 7);
+    }
+
     #[test]
     fn a_single_row_with_no_previous_owner_still_moves_the_pick() {
         let row = TradedPick {

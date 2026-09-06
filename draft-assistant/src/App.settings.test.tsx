@@ -3,7 +3,7 @@
 // and almost none of it was reached by a test. Everything here is asserted
 // through what a user sees on the row or in the message underneath.
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./api", async () => ({ api: (await import("./test/appHarness")).harness().api }));
@@ -94,7 +94,7 @@ describe("the live sync row", () => {
       settingsRow(/Live sync/).click();
     });
     expect(h.api.startPolling).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("Live sync on — polling Sleeper every 3s")).toBeInTheDocument();
+    expect(screen.getByText("Live sync on: polling Sleeper every 3s")).toBeInTheDocument();
     // Once polling, the row reports how long ago the last sync landed.
     expect(settingsRow(/Live sync/)).toHaveTextContent(/Last sync/);
   });
@@ -105,7 +105,7 @@ describe("the live sync row", () => {
     await chooseSetting(/Live sync/);
 
     const failure = screen.getByRole("alert");
-    expect(failure).toHaveTextContent("Could not change live sync — backend is not listening");
+    expect(failure).toHaveTextContent("Could not change live sync: backend is not listening");
     await settle(() => {
       screen.getByRole("button", { name: "Try again" }).click();
     });
@@ -117,7 +117,7 @@ describe("the live sync row", () => {
     await loaded();
 
     const failure = await screen.findByRole("alert");
-    expect(failure).toHaveTextContent("Could not turn live sync on — no draft to poll");
+    expect(failure).toHaveTextContent("Could not turn live sync on: no draft to poll");
     await settle(() => {
       screen.getByRole("button", { name: "Try again" }).click();
     });
@@ -134,6 +134,30 @@ describe("the Sleeper username row", () => {
     expect(await screen.findByLabelText("Sleeper username")).toBeInTheDocument();
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Back to/ })).toBeInTheDocument();
+  });
+
+  it("saves a username typed on its own and comes back to the board", async () => {
+    // Arriving was not the point. The form's submit needed a league id, so a
+    // user who came to change one word was stuck until they went and found
+    // the id of the league already on their screen.
+    const view = draftFixture();
+    await loaded(view);
+    h.api.setMyUsername.mockResolvedValue("mcsleeper26");
+    await chooseSetting(/Sleeper username/);
+
+    const field = await screen.findByLabelText("Sleeper username");
+    expect(screen.getByLabelText("League ID")).toHaveValue(view.league.league_id);
+    await settle(() => {
+      fireEvent.change(field, { target: { value: "mcsleeper26" } });
+    });
+    await settle(() => {
+      fireEvent.submit(field.closest("form") as HTMLFormElement);
+    });
+
+    await waitFor(() => expect(h.api.setMyUsername).toHaveBeenCalledWith("mcsleeper26"));
+    expect(h.api.addLeague).toHaveBeenLastCalledWith(view.league.league_id);
+    expect(await screen.findByRole("heading", { name: view.league.name })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Sleeper username")).toBeNull();
   });
 });
 
@@ -169,7 +193,7 @@ describe("the refresh row", () => {
     await chooseSetting(/Refresh data/);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Could not refresh the projections — projections are down",
+      "Could not refresh the projections: projections are down",
     );
     await settle(() => {
       screen.getByRole("button", { name: "Try again" }).click();
@@ -187,7 +211,7 @@ describe("the undo action", () => {
       screen.getByRole("button", { name: "Undo" }).click();
     });
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Could not undo the last recorded pick — nothing to undo",
+      "Could not undo the last recorded pick: nothing to undo",
     );
     await settle(() => {
       screen.getByRole("button", { name: "Try again" }).click();
@@ -202,7 +226,7 @@ describe("the player pictures row", () => {
     await chooseSetting(/Player pictures/);
 
     const row = settingsRow(/Player pictures/);
-    expect(row).toHaveTextContent("Team logos only — no photo downloads");
+    expect(row).toHaveTextContent("Team logos only, no photo downloads");
     expect(row).toHaveTextContent("Team logos");
     expect(row).toHaveAttribute("aria-checked", "false");
 

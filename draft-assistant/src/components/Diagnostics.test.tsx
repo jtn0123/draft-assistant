@@ -4,7 +4,7 @@
 
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Diagnostics } from "./Diagnostics";
 import { diagnosticsText, pollSummary } from "./diagnosticsText";
 import { diagnostics, harness } from "../test/appHarness";
@@ -15,6 +15,10 @@ const { api, reset } = harness();
 
 beforeEach(() => {
   reset();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 /** A clipboard this jsdom does not otherwise have. */
@@ -88,6 +92,37 @@ describe("the diagnostics dialog", () => {
     api.diagnostics.mockRejectedValue(new Error("no league loaded"));
     render(<Diagnostics appVersion="0.2.0" onClose={() => undefined} />);
     await waitFor(() => expect(screen.getByText("no league loaded")).toBeInTheDocument());
+  });
+
+  it("still has a Close button when the backend will not answer", async () => {
+    // Escape and the scrim worked, but a dialog whose only content is an
+    // error and no button reads as stuck.
+    const onClose = vi.fn();
+    api.diagnostics.mockRejectedValue(new Error("no league loaded"));
+    render(<Diagnostics appVersion="0.2.0" onClose={onClose} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("says copying is unavailable rather than doing nothing", async () => {
+    vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+    render(<Diagnostics appVersion="0.2.0" onClose={() => undefined} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Copy diagnostics" }));
+    expect(await screen.findByText("Copying is not available here")).toBeInTheDocument();
+  });
+
+  it("forgets the last outcome when the next action starts", async () => {
+    // "Copied" stayed on screen under the failure of whatever came next, so
+    // the dialog reported two outcomes at once.
+    stubClipboard();
+    api.openLogFolder.mockRejectedValue(new Error("no such folder"));
+    render(<Diagnostics appVersion="0.2.0" onClose={() => undefined} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Copy diagnostics" }));
+    expect(await screen.findByText("Copied")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Open log folder" }));
+    expect(await screen.findByText("no such folder")).toBeInTheDocument();
+    expect(screen.queryByText("Copied")).toBeNull();
   });
 
   it("closes on Escape", async () => {

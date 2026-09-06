@@ -192,6 +192,7 @@ export function YahooConnect({
             start={start}
             code={code}
             copied={copied}
+            redirect={status.redirect}
             working={working}
             onBegin={() => void begin()}
             onCode={setCode}
@@ -284,11 +285,19 @@ function Credentials({
   );
 }
 
-/** Step two: the browser round trip that gets a token. */
+/** Step two: the browser round trip that gets a token.
+ *
+ *  What happens after "Allow" depends on the redirect the app registered,
+ *  which the backend reports on every status (one constant decides it, see
+ *  `yahoo_oauth::REDIRECT_FLOW`): with `oob` Yahoo shows a code to paste
+ *  here; with a localhost address the app catches the browser itself and the
+ *  sign-in finishes on its own. The words have to match, or the user sits
+ *  waiting for a code Yahoo will never show. */
 function Connect({
   start,
   code,
   copied,
+  redirect,
   working,
   onBegin,
   onCode,
@@ -298,17 +307,20 @@ function Connect({
   start: { authorize_url: string; state: string } | null;
   code: string;
   copied: boolean;
+  redirect: string;
   working: boolean;
   onBegin: () => void;
   onCode: (value: string) => void;
   onCopy: () => void;
   onFinish: () => void;
 }) {
+  const pastesCode = redirect === "oob";
   return (
     <>
       <span className="mid dialog-note">
-        Your app is saved. Signing in opens Yahoo in your browser; approve the app there and Yahoo
-        shows a short code to paste back here.
+        {pastesCode
+          ? "Your app is saved. Signing in opens Yahoo in your browser; approve the app there and Yahoo shows a short code to paste back here."
+          : "Your app is saved. Signing in opens Yahoo in your browser; approve the app there and Yahoo sends the browser back to this app, which finishes signing in on its own. When the browser says you can close the tab, close this dialog: Settings shows Connected."}
       </span>
       <button
         type="button"

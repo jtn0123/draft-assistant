@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fixtureJson from "../../public/dev-fixture.json";
 import type { DraftView } from "../types";
 import { stableAvailable } from "../boardIdentity";
-import { SidePanel } from "./Panels";
+import { RecCard, SidePanel } from "./Panels";
 
 function fixture(): DraftView {
   return structuredClone(fixtureJson) as unknown as DraftView;
@@ -284,5 +284,25 @@ describe("SidePanel pick market", () => {
     delete view.pick_prices;
     render(<SidePanel view={view} />);
     expect(screen.queryByText("Pick market")).not.toBeInTheDocument();
+  });
+});
+
+describe("RecCard", () => {
+  it("spends its two reason lines on reasons, not on the VORP the stats already show", () => {
+    // The stats line prints the VORP. The first reason used to be that same
+    // number restated, so a card with three real reasons showed one of them.
+    const rec = {
+      ...fixture().recommendations[0],
+      vorp: 92,
+      reasons: ["92 VORP under league scoring", "fills open WR starter slot", "thin at WR"],
+    };
+
+    const { container } = render(
+      <RecCard rec={rec} featured={false} positionRank={1} onDraft={vi.fn()} />,
+    );
+    const shown = [...container.querySelectorAll(".rec-reasons li")].map((li) => li.textContent);
+    expect(shown).toEqual(["fills open WR starter slot", "thin at WR"]);
+    expect(new Set(shown).size).toBe(2);
+    expect(screen.getByText(/VORP 92/)).toBeInTheDocument();
   });
 });

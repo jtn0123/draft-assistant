@@ -30,6 +30,8 @@ const WEEK_SWEEP_TTL_SECS: u64 = 6 * 3600;
 /// ever read when the live request fails — so the whole season is fair game:
 /// last week's answer beats no screen at all.
 const NFL_STATE_CACHE: &str = "nfl_state.json";
+/// What a matchup week says when Sleeper answered it with nothing.
+pub const EMPTY_WEEK: &str = "came back with no matchup rows";
 pub(crate) const LAST_SEASON_TTL_SECS: u64 = 30 * 24 * 3600;
 
 /// week -> the (home_roster_id, away_roster_id) pairings played that week.
@@ -148,6 +150,19 @@ impl Engine {
             .matchups(league_id, week)
             .await
             .map_err(to_message)?;
+        // Sleeper answers `null` now and then, which parses as no rows. A
+        // finished week always has rows, so an empty answer for one is a lost
+        // response and is reported as such; an empty answer for the week
+        // being played or a later one is passed on but never written to
+        // disk. The settled-week cache is read back at `ttl = u64::MAX`, so
+        // one blank answer written there would have stood as that week's
+        // result for the rest of the season.
+        if matchups.is_empty() {
+            if settled {
+                return Err(format!("week {week} {EMPTY_WEEK}"));
+            }
+            return Ok(matchups);
+        }
         self.write_cache(&name, &matchups);
         Ok(matchups)
     }

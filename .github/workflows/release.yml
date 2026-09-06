@@ -1,7 +1,23 @@
-# Cutting a release: push a tag `vX.Y.Z` and this builds the macOS bundle and
-# attaches the .dmg to a GitHub release for that tag. Nothing else publishes a
-# build a person can install; `ci.yml`'s bundle job only uploads an artifact
-# that expires in fourteen days.
+# Cutting a release: push a tag `vX.Y.Z` and this runs the full CI gate, then
+# builds the macOS bundle and attaches it to a GitHub release for that tag.
+# Nothing else publishes a build a person can install; `ci.yml`'s bundle job
+# only uploads an artifact that expires in fourteen days.
+#
+# What gets attached:
+#   - the .dmg, for a first install by hand;
+#   - when the TAURI_SIGNING_PRIVATE_KEY secret is set, the updater archive
+#     (`Draft-Assistant-X.Y.Z-aarch64.app.tar.gz`), its minisign `.sig`, and
+#     `latest.json`. Installed copies poll
+#     https://github.com/jtn0123/draft-assistant/releases/latest/download/latest.json
+#     (the endpoint in tauri.conf.json) and install the archive if its
+#     signature checks against the public key baked into the app. Without the
+#     secret the tag still yields a .dmg, with a warning that no installed
+#     copy can update to it.
+#
+# The secret is the private half of the keypair whose public half is
+# `plugins.updater.pubkey` in tauri.conf.json. It was generated with
+# `npx tauri signer generate` and no password; losing it means shipping a new
+# public key, which installed copies will refuse, so keep it somewhere safe.
 #
 # The .dmg is UNSIGNED and UNNOTARISED (Tauri ad-hoc signs it), so Gatekeeper
 # blocks the first launch and the user has to allow it once in System Settings
@@ -30,8 +46,18 @@ permissions:
   contents: read
 
 jobs:
+  # The whole CI gate (clippy, tsc, both test suites with their coverage
+  # floors, the audits, the browser e2e run) on the tagged commit. A tag used
+  # to skip all of it and build straight away.
+  verify:
+    name: CI gate
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   release:
     name: Build and publish the macOS .dmg
+    needs: verify
     runs-on: macos-latest
     timeout-minutes: 40
     # Only this job gets write access, and only to releases and contents.
@@ -75,15 +101,51 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # With the key: the bundler signs the updater archive as tauri.conf.json
+      # asks (`createUpdaterArtifacts`). Without it the same build would fail
+      # asking for the key, so the flag is merged off for this run and the
+      # release ships a .dmg only. The key is passed as env and never echoed;
+      # the password is empty because the key was generated without one.
       - name: Build the desktop bundle
-        run: npm run tauri build
+        id: build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            npm run tauri build
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set: building without updater artifacts, so no installed copy can update to this release."
+            npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # latest.json plus the archive under a name without spaces; the script
+      # refuses an archive with no .sig beside it.
+      - name: Write the updater manifest
+        if: steps.build.outputs.signed == 'true'
+        run: node scripts/updater-manifest.mjs "$GITHUB_REF_NAME" src-tauri/target/release/bundle/macos updater
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
 
       # A tag with a `-` in it (v0.3.0-rc1) is a prerelease, so it does not
-      # become the "latest release" people land on.
+      # become the "latest release" people land on, and its latest.json is
+      # not what installed copies poll either.
       - name: Publish the release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: draft-assistant/src-tauri/target/release/bundle/dmg/*.dmg
           fail_on_unmatched_files: true
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+      # Same release, three more assets. Separate so the .dmg step above can
+      # insist on its file whether or not the key was available.
+      - name: Attach the updater archive, signature and latest.json
+        if: steps.build.outputs.signed == 'true'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: draft-assistant/updater/*
+          fail_on_unmatched_files: true
           prerelease: ${{ contains(github.ref_name, '-') }}

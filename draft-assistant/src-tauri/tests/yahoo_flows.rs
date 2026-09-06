@@ -21,6 +21,9 @@ mod yahoo_stub;
 #[path = "yahoo_flows/harness.rs"]
 mod harness;
 
+#[path = "yahoo_flows/signin.rs"]
+mod signin;
+
 use harness::{session, AUCTION_KEY, CLIENT_ID, CODE, LEAGUE_KEY, SECRET};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;

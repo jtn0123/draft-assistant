@@ -7,6 +7,23 @@ every first-party file.
 Rust suite, and a production `vite build`. Everything in it runs offline and
 finishes in seconds, and it is meant to stay that way.
 
+CI (`.github/workflows/ci.yml`) runs that plus the things that need the
+network or a browser: `npm run check:version`, `npm run test:scripts` (the
+node tests beside the guard scripts in `scripts/`), `npm run audit` (npm's
+advisories in both trees through `scripts/check-npm-audit.mjs`, cargo's
+through `cargo audit`; the two known-unfixable ones are allow-listed by id in
+`scripts/npm-audit-allowlist.json` and `src-tauri/.cargo/audit.toml` with the
+reason beside each), and the Playwright suite against the production bundle
+(`npm run test:e2e:browser:ci`: `vite build` then `vite preview` on port
+1420, where `npm run test:e2e:browser` drives the dev server locally). The
+release workflow calls this one and waits on it, so a tag gets the same gate.
+
+Vitest's coverage floors count every file under `src/` (`coverage.include`),
+not only the files some test imports, so removing a screen's tests lowers the
+number instead of raising it. Its per-test timeout is 20 s: the longest
+`waitFor` budget in `App.test.tsx` is 5 s, which the old 5 s default made
+unreachable under load.
+
 ### What is not covered
 
 Nothing in `verify` launches the app. The React bundle is tested in jsdom, the
@@ -89,7 +106,7 @@ is. The script gets it right; the trap is for driving the binary by hand.
 `tauri-driver` — the usual answer — is Windows and Linux only; its own README
 lists macOS as Todo, and there is no WKWebView driver binary to point it at.
 `@wdio/tauri-service` gets around this with its default `embedded` provider:
-the WebDriver server runs *inside* the app, from the
+the WebDriver server runs _inside_ the app, from the
 `tauri-plugin-wdio-webdriver` crate. Nothing external to install.
 
 That is a full remote-control surface, so it sits behind a cargo feature that
@@ -155,9 +172,10 @@ Which is why `e2e/` is **its own npm package with its own lockfile** rather
 than devDependencies of the app. Everyday `npm ci` stays at 209 MB instead of
 324 MB — and, the sharper reason, WebdriverIO's tree carries high-severity
 advisories with no fix available (`deepmerge-ts` and everything above it), so
-keeping it out means `npm audit --audit-level=high` in the `audit` job still
-reports `found 0 vulnerabilities` rather than being turned down to
-accommodate a test harness.
+keeping it out means the app tree's `npm audit --audit-level=high` still
+reports `found 0 vulnerabilities`. The e2e tree is audited too, through
+`scripts/check-npm-audit.mjs`, with that one advisory allow-listed by id
+rather than the level being turned down to accommodate a test harness.
 
 For the same reason `npm run lint:rust` is on default features rather than
 `--all-features`: asking `verify` for both feature sets would double its Rust

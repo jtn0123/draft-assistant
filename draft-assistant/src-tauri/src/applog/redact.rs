@@ -33,6 +33,29 @@ const MARKERS: [&str; 11] = [
     "code=",
 ];
 
+/// JSON keys whose string value is a secret: the shape a token response or a
+/// serialised config takes, `"access_token": "abc"`, which none of the `=`
+/// markers above ever matched.
+const JSON_KEYS: [&str; 5] = [
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "api_key",
+    "token",
+];
+
+/// The length of a `"key": "` prefix opening `low`, when `low` starts with one
+/// of the JSON secret keys and a quoted value. Whitespace is allowed around
+/// the colon, as pretty-printing puts it.
+fn json_secret_prefix(low: &str) -> Option<usize> {
+    let rest = low.strip_prefix('"')?;
+    let key = JSON_KEYS.iter().find(|key| rest.starts_with(**key))?;
+    let rest = rest[key.len()..].strip_prefix('"')?;
+    let rest = rest.trim_start_matches([' ', '\t']).strip_prefix(':')?;
+    let rest = rest.trim_start_matches([' ', '\t']).strip_prefix('"')?;
+    Some(low.len() - rest.len())
+}
+
 /// Where a marker's value stops. A query string ends at `&`, a sentence at a
 /// space or a comma, a JSON string at a quote.
 fn ends_value(c: char) -> bool {
@@ -61,6 +84,17 @@ pub fn redact(input: &str) -> String {
     let mut in_url = false;
 
     while !rest.is_empty() {
+        if let Some(prefix) = json_secret_prefix(low) {
+            out.push_str(&rest[..prefix]);
+            let value_len = rest[prefix..].find('"').unwrap_or(rest.len() - prefix);
+            if value_len > 0 {
+                out.push_str(MASK);
+            }
+            let step = prefix + value_len;
+            rest = &rest[step..];
+            low = &low[step..];
+            continue;
+        }
         if let Some(marker) = MARKERS.iter().find(|m| low.starts_with(**m)) {
             out.push_str(&rest[..marker.len()]);
             let value_len = rest[marker.len()..]
@@ -89,12 +123,16 @@ pub fn redact(input: &str) -> String {
             in_url = true;
         }
         let c = rest.chars().next().unwrap_or(' ');
-        if in_url && c.is_ascii_digit() {
+        // A pairing code sits in its own path segment or query value, so the
+        // run has to follow a `/` or an `=`. A Yahoo league key is `449.l.123456`:
+        // six digits after a dot, and the whole point of the line it is on.
+        let after_separator = matches!(out.chars().next_back(), Some('/' | '='));
+        if in_url && c.is_ascii_digit() && after_separator {
             let len = rest
                 .find(|c: char| !c.is_ascii_digit())
                 .unwrap_or(rest.len());
-            // Exactly six: a league id is eighteen digits and a port is four,
-            // and neither is worth hiding.
+            // Exactly six: a Sleeper league id is eighteen digits and a port
+            // is four, and neither is worth hiding.
             out.push_str(if len == 6 { MASK } else { &rest[..len] });
             rest = &rest[len..];
             low = &low[len..];
@@ -146,6 +184,57 @@ mod tests {
             redact("https://api.sleeper.app/v1/league/123456789012345678"),
             "https://api.sleeper.app/v1/league/123456789012345678",
         );
+    }
+
+    /// The failure this prevents: every Yahoo request line in the log read
+    /// `league/449.l.····`, so the one id that said which league had failed
+    /// was the one thing the log would not say.
+    #[test]
+    fn a_yahoo_league_key_in_a_url_survives_because_it_does_not_follow_a_slash() {
+        let line = "GET https://fantasysports.yahooapis.com/fantasy/v2/league/449.l.123456/draftresults failed";
+        assert_eq!(redact(line), line);
+        let key_only =
+            "https://fantasysports.yahooapis.com/fantasy/v2/league/nfl.l.654321;out=settings";
+        assert_eq!(redact(key_only), key_only);
+    }
+
+    #[test]
+    fn a_six_digit_query_value_in_a_url_is_still_masked() {
+        assert_eq!(
+            redact("GET http://192.168.1.24:7878/pair?c=418902 refused"),
+            "GET http://192.168.1.24:7878/pair?c=···· refused",
+        );
+    }
+
+    /// A token response or a serialised config quotes its secrets as JSON,
+    /// and no `=` marker ever matched `"access_token": "…"`.
+    #[test]
+    fn a_secret_in_a_json_object_is_masked_under_every_key_it_is_stored_as() {
+        assert_eq!(
+            redact(r#"{"access_token": "ya29.abc", "expires_in": 3600}"#),
+            r#"{"access_token": "····", "expires_in": 3600}"#,
+        );
+        assert_eq!(
+            redact(r#"{"refresh_token":"r1//xyz"}"#),
+            r#"{"refresh_token":"····"}"#
+        );
+        assert_eq!(redact(r#""token": "deadbeef""#), r#""token": "····""#);
+        assert_eq!(
+            redact(r#"{"api_key" : "sk-ant-api03-AbCdEfGhIjKl"}"#),
+            r#"{"api_key" : "····"}"#
+        );
+        assert_eq!(
+            redact(r#"{"client_secret": "hunter2", "client_id": "abc"}"#),
+            r#"{"client_secret": "····", "client_id": "abc"}"#
+        );
+    }
+
+    #[test]
+    fn a_json_key_that_merely_starts_like_a_secret_is_left_alone() {
+        // `tokens` is a count, not a credential, and an unquoted value is a
+        // number: neither is the shape being hunted.
+        let line = r#"{"tokens": "512", "token_count": 3, "code": 404}"#;
+        assert_eq!(redact(line), line);
     }
 
     #[test]

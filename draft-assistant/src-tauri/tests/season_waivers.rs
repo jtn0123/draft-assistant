@@ -98,6 +98,16 @@ fn loaded_league() -> LoadedLeague {
     }
     board.push(board_player("streamer", FILLERS as u32 + 2));
     rows.push(week_row("streamer", 25.0));
+    // A back on bye this week who projects far above my starter every other
+    // week. Nothing this week, so ranked on this week alone he is cut from the
+    // pool before anyone looks at him.
+    board.push(board_player("resting", FILLERS as u32 + 3));
+    for week in (WEEK + 1)..=6 {
+        rows.push(ProjectionRow {
+            week: Some(week),
+            ..week_row("resting", 20.0)
+        });
+    }
 
     let board_index: HashMap<String, usize> = board
         .iter()
@@ -181,5 +191,37 @@ fn a_low_ranked_free_agent_with_a_big_week_is_still_a_waiver_target() {
         (top.gain_points - 17.0).abs() < 1e-9,
         "25 for the streamer minus the 8 he displaces, got {}",
         top.gain_points
+    );
+}
+
+/// The bug: the pool was ranked on this week's projection alone, so a free
+/// agent on bye projected zero, fell outside the pool and was never evaluated,
+/// for exactly the week he was cheapest to claim.
+#[test]
+fn a_free_agent_on_bye_this_week_is_still_a_waiver_target() {
+    let config = AppConfig {
+        my_user_id: Some("user-1".into()),
+        ..AppConfig::default()
+    };
+    let view = build_season_view(&loaded_league(), &season(), config.my_user_id.as_deref());
+    let resting = view
+        .waivers
+        .iter()
+        .find(|w| w.player_id == "resting")
+        .unwrap_or_else(|| {
+            panic!(
+                "the back on bye was cut before evaluation: {:?}",
+                view.waivers
+                    .iter()
+                    .map(|w| &w.player_id)
+                    .collect::<Vec<_>>()
+            )
+        });
+    // Valued at the 20.0 he projects every week he plays, against the 8.0
+    // back he displaces.
+    assert!(
+        (resting.gain_points - 12.0).abs() < 1e-9,
+        "got {}",
+        resting.gain_points
     );
 }

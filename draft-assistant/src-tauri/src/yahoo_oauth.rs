@@ -7,11 +7,12 @@
 //! an error (see [`redact`], which scrubs it out of any Yahoo error body
 //! before it can reach a message the user or a log file will see).
 //!
-//! Two redirect styles are supported, both allowed by Yahoo:
+//! Two redirect styles are supported, both allowed by Yahoo, and
+//! [`REDIRECT_FLOW`] is the one place that says which the app ships with:
 //!
 //! - [`OOB`] (the default): Yahoo shows the user a code to paste back in. No
 //!   listener, no port, nothing to register beyond the app itself.
-//! - a loopback URI (`http://localhost:<port>`): [`catch_redirect`] binds the
+//! - a loopback URI (`http://localhost:<port>/`): [`catch_redirect`] binds the
 //!   port, takes the one request the browser makes, and answers with a page
 //!   telling the user to close the tab.
 //!
@@ -35,6 +36,71 @@ pub use redirect::{
 pub const LOGIN_BASE: &str = "https://api.login.yahoo.com";
 /// The "show the user a code to paste" redirect.
 pub const OOB: &str = "oob";
+
+/// How Yahoo hands the authorization code back to this app.
+///
+/// Both work against Yahoo's documented flow; they differ in what the user
+/// registers at developer.yahoo.com and in what happens after "Allow":
+///
+/// - `Oob`: the app is registered with redirect URI `oob`. After "Allow",
+///   Yahoo shows a short code on its own page and the user pastes it into
+///   the Connect dialog. Nothing listens on the machine.
+/// - `Loopback`: the app is registered with `http://localhost:<port>/`. The
+///   Connect command binds that port before the browser opens, Yahoo sends
+///   the browser back to it after "Allow", and the sign-in finishes on its
+///   own (`crate::commands_yahoo` catches it through [`catch_redirect_on`]).
+///   Nothing to paste, but the port has to be free and the browser has to be
+///   on the same machine.
+///
+/// What TRACKER L5 has to confirm against a real Yahoo app before this is
+/// flipped: that Yahoo still accepts `oob` for a new Installed Application
+/// (the developer console has removed and restored it before), and if not,
+/// which loopback port Yahoo will register and whether it insists on the
+/// trailing slash. Until then the app ships `Oob`, which needs nothing
+/// registered beyond the app itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedirectFlow {
+    Oob,
+    Loopback,
+}
+
+/// The flow the app is built with. Flip it here and nothing else: the
+/// default hosts, the status the Settings panel renders its instructions
+/// from, and the Connect command all read this.
+pub const REDIRECT_FLOW: RedirectFlow = RedirectFlow::Oob;
+
+/// The loopback port the `Loopback` flow registers. High, unassigned, and
+/// fixed rather than ephemeral because Yahoo has to know it in advance.
+pub const LOOPBACK_PORT: u16 = 8731;
+
+impl RedirectFlow {
+    /// The `redirect_uri` this flow registers and repeats on every token
+    /// request.
+    pub fn redirect_uri(self) -> String {
+        match self {
+            RedirectFlow::Oob => OOB.to_string(),
+            RedirectFlow::Loopback => format!("http://localhost:{LOOPBACK_PORT}/"),
+        }
+    }
+}
+
+/// The redirect URI of the flow the app ships with.
+pub fn redirect_uri() -> String {
+    REDIRECT_FLOW.redirect_uri()
+}
+
+/// The port a loopback redirect URI names, or `None` for `oob` or anything
+/// that is not `http://localhost:<port>/` (or `127.0.0.1`). This is how the
+/// Connect command decides whether to listen: the flow is a fact about the
+/// registered URI, not a second setting that could disagree with it.
+pub fn loopback_port(redirect_uri: &str) -> Option<u16> {
+    let rest = redirect_uri.strip_prefix("http://")?;
+    let (host, port) = rest.split_once(':')?;
+    if host != "localhost" && host != "127.0.0.1" {
+        return None;
+    }
+    port.split('/').next()?.parse().ok()
+}
 /// Yahoo Fantasy, read only. Asking for it by name is what keeps the token
 /// this flow issues from being able to write to anybody's league.
 pub const SCOPE: &str = "fspt-r";

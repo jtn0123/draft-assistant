@@ -88,6 +88,18 @@ impl Engine {
         }
         let scoring_map = league.scoring_settings.clone();
         let roster_rules = RosterRules::new(&league.roster_positions);
+        // Said once, at load: a slot no draftable position fills (an IDP
+        // league's DL, LB, DB) gets no players from this board and is left
+        // out of the open-starter count, and a user staring at an empty
+        // linebacker slot deserves to hear that from the app and not from
+        // the board.
+        let unfillable = roster_rules.unfillable_slots();
+        if !unfillable.is_empty() {
+            warnings.push(format!(
+                "this board does not draft for {}: those slots are ignored by the advice",
+                unfillable.join(", ")
+            ));
+        }
         let board_build = build_board(
             &league,
             &draft,

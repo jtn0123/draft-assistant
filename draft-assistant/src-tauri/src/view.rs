@@ -233,22 +233,29 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         })
         .collect();
     let my_byes = crate::view_signals::starter_byes(&loaded.roster_rules, my_bye_roster);
-    let recommendations = recommend(&RecommendInputs {
-        available: &available,
-        my_roster: my_roster.as_ref(),
-        rules: &loaded.roster_rules,
-        current_round,
-        total_rounds: rounds,
-        current_pick,
-        market_pick: draft::market_pick(current_pick, &keepers),
-        teams,
-        points_per_reception: league.scoring_settings.get("rec").copied().unwrap_or(0.0),
-        position_run: position_run.as_ref(),
-        my_byes: &my_byes,
-        pre_draft: draft.status == "pre_draft",
-        full_board: &loaded.board,
-        weeks_left: crate::board::WEEKS,
-    });
+    // Nothing to recommend once the last pick is in. The recommender has no
+    // idea the draft is over, so three "Mark drafted" cards sat under a
+    // finished board, each offering to record a pick nobody can make.
+    let recommendations = if draft_over {
+        Vec::new()
+    } else {
+        recommend(&RecommendInputs {
+            available: &available,
+            my_roster: my_roster.as_ref(),
+            rules: &loaded.roster_rules,
+            current_round,
+            total_rounds: rounds,
+            current_pick,
+            market_pick: draft::market_pick(current_pick, &keepers),
+            teams,
+            points_per_reception: league.scoring_settings.get("rec").copied().unwrap_or(0.0),
+            position_run: position_run.as_ref(),
+            my_byes: &my_byes,
+            pre_draft: draft.status == "pre_draft",
+            full_board: &loaded.board,
+            weeks_left: crate::recommend::weeks_left(league),
+        })
+    };
 
     let recent_picks: Vec<RecentPick> = happened
         .iter()

@@ -16,6 +16,7 @@ use std::sync::Arc;
 use tauri::State;
 
 mod edits;
+mod notes;
 mod poll_loop;
 pub(crate) mod tick;
 pub use edits::*;
@@ -27,7 +28,8 @@ pub use poll_loop::{
     __tauri_command_name_stop_polling, start_polling, stop_polling,
 };
 use tick::{
-    adopt_traded, draft_update, fetch_tick, tick_target, traded_update, DraftUpdate, EMPTY_PICKS,
+    adopt_traded, draft_update, fetch_tick, picks_rewound, tick_target, traded_update, DraftUpdate,
+    EMPTY_PICKS,
 };
 
 /// What every command and tick says when the league moved on under it. The
@@ -96,17 +98,23 @@ async fn resolve_yahoo_league(state: &AppState, numeric: &str) -> Result<String,
 /// Add (or re-sync) a league by ID, make it active, and build its board.
 /// Also accepts a bare draft ID (mock drafts) or a pasted sleeper.com URL.
 #[tauri::command]
-pub async fn add_league(
+pub async fn add_league<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
     league_id: String,
     force: Option<bool>,
 ) -> Result<DraftView, String> {
     let context = crate::applog::context(&[("league", &league_id)]);
-    crate::applog::logged!(
+    let out = crate::applog::logged!(
         "add_league",
         context,
         add_league_inner(&state, league_id, force).await
-    )
+    );
+    // The phones keep the old league's chat and week until told otherwise.
+    if out.is_ok() {
+        crate::companion::league_switched(&app).await;
+    }
+    out
 }
 
 async fn add_league_inner(
@@ -254,8 +262,21 @@ async fn refresh_picks_inner(state: &AppState) -> Result<DraftView, String> {
     // that did not land, and an endpoint beside the picks that did not answer.
     let mut notes: Vec<String> = Vec::new();
     let kept_previous = picks.is_empty() && !loaded.api_picks.is_empty();
+    // An answer missing a pick the last one had, with later picks still in
+    // it, is a partial answer rather than a shorter draft: adopted, it moved
+    // the clock back to the hole and named a manager who had already picked.
+    let rewound = (!kept_previous)
+        .then(|| {
+            let teams = loaded.draft.settings.teams.max(1);
+            let rounds = loaded.draft.settings.rounds.max(1);
+            let keepers = keepers::known_keepers(loaded, teams, rounds);
+            picks::rewound_to(&loaded.api_picks, &picks, teams, rounds, &keepers)
+        })
+        .flatten();
     if kept_previous {
         errors.push(EMPTY_PICKS.to_string());
+    } else if let Some(hole) = rewound {
+        errors.push(picks_rewound(hole));
     } else {
         loaded.api_picks = picks;
         if picks::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
@@ -300,6 +321,9 @@ async fn refresh_picks_inner(state: &AppState) -> Result<DraftView, String> {
     // re-pulled — 84 in" over a pull that pulled nothing.
     if kept_previous {
         return Err(EMPTY_PICKS.to_string());
+    }
+    if let Some(hole) = rewound {
+        return Err(picks_rewound(hole));
     }
     let config = state.config.lock().await;
     Ok(view_from(loaded, &config))

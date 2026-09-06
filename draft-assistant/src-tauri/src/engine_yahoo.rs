@@ -178,7 +178,7 @@ impl Engine {
         // sends no `is_keeper` at all on most leagues. Losing this call costs
         // the keeper flags and nothing else, so it is a warning rather than a
         // failed load.
-        match rosters {
+        let rosters = match rosters {
             Ok(rows) => {
                 let flags = crate::engine_yahoo_keepers::keeper_flags(&rows);
                 crate::engine_yahoo_keepers::apply_keeper_flags(&mut results, &flags);
@@ -186,16 +186,24 @@ impl Engine {
                 // disk every kept pick reverted to "not a keeper" on the
                 // first tick after the load.
                 self.save_yahoo_rosters(league_key, &rows).await;
+                rows
             }
-            Err(error) => warnings.push(format!(
-                "Yahoo rosters did not load ({error}), so any player kept rather than \
-                 drafted is drawn as an ordinary pick"
-            )),
-        }
+            Err(error) => {
+                warnings.push(format!(
+                    "Yahoo rosters did not load ({error}), so any player kept rather than \
+                     drafted is drawn as an ordinary pick"
+                ));
+                Vec::new()
+            }
+        };
 
         let mapped = yahoo_map::players(&pool);
         let crosswalk = crate::yahoo_crosswalk::build(&mapped, &sleeper_players);
-        let api_picks = picks_for(&results, &teams, &pool, &crosswalk);
+        // The same players a tick describes its picks from: the pool with
+        // the roster rows folded in, so a kept player who is not in the pool
+        // is named now rather than three seconds from now.
+        let context = crate::engine_yahoo_keepers::pick_context(pool, rosters);
+        let api_picks = picks_for(&results, &teams, &context, &crosswalk);
 
         warnings.extend(league_warning);
         warnings.extend(teams_warning);
@@ -295,17 +303,16 @@ pub(crate) fn team_names(teams: &[YahooTeam]) -> HashMap<String, String> {
 }
 
 /// Yahoo draft results as the app's picks, with the player ids crossed over
-/// to Sleeper's. Shared with the poller, which fetches the same two resources.
+/// to Sleeper's. `players` is [`crate::engine_yahoo_keepers::pick_context`]'s
+/// map, which is also what the poll tick builds its picks from
+/// (`Engine::yahoo_pick_context`), so the load and the tick name a pick the
+/// same way.
 pub fn picks_for(
     results: &[YahooDraftPick],
     teams: &[YahooTeam],
-    pool: &[YahooPlayer],
+    players: &HashMap<String, YahooPlayer>,
     crosswalk: &Crosswalk,
 ) -> Vec<Pick> {
-    let by_key: HashMap<String, YahooPlayer> = pool
-        .iter()
-        .map(|player| (player.player_key.clone(), player.clone()))
-        .collect();
     // `yahoo_map::picks` names a player `yahoo:<id>`; a player the crosswalk
     // matched sits on the board under his Sleeper id instead, and a pick that
     // named the other one would never take him off it.
@@ -317,7 +324,7 @@ pub fn picks_for(
             Some((yahoo_map::player_id(&result.player_key), id.to_string()))
         })
         .collect();
-    let mut picks = yahoo_map::picks(results, teams, &by_key);
+    let mut picks = yahoo_map::picks(results, teams, players);
     for pick in &mut picks {
         if let Some(id) = crossed.get(&pick.player_id) {
             pick.player_id = id.clone();
@@ -405,12 +412,19 @@ fn draft_status(yahoo: &str) -> String {
 fn rounds_from(slots: &[crate::yahoo_types::RosterSlot]) -> u32 {
     slots
         .iter()
-        .filter(|slot| {
-            let name = yahoo_map::roster_position(&slot.position);
-            name != "IR" && name != "IL"
-        })
+        .filter(|slot| !is_reserve_slot(&slot.position))
         .map(|slot| slot.count)
         .sum()
+}
+
+/// Whether a Yahoo roster slot is an injured-reserve one. Yahoo spells the
+/// slot `IR`, `IR+` (reserve that also takes COVID and out players), `IR2`
+/// and, for hockey, `IL`; matching `IR` exactly counted an `IR+` league's
+/// reserve seats as a round each, so its board ran a round long and the pick
+/// maths counted picks nobody would make.
+pub fn is_reserve_slot(position: &str) -> bool {
+    let name = yahoo_map::roster_position(position);
+    name.starts_with("IR") || name == "IL"
 }
 
 #[cfg(test)]

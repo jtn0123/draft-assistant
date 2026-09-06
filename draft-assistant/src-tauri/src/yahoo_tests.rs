@@ -82,5 +82,28 @@ fn the_default_hosts_are_yahoos_own() {
     let hosts = YahooHosts::default();
     assert_eq!(hosts.api_base, BASE);
     assert_eq!(hosts.login_base, LOGIN_BASE);
-    assert_eq!(hosts.redirect_uri, OOB);
+    // The redirect is whichever flow the app ships with, spelled in one
+    // place; the tokens Yahoo issues are bound to it, so it cannot drift from
+    // what the Connect command sent the browser off with.
+    assert_eq!(hosts.redirect_uri, redirect_uri());
+}
+
+#[test]
+fn a_revoked_grant_reads_as_sign_in_again_rather_than_as_an_http_status() {
+    // The failure this prevents: a revoked grant surfaced as "HTTP 401 for
+    // https://..." and nothing told the user the one thing that fixes it.
+    let error = YahooError::SignedOut;
+    assert_eq!(
+        error.to_string(),
+        "Yahoo signed you out. Connect again in Settings."
+    );
+    assert!(
+        !error.retryable(),
+        "repeating a call against a dead grant only spends the refresh token"
+    );
+    assert!(GRANT_GONE.contains(&400) && GRANT_GONE.contains(&401));
+    assert!(
+        !GRANT_GONE.contains(&503),
+        "a Yahoo outage is not a sign-out"
+    );
 }

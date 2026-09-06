@@ -2,7 +2,7 @@
 // the reads and a fake WebSocket for the live half.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { remoteApi, remoteFetcher, REVOKED_KEY } from "./apiRemote";
+import { HOST_TIMEOUT_MS, remoteApi, remoteFetcher, REVOKED_KEY } from "./apiRemote";
 import { getFollowStatus, resetFollowStatus } from "./followStatus";
 import type { Api } from "./api";
 import type { DraftView, FollowRecord } from "./types";
@@ -81,9 +81,10 @@ describe("reads", () => {
     fetchMock.mockResolvedValue(json(draftView));
     const view = await remoteApi(follow, () => undefined).getState();
     expect(view.league.league_id).toBe("L1");
-    expect(fetchMock).toHaveBeenCalledWith("http://192.168.1.5:7878/api/state", {
-      headers: { authorization: "Bearer tok-1" },
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://192.168.1.5:7878/api/state",
+      expect.objectContaining({ headers: { authorization: "Bearer tok-1" } }),
+    );
   });
 
   it("reads a 404 as nothing there, and says so by name", async () => {
@@ -110,6 +111,45 @@ describe("reads", () => {
     await expect(remoteApi(follow, () => undefined).headshot("4046")).resolves.toBe(
       `data:image/png;base64,${btoa("")}`,
     );
+  });
+});
+
+describe("a host that accepts the connection and then says nothing", () => {
+  /** A fetch that never answers on its own, only when its signal fires. */
+  function silentHost() {
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    );
+  }
+
+  it("gives up after ten seconds instead of leaving the launch screen with no controls", async () => {
+    vi.useFakeTimers();
+    silentHost();
+    const read = remoteFetcher(follow, () => undefined)("/api/state");
+    const failed = expect(read).rejects.toThrow("Justin's Mac did not answer within 10 seconds");
+    await vi.advanceTimersByTimeAsync(HOST_TIMEOUT_MS);
+    await failed;
+  });
+
+  it("reaches the shell as the launch error, not as a hang", async () => {
+    vi.useFakeTimers();
+    silentHost();
+    const restore = remoteApi(follow, () => undefined).addLeague("L1");
+    const failed = expect(restore).rejects.toThrow(/did not answer/);
+    await vi.advanceTimersByTimeAsync(HOST_TIMEOUT_MS);
+    await failed;
+  });
+
+  it("lets an answer that arrives in time through untouched", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(json(draftView));
+    await expect(remoteFetcher(follow, () => undefined)("/api/state")).resolves.toEqual(draftView);
+    // The timer is cleared with the answer: winding the clock on afterwards
+    // must not abort anything or leave a rejection nobody is waiting on.
+    await vi.advanceTimersByTimeAsync(HOST_TIMEOUT_MS);
   });
 });
 

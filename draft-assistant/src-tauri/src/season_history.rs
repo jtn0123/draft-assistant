@@ -14,7 +14,7 @@
 use crate::cache::safe_key;
 use crate::engine::{now_secs, Engine, LoadedLeague};
 use crate::season_engine::LoadedSeason;
-use crate::season_lineup::weekly_lineup_totals;
+use crate::season_lineup::{weekly_lineup_totals, Sidelined};
 use crate::season_lookup::Lookup;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -80,12 +80,19 @@ pub fn take_snapshot(
         .iter()
         .map(|roster| {
             let ids = roster.player_ids();
+            // The IR slot is out of the strength line, and the injury tag
+            // only touches the week it was issued for: a Doubtful listing
+            // used to knock a player out of every remaining week and read as
+            // a season-long collapse on the graph.
             let total: f64 = weekly_lineup_totals(
                 rules,
-                ids,
+                &roster.active_player_ids(),
                 &position_of,
                 &team_of,
-                &sidelined,
+                Sidelined {
+                    week: season.week,
+                    is_out: &sidelined,
+                },
                 weekly,
                 first..=last,
             )

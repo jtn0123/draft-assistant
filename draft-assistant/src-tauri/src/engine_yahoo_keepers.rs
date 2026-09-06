@@ -84,24 +84,42 @@ impl Engine {
             self.yahoo_cached_pool(league_key),
             self.yahoo_rosters(league_key)
         );
-        let mut by_key: HashMap<String, YahooPlayer> = pool
-            .into_iter()
-            .map(|player| (player.player_key.clone(), player))
-            .collect();
-        for row in rosters {
-            match by_key.get_mut(&row.player_key) {
-                // The pool row is the fuller of the two; all the roster adds
-                // is the keeper answer.
-                Some(player) => player.is_keeper = row.is_keeper.or(player.is_keeper),
-                // A player on a roster is not in the pool at all: the pool is
-                // what is still available. His row is the only one there is.
-                None => {
-                    by_key.insert(row.player_key.clone(), row);
-                }
+        pick_context(pool, rosters)
+    }
+}
+
+/// The players a pick can name, keyed by Yahoo player key: the pool with the
+/// roster rows folded onto it.
+///
+/// The load and the tick both build their picks from this, and both halves
+/// are needed. The pool is `league/<key>/players` with no status filter and a
+/// ceiling of `POOL_LIMIT` rows, so whether a rostered player is in it
+/// depends on where Yahoo ranks him; the roster rows are the one place every
+/// player on a team is guaranteed to appear, and the only place the keeper
+/// answer is. The load used to build from the pool alone, so a kept player
+/// Yahoo ranked past the ceiling had no name on the board until the first
+/// tick three seconds later filled it in.
+pub fn pick_context(
+    pool: Vec<YahooPlayer>,
+    rosters: Vec<YahooPlayer>,
+) -> HashMap<String, YahooPlayer> {
+    let mut by_key: HashMap<String, YahooPlayer> = pool
+        .into_iter()
+        .map(|player| (player.player_key.clone(), player))
+        .collect();
+    for row in rosters {
+        match by_key.get_mut(&row.player_key) {
+            // The pool row is the fuller of the two; all the roster adds
+            // is the keeper answer.
+            Some(player) => player.is_keeper = row.is_keeper.or(player.is_keeper),
+            // A player on a roster and not in the pool: his row is the only
+            // one there is.
+            None => {
+                by_key.insert(row.player_key.clone(), row);
             }
         }
-        by_key
     }
+    by_key
 }
 
 #[cfg(test)]

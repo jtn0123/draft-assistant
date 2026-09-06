@@ -2,6 +2,11 @@
 # same macOS checks twice; `Verify` had been failing on every push since the
 # Rust coverage step moved into `test:ci`, and nobody was watching it.
 #
+# `release.yml` calls this workflow (`workflow_call`) and waits on it, so a
+# `v*` tag gets the same clippy, tsc, tests and audits as a push to main
+# before anything is built for people to install. It used to build the
+# release straight off the tag with none of them.
+#
 # Every action is pinned to a commit SHA rather than a tag: a tag is mutable,
 # so a compromised upstream can repoint `v4` and run with this token. The
 # trailing comment names the version the SHA corresponds to.
@@ -11,6 +16,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -59,13 +65,31 @@ jobs:
           key: verify
 
       # The Rust tests run under cargo-llvm-cov, which enforces the coverage
-      # floor as well as running them.
+      # floor as well as running them. cargo-audit is the dependency gate
+      # below; both arrive as prebuilt binaries, no compile.
       - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
         with:
-          tool: cargo-llvm-cov
+          tool: cargo-llvm-cov,cargo-audit
 
       - name: Install dependencies
         run: npm ci
+
+      # Cheap and formerly never run here: the three version numbers have to
+      # agree (a release tagged against a stale tauri.conf.json ships an
+      # installer that calls itself the previous version), and the guard
+      # scripts in scripts/ have their own tests.
+      - name: Version numbers agree
+        run: npm run check:version
+
+      - name: Guard-script tests
+        run: npm run test:scripts
+
+      # Known advisories: npm's high-and-above ones are allow-listed by id in
+      # scripts/npm-audit-allowlist.json, cargo's in src-tauri/.cargo/audit.toml,
+      # each with the reason. A new high in either tree fails here rather than
+      # waiting for a Dependabot alert nobody opens.
+      - name: Dependency advisories (npm, both trees, and cargo)
+        run: npm run audit
 
       - name: Fast gate (loc, css, format, lint, typecheck)
         run: npm run verify:fast
@@ -81,8 +105,10 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Browser end-to-end tests
-        run: npm run test:e2e:browser
+      # Against `vite build` + `vite preview`, not the dev server: the bundle
+      # the .app ships is what gets driven (see playwright.config.ts).
+      - name: Browser end-to-end tests against the production bundle
+        run: npm run test:e2e:browser:ci
 
       - name: Upload Playwright report on failure
         if: failure()
@@ -127,8 +153,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # No updater archive from this job: tauri.conf.json turns
+      # `createUpdaterArtifacts` on for releases, which makes the bundler
+      # demand the signing key, and this artifact is only a fourteen-day
+      # smoke build nobody updates to. The inline config is merged over
+      # tauri.conf.json for this run only.
       - name: Build the desktop bundle
-        run: npm run tauri build
+        run: npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       # Only the .dmg: upload-artifact zips its input and drops the exec bit,
       # so a downloaded .app would not launch. The .dmg carries its own.

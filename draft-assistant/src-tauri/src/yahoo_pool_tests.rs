@@ -26,12 +26,23 @@ fn a_partial_pool_round_trips_through_the_cache_shape() {
         players: vec![player(1), player(2)],
         next_start: 75,
         complete: false,
+        unreadable: 0,
     };
     let text = serde_json::to_string(&partial).expect("serialize");
     let back: PlayerPool = serde_json::from_str(&text).expect("deserialize");
     assert_eq!(back, partial);
     assert!(!back.complete);
     assert_eq!(back.next_start, 75);
+}
+
+#[test]
+fn a_pool_cached_before_unreadable_rows_were_counted_still_reads() {
+    // The cache on a machine that upgraded has no `unreadable`; it must land
+    // as zero, which is the old behaviour, not fail the whole pool.
+    let older = r#"{"players":[],"next_start":50,"complete":false}"#;
+    let pool: PlayerPool = serde_json::from_str(older).expect("an older cache deserializes");
+    assert_eq!(pool.unreadable, 0);
+    assert_eq!(pool.next_start, 50);
 }
 
 #[test]

@@ -4,7 +4,7 @@
 //! the desktop webview already gets. The token is in the query rather than a
 //! header because a browser's `WebSocket` cannot set one.
 
-use super::hub::Device;
+use super::hub::{Closing, Device};
 use super::server::Srv;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
@@ -55,6 +55,18 @@ async fn send_revoked(socket: &mut WebSocket) -> Result<(), axum::Error> {
     socket.send(Message::Close(Some(frame))).await
 }
 
+/// The standard "going away" close, sent when the server is switched off.
+/// Anything but [`REVOKED_CLOSE`] is read by the page as "retry later".
+pub const GOING_AWAY_CLOSE: u16 = 1001;
+
+async fn send_going_away(socket: &mut WebSocket) -> Result<(), axum::Error> {
+    let frame = axum::extract::ws::CloseFrame {
+        code: GOING_AWAY_CLOSE,
+        reason: "companion off".into(),
+    };
+    socket.send(Message::Close(Some(frame))).await
+}
+
 async fn run(srv: Arc<Srv>, device: Device, token: String, mut socket: WebSocket) {
     let mut events = srv.hub.subscribe();
     let mut closes = srv.hub.subscribe_closes();
@@ -73,11 +85,18 @@ async fn run(srv: Arc<Srv>, device: Device, token: String, mut socket: WebSocket
             // or revoked. Without this a phone that paired again went on
             // reading the draft over the socket its old token opened.
             dropped = closes.recv() => match dropped {
-                Ok(dead) if dead == token => {
+                Ok(Closing::Token(dead)) if dead == token => {
                     let _ = send_revoked(&mut socket).await;
                     break;
                 }
-                Ok(_) | Err(RecvError::Lagged(_)) => continue,
+                // The host turned the companion off. A plain close, not the
+                // revoked one: the phone keeps its token and shows
+                // "Reconnecting" until the host is back.
+                Ok(Closing::Everyone) => {
+                    let _ = send_going_away(&mut socket).await;
+                    break;
+                }
+                Ok(Closing::Token(_)) | Err(RecvError::Lagged(_)) => continue,
                 Err(RecvError::Closed) => break,
             },
             event = events.recv() => match event {

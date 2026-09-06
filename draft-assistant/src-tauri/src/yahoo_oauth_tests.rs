@@ -271,6 +271,34 @@ fn a_port_already_in_use_is_reported_rather_than_panicked() {
 }
 
 #[test]
+fn the_app_ships_the_paste_a_code_flow_until_l5_confirms_otherwise() {
+    // One constant decides the flow, and everything that mentions the
+    // redirect reads it. This pins what ships so a flip is a deliberate,
+    // visible change rather than a drift between two files.
+    assert_eq!(REDIRECT_FLOW, RedirectFlow::Oob);
+    assert_eq!(redirect_uri(), OOB);
+    assert_eq!(RedirectFlow::Oob.redirect_uri(), "oob");
+    assert_eq!(
+        RedirectFlow::Loopback.redirect_uri(),
+        format!("http://localhost:{LOOPBACK_PORT}/")
+    );
+}
+
+#[test]
+fn only_a_localhost_redirect_uri_names_a_port_to_listen_on() {
+    // The Connect command listens exactly when the registered URI is a
+    // loopback one: `oob` must never bind a port, and a URI pointing anywhere
+    // but this machine must never be mistaken for one that does.
+    assert_eq!(loopback_port(OOB), None);
+    assert_eq!(loopback_port("http://localhost:8731/"), Some(8731));
+    assert_eq!(loopback_port("http://localhost:8731"), Some(8731));
+    assert_eq!(loopback_port("http://127.0.0.1:9000/cb"), Some(9000));
+    assert_eq!(loopback_port("https://localhost:8731/"), None);
+    assert_eq!(loopback_port("http://example.com:8731/"), None);
+    assert_eq!(loopback_port("http://localhost:notaport/"), None);
+}
+
+#[test]
 fn the_authorize_url_asks_for_the_read_only_fantasy_scope() {
     let url = authorize_url("id", OOB, "st");
     assert!(url.contains("scope=fspt-r"), "{url}");

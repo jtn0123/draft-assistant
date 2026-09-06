@@ -89,28 +89,31 @@ impl KeeperStore for Engine {
 /// How much this league's current pick snapshot is allowed to say about
 /// keepers.
 ///
-/// Before the draft starts, position is all there is and keepers arrive right
-/// up to the first pick, so every snapshot may widen the set. Once it is
-/// running, only the snapshot the league was loaded from is believed: from
-/// then on the gap in front of the clock has moved, and a `/picks` answer
-/// that drops a pick opens a false one. See [`KeeperEvidence`].
+/// Only a snapshot whose clock has not moved past where it stood when the
+/// league was loaded is believed: from then on the gap in front of the clock
+/// is a new one, and a `/picks` answer that drops a pick opens a false one.
+/// See [`KeeperEvidence`].
+///
+/// The draft's status is deliberately not consulted. It used to be: a
+/// `pre_draft` league believed every snapshot, because keepers arrive right
+/// up to the first pick. But Sleeper reports `pre_draft` for a mock draft
+/// that is halfway through (the clock banner has a special case for exactly
+/// this), so one dropped `/picks` row in a mock draft branded every later
+/// pick a keeper, on disk, with the guard switched off. Before a real draft
+/// starts the clock sits at pick 1 and never moves past the floor, so the
+/// floor rule lets every pre-draft keeper through on its own.
 pub fn evidence_for(loaded: &LoadedLeague) -> KeeperEvidence {
     let teams = loaded.draft.settings.teams.max(1);
     let rounds = loaded.draft.settings.rounds.max(1);
     evidence(
-        &loaded.draft.status,
         picks::next_open_pick(&loaded.api_picks, teams, rounds),
         loaded.keeper_pick_nos.floor,
     )
 }
 
-/// The rule behind [`evidence_for`], in the three facts it turns on: the
-/// draft's status, where its first gap is now, and where the gap was when the
-/// league was loaded.
-pub fn evidence(status: &str, open_pick: Option<u32>, floor: Option<u32>) -> KeeperEvidence {
-    if status == "pre_draft" {
-        return KeeperEvidence::Position;
-    }
+/// The rule behind [`evidence_for`], in the two facts it turns on: where the
+/// draft's first gap is now, and where it was when the league was loaded.
+pub fn evidence(open_pick: Option<u32>, floor: Option<u32>) -> KeeperEvidence {
     if open_pick.unwrap_or(u32::MAX) <= floor.unwrap_or(u32::MAX) {
         KeeperEvidence::Position
     } else {
@@ -157,6 +160,54 @@ pub fn known_keepers(loaded: &LoadedLeague, teams: u32, rounds: u32) -> HashSet<
         evidence_for(loaded),
     ));
     keepers
+}
+
+/// A fourteen-team, fifteen-round league with nothing on its board, for
+/// tests of the code around `LoadedLeague` that need one and do not need
+/// players. Sleeper reports such a mock draft as `pre_draft` however far
+/// along it is, which is the case the keeper tests turn on.
+#[cfg(test)]
+pub(crate) fn bare_league(draft_id: &str) -> LoadedLeague {
+    let league: crate::sleeper::League = serde_json::from_value(serde_json::json!({
+        "league_id": "mock", "name": "Mock", "season": "2026", "status": "pre_draft",
+        "total_rosters": 14, "roster_positions": ["RB", "BN"], "scoring_settings": {},
+    }))
+    .unwrap();
+    let draft: crate::sleeper::Draft = serde_json::from_value(serde_json::json!({
+        "draft_id": draft_id, "status": "drafting", "type": "snake",
+        "settings": {"teams": 14, "rounds": 15},
+    }))
+    .unwrap();
+    let roster_rules = crate::roster::RosterRules::new(&league.roster_positions);
+    LoadedLeague {
+        league,
+        draft,
+        user_names: Default::default(),
+        user_avatars: Default::default(),
+        my_slot: None,
+        yahoo_ids: Default::default(),
+        board: Default::default(),
+        board_index: Default::default(),
+        replacement_model: crate::valuation::ReplacementModel {
+            demand: Default::default(),
+            baseline: Default::default(),
+        },
+        roster_rules,
+        api_picks: Vec::new(),
+        manual_picks: Vec::new(),
+        traded_picks: Vec::new(),
+        keeper_pick_nos: Default::default(),
+        poll_last_success_at: None,
+        poll_consecutive_failures: 0,
+        poll_last_error: None,
+        players_fetched_at: 0,
+        projections_fetched_at: 0,
+        weekly_fetched_at: 0,
+        warnings: Vec::new(),
+        player_meta: Default::default(),
+        weekly_points: Default::default(),
+        second_opinion_loaded_at: None,
+    }
 }
 
 #[cfg(test)]
@@ -215,45 +266,57 @@ mod tests {
     /// rest of the board, permanently, on disk.
     #[test]
     fn position_stops_counting_once_the_draft_has_moved_past_where_it_was_loaded() {
-        // Keepers keep arriving right up to the first pick.
-        assert_eq!(
-            evidence("pre_draft", Some(1), None),
-            KeeperEvidence::Position
-        );
-        assert_eq!(
-            evidence("pre_draft", Some(37), Some(12)),
-            KeeperEvidence::Position
-        );
+        // Keepers keep arriving right up to the first pick, and the clock
+        // sits at pick 1 the whole time.
+        assert_eq!(evidence(Some(1), None), KeeperEvidence::Position);
+        assert_eq!(evidence(Some(1), Some(1)), KeeperEvidence::Position);
         // The snapshot the league was loaded from: the gap is the real one.
-        assert_eq!(
-            evidence("drafting", Some(12), Some(12)),
-            KeeperEvidence::Position
-        );
+        assert_eq!(evidence(Some(12), Some(12)), KeeperEvidence::Position);
         // The draft has moved on. A gap now is a hole in the answer, not a
         // keeper, however far ahead of the clock it looks.
-        assert_eq!(
-            evidence("drafting", Some(13), Some(12)),
-            KeeperEvidence::FlagOnly
-        );
-        assert_eq!(
-            evidence("drafting", Some(37), Some(12)),
-            KeeperEvidence::FlagOnly
-        );
+        assert_eq!(evidence(Some(13), Some(12)), KeeperEvidence::FlagOnly);
+        assert_eq!(evidence(Some(37), Some(12)), KeeperEvidence::FlagOnly);
         // A finished board has no gap at all.
-        assert_eq!(
-            evidence("complete", None, Some(12)),
-            KeeperEvidence::FlagOnly
-        );
-        // A paused draft is a running draft that has stopped, not one that
-        // has not started.
-        assert_eq!(
-            evidence("paused", Some(37), Some(12)),
-            KeeperEvidence::FlagOnly
-        );
+        assert_eq!(evidence(None, Some(12)), KeeperEvidence::FlagOnly);
         // A fixture nobody loaded a league into believes every gap.
-        assert_eq!(
-            evidence("drafting", Some(37), None),
-            KeeperEvidence::Position
+        assert_eq!(evidence(Some(37), None), KeeperEvidence::Position);
+    }
+
+    fn drafted(pick_no: u32) -> crate::sleeper::Pick {
+        crate::sleeper::Pick {
+            round: (pick_no - 1) / 14 + 1,
+            pick_no,
+            draft_slot: (pick_no - 1) % 14 + 1,
+            player_id: format!("p{pick_no}"),
+            picked_by: None,
+            metadata: None,
+            is_keeper: None,
+        }
+    }
+
+    /// Sleeper reports `pre_draft` for a mock draft that is halfway through.
+    /// With the floor guard switched off for that status, a `/picks` answer
+    /// missing pick 37 of 50 branded 38..=50 keepers, and `note_keepers`
+    /// wrote them to disk where every later launch read them back.
+    #[test]
+    fn a_dropped_pick_in_a_pre_draft_mock_draft_does_not_brand_the_rest_of_the_board() {
+        let mut loaded = bare_league("mock-draft");
+        loaded.draft.status = "pre_draft".into();
+        // Loaded with 12 picks made: the clock stood at 13.
+        loaded.api_picks = (1..=12).map(drafted).collect();
+        loaded.keeper_pick_nos.floor = Some(13);
+        assert!(
+            merge_keepers(&mut loaded).is_none(),
+            "nothing sits ahead of the clock"
+        );
+
+        // Late in round four the answer drops number 37.
+        loaded.api_picks = (1..=50).filter(|n| *n != 37).map(drafted).collect();
+        assert_eq!(evidence_for(&loaded), KeeperEvidence::FlagOnly);
+        assert!(
+            merge_keepers(&mut loaded).is_none(),
+            "a hole in a running mock draft is not thirteen keepers: {:?}",
+            loaded.keeper_pick_nos.picks
         );
     }
 }

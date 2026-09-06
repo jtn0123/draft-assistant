@@ -159,7 +159,7 @@ describe("switching leagues", () => {
     });
 
     expect(said.some((t) => /Could not switch leagues/.test(t))).toBe(false);
-    expect(said.some((t) => /the league list could not be re-read/.test(t))).toBe(true);
+    expect(said.some((t) => /the league list could not be re-read/i.test(t))).toBe(true);
     // And the switch stands: the poller is running against the new league.
     expect(result.current.polling).toBe(true);
   });

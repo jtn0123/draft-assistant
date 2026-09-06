@@ -34,8 +34,35 @@ impl RosterRules {
         }
     }
 
+    /// Bench, taxi and every flavour of injured reserve. Yahoo spells its
+    /// reserve slot "IR+" and Sleeper leagues have been seen with "IR2";
+    /// matching "IR" alone counted those as starting slots, so a roster with
+    /// two of them read as two open starters all draft.
     pub fn is_non_starting(slot: &str) -> bool {
-        matches!(slot, "BN" | "IR" | "TAXI")
+        matches!(slot, "BN" | "TAXI") || slot.starts_with("IR")
+    }
+
+    /// A starting slot no position this board drafts can fill: the IDP
+    /// slots (DL, LB, DB, IDP_FLEX) and anything else Sleeper adds. The board
+    /// carries no players for them, so they are neither open starters nor
+    /// need pressure; counting them as both told a twelve-round IDP draft
+    /// that seven starters were open when four were.
+    pub fn is_unfillable(slot: &str) -> bool {
+        !Self::is_non_starting(slot)
+            && Self::flex_eligible(slot).is_none()
+            && !DRAFTABLE.contains(&slot)
+    }
+
+    /// The distinct unfillable slots on this roster, in roster order, for
+    /// the warning that says the board is not drafting for them.
+    pub fn unfillable_slots(&self) -> Vec<String> {
+        let mut seen: Vec<String> = Vec::new();
+        for slot in &self.slots {
+            if Self::is_unfillable(slot) && !seen.contains(slot) {
+                seen.push(slot.clone());
+            }
+        }
+        seen
     }
 
     pub fn can_fill(slot: &str, position: &str) -> bool {
@@ -81,7 +108,10 @@ impl RosterRules {
         let mut open: HashMap<String, u32> = HashMap::new();
 
         for slot in &self.slots {
-            if Self::is_non_starting(slot) || Self::flex_eligible(slot).is_some() {
+            if Self::is_non_starting(slot)
+                || Self::is_unfillable(slot)
+                || Self::flex_eligible(slot).is_some()
+            {
                 continue;
             }
             let count = remaining.entry(slot.as_str()).or_insert(0);
@@ -178,6 +208,37 @@ mod tests {
             Some("TE")
         );
         assert_eq!(RosterRules::flex_claimant("QB", spare), None);
+    }
+
+    #[test]
+    fn every_flavour_of_injured_reserve_is_a_non_starting_slot() {
+        // Yahoo's "IR+" and a second Sleeper reserve slot both read as open
+        // starters, and the draft advice chased bodies to fill them.
+        for slot in ["IR", "IR+", "IR2", "BN", "TAXI"] {
+            assert!(RosterRules::is_non_starting(slot), "{slot}");
+            assert!(!RosterRules::can_fill(slot, "RB"), "{slot}");
+        }
+        assert!(!RosterRules::is_non_starting("RB"));
+        let open = rules(&["RB", "IR+", "IR2"]).open_starting_slots(["RB"]);
+        assert!(open.is_empty(), "{open:?}");
+    }
+
+    #[test]
+    fn idp_slots_are_named_as_unfillable_and_never_counted_as_open_starters() {
+        // An IDP league: the board has no DL, LB or DB, so those slots stay
+        // "open" for the whole draft and inflate the need pressure on every
+        // card. They are reported once and left out of the open count.
+        let idp = rules(&["QB", "RB", "DL", "LB", "LB", "DB", "IDP_FLEX", "BN", "IR"]);
+        assert_eq!(idp.unfillable_slots(), vec!["DL", "LB", "DB", "IDP_FLEX"]);
+        let open = idp.open_starting_slots(["QB"]);
+        assert_eq!(open, vec![("RB".to_string(), 1)]);
+        assert!(
+            rules(&["QB", "FLEX", "SUPER_FLEX", "K", "DEF", "BN", "IR+"])
+                .unfillable_slots()
+                .is_empty()
+        );
+        assert!(!RosterRules::is_unfillable("BN"));
+        assert!(!RosterRules::is_unfillable("FLEX"));
     }
 
     #[test]

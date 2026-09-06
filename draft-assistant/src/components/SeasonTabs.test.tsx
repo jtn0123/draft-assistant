@@ -28,6 +28,12 @@ describe("TeamRoster empty state", () => {
     render(<TeamRoster rows={[]} />);
     expect(screen.getByText(/Set your Sleeper username/)).toBeInTheDocument();
   });
+
+  it("does not send a Yahoo player to a Sleeper setting that does not exist", () => {
+    render(<TeamRoster rows={[]} platform="yahoo" />);
+    expect(screen.queryByText(/Sleeper username/)).toBeNull();
+    expect(screen.getByText(/connected Yahoo account/)).toBeInTheDocument();
+  });
 });
 
 describe("TeamRoster", () => {
@@ -52,7 +58,7 @@ describe("TeamRoster", () => {
     expect(screen.getByText("Season")).toBeInTheDocument();
   });
 
-  it("em-dashes a column that has nothing in it yet", () => {
+  it("blanks a column that has nothing in it yet", () => {
     // Week one, pre-kickoff: nobody has scored, so the Season column is a
     // stack of "0.0" that reads as fifteen men measured at zero.
     const { container } = render(
@@ -64,7 +70,7 @@ describe("TeamRoster", () => {
       />,
     );
     const seasons = [...container.querySelectorAll(".team-season")].map((c) => c.textContent);
-    expect(seasons).toEqual(["—", "—"]);
+    expect(seasons).toEqual(["–", "–"]);
     // The projections are real, so that column still prints.
     expect(screen.getByText("23.4")).toBeInTheDocument();
     expect(screen.getByText(/A dash means that column has nothing in it yet/)).toBeInTheDocument();

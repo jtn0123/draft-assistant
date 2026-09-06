@@ -347,3 +347,118 @@ async fn a_refused_chat_command_leaves_an_error_line_naming_it() {
         capture.lines()
     );
 }
+
+/// A screen name that is not a screen used to get as far as reading the
+/// thread: an empty thread was refused as "nothing to ask", which told the
+/// caller nothing about the name that was wrong.
+#[tokio::test]
+async fn a_junk_screen_is_refused_before_the_thread_is_looked_at() {
+    let (state, _dir) = AppState::scratch("chat-junk-screen");
+    let error = answer(&state, "settings", "", "", Vec::new())
+        .await
+        .expect_err("not a screen");
+    assert!(error.contains("not a screen"), "{error}");
+}
+
+fn billed(input_tokens: u32) -> ChatReply {
+    ChatReply {
+        text: String::new(),
+        thinking: None,
+        model: "claude-opus-5".into(),
+        refused: false,
+        truncated: false,
+        input_tokens,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        provider: String::new(),
+        cost_usd: 0.0,
+        screen_spend_usd: 0.0,
+    }
+}
+
+fn books(state: &AppState, key: &str) -> Books {
+    Books {
+        config: state.config.clone(),
+        engine: state.engine.clone(),
+        key: key.to_string(),
+        model: ChatModel::Opus5,
+        provider: PROVIDER_API,
+    }
+}
+
+async fn spent(state: &AppState, key: &str) -> f64 {
+    state
+        .config
+        .lock()
+        .await
+        .chat_spend_usd
+        .get(key)
+        .copied()
+        .unwrap_or(0.0)
+}
+
+/// The shared thread stops waiting for an answer after its limit and aborts
+/// the future. The request does not stop with it: the API bills from the
+/// moment it accepts the call. That turn used to be billed, discarded, and
+/// never counted — the next question passed a cap it should have failed.
+#[tokio::test]
+async fn a_turn_abandoned_mid_answer_is_still_counted_against_the_cap() {
+    let (state, _dir) = AppState::scratch("chat-abandoned");
+    let key = "draft.abandoned";
+    let in_flight = chat_client::reserve(key).expect("first claim");
+    let call = async {
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        // A million input tokens at Opus 5's $5/MTok: five dollars.
+        Ok(billed(1_000_000))
+    };
+    let waiting = tokio::spawn(settle(books(&state, key), in_flight, call));
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    waiting.abort();
+    assert!(waiting.await.is_err(), "the caller stopped waiting");
+    // The caller is gone; the call and its bookkeeping are not.
+    assert_eq!(spent(&state, key).await, 0.0, "nothing is billed yet");
+    assert!(
+        chat_client::reserve(key).is_err(),
+        "the claim is held until the call ends, not until the caller leaves"
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!((spent(&state, key).await - 5.0).abs() < 1e-9);
+    chat_client::reserve(key).expect("the claim was released when the call ended");
+}
+
+/// A call that fails after the API has started answering — the client's own
+/// timeout, a dropped socket — was still billed for what had arrived.
+#[tokio::test]
+async fn a_call_that_failed_after_the_api_started_answering_is_still_counted() {
+    let (state, _dir) = AppState::scratch("chat-failed-late");
+    let key = "draft.failed-late";
+    let in_flight = chat_client::reserve(key).expect("first claim");
+    let call = async {
+        Err(chat::ChatError {
+            message: "the Anthropic answer stopped early: timed out".to_string(),
+            partial: Some(Box::new(billed(200_000))),
+        })
+    };
+    let error = settle(books(&state, key), in_flight, call)
+        .await
+        .expect_err("the failure still reaches the caller");
+    assert!(error.contains("stopped early"), "{error}");
+    assert!((spent(&state, key).await - 1.0).abs() < 1e-9);
+}
+
+/// The ordinary path: the reply comes back priced, labelled, and already
+/// written down.
+#[tokio::test]
+async fn a_reply_is_priced_and_recorded_before_it_is_handed_back() {
+    let (state, _dir) = AppState::scratch("chat-recorded");
+    let key = "draft.recorded";
+    let in_flight = chat_client::reserve(key).expect("first claim");
+    let reply = settle(books(&state, key), in_flight, async { Ok(billed(100_000)) })
+        .await
+        .expect("a reply");
+    assert!((reply.cost_usd - 0.5).abs() < 1e-9);
+    assert_eq!(reply.provider, PROVIDER_API);
+    assert!((reply.screen_spend_usd - 0.5).abs() < 1e-9);
+    assert!((spent(&state, key).await - 0.5).abs() < 1e-9);
+}

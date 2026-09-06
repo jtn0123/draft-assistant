@@ -36,7 +36,7 @@ describe("marking a player drafted", () => {
     );
     const applyView = vi.fn();
     const { said, showToast } = toasts();
-    const { result } = renderHook(() => useMarkDrafted(applyView, showToast, null));
+    const { result } = renderHook(() => useMarkDrafted(applyView, showToast, null, "league-1"));
 
     act(() => result.current.ask("4046", "Patrick Mahomes"));
     expect(result.current.confirm?.name).toBe("Patrick Mahomes");
@@ -60,7 +60,7 @@ describe("marking a player drafted", () => {
   it("treats a pick we already made as done, not as a failure", async () => {
     mocks.recordManualPick.mockResolvedValueOnce(view);
     const { said, showToast } = toasts();
-    const { result } = renderHook(() => useMarkDrafted(vi.fn(), showToast, null));
+    const { result } = renderHook(() => useMarkDrafted(vi.fn(), showToast, null, "league-1"));
 
     act(() => result.current.ask("4046", "Patrick Mahomes"));
     await act(async () => {
@@ -85,7 +85,7 @@ describe("marking a player drafted", () => {
   it("still says so when the pick genuinely failed", async () => {
     mocks.recordManualPick.mockRejectedValue(new Error("no draft loaded"));
     const { said, showToast } = toasts();
-    const { result } = renderHook(() => useMarkDrafted(vi.fn(), showToast, null));
+    const { result } = renderHook(() => useMarkDrafted(vi.fn(), showToast, null, "league-1"));
 
     act(() => result.current.ask("4046", "Patrick Mahomes"));
     await act(async () => {
@@ -100,7 +100,7 @@ describe("marking a player drafted", () => {
   it("refuses a player already drafted when this window never recorded them", async () => {
     mocks.recordManualPick.mockRejectedValue(new Error("player already drafted"));
     const { said, showToast } = toasts();
-    const { result } = renderHook(() => useMarkDrafted(vi.fn(), showToast, null));
+    const { result } = renderHook(() => useMarkDrafted(vi.fn(), showToast, null, "league-1"));
 
     act(() => result.current.ask("99", "Someone Else"));
     await act(async () => {
@@ -111,9 +111,41 @@ describe("marking a player drafted", () => {
     expect(said).toHaveLength(1);
   });
 
+  it("forgets the picks it recorded when the league changes", async () => {
+    // Sleeper ids are shared across leagues. Recorded in league one, Mahomes
+    // was remembered as ours in league two, so league two's genuine "already
+    // drafted" refusal was swallowed as if it were our own success.
+    mocks.recordManualPick.mockResolvedValueOnce(view);
+    const { said, showToast } = toasts();
+    const { result, rerender } = renderHook(
+      ({ leagueId }: { leagueId: string }) => useMarkDrafted(vi.fn(), showToast, null, leagueId),
+      { initialProps: { leagueId: "league-1" } },
+    );
+
+    act(() => result.current.ask("4046", "Patrick Mahomes"));
+    await act(async () => {
+      result.current.confirmDraft();
+      await Promise.resolve();
+    });
+    expect(said).toEqual([]);
+
+    rerender({ leagueId: "league-2" });
+    mocks.recordManualPick.mockRejectedValueOnce(new Error("player already drafted"));
+    act(() => result.current.ask("4046", "Patrick Mahomes"));
+    await act(async () => {
+      result.current.confirmDraft();
+      await Promise.resolve();
+    });
+
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/Could not mark Patrick Mahomes as drafted/);
+  });
+
   it("tells a follower who records the picks instead of opening a dialog", () => {
     const { said, showToast } = toasts();
-    const { result } = renderHook(() => useMarkDrafted(vi.fn(), showToast, "Justin's Mac"));
+    const { result } = renderHook(() =>
+      useMarkDrafted(vi.fn(), showToast, "Justin's Mac", "league-1"),
+    );
 
     act(() => result.current.ask("4046", "Patrick Mahomes"));
 

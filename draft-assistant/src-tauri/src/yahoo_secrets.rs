@@ -1,7 +1,10 @@
-//! Where the Yahoo credentials and tokens live.
+//! The app's secret store: where the Anthropic key, the Yahoo credentials
+//! and tokens, and the companion's device list live.
 //!
-//! Same deal as [`crate::secrets`], which keeps the Anthropic key in the macOS
-//! login Keychain through `/usr/bin/security`. Three differences:
+//! The file keeps its Yahoo name from when Yahoo was the only tenant; the
+//! Anthropic key moved in later through the thin layer in [`crate::secrets`].
+//! On macOS every item is in the login Keychain through `/usr/bin/security`,
+//! under one service with an account per item. Three things about how:
 //!
 //! - The value goes to `security` as an argument, hex-encoded, not on stdin.
 //!   The stdin route answers the tool's password prompt, and that prompt
@@ -15,16 +18,18 @@
 //!   text itself because `find-generic-password -w` prints an item as hex
 //!   the moment it holds one non-ASCII byte and as text otherwise, and a
 //!   host called "Justin’s MacBook Air" is one such byte.
-//! - There are two items, not one: the app credentials Yahoo issues
-//!   (client id **and** secret) and the token pair from the OAuth flow. They
-//!   get their own Keychain accounts under the app's existing service, so
-//!   revoking one does not disturb the Anthropic key.
+//! - One item per secret, not one blob: the app credentials Yahoo issues
+//!   (client id **and** secret), the token pair from the OAuth flow, the
+//!   companion's devices and the Anthropic key each get their own Keychain
+//!   account under the one service, so revoking one does not disturb the rest.
 //! - The non-Keychain fallback is a file of this module's own rather than the
 //!   app config, because a Yahoo token has no business in a settings file that
-//!   the config screen rewrites. It is written 0600 on unix.
+//!   the config screen rewrites. It is written 0600 on unix. The Anthropic key
+//!   is the exception: with no Keychain it stays in the config file, as it
+//!   always has, and [`crate::secrets`] never asks this file for it.
 //!
-//! Both live behind [`SecretStore`], which is what lets the tests here run
-//! against a directory in `/tmp` and never touch a real login Keychain.
+//! Everything lives behind [`SecretStore`], which is what lets the tests here
+//! run against a directory in `/tmp` and never touch a real login Keychain.
 
 use crate::yahoo_oauth::{TokenSet, YahooCredentials};
 use std::path::{Path, PathBuf};
@@ -35,9 +40,10 @@ const SERVICE: &str = "draft-assistant";
 /// The things worth keeping. Kept as an enum so an account name cannot be
 /// mistyped into existence at a call site.
 ///
-/// Not all of them are Yahoo's: the companion's device tokens live here too,
-/// because this module is the one path to the Keychain that takes a value of
-/// any length and can be swapped for a file in a test.
+/// Not all of them are Yahoo's: the companion's device tokens and the
+/// Anthropic key live here too, because this module is the one path to the
+/// Keychain that takes a value of any length and can be swapped for a file in
+/// a test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Item {
     /// `{"client_id": .., "client_secret": ..}` from developer.yahoo.com.
@@ -47,6 +53,10 @@ pub enum Item {
     /// The companion's pairing code and the bearer token of every paired
     /// phone, as one blob of JSON. See [`crate::companion::store`].
     CompanionDevices,
+    /// The Anthropic API key, `sk-ant-...`, as the text it is. Filed under
+    /// the account [`crate::secrets`] used when it was a store of its own, so
+    /// a key an older build stored keeps reading. See [`crate::secrets`].
+    AnthropicKey,
 }
 
 impl Item {
@@ -55,6 +65,7 @@ impl Item {
             Item::Credentials => "yahoo-app-credentials",
             Item::Token => "yahoo-oauth-token",
             Item::CompanionDevices => "companion-devices",
+            Item::AnthropicKey => "anthropic-api-key",
         }
     }
 }
@@ -104,7 +115,8 @@ pub fn hex_of(text: &str) -> String {
 /// is an item written before values were hex-encoded, or an item the tool
 /// printed as text, and is handed back as it is; a legacy value that happens
 /// to be entirely hex digits is not a case that arises, because every value
-/// this module has ever stored is JSON and starts with a brace.
+/// this module has ever stored is either JSON, which starts with a brace, or
+/// an Anthropic key, which starts with `sk-`.
 pub fn decode_stored(printed: &str) -> String {
     let printed = printed.trim();
     let is_hex = !printed.is_empty()

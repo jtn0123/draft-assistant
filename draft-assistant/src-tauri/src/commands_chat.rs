@@ -10,6 +10,15 @@ use crate::state::{season_view_for_chat, view_from, AppState};
 use tauri::State;
 use tokio::sync::Mutex;
 
+/// The pure rules: screens, the thread window, the cap and the spend key.
+#[path = "commands_chat_budget.rs"]
+mod budget;
+
+use budget::{billed_model, charged_league, check_budget, check_screen, checked_budget, window};
+pub use budget::{budget_of, spend_key, DEFAULT_BUDGET_USD};
+#[cfg(test)]
+use budget::{MAX_THREAD_BYTES, MAX_TURNS};
+
 const PROVIDER_API: &str = "api";
 const PROVIDER_CLI: &str = "claude_code";
 
@@ -202,94 +211,6 @@ async fn chat_settings_inner(state: &AppState) -> Result<ChatSettings, String> {
     })
 }
 
-/// The most turns and the most text one question may carry.
-const MAX_TURNS: usize = 60;
-const MAX_THREAD_BYTES: usize = 200_000;
-
-/// The tail of a conversation that is short enough to send.
-///
-/// A thread over the limit used to be refused outright, which left the shared
-/// thread with no way out: it keeps two hundred entries, every device adds to
-/// the same one, and a phone has no "new chat" button, so a league that asked
-/// sixty questions on draft night could never ask a sixty-first. What goes to
-/// the model is a window over the end of the thread instead — the last
-/// [`MAX_TURNS`] turns that fit inside [`MAX_THREAD_BYTES`], trimmed from the
-/// front and started on a user turn, because a conversation that opens on an
-/// assistant turn is a 400.
-fn window(messages: &[ChatMessage]) -> Result<&[ChatMessage], String> {
-    if messages.is_empty() {
-        return Err("nothing to ask".to_string());
-    }
-    let bytes_from = |from: usize| {
-        messages[from..]
-            .iter()
-            .map(|m| m.content.len())
-            .sum::<usize>()
-    };
-    let mut start = messages.len().saturating_sub(MAX_TURNS);
-    while start < messages.len() && bytes_from(start) > MAX_THREAD_BYTES {
-        start += 1;
-    }
-    while start < messages.len() && messages[start].role != "user" {
-        start += 1;
-    }
-    let windowed = &messages[start..];
-    if windowed.is_empty() {
-        // Nothing survived the trim: one turn on its own is over the byte
-        // limit, and no window of the thread can carry it.
-        return Err(format!(
-            "that question is too long to send ({} KB) — ask a shorter one",
-            bytes_from(messages.len() - 1) / 1024
-        ));
-    }
-    Ok(windowed)
-}
-
-/// The cap a screen's chat runs under until the user sets one of their own.
-pub const DEFAULT_BUDGET_USD: f64 = 5.0;
-
-/// The cap in force, in dollars. Zero means the user turned it off.
-pub fn budget_of(config: &AppConfig) -> f64 {
-    config
-        .chat_budget_usd
-        .unwrap_or(DEFAULT_BUDGET_USD)
-        .max(0.0)
-}
-
-/// Refuse a turn whose screen has already spent its cap.
-///
-/// The check is necessarily *before* the turn, because what a turn costs is
-/// only known once it has been answered. So a turn that starts under the cap
-/// always finishes, however far over it lands — and then counts in full
-/// against the cap, which the next turn is refused by. The cap is a stop, not
-/// a ceiling; the overshoot is one turn wide.
-fn check_budget(spent: f64, cap: f64, screen: &str) -> Result<(), String> {
-    if cap > 0.0 && spent >= cap {
-        return Err(format!(
-            "Ask Claude has spent ${spent:.2} of its ${cap:.2} cap on the {screen} screen — raise the budget above to keep asking."
-        ));
-    }
-    Ok(())
-}
-
-/// The cap a caller asked for, or a refusal.
-///
-/// A negative cap used to be quietly rounded up to zero — and zero is the one
-/// value that means *no cap at all*, so "-1" turned the budget off instead of
-/// being rejected. Nothing below zero is a cap, so nothing below zero is
-/// accepted; the panel keeps whatever cap it had and says why.
-fn checked_budget(dollars: f64) -> Result<f64, String> {
-    if !dollars.is_finite() {
-        return Err("that is not a number of dollars".to_string());
-    }
-    if dollars < 0.0 {
-        return Err(format!(
-            "a budget cannot be negative (${dollars:.2}) — 0 is the way to turn the cap off"
-        ));
-    }
-    Ok(dollars)
-}
-
 /// Set the dollar cap a screen's chat runs under. Zero turns it off.
 #[tauri::command]
 pub async fn set_chat_budget(state: State<'_, AppState>, dollars: f64) -> Result<f64, String> {
@@ -306,61 +227,6 @@ async fn set_chat_budget_inner(state: &AppState, dollars: f64) -> Result<f64, St
     config.chat_budget_usd = Some(dollars);
     state.engine.save_config(&config)?;
     Ok(dollars)
-}
-
-/// The two screens that can ask a question.
-///
-/// `screen` picks the context, and further down it keys the running spend the
-/// budget is checked against. Anything else would open a fresh, uncapped tally
-/// under whatever name arrived over the IPC — and the config would grow a new
-/// entry for every one of them.
-fn check_screen(screen: &str) -> Result<(), String> {
-    match screen {
-        "draft" | "season" => Ok(()),
-        other => Err(format!("'{other}' is not a screen Ask Claude answers for")),
-    }
-}
-
-/// Where one screen's running spend is filed: `screen.league_id`.
-///
-/// The same shape the panel files its saved conversations under (`chatScope`
-/// in `chatSessions.ts`), and for the same reason — a question about one
-/// league's board is not a question about another's. Spend used to be keyed by
-/// screen alone, so every league on the machine drew down one shared cap and
-/// the panel's "spent on this screen" figure belonged to no league in
-/// particular.
-///
-/// Keys written under the old scheme are bare screen names, which no scope can
-/// collide with. They are left in the config and never read: they are a
-/// mixture of every league's spending, so there is no league to migrate them
-/// to, and the alternative — charging them all to whichever league happens to
-/// be open — would refuse turns over money that league never spent.
-pub fn spend_key(screen: &str, league_id: Option<&str>) -> String {
-    format!("{screen}.{}", league_id.unwrap_or("none"))
-}
-
-/// The league a turn is billed to: the one whose board the question is about.
-///
-/// The panel reads its "spent on this screen" figure under the league it is
-/// showing — the loaded one, which is also the league the context below is
-/// built from. The backend used to file the spend under
-/// `config.active_league_id`, which is a record of what was last loaded rather
-/// than what is loaded now; while a league is being switched the two disagree,
-/// and the cap was then drawn down under a key the panel was not reading. Both
-/// sides go through this one function so they cannot drift again.
-fn charged_league<'a>(loaded: Option<&'a str>, active: Option<&'a str>) -> Option<&'a str> {
-    loaded.or(active)
-}
-
-/// What a turn is billed at.
-///
-/// The requested model is what the panel picked; the reported one is what
-/// answered. Those differ whenever a server-side fallback rescues a refusal,
-/// and pricing the answer as the request charged the wrong rate — under, if
-/// Opus was asked for and Fable answered, so the cap let the next turn
-/// through on money that had already been spent.
-fn billed_model(requested: ChatModel, reported: &str) -> ChatModel {
-    ChatModel::from_reported(reported).unwrap_or(requested)
 }
 
 /// Ask Claude about the board or the week. `screen` selects which view is
@@ -393,11 +259,14 @@ pub(crate) async fn answer(
     effort: &str,
     messages: Vec<ChatMessage>,
 ) -> Result<ChatReply, String> {
+    // The screen is checked before anything is done with the thread: it keys
+    // the spend, and a name that is not a screen must not get as far as
+    // reading the conversation, let alone opening a tally under itself.
+    check_screen(screen)?;
     // The whole thread is forwarded to Anthropic or written to the CLI's
     // stdin, so it is bounded here rather than discovered as a bill or a
     // rejected request.
-    let messages = window(&messages)?;
-    check_screen(screen)?;
+    let messages = window(&messages)?.to_vec();
     let cli = chat_cli::find_cli();
     let config = state.config.lock().await.clone();
     let api_key = state.engine.api_key(&config).await;
@@ -417,9 +286,8 @@ pub(crate) async fn answer(
     check_budget(spent, budget_of(&config), screen)?;
     // The cap above is read before the turn and written after it, so two
     // questions asked at once both saw the spend from before either of them.
-    // The claim is held for the rest of this function and released by every
-    // path out of it, `?` included.
-    let _in_flight = chat_client::reserve(&key)?;
+    // The claim travels with the model call and is released when it ends.
+    let in_flight = chat_client::reserve(&key)?;
 
     // Building a season view is seconds of arithmetic. It must not happen with
     // the pollers' mutexes held, so the season screen's own view is reused and
@@ -442,42 +310,116 @@ pub(crate) async fn answer(
 
     let model = ChatModel::parse(model);
     let effort = Effort::parse(effort);
-    let mut reply = if provider == PROVIDER_CLI {
-        let cli = cli.ok_or("Claude Code CLI not found — install it or add an API key")?;
-        chat_cli::ask(&cli, model, effort, &context.joined(), messages).await?
-    } else {
-        let api_key = api_key.ok_or("no Anthropic API key set — add one in Settings")?;
-        chat::ask(
-            // Not the Sleeper client: its eight-second budget cut off every
-            // answer that took longer than a board refresh.
-            &chat_client::client(),
-            &api_key,
-            model,
-            effort,
-            &context,
-            messages,
-        )
-        .await?
+    let books = Books {
+        config: state.config.clone(),
+        engine: state.engine.clone(),
+        key,
+        model,
+        provider,
     };
+    let call = async move {
+        if provider == PROVIDER_CLI {
+            let cli = cli.ok_or_else(|| {
+                "Claude Code CLI not found — install it or add an API key".to_string()
+            })?;
+            chat_cli::ask(&cli, model, effort, &context.joined(), &messages)
+                .await
+                .map_err(chat::ChatError::from)
+        } else {
+            let api_key = api_key
+                .ok_or_else(|| "no Anthropic API key set — add one in Settings".to_string())?;
+            chat::ask(
+                // Not the Sleeper client: its eight-second budget cut off every
+                // answer that took longer than a board refresh.
+                &chat_client::client(),
+                &api_key,
+                model,
+                effort,
+                &context,
+                &messages,
+            )
+            .await
+        }
+    };
+    settle(books, in_flight, call).await
+}
 
-    // The CLI route is paid for by a subscription, not by the token: charging
-    // it list rates would stop the panel over money nobody spent.
-    reply.cost_usd = if provider == PROVIDER_CLI {
-        0.0
-    } else {
-        chat::turn_cost_of(billed_model(model, &reply.model), &reply)
-    };
-    reply.provider = provider.to_string();
-    let mut config = state.config.lock().await;
-    let running = config.chat_spend_usd.entry(key).or_insert(0.0);
-    *running += reply.cost_usd;
-    reply.screen_spend_usd = *running;
-    // A failure to write it down is not a reason to withhold the answer the
-    // user already paid for; the next turn re-reads whatever did land.
-    if let Err(e) = state.engine.save_config(&config) {
-        crate::applog::warn(format!("could not record what Ask Claude spent: {e}"));
+/// Where one turn's money is written down.
+pub(crate) struct Books {
+    pub(crate) config: std::sync::Arc<Mutex<AppConfig>>,
+    pub(crate) engine: std::sync::Arc<crate::engine::Engine>,
+    pub(crate) key: String,
+    pub(crate) model: ChatModel,
+    pub(crate) provider: &'static str,
+}
+
+impl Books {
+    /// What a reply — or the billed part of a failed one — cost.
+    ///
+    /// The CLI route is paid for by a subscription, not by the token:
+    /// charging it list rates would stop the panel over money nobody spent.
+    fn cost_of(&self, reply: &ChatReply) -> f64 {
+        if self.provider == PROVIDER_CLI {
+            0.0
+        } else {
+            chat::turn_cost_of(billed_model(self.model, &reply.model), reply)
+        }
     }
-    Ok(reply)
+
+    /// Add `cost` to the running spend and return the new total.
+    async fn record(&self, cost: f64) -> f64 {
+        let mut config = self.config.lock().await;
+        let running = config.chat_spend_usd.entry(self.key.clone()).or_insert(0.0);
+        *running += cost;
+        let running = *running;
+        // A failure to write it down is not a reason to withhold the answer
+        // the user already paid for; the next turn re-reads whatever did land.
+        if let Err(e) = self.engine.save_config(&config) {
+            crate::applog::warn(format!("could not record what Ask Claude spent: {e}"));
+        }
+        running
+    }
+}
+
+/// Run the model call to its end and write down what it cost, whatever
+/// becomes of the caller.
+///
+/// The call runs on a task of its own, so a caller that stops waiting — the
+/// shared thread's answer limit, or a webview that went away — does not
+/// cancel it. That matters because cancelling the future does not cancel the
+/// bill: the API charges from the moment it accepts the request, and a turn
+/// that was aborted at the await used to be billed, discarded, and never
+/// counted against the cap. Here the spend is recorded by the same task that
+/// made the call, before anything is handed back, and a call that fails after
+/// the API started answering records the usage that did arrive.
+pub(crate) async fn settle<F>(
+    books: Books,
+    in_flight: chat_client::InFlight,
+    call: F,
+) -> Result<ChatReply, String>
+where
+    F: std::future::Future<Output = Result<ChatReply, chat::ChatError>> + Send + 'static,
+{
+    let task = tokio::spawn(async move {
+        // Released when the call ends, not when the caller stops waiting.
+        let _in_flight = in_flight;
+        match call.await {
+            Ok(mut reply) => {
+                reply.cost_usd = books.cost_of(&reply);
+                reply.provider = books.provider.to_string();
+                reply.screen_spend_usd = books.record(reply.cost_usd).await;
+                Ok(reply)
+            }
+            Err(error) => {
+                if let Some(partial) = &error.partial {
+                    books.record(books.cost_of(partial)).await;
+                }
+                Err(error.message)
+            }
+        }
+    });
+    task.await
+        .map_err(|_| "The answer stopped unexpectedly".to_string())?
 }
 
 /// Suggested prompts for the current screen.

@@ -287,17 +287,27 @@ async fn refresh_players<E: SeasonEngine>(
         // screen are as old as the league load, and the user has no other
         // way to find that out.
         if let Some(season) = season_guard.as_mut() {
-            let note = "the player list came back incomplete \u{2014} names and injury tags are the ones loaded with the league".to_string();
-            if !season.warnings.contains(&note) {
-                season.warnings.push(note);
+            if !season.warnings.iter().any(|w| w == INCOMPLETE_PLAYERS) {
+                season.warnings.push(INCOMPLETE_PLAYERS.to_string());
             }
         }
         return false;
+    }
+    // A good refresh takes the complaint down again. It used to stay on the
+    // badge for the life of the process, so one truncated download at noon
+    // still read "player list incomplete" at midnight over names and tags
+    // that had been refreshed a dozen times since.
+    if let Some(season) = season_guard.as_mut() {
+        season.warnings.retain(|w| w != INCOMPLETE_PLAYERS);
     }
     drop(season_guard);
     refreshed.apply(loaded);
     true
 }
+
+/// The warning a refused player refresh leaves on the health badge, until the
+/// next refresh that is worth applying.
+pub const INCOMPLETE_PLAYERS: &str = "the player list came back incomplete \u{2014} names and injury tags are the ones loaded with the league";
 
 /// One turn of the season poll loop: refresh the live slice, note whether that
 /// worked, and rebuild the view if the scores moved.
@@ -371,7 +381,18 @@ pub async fn season_tick<E: SeasonEngine>(
     // The three requests run with nothing locked. Each has an eight-second
     // timeout and retries, so holding `season` across them stalled every
     // command that needs it and queued the next tick behind this one.
+    let fetch_started = std::time::Instant::now();
     let fetched = engine.fetch_live(&league_id, watching.0, watching.1).await;
+    // The tick boundary at the verbose level: the league and week, what each
+    // of the three sources said, and how long the round trip took.
+    crate::applog::debug(format!(
+        "season tick fetched league={league_id} week={} matchups={} scores={} rosters={} in {}ms",
+        watching.1,
+        fetched.matchups.as_ref().err().map_or("ok", String::as_str),
+        fetched.scores.as_ref().err().map_or("ok", String::as_str),
+        fetched.rosters.as_ref().err().map_or("ok", String::as_str),
+        fetch_started.elapsed().as_millis()
+    ));
     let mut errors = Vec::new();
     let signature = {
         // Locks in the usual order, loaded then season. The league is checked

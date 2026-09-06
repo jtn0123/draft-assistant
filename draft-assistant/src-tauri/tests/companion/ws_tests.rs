@@ -7,9 +7,9 @@ use serde_json::Value;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
-type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
+pub type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
-async fn open(base: &str, token: &str) -> Socket {
+pub async fn open(base: &str, token: &str) -> Socket {
     let url = format!(
         "{}/api/events?token={token}",
         base.replace("http://", "ws://")
@@ -34,7 +34,7 @@ async fn next_frame(socket: &mut Socket) -> Value {
 }
 
 /// The next frame of a given type, skipping the ones this test is not about.
-async fn next_of(socket: &mut Socket, kind: &str) -> Value {
+pub async fn next_of(socket: &mut Socket, kind: &str) -> Value {
     for _ in 0..20 {
         let frame = next_frame(socket).await;
         if frame["type"] == kind {
@@ -293,4 +293,39 @@ async fn pairing_again_closes_the_socket_the_old_token_opened() {
     // The new token is the live one, and its socket works.
     let mut fresh = open(&host.base, &second.token).await;
     assert_eq!(next_of(&mut fresh, "devices").await["type"], "devices");
+}
+
+/// The whole failure: the host opens another league and every phone keeps
+/// the old league's chat thread and week on screen, because nothing on the
+/// switch path published either.
+#[tokio::test]
+async fn switching_league_sends_the_phones_the_new_threads_and_clears_the_week() {
+    let host = host("ws-switch").await;
+    let paired = host.pair_ok("Rob's iPhone", "phone").await;
+    let mut socket = open(&host.base, &paired.token).await;
+    // Everything the socket opens with, so what follows is the switch alone.
+    next_of(&mut socket, "devices").await;
+    next_of(&mut socket, "draft-updated").await;
+    next_of(&mut socket, "season-updated").await;
+    next_of(&mut socket, "shared-chat").await;
+    next_of(&mut socket, "shared-chat").await;
+
+    // What `add_league` leaves behind: the season belongs to the league that
+    // was active a moment ago, so it is gone until its screen is opened.
+    *host.state.season.lock().await = None;
+    host.companion.league_switched().await;
+
+    let season = next_of(&mut socket, "season-updated").await;
+    assert!(season["payload"].is_null(), "{season}");
+    let first = next_of(&mut socket, "shared-chat").await;
+    let second = next_of(&mut socket, "shared-chat").await;
+    for thread in [&first, &second] {
+        assert_eq!(thread["payload"]["league_id"], "league-1", "{thread}");
+    }
+    let mut screens = vec![
+        first["payload"]["screen"].as_str().unwrap_or_default(),
+        second["payload"]["screen"].as_str().unwrap_or_default(),
+    ];
+    screens.sort_unstable();
+    assert_eq!(screens, ["draft", "season"]);
 }

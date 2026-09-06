@@ -1,21 +1,22 @@
 import { Suspense, useState } from "react";
 import { api } from "./api";
+import { headerSubtitle } from "./appSubtitle";
 import { useAppVersion } from "./appVersion";
 import { setAvatarMode, useAvatarMode } from "./avatars";
 import { MAX_RECONNECT_ATTEMPTS, useDraftSession } from "./draftSession";
 import { useMarkDrafted } from "./markDrafted";
 import { usePickChime } from "./pickChime";
-import { setChime, setScreen, useChime, useScreen } from "./prefs";
+import { setChime, setScreen, useChime, useScreen, type Screen } from "./prefs";
 import { importSecondOpinion } from "./secondOpinionImport";
 import { clearFollow, readFollow, useCompanionEnabled, useFollowStatus } from "./companion";
 import { useToast } from "./toast";
 import { buildSettingsRows } from "./settingsRows";
 import { useSeasonSession } from "./session";
-import type { SeasonView } from "./season-types";
 import type { DraftView } from "./types";
 import { Header } from "./components/Header";
 import { Chat, DraftScreen, ScreenFallback, SeasonScreen } from "./components/lazyScreens";
 import { LaunchScreen, Setup } from "./components/Panels";
+import { HostWaiting } from "./components/SetupScreens";
 import { LeaguePicker } from "./components/LeaguePicker";
 import { YahooConnect } from "./components/YahooConnect";
 import { ConfirmDialog, Toast } from "./components/Overlays";
@@ -23,7 +24,7 @@ import { CompanionPanel } from "./components/CompanionPanel";
 import { Diagnostics } from "./components/Diagnostics";
 import { JoinHost } from "./components/JoinHost";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { ordinal, pickLabel, problem, scoringFormat } from "./format";
+import { pickLabel, problem, scoringFormat } from "./format";
 import { cycleThemePreference, useAppliedTheme } from "./theme";
 import { useYahooStatus } from "./yahoo";
 // Only the sheets the shell itself paints with. The screen-specific ones are
@@ -39,7 +40,7 @@ import "./yahoo.css";
 
 export default function App() {
   // Remembered between sessions, along with the rest of the preferences.
-  const screen = useScreen();
+  const savedScreen = useScreen();
   const avatars = useAvatarMode();
   // Read once, as the window opens: `api` chose its backend off the same
   // record, so a change to it mid-session would leave the two disagreeing.
@@ -92,6 +93,11 @@ export default function App() {
     refreshData,
   } = useDraftSession(showToast);
 
+  // The season screen reads Sleeper's endpoints, so on a Yahoo league it can
+  // only fail, forever. The header disables the button, and a remembered
+  // "season" is read as the draft board until the league changes.
+  const screen: Screen = view?.league.platform === "yahoo" ? "draft" : savedScreen;
+
   // The season screen's own data lifecycle: loads on first open, polls while
   // it is showing, and knows how to retry itself.
   const {
@@ -109,7 +115,12 @@ export default function App() {
     cancel: cancelDraft,
     confirmDraft,
     drafting,
-  } = useMarkDrafted(applyView, showToast, follow?.host_name ?? null);
+  } = useMarkDrafted(
+    applyView,
+    showToast,
+    follow?.host_name ?? null,
+    view?.league.league_id ?? null,
+  );
   // Asked once for the settings row and the picker's Yahoo lookup; the
   // connect dialog hands back every newer answer it is given.
   const yahoo = useYahooStatus();
@@ -154,7 +165,36 @@ export default function App() {
     }
   };
 
+  // Every screen is built against the host's data, so going home is a reload
+  // rather than a state change — the same way joining was. The settings row
+  // and the "Pair again" the header offers a revoked follower are one path.
+  const leaveHost = () => {
+    clearFollow();
+    window.location.reload();
+  };
+
+  // The league the user actually came from: the one on screen when Settings
+  // opened this form, else the saved one being restored. `restoring` alone
+  // named the launch-time league after a switch.
+  const cameFrom = view?.league.name ?? restoring?.name ?? "";
+
   if (showSetup) {
+    // A follower's league is whatever the host has open: the Sleeper form,
+    // Yahoo and Join would all be refused, so it gets a wait and a way out.
+    if (follow !== null) {
+      return (
+        <div className="app">
+          <HostWaiting
+            hostName={follow.host_name}
+            onRetry={() => {
+              setShowSetup(false);
+              retry();
+            }}
+            onLeaveHost={leaveHost}
+          />
+        </div>
+      );
+    }
     return (
       <div className="app">
         {setupFromLaunch && (
@@ -169,13 +209,11 @@ export default function App() {
               setShowSetup(false);
             }}
           >
-            Back to{" "}
-            {restoring?.name === undefined || restoring.name === ""
-              ? "the saved league"
-              : restoring.name}
+            {cameFrom === "" ? "Back" : `Back to ${cameFrom}`}
           </button>
         )}
         <Setup
+          activeLeagueId={view?.league.league_id ?? null}
           onReady={enterLeague}
           onConnectYahoo={() => setYahooOpen(true)}
           onJoinHost={() => setJoinOpen(true)}
@@ -224,6 +262,8 @@ export default function App() {
             setSetupFromLaunch(true);
             setShowSetup(true);
           }}
+          hostName={follow?.host_name ?? null}
+          onLeaveHost={follow === null ? undefined : leaveHost}
         />
       </div>
     );
@@ -232,20 +272,7 @@ export default function App() {
   // ---------- the app ----------
 
   const d = view.draft;
-  const subtitle =
-    screen === "season"
-      ? season === null
-        ? `${view.league.season} season`
-        : `Week ${season.week} · ${myRecord(season)}`
-      : `Round ${d.current_round} of ${d.rounds} · ${d.total_picks_made} picks in`;
-
-  // Every screen is built against the host's data, so going home is a reload
-  // rather than a state change — the same way joining was. The settings row
-  // and the "Pair again" the header offers a revoked follower are one path.
-  const leaveHost = () => {
-    clearFollow();
-    window.location.reload();
-  };
+  const subtitle = headerSubtitle(screen, view, season);
 
   const settingsRows = buildSettingsRows({
     view,
@@ -339,6 +366,7 @@ export default function App() {
             meta={`${d.teams}-team ${scoringFormat(view.league.scoring_settings.rec)} · ${d.rounds} rounds${d.manual_picks_active ? " · manual picks active" : ""}`}
             screen={screen}
             onScreen={setScreen}
+            platform={view.league.platform}
             polling={polling}
             pollHealth={pollHealth}
             onRefreshPicks={() => void refreshPicks()}
@@ -368,14 +396,16 @@ export default function App() {
             />
           )}
 
+          {/* Keyed per screen: one reused instance kept the season screen's
+              crash on screen after switching to the draft, and back. */}
           {screen === "draft" ? (
-            <ErrorBoundary>
+            <ErrorBoundary key="draft">
               <Suspense fallback={<ScreenFallback />}>
                 <DraftScreen view={view} busy={busy} onDraft={askToDraft} />
               </Suspense>
             </ErrorBoundary>
           ) : season !== null ? (
-            <ErrorBoundary>
+            <ErrorBoundary key="season">
               <Suspense fallback={<ScreenFallback />}>
                 <SeasonScreen view={season} pollHealth={seasonPollHealth} />
               </Suspense>
@@ -465,10 +495,4 @@ export default function App() {
       )}
     </div>
   );
-}
-
-function myRecord(season: SeasonView): string {
-  const mine = season.standings.find((s) => s.is_mine);
-  if (mine === undefined) return `${season.standings.length} teams`;
-  return `${mine.record} · ${ordinal(mine.seed)} of ${season.standings.length}`;
 }

@@ -337,8 +337,9 @@ fn the_rosters_resource_names_every_teams_keepers_in_one_payload() {
         .collect();
     assert_eq!(
         kept[0],
-        ("449.p.30977", Some(false)),
-        "Yahoo's empty keeper object means 'this league keeps players and he is not one'"
+        ("449.p.30977", None),
+        "Yahoo's all-null keeper object is on every roster row of every league; \
+         reading it as 'not a keeper' switched the app's own keeper inference off"
     );
     assert_eq!(
         kept[1],

@@ -95,25 +95,9 @@ fn every_field_of_a_paired_device_survives_the_round_trip() {
 }
 
 #[test]
-/// The failure this prevents: a device token, which is a bearer token for the
-/// whole read API, sitting in a file anything running as the user can read.
-fn saving_puts_no_token_or_code_in_a_file_in_the_data_directory() {
-    let scratch = scratch("no-plaintext");
-    save(scratch.store.as_ref(), &sample());
-    assert!(
-        !contains_anywhere(&scratch.data_dir, "tok"),
-        "a device token was written into the data directory"
-    );
-    assert!(
-        !contains_anywhere(&scratch.data_dir, "424242"),
-        "the pairing code was written into the data directory"
-    );
-}
-
-#[test]
 /// What an upgrading user gets: the phone paired against the old build stays
 /// paired, and the plaintext file it was paired through is gone for good.
-fn an_old_plaintext_file_is_moved_into_the_store_and_deleted() {
+fn an_old_plaintext_file_is_moved_into_the_store_and_no_token_or_code_stays_on_disk() {
     let scratch = scratch("migrate");
     let path = legacy_path_in(&scratch.data_dir);
     std::fs::write(
@@ -125,12 +109,30 @@ fn an_old_plaintext_file_is_moved_into_the_store_and_deleted() {
     let first = load(scratch.store.as_ref(), &scratch.data_dir).expect("the old file is read");
     assert_eq!(first.devices[0].token, "tok");
     assert!(!path.exists(), "the plaintext file outlived the migration");
-    assert!(!contains_anywhere(&scratch.data_dir, "tok"));
+    // The failure this prevents: a device token, which is a bearer token for
+    // the whole read API, and the code, left in any file under the data
+    // directory anything running as the user can read. This walk is the one
+    // that can fail: the migration is the only path that ever wrote there.
+    assert!(
+        !contains_anywhere(&scratch.data_dir, "tok"),
+        "a device token is still on disk in the data directory"
+    );
+    assert!(
+        !contains_anywhere(&scratch.data_dir, "424242"),
+        "the pairing code is still on disk in the data directory"
+    );
+    // A later save must not bring the file back either.
+    let mut changed = sample();
+    changed.code = "535353".to_string();
+    save(scratch.store.as_ref(), &changed);
+    assert!(!path.exists(), "a save recreated the plaintext file");
+    assert!(!contains_anywhere(&scratch.data_dir, "535353"));
 
     // The second construction is the restart after the upgrade: there is no
-    // file left to read it out of, so it has to come back from the store.
+    // file left to read it out of, so it has to come back from the store,
+    // as the last save left it.
     let again = load(scratch.store.as_ref(), &scratch.data_dir).expect("the store kept it");
-    assert_eq!(again.code, "424242");
+    assert_eq!(again.code, "535353");
     assert_eq!(again.devices[0].token, "tok");
 }
 

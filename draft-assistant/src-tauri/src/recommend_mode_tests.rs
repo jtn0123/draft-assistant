@@ -53,6 +53,37 @@ fn upside_takes_the_swingier_of_two_identical_players() {
 }
 
 #[test]
+fn upside_charges_a_player_the_market_likes_more_than_this_board_does() {
+    // The market-disagreement term was clamped to minus four and then gated
+    // on being at least plus one, so a player drafted well ahead of where
+    // this board ranks him, ceiling already in his price, cost upside mode
+    // nothing. The bet runs both ways or it is not a bet. Read as the gap
+    // between his upside and balanced cards, which is this one term.
+    let mut priced_in = player("priced_in", "WR", 30.0);
+    priced_in.player.adp = Some(20.0);
+    priced_in.player.overall_rank = 60;
+    let available = vec![priced_in];
+    let mine = roster(&["QB"]);
+    let rules = RosterRules::new(&slots());
+    let inputs = RecommendInputs::new(&available, Some(&mine), &rules, 2, 15, 20, 12);
+    let ctx = context(&inputs, HashMap::from([("QB", 1)]));
+    let balanced = score_candidate(&ctx, &available[0], Mode::Balanced).expect("a receiver");
+    let upside = score_candidate(&ctx, &available[0], Mode::Upside).expect("a receiver");
+    assert!(
+        (upside.total - balanced.total + 4.0).abs() < 1e-9,
+        "the market's favourite moved upside by {}",
+        upside.total - balanced.total
+    );
+    let reasons = upside.into_reasons();
+    assert!(
+        reasons
+            .iter()
+            .any(|r| r == "market has him 40 spots ahead of this board"),
+        "{reasons:?}"
+    );
+}
+
+#[test]
 fn upside_will_take_a_bench_body_late_where_balanced_will_not() {
     // Last two rounds, both flex slots long since filled. Balanced marks the
     // depth pick down and takes the safe body; upside pays the smaller
@@ -107,6 +138,42 @@ fn safe_mode_penalises_a_reach_and_not_a_bargain() {
     assert!(
         picked_reach.is_none() || !picked_reach.unwrap().contains("a reach"),
         "{recs:?}"
+    );
+}
+
+#[test]
+fn safe_mode_notices_a_reach_of_a_round_and_not_only_of_two() {
+    // The reach term woke at twenty-five picks ahead of ADP while the
+    // bargain term woke at eight past it. Safe mode, whose promise is to
+    // stay near the market, said nothing about pick 20 spent on a player
+    // the market takes at 35: a round and a quarter early, in silence.
+    let mut early = player("early", "WR", 30.0);
+    early.player.adp = Some(35.0);
+    let available = vec![early];
+    let mine = roster(&["QB"]);
+    let rules = RosterRules::new(&slots());
+    let inputs = RecommendInputs::new(&available, Some(&mine), &rules, 2, 15, 20, 12);
+    let ctx = context(&inputs, HashMap::from([("QB", 1)]));
+    let safe = score_candidate(&ctx, &available[0], Mode::Safe).expect("a receiver");
+    let reasons = safe.into_reasons();
+    assert!(
+        reasons
+            .iter()
+            .any(|r| r.starts_with("ahead of market: 15 picks")),
+        "{reasons:?}"
+    );
+    // And a pick a few spots before ADP is still the market, not a reach.
+    let mut near = player("near", "WR", 30.0);
+    near.player.adp = Some(28.0);
+    let available = vec![near];
+    let inputs = RecommendInputs::new(&available, Some(&mine), &rules, 2, 15, 20, 12);
+    let ctx = context(&inputs, HashMap::from([("QB", 1)]));
+    let reasons = score_candidate(&ctx, &available[0], Mode::Safe)
+        .expect("a receiver")
+        .into_reasons();
+    assert!(
+        !reasons.iter().any(|r| r.starts_with("ahead of market")),
+        "{reasons:?}"
     );
 }
 
@@ -349,4 +416,34 @@ fn the_reasons_are_ordered_by_what_they_were_worth() {
         reasons[0].contains("empty slot") || reasons[0].contains("starter slot"),
         "{reasons:?}"
     );
+}
+
+#[test]
+fn the_vorp_line_stays_in_the_stats_and_off_the_reason_list() {
+    // The card prints the VORP in its stats line and then has room for two
+    // reasons. The VORP term is the largest on nearly every card, so the
+    // first of those two lines was the stats line said again, and the
+    // reason that actually separated two candidates was pushed off the card.
+    let available = vec![player("wr", "WR", 90.0)];
+    let mine = roster(&["QB", "RB"]);
+    let recs = recs(
+        &available,
+        Some(&mine),
+        &RosterRules::new(&slots()),
+        3,
+        15,
+        30,
+    );
+    for rec in &recs {
+        assert!(
+            !rec.reasons.iter().any(|r| r.contains("VORP")),
+            "{}: {:?}",
+            rec.mode,
+            rec.reasons
+        );
+        assert!(!rec.reasons.is_empty(), "{}: no reason left", rec.mode);
+        // The score still counts it: a 90-VORP body is worth 54 before
+        // anything else is said about him.
+        assert!(rec.score > 40.0, "{}: {}", rec.mode, rec.score);
+    }
 }

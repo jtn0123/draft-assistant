@@ -1,13 +1,18 @@
 //! Keychain argument construction only. Nothing here runs /usr/bin/security.
 
 use draft_assistant_lib::secrets::{args_for, available, Op};
+use draft_assistant_lib::yahoo_secrets::hex_of;
+
+const KEY: &str = "sk-ant-api03-not-a-real-key";
 
 #[test]
-fn store_builds_an_upserting_add_command_that_reads_the_key_from_stdin() {
-    // No key in argv: `-w` with no value makes `security` read it from stdin,
-    // which keeps it out of `ps` output.
+fn store_builds_an_upserting_add_command_with_the_key_hex_encoded_in_argv() {
+    // Not the stdin password prompt: that keeps 128 bytes and drops the rest
+    // without a word. Hex rather than the text, so `find-generic-password -w`
+    // prints back plain ASCII whatever the key holds and `ps` never shows the
+    // key as written.
     assert_eq!(
-        args_for(Op::Store),
+        args_for(Op::Store, Some(KEY)),
         [
             "add-generic-password",
             "-U",
@@ -16,16 +21,17 @@ fn store_builds_an_upserting_add_command_that_reads_the_key_from_stdin() {
             "-a",
             "anthropic-api-key",
             "-w",
+            &hex_of(KEY),
         ]
     );
 }
 
 #[test]
-fn no_operation_can_put_a_secret_in_the_argument_list() {
+fn no_operation_can_put_a_secret_in_the_argument_list_as_text() {
     for op in [Op::Store, Op::Load, Op::Clear] {
-        let args = args_for(op);
+        let args = args_for(op, Some(KEY));
         assert!(
-            args.iter().all(|a| !a.starts_with("sk-")),
+            args.iter().all(|a| !a.contains("sk-")),
             "{op:?} leaked a key: {args:?}"
         );
     }
@@ -34,7 +40,7 @@ fn no_operation_can_put_a_secret_in_the_argument_list() {
 #[test]
 fn load_requests_only_the_password() {
     assert_eq!(
-        args_for(Op::Load),
+        args_for(Op::Load, None),
         [
             "find-generic-password",
             "-s",
@@ -49,7 +55,7 @@ fn load_requests_only_the_password() {
 #[test]
 fn clear_deletes_by_service_and_account_without_a_password() {
     assert_eq!(
-        args_for(Op::Clear),
+        args_for(Op::Clear, None),
         [
             "delete-generic-password",
             "-s",
@@ -60,11 +66,11 @@ fn clear_deletes_by_service_and_account_without_a_password() {
     );
 }
 
-/// `available()` is a promise about `run()`: everywhere it says yes, the app
-/// goes on to spawn `/usr/bin/security` by that exact hardcoded path. The
-/// previous test here recomputed the function's own body and compared the two,
-/// which passed for any body at all -- including one that named a path nothing
-/// spawns. This checks the coupling instead.
+/// `available()` is a promise about the Keychain store: everywhere it says
+/// yes, the app goes on to spawn `/usr/bin/security` by that exact hardcoded
+/// path. The previous test here recomputed the function's own body and
+/// compared the two, which passed for any body at all -- including one that
+/// named a path nothing spawns. This checks the coupling instead.
 #[test]
 fn saying_the_keychain_is_available_means_the_binary_it_will_spawn_is_really_there() {
     if !available() {

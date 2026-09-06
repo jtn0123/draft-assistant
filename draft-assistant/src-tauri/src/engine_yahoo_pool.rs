@@ -45,14 +45,19 @@ pub(crate) const POOL_RESUME_MAX_AGE_SECS: u64 = 3_600;
 ///
 /// Yahoo publishes no total, so the check is against the walk's own
 /// arithmetic: every page but the last was a full one, so a walk that has
-/// reached offset N is holding at least N minus one page of rows. Fewer than
-/// that and the cache this walk resumed from was not describing this pool —
-/// which is exactly what a stale partial looks like once Yahoo has re-ordered
-/// underneath it.
+/// reached offset N was sent at least N minus one page of rows. The rows
+/// the parser dropped count as read: Yahoo said it sent them, the walk moved
+/// past them, and they are in `unreadable`. Only rows that are neither held
+/// nor accounted for mean the cache this walk resumed from was not
+/// describing this pool — which is exactly what a stale partial looks like
+/// once Yahoo has re-ordered underneath it. Before `unreadable` was kept, a
+/// walk that had dropped more than a page's worth of rows failed this check
+/// on every resume and threw away pages it had paid the throttle for.
 fn offsets_disagree(pool: &PlayerPool) -> Option<String> {
     let claimed = pool.next_start.saturating_sub(PAGE);
     let held = pool.players.len() as u32;
-    (held < claimed).then(|| {
+    let accounted = held.saturating_add(pool.unreadable);
+    (accounted < claimed).then(|| {
         format!(
             "the Yahoo player pool came back with {held} players where the {} pages read \
              should have held at least {claimed}; it is loading again from the start on the \
@@ -150,5 +155,45 @@ impl Engine {
             .await
             .map(|(_, pool)| pool.players)
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::offsets_disagree;
+    use crate::yahoo::PAGE;
+    use crate::yahoo_pool::PlayerPool;
+    use crate::yahoo_types::YahooPlayer;
+
+    fn pool(held: u32, next_start: u32, unreadable: u32) -> PlayerPool {
+        PlayerPool {
+            players: (0..held)
+                .map(|id| YahooPlayer {
+                    player_key: format!("449.p.{id}"),
+                    ..YahooPlayer::default()
+                })
+                .collect(),
+            next_start,
+            complete: false,
+            unreadable,
+        }
+    }
+
+    #[test]
+    fn a_walk_that_dropped_more_than_a_page_of_unreadable_rows_is_not_called_a_hole() {
+        // Three full pages read, 30 of the 75 rows had no player key. The
+        // walk is holding 45 and knows about the other 30, which is the
+        // whole 75 minus nothing; the old check saw 45 < 50 and restarted.
+        let dropped = pool(45, PAGE * 3, 30);
+        assert_eq!(offsets_disagree(&dropped), None);
+    }
+
+    #[test]
+    fn a_cache_missing_rows_it_never_accounted_for_still_restarts() {
+        let short = pool(2, PAGE * 3, 0);
+        let warning = offsets_disagree(&short).expect("two rows for three pages is a hole");
+        assert!(warning.contains("from the start"), "{warning}");
+        // Unreadable rows explain some of the gap, not all of it.
+        assert!(offsets_disagree(&pool(2, PAGE * 3, 10)).is_some());
     }
 }

@@ -14,6 +14,8 @@ use std::collections::{HashMap, HashSet};
 mod demand;
 #[path = "recommend_injury.rs"]
 mod injury;
+#[path = "recommend_strategy.rs"]
+mod strategy;
 
 use demand::dedicated_starters;
 pub(crate) use demand::{starters_phrase, starting_demand};
@@ -29,6 +31,11 @@ fn league_scaled(ctx: &Context, picks_at_twelve: f64) -> f64 {
 pub(crate) struct Score {
     pub total: f64,
     reasons: Vec<(String, f64)>,
+    /// The VORP term: counted in the total and in `weights`, never on the
+    /// card. The card prints the VORP in its stats line already, and with
+    /// two reason lines to spend, the first one was that number restated on
+    /// every card the panel ever showed.
+    in_stats: Option<(String, f64)>,
 }
 
 impl Score {
@@ -36,6 +43,7 @@ impl Score {
         Score {
             total: 0.0,
             reasons: Vec::new(),
+            in_stats: None,
         }
     }
 
@@ -44,12 +52,20 @@ impl Score {
         Score {
             total: 0.0,
             reasons: vec![("best available (fallback)".into(), 0.0)],
+            in_stats: None,
         }
     }
 
     fn add(&mut self, delta: f64, reason: impl Into<String>) {
         self.total += delta;
         self.reasons.push((reason.into(), delta));
+    }
+
+    /// A term the stats line already shows, so it moves the total and stays
+    /// off the reason list.
+    fn add_in_stats(&mut self, delta: f64, reason: impl Into<String>) {
+        self.total += delta;
+        self.in_stats = Some((reason.into(), delta));
     }
 
     /// What each reason was worth, for the test that the shown reasons and
@@ -59,12 +75,16 @@ impl Score {
     /// back up to its score is a card the user cannot audit.
     #[cfg(test)]
     pub(crate) fn weights(&self) -> Vec<f64> {
-        self.reasons.iter().map(|(_, delta)| *delta).collect()
+        self.in_stats
+            .iter()
+            .chain(self.reasons.iter())
+            .map(|(_, delta)| *delta)
+            .collect()
     }
 
-    /// Biggest mover first. The VORP line leads only when it is the biggest
-    /// mover, which on a late-round pick between two negative-VORP bodies it
-    /// is not — there the depth and the bye are the whole story.
+    /// Biggest mover first, the VORP term left to the stats line. It used to
+    /// be on the list and, being the largest term on most cards, was the
+    /// first of the two lines shown: a number the card had already printed.
     pub fn into_reasons(mut self) -> Vec<String> {
         self.reasons.sort_by(|a, b| b.1.abs().total_cmp(&a.1.abs()));
         self.reasons.into_iter().map(|(text, _)| text).collect()
@@ -129,7 +149,7 @@ pub(crate) fn score_candidate(ctx: &Context, a: &AvailablePlayer, mode: Mode) ->
     let mut score = Score::new();
     // Fixed scale: 0.6 pts of score per VORP point. Normalizing by the
     // board-best VORP explodes late in drafts when that value is small.
-    score.add(
+    score.add_in_stats(
         p.vorp * 0.6,
         format!("{:.0} VORP under league scoring", p.vorp),
     );
@@ -146,11 +166,11 @@ pub(crate) fn score_candidate(ctx: &Context, a: &AvailablePlayer, mode: Mode) ->
     discipline(ctx, a, &mut score)?;
     scarcity(a, tier_left, &mut score);
     market(ctx, a, mode, &mut score);
-    strategy(ctx, a, tier_left, &mut score);
+    strategy::strategy(ctx, a, tier_left, &mut score);
     injury::injury(a, ctx.inputs, mode, &mut score);
 
     if mode == Mode::Upside {
-        upside(ctx, a, &mut score);
+        strategy::upside(ctx, a, &mut score);
     }
     Some(score)
 }
@@ -366,7 +386,12 @@ fn market(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
     if let Some(adp) = p.adp {
         let past_adp = ctx.inputs.market_pick as f64 - adp;
         let falling = league_scaled(ctx, 8.0);
-        let ahead = league_scaled(ctx, 25.0);
+        // A reach is noticed a round early, as a bargain is noticed two
+        // thirds of a round late. At twenty-five the term slept through two
+        // full rounds of reaching, and safe mode, whose whole promise is to
+        // stay near the market, said nothing about a pick a round and a
+        // half before its ADP.
+        let ahead = league_scaled(ctx, 12.0);
         // Both terms are worth what the distance is worth, capped. Flat
         // numbers here meant a man nine picks past his ADP and a man
         // sixty-two picks past him got the same five points, under a reason
@@ -414,82 +439,5 @@ fn market(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
                 format!("{share:.0}% of his points are yardage bonuses"),
             );
         }
-    }
-}
-
-/// The strategy layer: runs, byes and handcuffs. Small numbers on purpose —
-/// these are tie-breakers between players the rest of the score likes equally,
-/// not reasons to take somebody the board does not rate.
-fn strategy(ctx: &Context, a: &AvailablePlayer, tier_left: usize, score: &mut Score) {
-    let p = &a.player;
-    // A run only matters if the tier it is eating is nearly gone. A run on a
-    // position with forty bodies left is other people making a mistake.
-    if let Some(run) = ctx.inputs.position_run {
-        if run.position == p.position && tier_left <= 3 {
-            score.add(
-                4.0,
-                format!(
-                    "run on {}: {} of the last {} picks, {tier_left} left in tier {}",
-                    run.position, run.count, run.window, p.tier
-                ),
-            );
-        }
-    }
-    // Byes: a starting lineup with four men off in week 9 loses week 9.
-    if let Some(bye) = p.bye_week {
-        let stacked = ctx.inputs.my_byes.get(&bye).copied().unwrap_or(0);
-        if stacked > 0 {
-            let penalty = (3.0 * stacked as f64).min(9.0);
-            score.add(
-                -penalty,
-                format!("week {bye} bye, shared with {stacked} of your starters"),
-            );
-        }
-    }
-    // Handcuff: the back behind a back I already own. Approximated by the NFL
-    // team, which is all the board knows — a depth chart is not something
-    // Sleeper's projections carry.
-    if p.position == "RB" {
-        if let Some(team) = p.team.as_deref() {
-            if ctx.rb_teams.contains(team) {
-                score.add(5.0, format!("handcuffs the {team} back you already have"));
-            }
-        }
-    }
-}
-
-/// Upside: pay for the players whose ceiling is real.
-///
-/// Week-to-week variance is the honest measure, and it comes off the same
-/// weekly projections the board already downloads for yardage bonuses. Where
-/// there are not enough weeks to measure, the market disagreement stands in:
-/// a player this board ranks well ahead of his ADP is one whose value is not
-/// yet priced, which is the same bet in a different currency.
-fn upside(ctx: &Context, a: &AvailablePlayer, score: &mut Score) {
-    let p = &a.player;
-    if let (Some(cv), Some(median)) = (p.weekly_cv, ctx.median_cv) {
-        // How much swingier than the middle of this board he is.
-        let ratio = cv / median;
-        let delta = ((ratio - 1.0) * 4.0).clamp(-6.0, 10.0);
-        if delta.abs() >= 0.5 {
-            score.add(
-                delta,
-                format!("week to week he swings {ratio:.1}x what the middle of this board does"),
-            );
-        }
-    }
-    if let (Some(adp), rank) = (p.adp, p.overall_rank) {
-        // Positive when the market drafts him later than this board ranks him.
-        let disagreement = adp - rank as f64;
-        let delta = (disagreement * 0.12).clamp(-4.0, 8.0);
-        if delta >= 1.0 {
-            score.add(
-                delta,
-                format!("board has him {disagreement:.0} spots ahead of the market"),
-            );
-        }
-    }
-    if p.tier <= 2 && ctx.rounds_left <= 8 {
-        score.add(3.0, format!("still a tier {} body this late", p.tier));
     }
 }

@@ -14,6 +14,7 @@ export function Setup({
   onReady,
   onConnectYahoo,
   onJoinHost,
+  activeLeagueId = null,
 }: {
   onReady: (view: DraftView) => void;
   /** Open the Yahoo connect dialog instead. A Yahoo player has no Sleeper
@@ -24,9 +25,14 @@ export function Setup({
    *  loading a league here. Someone handed a second screen an app with no
    *  league of its own used to have to set one up before they could watch. */
   onJoinHost: () => void;
+  /** The league already on screen, when Settings opened this form to change
+   *  the username. Prefilled, so a username can be saved on its own: the
+   *  submit needed an id typed in, and the row that led here gave nothing to
+   *  type it for. Null on first launch, where there is no league yet. */
+  activeLeagueId?: string | null;
 }) {
   const [username, setUsername] = useState("");
-  const [leagueId, setLeagueId] = useState("");
+  const [leagueId, setLeagueId] = useState(activeLeagueId ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +55,9 @@ export function Setup({
   };
 
   const canSubmit = leagueId.trim() !== "" && busy === null;
+  // Re-loading the league on screen is how a new username takes effect, but
+  // "Load league" over a field that already names it reads as a second copy.
+  const saving = activeLeagueId !== null && leagueId.trim() === activeLeagueId;
 
   return (
     // A form, so Enter in either field loads the league. Two text inputs and
@@ -88,7 +97,7 @@ export function Setup({
       </label>
       <div className="launch-actions">
         <button type="submit" className="btn-primary card-screen-submit" disabled={!canSubmit}>
-          {busy ?? "Load league"}
+          {busy ?? (saving ? "Save" : "Load league")}
         </button>
         <button
           type="button"
@@ -103,7 +112,7 @@ export function Setup({
         </button>
       </div>
       <span className="muted small">
-        First load pulls league, players and projections — about 10 seconds.
+        First load pulls league, players and projections, about 10 seconds.
       </span>
       {/* Announced: the button goes back to saying "Load league" and the only
           other thing that changed was a line of red text further down. */}
@@ -127,6 +136,8 @@ export function LaunchScreen({
   lastError,
   onRetry,
   onDifferentLeague,
+  hostName = null,
+  onLeaveHost,
 }: {
   leagueName: string | null;
   leagueId: string | null;
@@ -138,9 +149,16 @@ export function LaunchScreen({
   lastError: string | null;
   onRetry: () => void;
   onDifferentLeague: () => void;
+  /** The host this window follows, when it is a follower. It is waiting on
+   *  that Mac, not on Sleeper or Yahoo, and the card says so. */
+  hostName?: string | null;
+  /** Stop following the host. Offered in place of "Enter a different league",
+   *  which a follower cannot do: its league is whatever the host has open. A
+   *  follower whose host stopped answering had no way off this card at all. */
+  onLeaveHost?: () => void;
 }) {
   const reconnecting = lastError === null;
-  const service = platformName(platform);
+  const service = hostName ?? platformName(platform);
   return (
     <div className="card-screen">
       <h1>Draft Assistant</h1>
@@ -149,7 +167,7 @@ export function LaunchScreen({
         <span>
           {reconnecting
             ? `Connecting to ${service}`
-            : `Reconnecting to ${service} — attempt ${attempt} of ${maxAttempts}`}
+            : `Reconnecting to ${service}, attempt ${attempt} of ${maxAttempts}`}
         </span>
       </div>
       <span className="muted small launch-detail">
@@ -172,11 +190,59 @@ export function LaunchScreen({
           <button type="button" className="btn-primary" onClick={onRetry}>
             Try again
           </button>
-          <button type="button" className="btn-ghost" onClick={onDifferentLeague}>
-            Enter a different league
-          </button>
+          {onLeaveHost === undefined ? (
+            <button type="button" className="btn-ghost" onClick={onDifferentLeague}>
+              Enter a different league
+            </button>
+          ) : (
+            <button type="button" className="btn-ghost" onClick={onLeaveHost}>
+              Leave host
+            </button>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------- a follower whose host has nothing open ----------
+
+/**
+ * What a follower sees when the host has no league loaded.
+ *
+ * The shell used to fall through to the first-launch form here, whose every
+ * button (a Sleeper league, Yahoo, joining a host) the follower's backend
+ * refuses by name, and which had no "Leave host" anywhere on it. The two
+ * things that can actually happen next are the host opening a league and
+ * this Mac going back to its own.
+ */
+export function HostWaiting({
+  hostName,
+  onRetry,
+  onLeaveHost,
+}: {
+  hostName: string;
+  onRetry: () => void;
+  onLeaveHost: () => void;
+}) {
+  return (
+    <div className="card-screen">
+      <h1>Draft Assistant</h1>
+      <div className="launch-status">
+        <span className="launch-dot" />
+        <span>Following {hostName}</span>
+      </div>
+      <span className="muted small launch-detail">
+        {hostName} has no league loaded. This screen shows whatever the host opens.
+      </span>
+      <div className="launch-actions">
+        <button type="button" className="btn-primary" onClick={onRetry}>
+          Try again
+        </button>
+        <button type="button" className="btn-ghost" onClick={onLeaveHost}>
+          Leave host
+        </button>
+      </div>
     </div>
   );
 }

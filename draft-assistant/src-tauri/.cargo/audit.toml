@@ -1,0 +1,17 @@
+# Read by `cargo audit` when run from src-tauri/ (`npm run audit:cargo`, and
+# the CI verify job). Unsound advisories fail the run like vulnerabilities do;
+# the gtk-rs "unmaintained" ones stay warnings, they arrive by way of Tauri's
+# Linux backend and there is nothing this crate can do about them.
+[output]
+deny = ["unsound"]
+# cargo-audit refuses an [output] table without these two spelled out.
+quiet = false
+show_tree = true
+
+[advisories]
+ignore = [
+  # glib 0.18 VariantStrIter unsoundness. glib is a Linux-only dependency of
+  # Tauri's GTK backend, never linked on macOS, and Tauri 2 has not moved off
+  # gtk-rs 0.18. Drop this line when `cargo audit` stops reporting it.
+  "RUSTSEC-2024-0429",
+]

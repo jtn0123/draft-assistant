@@ -85,7 +85,7 @@ fn apply_refresh(
     now: u64,
 ) -> Result<(), String> {
     let mut errors = Vec::new();
-    match matchups {
+    match refuse_empty(matchups, &season.matchups) {
         Ok(value) => {
             season.matchups = std::sync::Arc::new(value);
             season.sources.matchups.succeeded(now);
@@ -95,7 +95,7 @@ fn apply_refresh(
             season.sources.matchups.failed(error);
         }
     }
-    match scores {
+    match refuse_empty(scores, &season.scores) {
         Ok(value) => {
             season.scores = std::sync::Arc::new(value);
             season.sources.scores.succeeded(now);
@@ -105,7 +105,7 @@ fn apply_refresh(
             season.sources.scores.failed(error);
         }
     }
-    match rosters {
+    match refuse_empty(rosters, &season.rosters) {
         Ok(value) => {
             season.rosters = std::sync::Arc::new(value);
             season.sources.rosters.succeeded(now);
@@ -120,6 +120,25 @@ fn apply_refresh(
     }
     season.fetched_at = now;
     Ok(())
+}
+
+/// What a source says when it answered with nothing over data already held.
+pub const EMPTY_FEED: &str = "came back empty, keeping the rows already on screen";
+
+/// An empty list over a non-empty one is a lost response, not news.
+///
+/// Sleeper answers `null` for matchups, rosters and the scoreboard now and
+/// then, and `null` parses as an empty list. Applying it blanked the live
+/// season, every matchup row, every roster, every game, and stamped the
+/// source green while doing so, and the start/sit panel then read "your
+/// lineup is already optimal" off a matchup that no longer existed. The same
+/// guard the draft loop has had on its pick list (`EMPTY_PICKS`): the empty
+/// answer is refused, the old rows stand, and the source counts as failed.
+fn refuse_empty<T>(incoming: Result<Vec<T>, String>, held: &[T]) -> Result<Vec<T>, String> {
+    match incoming {
+        Ok(value) if value.is_empty() && !held.is_empty() => Err(EMPTY_FEED.to_string()),
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -193,6 +212,92 @@ mod tests {
         .expect("everything answered");
         assert_eq!(season.sources.matchups.error, None);
         assert_eq!(season.sources.matchups.last_success_secs, 1_060);
+    }
+
+    fn a_matchup(roster_id: u32) -> Matchup {
+        Matchup {
+            roster_id,
+            matchup_id: Some(1),
+            points: 10.0,
+            custom_points: None,
+            starters: None,
+            players: None,
+            players_points: None,
+        }
+    }
+
+    fn a_roster(roster_id: u32) -> Roster {
+        serde_json::from_value(serde_json::json!({ "roster_id": roster_id })).unwrap()
+    }
+
+    /// The bug: Sleeper's occasional `null` parsed as "no matchups", replaced
+    /// a week of live rows with nothing, and stamped the source green.
+    #[test]
+    fn a_null_payload_does_not_blank_the_live_season_or_turn_the_badge_green() {
+        let mut season = LoadedSeason::default();
+        apply_refresh(
+            &mut season,
+            Ok(vec![a_matchup(1), a_matchup(2)]),
+            Ok(Vec::new()),
+            Ok(vec![a_roster(1)]),
+            1_000,
+        )
+        .expect("a clean load");
+
+        apply_refresh(
+            &mut season,
+            Ok(Vec::new()),
+            Ok(Vec::new()),
+            Ok(Vec::new()),
+            1_030,
+        )
+        .expect("the scoreboard was empty before and still is, so one source answered");
+
+        assert_eq!(season.matchups.len(), 2, "the matchups were blanked");
+        assert_eq!(season.rosters.len(), 1, "the rosters were blanked");
+        assert_eq!(
+            season.sources.matchups.error.as_deref(),
+            Some(EMPTY_FEED),
+            "an empty answer over live rows is a failed refresh, not a green one"
+        );
+        assert_eq!(season.sources.matchups.last_success_secs, 1_000);
+        assert_eq!(season.sources.rosters.error.as_deref(), Some(EMPTY_FEED));
+        // Empty over empty is not a lost response: the scoreboard is allowed
+        // to be empty and stays green.
+        assert_eq!(season.sources.scores.error, None);
+        assert_eq!(season.sources.scores.last_success_secs, 1_030);
+    }
+
+    /// Three empty answers over a live season is a total outage, and the
+    /// staleness clock must say so rather than restart.
+    #[test]
+    fn three_empty_payloads_over_a_live_season_count_as_a_failed_refresh() {
+        let mut season = LoadedSeason::default();
+        apply_refresh(
+            &mut season,
+            Ok(vec![a_matchup(1)]),
+            Ok(vec![ScoreGame {
+                game_id: None,
+                status: None,
+                start_time: None,
+                week: None,
+                metadata: None,
+            }]),
+            Ok(vec![a_roster(1)]),
+            1_000,
+        )
+        .expect("a clean load");
+        let error = apply_refresh(
+            &mut season,
+            Ok(Vec::new()),
+            Ok(Vec::new()),
+            Ok(Vec::new()),
+            2_000,
+        )
+        .expect_err("nothing usable arrived");
+        assert!(error.contains(EMPTY_FEED), "{error}");
+        assert_eq!(season.fetched_at, 1_000);
+        assert_eq!(season.scores.len(), 1);
     }
 
     #[test]

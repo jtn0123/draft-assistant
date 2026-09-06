@@ -134,6 +134,58 @@ describe("following a host", () => {
   });
 });
 
+describe("a follower whose host has no league loaded", () => {
+  beforeEach(() => {
+    fakeStorage({ "da.screen": "draft", "da.companion.follow": FOLLOW });
+  });
+
+  const nothingOpen = { my_user_id: null, active_league_id: null, leagues: [] };
+
+  // The shell fell through to the first-launch form, whose every button the
+  // follower's backend refuses, and which had no "Leave host" anywhere on it.
+  it("waits for the host and offers Leave host, not the Sleeper form", async () => {
+    h.api.getConfig.mockResolvedValue(nothingOpen);
+    render(<App />);
+    expect(await screen.findByText(/Justin's Mac has no league loaded/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("League ID")).toBeNull();
+    expect(screen.getByRole("button", { name: "Leave host" })).toBeInTheDocument();
+  });
+
+  it("leaves the host from that card", async () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+    h.api.getConfig.mockResolvedValue(nothingOpen);
+    render(<App />);
+    await settle(() => {});
+    await settle(() => screen.getByRole("button", { name: "Leave host" }).click());
+    expect(localStorage.getItem("da.companion.follow")).toBeNull();
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it("lands on the board once the host has opened a league and Try again is pressed", async () => {
+    const view = draftFixture();
+    h.api.getConfig.mockResolvedValueOnce(nothingOpen).mockResolvedValue(restoringConfig(view));
+    h.api.addLeague.mockResolvedValue(view);
+    render(<App />);
+    await settle(() => {});
+    await settle(() => screen.getByRole("button", { name: "Try again" }).click());
+    expect(await screen.findByRole("heading", { name: view.league.name })).toBeInTheDocument();
+  });
+
+  it("offers Leave host on the launch card once the host stops answering", async () => {
+    const view = draftFixture();
+    h.api.getConfig.mockResolvedValue(restoringConfig(view));
+    h.api.addLeague.mockRejectedValue(new Error("Justin's Mac did not answer within 10 seconds"));
+    render(<App />);
+    expect(await screen.findByText(/Reconnecting to Justin's Mac/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Leave host" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Enter a different league" })).toBeNull();
+  });
+});
+
 describe("how the connection is doing", () => {
   beforeEach(() => {
     fakeStorage({ "da.screen": "draft", "da.companion.follow": FOLLOW });

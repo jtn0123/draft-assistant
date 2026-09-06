@@ -449,7 +449,7 @@ export function Chat({
             <span className="muted chat-foot">
               {model} · {note?.[1] ?? activeEffort} ·{" "}
               {settings?.provider === "claude_code" ? "via Claude Code" : "via the API"} · reads
-              your board, never writes to Sleeper
+              your board, never writes to your league
               {settings?.has_key === true && (
                 <>
                   {" · "}

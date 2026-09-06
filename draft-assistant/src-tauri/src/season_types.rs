@@ -91,6 +91,13 @@ pub struct LiveSection {
     pub next_kickoff_ms: Option<i64>,
     /// NFL teams idle this week; empty when no schedule has loaded.
     pub bye_teams: Vec<String>,
+    /// True when no legal lineup change is left this week: every set starter
+    /// is on the field, and every empty or bye slot has nobody on the bench
+    /// who could still legally fill it. Decided here rather than off the
+    /// scoreboard chips, which carry no entry for an empty or bye slot and so
+    /// read a lineup with a hole in it as locked while the swap to fill it
+    /// was still there to be made.
+    pub lineup_locked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -75,6 +75,41 @@ pub fn next_open_pick(picks: &[Pick], teams: u32, rounds: u32) -> Option<u32> {
     (1..=teams.saturating_mul(rounds)).find(|pick| !made.contains(pick))
 }
 
+/// The hole a partial `/picks` answer opened, if `next` is one: the pick
+/// number the clock would jump back to.
+///
+/// `/picks` drops a row from its answer now and then. Adopted as it stands,
+/// the first gap moves back to the missing pick, the banner names a manager
+/// who already picked, and every pick after the hole falls out of the
+/// activity feed until the next answer. So an answer whose open pick sits
+/// below the last one's is refused, the way an empty answer is.
+///
+/// Only a *hole* is refused, not a shorter list. A commissioner taking the
+/// last pick back also moves the clock backwards, and that answer has to be
+/// adopted or the board never updates again: it is told apart by having no
+/// made pick left beyond the new open pick. `keepers` names the picks that
+/// sit ahead of the clock by right and so are not evidence either way.
+pub fn rewound_to(
+    previous: &[Pick],
+    next: &[Pick],
+    teams: u32,
+    rounds: u32,
+    keepers: &HashSet<u32>,
+) -> Option<u32> {
+    let last_open = next_open_pick(previous, teams, rounds).unwrap_or(u32::MAX);
+    let open = next_open_pick(next, teams, rounds)?;
+    if open >= last_open {
+        return None;
+    }
+    let made_after_hole = next.iter().any(|pick| {
+        pick.pick_no > open
+            && pick.pick_no < last_open
+            && pick.is_keeper != Some(true)
+            && !keepers.contains(&pick.pick_no)
+    });
+    made_after_hole.then_some(open)
+}
+
 /// How much of a keeper judgement one snapshot of the pick list is allowed to
 /// make.
 ///
@@ -272,6 +307,53 @@ mod tests {
         assert_eq!(
             sorted(keeper_pick_nos(&flagged, 14, 15, KeeperEvidence::FlagOnly)),
             vec![200]
+        );
+    }
+
+    /// `/picks` answering without pick 37 of 50 moved the clock back to 37:
+    /// the banner named the manager who had made that pick a quarter of an
+    /// hour earlier, and picks 38..=50 dropped off the activity feed.
+    #[test]
+    fn a_partial_answer_that_opens_a_hole_behind_the_clock_is_refused() {
+        let before: Vec<Pick> = (1..=50).map(|n| pick(n, "drafted")).collect();
+        let holed: Vec<Pick> = before.iter().filter(|p| p.pick_no != 37).cloned().collect();
+        assert_eq!(
+            rewound_to(&before, &holed, 14, 15, &HashSet::new()),
+            Some(37)
+        );
+        // The same answer again, or a fuller one, is fine.
+        assert_eq!(rewound_to(&before, &before, 14, 15, &HashSet::new()), None);
+        let mut more = before.clone();
+        more.push(pick(51, "next"));
+        assert_eq!(rewound_to(&before, &more, 14, 15, &HashSet::new()), None);
+        // And a finished board that comes back finished is not a rewind.
+        let full: Vec<Pick> = (1..=4).map(|n| pick(n, "x")).collect();
+        assert_eq!(rewound_to(&full, &full, 2, 2, &HashSet::new()), None);
+    }
+
+    /// The rule must not refuse a commissioner's undo, or the board would
+    /// stop updating for the rest of the night: the last pick going away
+    /// leaves nothing made between the new clock and the old one.
+    #[test]
+    fn the_last_pick_being_taken_back_is_adopted_not_refused() {
+        let mut before: Vec<Pick> = (1..=50).map(|n| pick(n, "drafted")).collect();
+        before.push(keeper(177));
+        let undone: Vec<Pick> = before.iter().filter(|p| p.pick_no != 50).cloned().collect();
+        assert_eq!(rewound_to(&before, &undone, 14, 15, &HashSet::new()), None);
+
+        // Pick 50 is a keeper judged by position at load, unflagged, and the
+        // commissioner takes pick 49 back. The keeper is in the book beyond
+        // the new clock but it was never a made pick, so this is an undo
+        // too; only the memory of it says so.
+        let mut before: Vec<Pick> = (1..=50).map(|n| pick(n, "drafted")).collect();
+        before.push(keeper(177));
+        let remembered: HashSet<u32> = [50].into_iter().collect();
+        let undone: Vec<Pick> = before.iter().filter(|p| p.pick_no != 49).cloned().collect();
+        assert_eq!(rewound_to(&before, &undone, 14, 15, &remembered), None);
+        assert_eq!(
+            rewound_to(&before, &undone, 14, 15, &HashSet::new()),
+            Some(49),
+            "without the memory the keeper looks like a made pick beyond the hole"
         );
     }
 

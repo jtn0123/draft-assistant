@@ -26,6 +26,7 @@ pub mod engine_yahoo;
 pub mod engine_yahoo_keepers;
 pub mod engine_yahoo_pool;
 pub mod headshots;
+pub mod injury_class;
 pub mod keepers;
 pub mod league_ref;
 pub mod leagues;
@@ -124,6 +125,10 @@ pub fn run() {
         // CSV...". Its commands are not in capabilities/default.json, so the
         // webview cannot open a picker of its own.
         .plugin(tauri_plugin_dialog::init())
+        // In-app updates against the release feed in tauri.conf.json. Only
+        // the plugin's own `check`/`download` commands are granted, so the
+        // page can ask for an update but cannot point it anywhere else.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let data_dir = app.path().app_data_dir().expect("no app data dir");
             // First point in the process where there is anywhere to write:

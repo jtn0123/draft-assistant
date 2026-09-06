@@ -182,7 +182,7 @@ describe("App live workflow", () => {
     // buttons — see Header.test.tsx.
     await user.click(screen.getByRole("menuitemcheckbox", { name: /Refresh data/ }));
     expect(
-      await screen.findByText("Projections refreshed — board rebuilt from 312 players"),
+      await screen.findByText("Projections refreshed: board rebuilt from 312 players"),
     ).toBeInTheDocument();
   });
 
@@ -309,7 +309,7 @@ describe("when an action fails", () => {
 
     // An error is announced straight away, not filed away politely.
     const failure = screen.getByRole("alert");
-    expect(failure).toHaveTextContent(/Could not mark .+ as drafted — Sleeper is not answering/);
+    expect(failure).toHaveTextContent(/Could not mark .+ as drafted: Sleeper is not answering/);
 
     // Long past the five seconds an informational toast lives for.
     act(() => {
@@ -340,7 +340,7 @@ describe("when an action fails", () => {
       screen.getByRole("menuitemcheckbox", { name: /Refresh data/ }).click();
     });
 
-    const note = "Projections refreshed — board rebuilt from 312 players";
+    const note = "Projections refreshed: board rebuilt from 312 players";
     expect(screen.getByText(note)).toBeInTheDocument();
     // Nothing to decide, so it is announced politely and clears itself.
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -380,6 +380,29 @@ describe("the way back off the setup screen", () => {
 
     expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.queryByLabelText("League ID")).not.toBeInTheDocument();
+  });
+
+  it("names the league that was loaded this session, not a saved one", async () => {
+    // A first-launch session has nothing saved. Load a league, then ask for
+    // the username form from Settings: the way back used to read "Back to
+    // the saved league", which named a league that did not exist.
+    const user = userEvent.setup();
+    const initial = fixture();
+    h.api.getConfig.mockResolvedValue({ my_user_id: null, active_league_id: null, leagues: [] });
+    h.api.addLeague.mockResolvedValue(initial);
+
+    render(<App />);
+    await user.type(await screen.findByLabelText("League ID"), "123{Enter}");
+    await screen.findByRole("heading", { name: initial.league.name });
+    await settle(() => {});
+
+    await settle(() => screen.getByRole("button", { name: "Settings" }).click());
+    await settle(() => screen.getByRole("menuitemcheckbox", { name: /Sleeper username/ }).click());
+
+    expect(
+      await screen.findByRole("button", { name: `Back to ${initial.league.name}` }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/the saved league/)).toBeNull();
   });
 
   it("offers no way back when there was no league to go back to", async () => {

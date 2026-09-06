@@ -12,7 +12,7 @@ use draft_assistant_lib::engine::LoadedLeague;
 use draft_assistant_lib::season::build_season_view;
 use draft_assistant_lib::season_api::{GameMeta, ScoreGame};
 use draft_assistant_lib::season_engine::LoadedSeason;
-use draft_assistant_lib::season_lineup::weekly_lineup_totals;
+use draft_assistant_lib::season_lineup::{weekly_lineup_totals, Sidelined};
 use draft_assistant_lib::season_lookup::Lookup;
 use std::collections::HashMap;
 
@@ -62,7 +62,10 @@ fn projection_only(loaded: &LoadedLeague, season: &LoadedSeason) -> HashMap<u32,
                 r.player_ids(),
                 &position_of,
                 &team_of,
-                &sidelined,
+                Sidelined {
+                    week: season.week,
+                    is_out: &sidelined,
+                },
                 &loaded.weekly_points,
                 season.week..=loaded.league.last_regular_week(),
             );
@@ -240,6 +243,55 @@ fn a_benched_player_who_went_off_is_not_banked_into_my_score() {
         "projected {} \u{2014} the benched thirty was counted",
         mine.projected_points
     );
+}
+
+/// The bug: whether Sleeper's standings already held this week's result was
+/// decided by comparing the record's game count with the week number. In an
+/// odd-team league every roster sits out a week, so a team with its bye
+/// behind it was always "one short" and the week it had just won was added
+/// to its record a second time once Sleeper posted it.
+#[test]
+fn a_team_with_a_bye_behind_it_is_not_credited_twice_for_the_finished_week() {
+    let (loaded, mut season, config) = common::fixture();
+    season.scores = std::sync::Arc::new(every_game_final());
+    // Rosters 1 and 2 sat out week 1; week 2 is the first game either played.
+    season.schedule = std::sync::Arc::new(vec![(1, vec![(3, 4)]), (2, vec![(1, 2), (3, 4)])]);
+    for roster in std::sync::Arc::make_mut(&mut season.rosters) {
+        // Sleeper has already posted week 2: roster 1 won it, roster 2 lost
+        // it, and rosters 3 and 4 are on two games apiece.
+        let (wins, losses) = match roster.roster_id {
+            1 => (1, 0),
+            2 => (0, 1),
+            3 => (2, 0),
+            _ => (0, 2),
+        };
+        roster.settings.wins = wins;
+        roster.settings.losses = losses;
+        roster.settings.ties = 0;
+    }
+    for matchup in std::sync::Arc::make_mut(&mut season.matchups) {
+        matchup.points = match matchup.roster_id {
+            1 | 3 => 100.0,
+            _ => 50.0,
+        };
+    }
+
+    let view = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+    let row = |id: u32| {
+        view.standings
+            .iter()
+            .find(|row| row.roster_id == id)
+            .expect("every roster has a row")
+            .clone()
+    };
+    assert_eq!(
+        row(1).wins,
+        1,
+        "the week already on the record was added again"
+    );
+    assert_eq!(row(2).losses, 1);
+    assert_eq!(row(3).wins, 2);
+    assert_eq!(row(4).losses, 2);
 }
 
 /// The bug: on a Monday night with every game final, Sleeper's standings have

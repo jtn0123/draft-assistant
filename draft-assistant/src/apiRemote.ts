@@ -11,6 +11,7 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { Api } from "./api";
 import { validateDraftView, validateSeasonView } from "./api";
+import { remoteFetcher } from "./apiRemoteFetch";
 import { clearFollow } from "./companion";
 import { REVOKED_CLOSE_CODE, setFollowStatus } from "./followStatus";
 import type { ChatSettings } from "./chat-types";
@@ -30,6 +31,10 @@ import type {
  *  reload that follows, so the user is told rather than just demoted. */
 export const REVOKED_KEY = "da.companion.revoked";
 
+// The read half lives in its own module; re-exported so callers and tests
+// keep one import for the follower's backend.
+export { HOST_TIMEOUT_MS, remoteFetcher } from "./apiRemoteFetch";
+
 /** How long to wait before each reconnection attempt, in ms; the last one
  *  repeats for as long as the host stays away. */
 const BACKOFF_MS = [1000, 2000, 5000, 10000];
@@ -48,23 +53,6 @@ function dataUri(type: string, bytes: ArrayBuffer): string {
   let binary = "";
   for (const byte of view) binary += String.fromCharCode(byte);
   return `data:${type || "image/jpeg"};base64,${btoa(binary)}`;
-}
-
-/** A GET that knows about the host's two failure modes: a 404 for something
- *  not loaded yet, and a 401 for a device that is no longer paired. */
-export function remoteFetcher(follow: FollowRecord, onRevoked: () => void) {
-  return async function fetchJson<T>(path: string): Promise<T | null> {
-    const response = await fetch(`${follow.url}${path}`, {
-      headers: { authorization: `Bearer ${follow.token}` },
-    });
-    if (response.status === 401) {
-      onRevoked();
-      throw new Error("The host revoked this device");
-    }
-    if (response.status === 404) return null;
-    if (!response.ok) throw new Error(`${follow.host_name} answered ${response.status}`);
-    return (await response.json()) as T;
-  };
 }
 
 /** The one socket every screen's live updates come down, reconnecting on its

@@ -226,6 +226,46 @@ async fn a_dictionary_that_lost_most_of_the_league_is_refused() {
     );
 }
 
+/// The bug: the "came back incomplete" warning was pushed and never taken
+/// down, so one truncated download at noon still greyed the badge at
+/// midnight over names and tags that had been refreshed many times since.
+#[tokio::test]
+async fn the_incomplete_player_list_warning_clears_on_the_next_good_refresh() {
+    let mut harness = Harness::named("warning-clears");
+    harness.tick().await.view.expect("the first view is sent");
+
+    harness.engine.players = Some(dictionary(&["q1".to_string()], &[]));
+    harness.memory = SeasonPollMemory::new(20);
+    let refused = harness.tick().await.view.expect("a view is still built");
+    assert!(
+        refused
+            .data_health
+            .warnings
+            .iter()
+            .any(|w| w.contains("came back incomplete")),
+        "{:?}",
+        refused.data_health.warnings
+    );
+
+    // The next half-hour refresh brings the whole dictionary back.
+    harness.engine.players = Some(dictionary(&every_player(), &[("q1", "Questionable")]));
+    harness.memory = SeasonPollMemory::new(20);
+    let recovered = harness
+        .tick()
+        .await
+        .view
+        .expect("an applied refresh is a changed view");
+    assert!(
+        !recovered
+            .data_health
+            .warnings
+            .iter()
+            .any(|w| w.contains("came back incomplete")),
+        "the warning outlived the refresh that made it wrong: {:?}",
+        recovered.data_health.warnings
+    );
+}
+
 /// The bug: Refresh asked only for the live slice, and it asks for it *by
 /// week*. From Tuesday morning the button re-fetched the week that had just
 /// finished, forever, and the only way to see the new one was to close the

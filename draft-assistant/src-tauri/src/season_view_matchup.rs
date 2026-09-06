@@ -75,12 +75,32 @@ pub fn build_matchup<'a>(
     let my_matchup = my_roster.and_then(|r| matchup_for(&season.matchups, r.roster_id));
     let opp_matchup = my_matchup.and_then(|mine| opponent_of(&season.matchups, mine));
 
+    // The IR slot is left out on both sides: a player on injured reserve
+    // cannot be started, so he is neither a start/sit call nor part of the
+    // best lineup either roster can field.
     let my_candidates: Vec<Candidate> = my_roster
-        .map(|r| candidates_for(r.player_ids(), &position_of, &sidelined, weekly, week))
+        .map(|r| {
+            candidates_for(
+                &r.active_player_ids(),
+                &position_of,
+                &sidelined,
+                weekly,
+                week,
+            )
+        })
         .unwrap_or_default();
     let my_optimal = optimal_lineup(rules, &my_candidates);
-    let my_current = my_matchup
-        .map(|m| current_lineup(loaded, m.starter_ids(), &projected))
+    // The lineup I have set comes off this week's matchup row, and when that
+    // row is missing, off the roster's own starter list, which Sleeper keeps
+    // in step with it. It used to fall back to the optimal lineup, so a
+    // matchups outage or a `null` answer read as "your lineup is already
+    // optimal" with every real call hidden behind it.
+    let set_starters: Option<&[String]> = my_matchup
+        .map(Matchup::starter_ids)
+        .or_else(|| my_roster.map(Roster::starter_ids))
+        .filter(|starters| !starters.is_empty());
+    let my_current = set_starters
+        .map(|starters| current_lineup(loaded, starters, &projected))
         .unwrap_or_else(|| my_optimal.clone());
 
     let describe = |id: &str| (lookup.name(id), lookup.team(id));
@@ -125,7 +145,15 @@ pub fn build_matchup<'a>(
                 .rosters
                 .iter()
                 .find(|r| r.roster_id == m.roster_id)
-                .map(|r| candidates_for(r.player_ids(), &position_of, &sidelined, weekly, week))
+                .map(|r| {
+                    candidates_for(
+                        &r.active_player_ids(),
+                        &position_of,
+                        &sidelined,
+                        weekly,
+                        week,
+                    )
+                })
         })
         .unwrap_or_default();
     let opp_optimal = optimal_lineup(rules, &opp_candidates);

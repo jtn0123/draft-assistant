@@ -127,16 +127,16 @@ update?": the tick ran, nothing had moved, so no event was sent.
 
 ### The two pollers
 
-| | Draft poller | Season poller |
-|---|---|---|
-| Started by | `start_polling`, from `App.tsx` when a draft is open | `start_season_polling`, from `session.ts` while the Season tab is showing |
-| Loop lives in | `commands_draft.rs` | `commands_season.rs` |
-| Decisions live in | `poll::DraftPollMemory` | `poll::season_tick` |
-| Interval | 3s (caller may ask for 2–60) | 30s (caller may ask for 10–300) |
-| Each tick fetches | picks + draft status, in parallel | this week's matchups + the NFL scoreboard + all rosters, in parallel |
-| Always emits | `poll-health` | `season-poll-health` |
-| Emits data only when | the picks or the draft status changed | either side's live total moved |
-| Data event | `draft-updated` (a whole `DraftView`) | `season-updated` (a whole `SeasonView`) |
+|                      | Draft poller                                         | Season poller                                                             |
+| -------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------- |
+| Started by           | `start_polling`, from `App.tsx` when a draft is open | `start_season_polling`, from `session.ts` while the Season tab is showing |
+| Loop lives in        | `commands_draft.rs`                                  | `commands_season.rs`                                                      |
+| Decisions live in    | `poll::DraftPollMemory`                              | `poll::season_tick`                                                       |
+| Interval             | 3s (caller may ask for 2–60)                         | 30s (caller may ask for 10–300)                                           |
+| Each tick fetches    | picks + draft status, in parallel                    | this week's matchups + the NFL scoreboard + all rosters, in parallel      |
+| Always emits         | `poll-health`                                        | `season-poll-health`                                                      |
+| Emits data only when | the picks or the draft status changed                | either side's live total moved                                            |
+| Data event           | `draft-updated` (a whole `DraftView`)                | `season-updated` (a whole `SeasonView`)                                   |
 
 The health event goes out on **every** tick, pass or fail. That is deliberate:
 a failed tick has no new data to send, so without a separate health event a
@@ -147,7 +147,7 @@ and the sync badge reads them.
 
 ### What counts as "changed"
 
-- **Draft.** Not just "are there more picks". The poller keeps a count *and* a
+- **Draft.** Not just "are there more picks". The poller keeps a count _and_ a
   hash of which player sits at each pick number, so a commissioner editing a
   pick — same count, different player — still reaches the screen. The draft's
   status moving (`pre_draft` → `drafting` → `complete`) also counts, because it
@@ -159,14 +159,14 @@ and the sync badge reads them.
 
 ### The three tiers of cache
 
-| Tier | Holds | Lives for | Cleared by |
-|---|---|---|---|
-| On disk | the players dictionary | 24h | "Refresh data", or the TTL |
-| On disk | season projections | 6h | "Refresh data", or the TTL |
-| On disk | the per-league week sweep (every week's pairings and points-to-date) | 6h | a `load_season(force)`, or the TTL |
-| On disk | last season's final standings | 30 days | a `load_season(force)`, or the TTL |
-| In memory | `AnalysisCache` — the expensive half of the season view | 20 season ticks (~10 min at the default 30s) | its own tick count, or the poller being restarted |
-| In memory | `stableAvailable` in `boardIdentity.ts` — the last available-players array | until the board's contents actually differ | a genuinely different board |
+| Tier      | Holds                                                                      | Lives for                                    | Cleared by                                        |
+| --------- | -------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------- |
+| On disk   | the players dictionary                                                     | 24h                                          | "Refresh data", or the TTL                        |
+| On disk   | season projections                                                         | 6h                                           | "Refresh data", or the TTL                        |
+| On disk   | the per-league week sweep (every week's pairings and points-to-date)       | 6h                                           | a `load_season(force)`, or the TTL                |
+| On disk   | last season's final standings                                              | 30 days                                      | a `load_season(force)`, or the TTL                |
+| In memory | `AnalysisCache` — the expensive half of the season view                    | 20 season ticks (~10 min at the default 30s) | its own tick count, or the poller being restarted |
+| In memory | `stableAvailable` in `boardIdentity.ts` — the last available-players array | until the board's contents actually differ   | a genuinely different board                       |
 
 `AnalysisCache` is the one worth knowing about. Rebuilding a season view from
 scratch means roughly 1,600 lineup solves, a playoff simulation and a trade
@@ -337,26 +337,40 @@ shown the current board or matchup and never writes anything back.
 ## Releases
 
 CI only ever uploads a build artifact that expires. To ship something a person
-can install, push a tag and `.github/workflows/release.yml` builds the bundle
-and attaches the `.dmg` to a GitHub release for that tag:
+can install, push a tag: `.github/workflows/release.yml` runs the whole CI
+gate on that commit first (clippy, tsc, both suites, the audits, the browser
+e2e run), then builds the bundle and attaches it to a GitHub release:
 
 1. Bump the version in `package.json`, `src-tauri/Cargo.toml` and
-   `src-tauri/tauri.conf.json` — all three, to the same number.
+   `src-tauri/tauri.conf.json`, all three, to the same number.
 2. `npm run verify:mid` (it runs `scripts/check-version.mjs`, which fails if the
    three disagree; the release job runs it again against the tag).
 3. Commit.
 4. `git tag vX.Y.Z && git push origin vX.Y.Z`. A tag with a `-` in it, like
-   `v0.3.0-rc1`, is published as a prerelease.
+   `v0.3.0-rc1`, is published as a prerelease: not the "latest" release, and
+   not offered to installed copies.
+
+**In-app updates.** The app carries `tauri-plugin-updater` and polls
+`https://github.com/jtn0123/draft-assistant/releases/latest/download/latest.json`.
+The release job writes that manifest (`scripts/updater-manifest.mjs`) and
+attaches it with the signed `.app.tar.gz` and `.sig`, but only when the
+`TAURI_SIGNING_PRIVATE_KEY` repository secret is set: it is the private half
+of the minisign keypair whose public half is `plugins.updater.pubkey` in
+`tauri.conf.json`, generated with `npx tauri signer generate` and no password.
+Without the secret a tag still produces the `.dmg`, with a warning that no
+installed copy can update to it. The plugin is registered and granted; a
+"Check for updates" row in Settings is not built yet, so nothing in the UI
+triggers a check today.
 
 Two things to tell anyone you hand the `.dmg` to:
 
 - It is **unsigned and unnotarised**, and Apple Silicon only (aarch64). On
-  macOS 15 and later the first launch is blocked outright and right-click →
-  Open no longer gets past it: open System Settings → Privacy & Security,
+  macOS 15 and later the first launch is blocked outright and right-click ->
+  Open no longer gets past it: open System Settings -> Privacy & Security,
   find the message about the blocked app, click **Open Anyway**, then launch
   it again.
-- **In-app updates are not wired up.** A new version means downloading the
-  next `.dmg` by hand.
+- Until the Settings row exists, a new version means downloading the next
+  `.dmg` by hand.
 
 ## Testing
 

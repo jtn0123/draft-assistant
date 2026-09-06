@@ -5,15 +5,18 @@
 //! part with the fiddly arithmetic (the UTC timestamp) worth testing on its
 //! own.
 //!
-//! Deliberately tiny and dependency-free. It opens the file per line rather
-//! than holding a handle, because the volume is a handful of lines per session
-//! and a handle would need locking and a flush-on-exit that a crash skips
-//! anyway. Every failure here is handed back rather than raised: a logger that
-//! panics because the disk is full turns a warning into a crash, which is
-//! strictly worse than a lost log line.
+//! Deliberately tiny and dependency-free. One handle is kept open between
+//! lines: opening per line was fine at a few lines per session, but at the
+//! debug level a poll loop writes several per tick, and an open is a path walk
+//! on the runtime thread every time. Writes are unbuffered, so a crash loses
+//! nothing that was handed over. Every failure here is handed back rather
+//! than raised: a logger that panics because the disk is full turns a warning
+//! into a crash, which is strictly worse than a lost log line.
 
+use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The log's name inside the app data directory.
@@ -24,21 +27,106 @@ pub const LOG_NAME: &str = "draft-assistant.log";
 /// small enough that nothing has to think about it.
 const MAX_BYTES: u64 = 1024 * 1024;
 
+/// The handle the last line went through, kept so the next line does not pay
+/// for an open and a close of its own.
+///
+/// Checked before every write with one `fstat`: past the cap it is let go so
+/// the file can rotate, and gone from the directory it is let go so the file
+/// comes back, rather than the process writing on into an unlinked inode
+/// nobody can read.
+static OPEN: Mutex<Option<OpenLog>> = Mutex::new(None);
+
+struct OpenLog {
+    path: PathBuf,
+    file: File,
+}
+
 /// Append one line, rotating first if the file has grown past the cap.
 ///
 /// Takes a path rather than reading the process-wide directory so the tests
 /// can drive it anywhere -- one test setting that `OnceLock` would wedge it
 /// for every other test in the binary.
 pub(super) fn append(path: &Path, line: &str) -> std::io::Result<()> {
+    let mut slot = OPEN.lock().unwrap_or_else(|e| e.into_inner());
+    if !reusable(slot.as_ref(), path) {
+        // Closed before the rename, so a rotation on a platform that will not
+        // move an open file still goes through.
+        *slot = None;
+        rotate_if_full(path)?;
+        *slot = Some(OpenLog {
+            path: path.to_path_buf(),
+            file: open_private(path)?,
+        });
+    }
+    match slot.as_mut() {
+        Some(open) => open.file.write_all(line.as_bytes()),
+        None => Err(std::io::Error::other("the log handle was not opened")),
+    }
+}
+
+/// Whether the kept handle is still the right one for `path`: the same file,
+/// still in its directory, and still under the cap.
+fn reusable(open: Option<&OpenLog>, path: &Path) -> bool {
+    open.is_some_and(|open| {
+        open.path == path
+            && open
+                .file
+                .metadata()
+                .is_ok_and(|meta| still_linked(&meta) && meta.len() <= MAX_BYTES)
+    })
+}
+
+/// Whether the file behind a handle still has a name. A user who deletes the
+/// log while the app runs expects a new one, not silence.
+#[cfg(unix)]
+fn still_linked(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    meta.nlink() > 0
+}
+
+#[cfg(not(unix))]
+fn still_linked(_meta: &std::fs::Metadata) -> bool {
+    true
+}
+
+/// Open for append, creating the file readable by its owner alone.
+///
+/// The log quotes league names, device names and every URL that failed, and
+/// it was the one file under the data directory created 0644: readable by
+/// any other account on the machine while everything beside it was 0600. A
+/// log left 0644 by an older build is narrowed on open rather than kept.
+fn open_private(path: &Path) -> std::io::Result<File> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    rotate_if_full(path)?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    file.write_all(line.as_bytes())
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(path)?;
+    // Best effort: a filesystem that refuses the chmod still gets the line,
+    // because losing the log over its permissions helps nobody.
+    let _ = narrow_to_owner(&file);
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn narrow_to_owner(file: &File) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = file.metadata()?.permissions();
+    if perms.mode() & 0o077 != 0 {
+        perms.set_mode(0o600);
+        file.set_permissions(perms)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn narrow_to_owner(_file: &File) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// One generation of history: the full log becomes `.1`, replacing whatever
@@ -190,6 +278,97 @@ mod tests {
         let log = dir.join("nested").join("deeper").join(LOG_NAME);
         append(&log, "line\n").expect("write into a directory that did not exist");
         assert_eq!(std::fs::read_to_string(&log).unwrap(), "line\n");
+    }
+
+    /// The handle is kept between lines, and the checks that decide when it
+    /// cannot be: the file grew past the cap, was deleted, or is another file.
+    #[test]
+    fn the_kept_handle_is_reused_until_the_file_rotates_or_disappears() {
+        let dir = TempDir::new("reuse");
+        let log = dir.join(LOG_NAME);
+        let open = OpenLog {
+            path: log.clone(),
+            file: open_private(&log).expect("open"),
+        };
+        assert!(reusable(Some(&open), &log), "a fresh handle is reused");
+        assert!(
+            !reusable(Some(&open), &dir.join("other.log")),
+            "a handle on one file is not used for another"
+        );
+        assert!(!reusable(None, &log), "nothing open means open");
+
+        std::fs::write(&log, "x".repeat(MAX_BYTES as usize + 1)).expect("grow past the cap");
+        assert!(
+            !reusable(Some(&open), &log),
+            "past the cap the handle is let go so the file can rotate"
+        );
+
+        std::fs::write(&log, "small").expect("shrink");
+        assert!(reusable(Some(&open), &log));
+        std::fs::remove_file(&log).expect("delete the log");
+        assert!(
+            !reusable(Some(&open), &log),
+            "a deleted log is let go so the next line recreates it"
+        );
+    }
+
+    /// The failure this prevents: a log deleted mid-session went on being
+    /// written into an unlinked inode, and the Diagnostics dialog showed an
+    /// empty tail for the rest of the evening.
+    #[test]
+    fn a_log_deleted_while_the_app_runs_is_recreated_rather_than_written_into_the_void() {
+        let dir = TempDir::new("deleted");
+        let log = dir.join(LOG_NAME);
+        append(&log, "before\n").expect("first write");
+        std::fs::remove_file(&log).expect("delete it out from under the handle");
+        append(&log, "after\n").expect("second write");
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "after\n");
+    }
+
+    /// Rotation used to be decided by a stat of the path on every open; with
+    /// a kept handle it has to be decided from the handle, or a log the app
+    /// was already writing would grow past the cap for the rest of the run.
+    #[test]
+    fn a_rotation_while_the_handle_is_open_still_moves_the_old_file_aside() {
+        let dir = TempDir::new("rotate-open");
+        let log = dir.join(LOG_NAME);
+        append(&log, "first\n").expect("open the handle");
+        let over_cap = "x".repeat(MAX_BYTES as usize + 1);
+        std::fs::write(&log, &over_cap).expect("grow the same file past the cap");
+        append(&log, "after\n").expect("write past the cap");
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "after\n");
+        assert_eq!(std::fs::read_to_string(rotated(&log)).unwrap(), over_cap);
+    }
+
+    #[cfg(unix)]
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
+    }
+
+    /// The log was the one file under the data directory any other account on
+    /// the machine could read.
+    #[cfg(unix)]
+    #[test]
+    fn the_log_is_created_readable_by_its_owner_alone() {
+        let dir = TempDir::new("mode");
+        let log = dir.join(LOG_NAME);
+        append(&log, "line\n").expect("write");
+        assert_eq!(mode_of(&log), 0o600, "{:o}", mode_of(&log));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_log_left_world_readable_by_an_older_build_is_narrowed_on_open() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("narrow");
+        let log = dir.join(LOG_NAME);
+        std::fs::write(&log, "old\n").expect("seed");
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644)).expect("widen");
+        assert_eq!(mode_of(&log), 0o644, "the seed is world-readable");
+        append(&log, "new\n").expect("write");
+        assert_eq!(mode_of(&log), 0o600, "{:o}", mode_of(&log));
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "old\nnew\n");
     }
 
     #[test]

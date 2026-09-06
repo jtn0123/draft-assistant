@@ -25,10 +25,18 @@ pub struct NflState {
 }
 
 impl NflState {
-    /// The week to score. `display_week` leads `week` between the last game and
-    /// the Tuesday rollover, which is exactly when a user is reviewing results.
+    /// The week to score, and the week the poller rolls over on. Always
+    /// `week`, never `display_week`.
+    ///
+    /// `display_week` moves to N+1 the moment Monday night's game ends, hours
+    /// before Sleeper's own `week` turns over on Tuesday. Rolling on it made
+    /// the poller reload week N+1 while week N was still being settled, so the
+    /// finished-week path, the Monday-night win counted off the matchups
+    /// before the standings caught up, was never reachable live and the
+    /// screen jumped to next week's empty matchup mid-review. `display_week`
+    /// is kept on the struct for labels only.
     pub fn current_week(&self) -> u32 {
-        self.display_week.unwrap_or(self.week).max(1)
+        self.week.max(1)
     }
 }
 
@@ -90,6 +98,27 @@ impl Roster {
 
     pub fn starter_ids(&self) -> &[String] {
         self.starters.as_deref().unwrap_or(&[])
+    }
+
+    /// True when the player sits in this roster's IR slot.
+    pub fn is_reserved(&self, player_id: &str) -> bool {
+        self.reserve
+            .as_deref()
+            .is_some_and(|ids| ids.iter().any(|id| id == player_id))
+    }
+
+    /// The players who can actually be started: everyone Sleeper lists on the
+    /// roster minus the IR slot.
+    ///
+    /// `players` includes the reserve list, and every lineup solve used to
+    /// read it whole, so a back on injured reserve was offered as a start/sit
+    /// call and solved into the rest-of-season lineup week after week.
+    pub fn active_player_ids(&self) -> Vec<String> {
+        self.player_ids()
+            .iter()
+            .filter(|id| !self.is_reserved(id))
+            .cloned()
+            .collect()
     }
 }
 
@@ -375,8 +404,11 @@ mod tests {
         assert!((s.points_against() - 1500.08).abs() < 1e-9);
     }
 
+    /// Monday night, last game just ended: Sleeper's `display_week` has moved
+    /// on and `week` has not. The scoring week is `week`; rolling on the other
+    /// field reloaded next week's season before this one was settled.
     #[test]
-    fn display_week_leads_week_after_the_last_game() {
+    fn a_display_week_that_leads_on_monday_night_does_not_move_the_scoring_week() {
         let state = NflState {
             week: 3,
             display_week: Some(4),
@@ -384,7 +416,26 @@ mod tests {
             season_type: "regular".into(),
             previous_season: Some("2025".into()),
         };
-        assert_eq!(state.current_week(), 4);
+        assert_eq!(state.current_week(), 3);
+    }
+
+    #[test]
+    fn a_player_in_the_ir_slot_is_not_an_active_player() {
+        let roster: Roster = serde_json::from_value(serde_json::json!({
+            "roster_id": 1,
+            "players": ["rb1", "rb2", "wr1"],
+            "starters": ["rb1", "wr1"],
+            "reserve": ["rb2"],
+        }))
+        .unwrap();
+        assert!(roster.is_reserved("rb2"));
+        assert!(!roster.is_reserved("rb1"));
+        assert_eq!(roster.active_player_ids(), ["rb1", "wr1"]);
+        let none: Roster = serde_json::from_value(serde_json::json!({
+            "roster_id": 2, "players": ["a"], "reserve": null,
+        }))
+        .unwrap();
+        assert_eq!(none.active_player_ids(), ["a"]);
     }
 
     #[test]

@@ -18,6 +18,10 @@ const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 #[path = "chat_request.rs"]
 mod request;
 
+/// The answer, reassembled out of the stream of events it arrives as.
+#[path = "chat_stream.rs"]
+pub mod stream;
+
 use request::build_request;
 
 /// The models the panel offers. Opus 5 can turn thinking off; Fable 5 cannot,
@@ -211,41 +215,6 @@ pub struct ChatReply {
     pub screen_spend_usd: f64,
 }
 
-// ---------- response wire types ----------
-
-#[derive(Deserialize)]
-struct ContentBlock {
-    #[serde(rename = "type")]
-    kind: String,
-    #[serde(default)]
-    text: Option<String>,
-}
-
-#[derive(Deserialize, Default)]
-struct Usage {
-    #[serde(default)]
-    input_tokens: u32,
-    #[serde(default)]
-    output_tokens: u32,
-    /// Absent on a response that used no cache at all, hence the defaults.
-    #[serde(default)]
-    cache_creation_input_tokens: u32,
-    #[serde(default)]
-    cache_read_input_tokens: u32,
-}
-
-#[derive(Deserialize)]
-struct Response {
-    #[serde(default)]
-    content: Vec<ContentBlock>,
-    #[serde(default)]
-    model: String,
-    #[serde(default)]
-    stop_reason: Option<String>,
-    #[serde(default)]
-    usage: Usage,
-}
-
 #[derive(Deserialize)]
 struct ApiErrorBody {
     #[serde(default)]
@@ -258,10 +227,94 @@ struct ApiErrorDetail {
     message: Option<String>,
 }
 
+/// Why an answer did not arrive, and what it cost anyway.
+///
+/// A request the API accepted is billed from `message_start` on, whether or
+/// not the rest of the stream reaches this side: a timeout or a dropped
+/// socket halfway through an answer is still a charge. `partial` is the
+/// usage that had arrived by then, so the command layer can count it against
+/// the cap instead of losing it with the error.
+#[derive(Debug)]
+pub struct ChatError {
+    pub message: String,
+    /// A reply with no text, carrying the model and the usage seen so far.
+    /// `None` when nothing was billed: the request never reached the API, or
+    /// was refused before it began. Boxed so the error stays small on the
+    /// path that almost always carries only a message.
+    pub partial: Option<Box<ChatReply>>,
+}
+
+impl From<String> for ChatError {
+    fn from(message: String) -> Self {
+        ChatError {
+            message,
+            partial: None,
+        }
+    }
+}
+
+impl From<ChatError> for String {
+    fn from(error: ChatError) -> Self {
+        error.message
+    }
+}
+
+/// The canned line for a refusal with no text, naming the safety category
+/// when the API gave one. `stop_details` is informational — the category can
+/// be absent even on a refusal — so the line reads the same without it.
+pub(crate) fn refusal_text(category: Option<&str>) -> String {
+    match category {
+        Some(category) if !category.trim().is_empty() => {
+            let category: String = category.trim().chars().take(40).collect();
+            format!("Claude declined to answer that one (safety category: {category}).")
+        }
+        _ => "Claude declined to answer that one.".to_string(),
+    }
+}
+
+/// A reply with no text, from what the stream had said before it stopped.
+fn partial_reply(stream: &stream::Stream) -> Option<Box<ChatReply>> {
+    if !stream.started() {
+        return None;
+    }
+    Some(Box::new(reply_from(
+        stream.model().to_string(),
+        String::new(),
+        stream.usage(),
+        false,
+        false,
+    )))
+}
+
+fn reply_from(
+    model: String,
+    text: String,
+    usage: &stream::Usage,
+    refused: bool,
+    truncated: bool,
+) -> ChatReply {
+    ChatReply {
+        text,
+        // Not asked for and not rendered: see `chat_request.rs`.
+        thinking: None,
+        model,
+        refused,
+        truncated,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens,
+        provider: String::new(),
+        cost_usd: 0.0,
+        screen_spend_usd: 0.0,
+    }
+}
+
 /// Ask Claude about the current board.
 ///
 /// `context` is the serialized view (draft or season) the panel is showing,
-/// in the two halves the cache breakpoint goes between.
+/// in the two halves the request builder places: the stable half in the
+/// cached system prompt, the board after the conversation.
 pub async fn ask(
     http: &reqwest::Client,
     api_key: &str,
@@ -269,7 +322,7 @@ pub async fn ask(
     effort: Effort,
     context: &crate::chat_context::SplitContext,
     messages: &[ChatMessage],
-) -> Result<ChatReply, String> {
+) -> Result<ChatReply, ChatError> {
     ask_at(ENDPOINT, http, api_key, model, effort, context, messages).await
 }
 
@@ -283,91 +336,130 @@ async fn ask_at(
     effort: Effort,
     context: &crate::chat_context::SplitContext,
     messages: &[ChatMessage],
-) -> Result<ChatReply, String> {
+) -> Result<ChatReply, ChatError> {
     if api_key.trim().is_empty() {
-        return Err("no Anthropic API key set — add one in Settings".into());
+        return Err("no Anthropic API key set — add one in Settings"
+            .to_string()
+            .into());
     }
     if messages.is_empty() {
-        return Err("nothing to ask".into());
+        return Err("nothing to ask".to_string().into());
+    }
+    // The board goes after the thread as a system-role message, which must
+    // follow a user turn. A thread ending on the assistant's turn is asking
+    // the model to continue its own answer, which these models refuse anyway.
+    if messages.last().is_some_and(|m| m.role != "user") {
+        return Err("the last turn must be a question".to_string().into());
     }
 
     let request = build_request(model, effort, context, messages);
+    let sent_at = std::time::Instant::now();
 
-    let response = http
+    let mut response = http
         .post(endpoint)
         .header("x-api-key", api_key)
         .header("anthropic-version", API_VERSION)
         .header("anthropic-beta", FALLBACK_BETA)
         .header("content-type", "application/json")
+        .header("accept", "text/event-stream")
         .json(&request)
         .send()
         .await
         .map_err(|e| format!("could not reach the Anthropic API: {e}"))?;
 
     let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| format!("could not read the Anthropic response: {e}"))?;
-
     if !status.is_success() {
-        let detail = serde_json::from_str::<ApiErrorBody>(&body)
-            .ok()
-            .and_then(|b| b.error.and_then(|e| e.message));
-        if detail.is_none() {
-            // Anything between here and Anthropic can answer with its own
-            // error page. Pasting a gateway's HTML into the chat panel tells
-            // the user nothing and looks like the model said it, so the body
-            // goes to the log and the status speaks for itself.
-            let logged: String = body.chars().take(300).collect();
-            crate::applog::warn(format!(
-                "Anthropic API {status} with a body that is not an error object: {logged}"
-            ));
-        }
-        let sentence = match status.as_u16() {
-            401 => "Anthropic rejected the API key".to_string(),
-            429 => "Rate limited by Anthropic".to_string(),
-            _ => format!("Anthropic API error {status}"),
-        };
-        return Err(match detail {
-            Some(detail) => format!("{sentence}: {detail}"),
-            None => sentence,
-        });
+        let body = response
+            .text()
+            .await
+            .map_err(|e| format!("could not read the Anthropic response: {e}"))?;
+        return Err(error_message(status, &body).into());
     }
 
-    let parsed: Response = serde_json::from_str(&body)
-        .map_err(|e| format!("unexpected Anthropic response shape: {e}"))?;
+    // Read the events as they arrive. A body that stops early — the client's
+    // own timeout, or the socket dropping — is still a billed request from
+    // `message_start` on, so the error carries what had been charged so far.
+    let mut stream = stream::Stream::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(bytes)) => {
+                if let Err(message) = stream.feed(&bytes) {
+                    return Err(ChatError {
+                        partial: partial_reply(&stream),
+                        message,
+                    });
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                return Err(ChatError {
+                    partial: partial_reply(&stream),
+                    message: format!("the Anthropic answer stopped early: {e}"),
+                });
+            }
+        }
+    }
+    let answer = stream.finish()?;
 
-    let text = parsed
-        .content
-        .iter()
-        .filter(|b| b.kind == "text")
-        .filter_map(|b| b.text.as_deref())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let refused = parsed.stop_reason.as_deref() == Some("refusal");
-    let truncated = parsed.stop_reason.as_deref() == Some("max_tokens");
-    let text = if text.trim().is_empty() && refused {
-        "Claude declined to answer that one.".to_string()
+    // Model, effort, token counts and the round trip. Never the prompt or the
+    // answer: the log is for pasting into a chat window.
+    crate::applog::debug(format!(
+        "chat answered model={} effort={} in={} out={} cache_read={} stop={} in {}ms",
+        answer.model,
+        effort.api_effort(),
+        answer.usage.input_tokens,
+        answer.usage.output_tokens,
+        answer.usage.cache_read_input_tokens,
+        answer.stop_reason.as_deref().unwrap_or("none"),
+        sent_at.elapsed().as_millis()
+    ));
+    let refused = answer.stop_reason.as_deref() == Some("refusal");
+    let truncated = answer.stop_reason.as_deref() == Some("max_tokens");
+    let text = if answer.text.trim().is_empty() && refused {
+        refusal_text(answer.stop_category.as_deref())
     } else {
-        text
+        answer.text
     };
-
-    Ok(ChatReply {
-        text: with_truncation_note(text, truncated),
-        // Not asked for and not rendered: see `chat_request.rs`.
-        thinking: None,
-        model: parsed.model,
+    Ok(reply_from(
+        answer.model,
+        with_truncation_note(text, truncated),
+        &answer.usage,
         refused,
         truncated,
-        input_tokens: parsed.usage.input_tokens,
-        output_tokens: parsed.usage.output_tokens,
-        cache_creation_input_tokens: parsed.usage.cache_creation_input_tokens,
-        cache_read_input_tokens: parsed.usage.cache_read_input_tokens,
-        provider: String::new(),
-        cost_usd: 0.0,
-        screen_spend_usd: 0.0,
-    })
+    ))
+}
+
+/// The sentence the panel shows for a non-2xx status.
+fn error_message(status: reqwest::StatusCode, body: &str) -> String {
+    let detail = serde_json::from_str::<ApiErrorBody>(body)
+        .ok()
+        .and_then(|b| b.error.and_then(|e| e.message));
+    if detail.is_none() {
+        // Anything between here and Anthropic can answer with its own error
+        // page. Pasting a gateway's HTML into the chat panel tells the user
+        // nothing and looks like the model said it, so the status speaks for
+        // itself and a short, redacted sample goes to the log. Not the raw
+        // body: a proxy's page can echo the request back, headers and all.
+        let sample: String = body
+            .chars()
+            .take(120)
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect();
+        crate::applog::warn(format!(
+            "Anthropic API {status} with a body that is not an error object ({} bytes): {}",
+            body.len(),
+            crate::applog::redact(&sample)
+        ));
+    }
+    let sentence = match status.as_u16() {
+        401 => "Anthropic rejected the API key".to_string(),
+        429 => "Rate limited by Anthropic".to_string(),
+        _ => format!("Anthropic API error {status}"),
+    };
+    match detail {
+        Some(detail) => format!("{sentence}: {detail}"),
+        None => sentence,
+    }
 }
 
 /// Minimal blocking helper so the tests here need no async runtime crate.
@@ -379,6 +471,11 @@ fn tokio_test_block<F: std::future::Future>(future: F) -> F::Output {
         .expect("runtime")
         .block_on(future)
 }
+
+/// The stub server and event builders the wire tests share.
+#[cfg(test)]
+#[path = "chat_wire_stub.rs"]
+mod wire_stub;
 
 /// Response parsing against a real socket. Its own file only because this one
 /// is at the line cap.

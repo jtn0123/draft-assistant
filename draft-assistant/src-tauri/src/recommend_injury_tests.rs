@@ -10,6 +10,78 @@ use super::tests::{of_mode, player, recs, roster, slots};
 use super::*;
 use crate::board::AvailablePlayer;
 
+/// A league as the loader hands it over, with only the field that says which
+/// week its season starts.
+fn league_starting_in_week(start_week: Option<u32>) -> crate::sleeper::League {
+    crate::sleeper::League {
+        league_id: "league".into(),
+        name: "league".into(),
+        season: "2026".into(),
+        status: "drafting".into(),
+        total_rosters: 12,
+        roster_positions: slots(),
+        scoring_settings: HashMap::new(),
+        draft_id: None,
+        previous_league_id: None,
+        settings: crate::sleeper::LeagueSettings {
+            start_week,
+            ..Default::default()
+        },
+    }
+}
+
+#[test]
+fn a_league_that_does_not_say_when_it_starts_drafts_for_the_whole_season() {
+    // An August draft, a mock draft with no league behind it, a Yahoo league
+    // whose import carries no start week: all of them are the full season,
+    // and none of them may be zero, because the one-week tag divides by it.
+    assert_eq!(
+        weeks_left(&league_starting_in_week(None)),
+        crate::board::WEEKS
+    );
+    assert_eq!(
+        weeks_left(&league_starting_in_week(Some(1))),
+        crate::board::WEEKS
+    );
+    assert_eq!(
+        weeks_left(&league_starting_in_week(Some(0))),
+        crate::board::WEEKS
+    );
+    assert_eq!(weeks_left(&league_starting_in_week(Some(10))), 9);
+    assert_eq!(weeks_left(&league_starting_in_week(Some(40))), 1);
+}
+
+#[test]
+fn a_suspended_player_is_priced_as_missing_weeks_not_as_a_weekly_tag() {
+    // "Suspended" was in the season screen's dictionary and not in the
+    // recommender's, so it fell through to the unfamiliar-tag price: six
+    // points, against the quarter of the season a "Sus" tag costs. The same
+    // suspension, spelt two ways Sleeper both uses, has to cost the same.
+    let available = vec![
+        tagged("spelt_out", "RB", 90.0, Some("Suspended")),
+        tagged("abbreviated", "RB", 90.0, Some("Sus")),
+        tagged("fit", "RB", 90.0, None),
+    ];
+    let mine = roster(&["QB", "WR"]);
+    let rules = RosterRules::new(&slots());
+    let inputs = RecommendInputs::new(&available, Some(&mine), &rules, 4, 15, 40, 12);
+    let ctx = context(&inputs, HashMap::from([("QB", 1), ("WR", 1)]));
+    let spelt_out = score_candidate(&ctx, &available[0], Mode::Balanced).expect("an RB");
+    let abbreviated = score_candidate(&ctx, &available[1], Mode::Balanced).expect("an RB");
+    let fit = score_candidate(&ctx, &available[2], Mode::Balanced).expect("an RB");
+    assert!(
+        (spelt_out.total - abbreviated.total).abs() < 1e-9,
+        "Suspended cost {} and Sus cost {}",
+        fit.total - spelt_out.total,
+        fit.total - abbreviated.total
+    );
+    assert!(
+        fit.total - spelt_out.total > 10.0,
+        "a suspension cost only {}",
+        fit.total - spelt_out.total
+    );
+}
+
 fn tagged(id: &str, position: &str, vorp: f64, tag: Option<&str>) -> AvailablePlayer {
     let mut p = player(id, position, vorp);
     p.player.injury_status = tag.map(|t| t.to_string());
@@ -168,9 +240,13 @@ fn being_out_for_a_week_costs_a_week_and_not_a_quarter_of_the_season() {
     );
 
     // And it is a share of what is left: with two weeks to play, the same tag
-    // takes a ninth of the season rather than an eighteenth.
+    // takes a ninth of the season rather than an eighteenth. Through the same
+    // door the view uses, because a field set by hand in a test proved
+    // nothing about production, where the view passed the full season to
+    // every draft for a year.
     let mut inputs = RecommendInputs::new(&available, Some(&mine), &rules, 4, 15, 40, 12);
-    inputs.weeks_left = 2;
+    inputs.weeks_left = weeks_left(&league_starting_in_week(Some(17)));
+    assert_eq!(inputs.weeks_left, 2);
     let ctx = context(&inputs, HashMap::from([("QB", 1), ("WR", 1)]));
     let late = score_candidate(&ctx, &available[0], Mode::Balanced).expect("an RB");
     assert!(

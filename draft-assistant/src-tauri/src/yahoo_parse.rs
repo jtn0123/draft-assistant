@@ -125,15 +125,20 @@ pub fn num<T: std::str::FromStr + Default>(map: &Map<String, Value>, key: &str) 
 /// only gets a turn while the flag is unset.
 ///
 /// Yahoo also sends the roster form, an object rather than a scalar:
-/// `is_keeper: {"status": null, "cost": null, "kept": "1"}`.
+/// `is_keeper: {"status": null, "cost": null, "kept": "1"}`. Only a non-null
+/// `kept` inside it is an answer. Yahoo puts the all-null object on every
+/// roster row of every league, keeper league or not, so reading it as
+/// `Some(false)` marked every rostered player "not a keeper" and switched the
+/// app's own keeper inference off league-wide.
 pub fn opt_flag(map: &Map<String, Value>, key: &str) -> Option<bool> {
     match map.get(key)? {
         Value::Object(inner) => {
             let inner = Value::Object(inner.clone());
             let inner = flatten(&inner);
-            // An object with none of the three keys filled in is Yahoo saying
-            // "this league has keepers, this player is not one".
-            Some(flag(&inner, "kept"))
+            match inner.get("kept") {
+                None | Some(Value::Null) => None,
+                Some(_) => Some(flag(&inner, "kept")),
+            }
         }
         Value::Null => None,
         other => {

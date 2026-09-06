@@ -121,10 +121,23 @@ pub async fn persist_tokens(state: &AppState, client: &YahooClient) {
 }
 
 pub async fn persist_tokens_for(engine: &Engine, yahoo: &YahooState, client: &YahooClient) {
-    let tokens = client.tokens().await;
     let Ok(store) = store_for(engine.data_dir.clone(), yahoo.keychain).await else {
         return;
     };
+    // A client Yahoo has signed out is holding a pair that will never work
+    // again. Writing it back would keep Settings saying "Connected" and send
+    // every later call through the same refusal; clearing it is what makes
+    // the next status say "connect again" and mean it.
+    if client.signed_out() {
+        yahoo.set_client(None).await;
+        let cleared =
+            tokio::task::spawn_blocking(move || yahoo_secrets::clear_tokens(store.as_ref())).await;
+        if let Err(error) = cleared.map_err(|e| e.to_string()).and_then(|r| r) {
+            crate::applog::warn(format!("yahoo: dead token not cleared: {error}"));
+        }
+        return;
+    }
+    let tokens = client.tokens().await;
     let stored =
         tokio::task::spawn_blocking(move || yahoo_secrets::save_tokens(store.as_ref(), &tokens))
             .await;

@@ -12,6 +12,19 @@ import { defineConfig, devices } from "@playwright/test";
  * `npm run test:e2e` drives the real desktop window through WebdriverIO for
  * that, and is a separate, much heavier package.
  */
+
+// Locally the dev server, for the edit-and-rerun loop. In CI (or with
+// PW_WEB_SERVER=preview) the production bundle: `vite build` then `vite
+// preview` on the same port, so the suite exercises the chunking, minified
+// output and asset paths the .app ships, not the unbundled dev transform. A
+// chunk that only breaks once built used to pass here and fail in the window.
+const productionBundle = !!process.env.CI || process.env.PW_WEB_SERVER === "preview";
+
+// 1420 is the port the Tauri dev server owns. PW_PORT moves the run when that
+// port is busy (a `tauri dev` left running), read by `preview:e2e` too so the
+// server and the tests agree.
+const port = Number(process.env.PW_PORT ?? 1420);
+
 export default defineConfig({
   testDir: "./e2e-browser",
   fullyParallel: true,
@@ -20,15 +33,18 @@ export default defineConfig({
   reporter: process.env.CI ? "list" : [["list"], ["html", { open: "never" }]],
   outputDir: "./e2e-browser/.results",
   use: {
-    baseURL: "http://localhost:1420",
+    baseURL: `http://localhost:${port}`,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "npm run dev",
-    url: "http://localhost:1420",
+    command: productionBundle
+      ? "npm run build && npm run preview:e2e"
+      : `npm run dev -- --port ${port}`,
+    url: `http://localhost:${port}`,
     reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
+    // The production path pays for a build before the server answers.
+    timeout: productionBundle ? 180_000 : 60_000,
   },
 });

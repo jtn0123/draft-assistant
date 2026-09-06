@@ -125,18 +125,39 @@ async fn set_level_on(
 /// Always `Ok`. A reporter that can fail is a reporter that reports its own
 /// failure, and the frontend has no way to tell a real problem from that loop.
 #[tauri::command]
-pub async fn log_frontend_error(message: String, source: Option<String>) -> Result<(), String> {
-    applog::error(frontend_line(&message, source.as_deref()));
+pub async fn log_frontend_error(
+    message: String,
+    source: Option<String>,
+    stack: Option<String>,
+) -> Result<(), String> {
+    applog::error(frontend_line(&message, source.as_deref(), stack.as_deref()));
     Ok(())
 }
 
 /// The line a page-level failure becomes. Split out so a test can assert what
 /// is stored without a log file to read back.
-fn frontend_line(message: &str, source: Option<&str>) -> String {
+///
+/// The stack is the page's first frames, on the same line: the log is read a
+/// line at a time, and "TypeError: undefined is not a function" with no frame
+/// named nothing about which screen had failed.
+fn frontend_line(message: &str, source: Option<&str>, stack: Option<&str>) -> String {
     format!(
         "frontend: {message}{}",
-        applog::context(&[("where", source.unwrap_or(""))])
+        applog::context(&[
+            ("where", source.unwrap_or("")),
+            ("stack", &one_line(stack.unwrap_or(""))),
+        ])
     )
+}
+
+/// A stack's frames joined onto one line, innermost first.
+fn one_line(stack: &str) -> String {
+    stack
+        .lines()
+        .map(str::trim)
+        .filter(|frame| !frame.is_empty())
+        .collect::<Vec<_>>()
+        .join(" <- ")
 }
 
 /// Show the log's folder in the user's file manager, and hand back the path
@@ -198,19 +219,38 @@ mod tests {
         assert_eq!(
             frontend_line(
                 "Cannot read properties of undefined",
-                Some("unhandledrejection")
+                Some("unhandledrejection"),
+                None
             ),
             "frontend: Cannot read properties of undefined where=unhandledrejection"
         );
         // A page that cannot say where is still worth storing.
-        assert_eq!(frontend_line("boom", None), "frontend: boom");
+        assert_eq!(frontend_line("boom", None, None), "frontend: boom");
+    }
+
+    /// The failure this prevents: a render error reached the log as
+    /// "frontend: TypeError: x is undefined where=render", which names no
+    /// screen and no component, so the log could not say what had failed.
+    #[test]
+    fn a_frontend_error_keeps_its_first_frames_on_the_same_line() {
+        let line = frontend_line(
+            "TypeError: x is undefined",
+            Some("render"),
+            Some("    at Board (http://localhost/assets/index.js:10:5)\n    at Panel\n"),
+        );
+        assert_eq!(
+            line,
+            "frontend: TypeError: x is undefined where=render \
+             stack=at Board (http://localhost/assets/index.js:10:5) <- at Panel"
+        );
+        assert!(!line.contains('\n'), "one entry is one line of the log");
     }
 
     #[test]
     fn a_frontend_error_that_quotes_a_url_is_masked_before_it_is_stored() {
         // The page's own error strings quote whatever URL failed, which on a
         // follower is the host's address with its bearer token in it.
-        let line = frontend_line("GET /api/state?token=abc123 failed", Some("render"));
+        let line = frontend_line("GET /api/state?token=abc123 failed", Some("render"), None);
         assert!(!applog::redact(&line).contains("abc123"), "{line}");
     }
 
@@ -284,6 +324,6 @@ mod tests {
     #[tokio::test]
     async fn the_reporting_command_never_fails_whatever_the_page_hands_it() {
         // A reporter that can fail is one the frontend has to report about.
-        assert!(log_frontend_error(String::new(), None).await.is_ok());
+        assert!(log_frontend_error(String::new(), None, None).await.is_ok());
     }
 }

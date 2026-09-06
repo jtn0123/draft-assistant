@@ -89,6 +89,7 @@ export function view(overrides: Partial<SeasonView> = {}): SeasonView {
       totals: { my_playing: 0, my_pre: 0, my_done: 0, my_live_points: 0, opp_live_points: 0 },
       next_kickoff_ms: null,
       bye_teams: [],
+      lineup_locked: false,
     },
     roster: [],
     trades: [],
@@ -142,6 +143,6 @@ export function lockedView() {
   return {
     ...base,
     calls: [],
-    live: { ...base.live, games: [liveGame()] },
+    live: { ...base.live, games: [liveGame()], lineup_locked: true },
   };
 }

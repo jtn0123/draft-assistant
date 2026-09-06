@@ -71,14 +71,29 @@ async fn a_yahoo_command_that_fails_leaves_an_error_line_naming_it() {
 }
 
 #[test]
-fn two_sign_ins_never_get_the_same_state_to_echo_back() {
-    let first = nonce();
-    let second = nonce();
+fn a_sign_in_state_cannot_be_guessed_from_the_clock_and_the_process_id() {
+    // The failure this prevents: the state was the time in nanoseconds, a
+    // counter and the pid, all of which a page open in the same browser can
+    // estimate closely enough to post a code of its own to the loopback
+    // listener. Sixteen random bytes cannot be.
+    let first = nonce().expect("the OS random source is readable");
+    let second = nonce().expect("random");
     assert_ne!(first, second);
-    assert!(!first.is_empty());
+    assert_eq!(first.len(), 32, "{first} is not sixteen bytes of hex");
     // It goes in a URL query, so it has to survive one unescaped.
     assert!(
-        first.chars().all(|c| c.is_ascii_alphanumeric()),
+        first.chars().all(|c| c.is_ascii_hexdigit()),
         "{first} is not URL-safe"
+    );
+    // Two states drawn a moment apart share no long prefix, which a
+    // clock-derived one always did.
+    let shared = first
+        .chars()
+        .zip(second.chars())
+        .take_while(|(a, b)| a == b)
+        .count();
+    assert!(
+        shared < 8,
+        "{first} and {second} share {shared} leading characters"
     );
 }

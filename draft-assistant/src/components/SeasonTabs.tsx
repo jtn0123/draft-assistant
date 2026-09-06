@@ -11,7 +11,12 @@ import type {
   TradeDone,
 } from "../season-types";
 import { dateLabel, fmt, ideasAgeNote, ordinal, pct, signed } from "../format";
+import type { Platform } from "../types";
 import { Headshot, PlayerName, PosBadge, SortHead, TeamAvatar, Empty } from "./bits";
+
+/** The placeholder for a column with nothing in it yet, the same glyph `fmt`
+ *  prints for a missing number. */
+const BLANK = "–";
 
 // ---------- standings ----------
 
@@ -114,12 +119,28 @@ export function Standings({
 
 // ---------- my team ----------
 
-export function TeamRoster({ rows }: { rows: RosterRow[] }) {
-  if (rows.length === 0) return <Empty>Set your Sleeper username to see your roster.</Empty>;
+export function TeamRoster({
+  rows,
+  platform = "sleeper",
+}: {
+  rows: RosterRow[];
+  /** Which service the league is on. A Yahoo league has no Sleeper username
+   *  to set, so the empty state has to point somewhere that exists. */
+  platform?: Platform;
+}) {
+  if (rows.length === 0) {
+    return (
+      <Empty>
+        {platform === "yahoo"
+          ? "Your team could not be matched to the connected Yahoo account, so there is no roster to show."
+          : "Set your Sleeper username to see your roster."}
+      </Empty>
+    );
+  }
   const openSlots = rows.filter((r) => r.role === "Start").length;
   // Before the projections land, and before anyone has played a snap, both of
   // these are a column of "0.0" per player — which reads as fifteen men
-  // measured at zero rather than as nothing measured yet. Em-dash the whole
+  // measured at zero rather than as nothing measured yet. Blank the whole
   // column until one real number turns up in it.
   const anyProjected = rows.some((r) => r.projected > 0);
   const anyPoints = rows.some((r) => r.points !== 0);
@@ -144,10 +165,10 @@ export function TeamRoster({ rows }: { rows: RosterRow[] }) {
           <PlayerName name={row.name} team={row.team} playerId={row.player_id} />
           <span className="muted small right">{row.role}</span>
           <span className="right team-points">
-            {row.role === "Bye" ? "Bye" : anyProjected ? fmt(row.projected, 1) : "—"}
+            {row.role === "Bye" ? "Bye" : anyProjected ? fmt(row.projected, 1) : BLANK}
           </span>
           <span className="right team-points team-season">
-            {anyPoints ? fmt(row.points, 1) : "—"}
+            {anyPoints ? fmt(row.points, 1) : BLANK}
           </span>
         </div>
       ))}

@@ -153,7 +153,7 @@ export interface Api {
   /** Put a page-level failure -- a render error, a rejected promise -- into
    *  the same log as everything else. Best effort: never worth a toast, and
    *  never worth failing over. */
-  logFrontendError(message: string, source: string): Promise<void>;
+  logFrontendError(message: string, source: string, stack?: string): Promise<void>;
   /** Turn verbose logging on ("debug") or off ("info"), now and for next
    *  launch. Resolves to the level that is now in force. */
   setLogLevel(level: string): Promise<string>;
@@ -221,7 +221,8 @@ const tauriApi: Api = {
     listen<CompanionDevice[]>("companion-devices", (event) => handler(event.payload)),
   diagnostics: () => invoke<Diagnostics>("diagnostics"),
   openLogFolder: () => invoke<string>("open_log_folder"),
-  logFrontendError: (message, source) => invoke<void>("log_frontend_error", { message, source }),
+  logFrontendError: (message, source, stack) =>
+    invoke<void>("log_frontend_error", { message, source, stack }),
   setLogLevel: (level) => invoke<string>("set_log_level", { level }),
 };
 

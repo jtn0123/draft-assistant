@@ -63,6 +63,7 @@ describe("once the lineup is locked", () => {
       live: {
         ...base.live,
         games: [liveGame("done", "phi-tb"), liveGame("playing", "sf-lar")],
+        lineup_locked: true,
       },
     };
     render(<SeasonScreen view={sunday} />);

@@ -109,6 +109,14 @@ fn route(path: &str) -> Option<stub::Reply> {
     if path.starts_with("/scores/nfl/regular/2026/") {
         return ok(SCORES.to_string());
     }
+    // The same league under another id, except that its finished week 1
+    // answers `null`, the lost-response shape Sleeper serves now and then.
+    if let Some(rest) = path.strip_prefix("/v1/league/league-null/") {
+        return match rest.split_once('/') {
+            Some(("matchups", "1")) => ok("null".to_string()),
+            _ => route(&format!("/v1/league/league-2026/{rest}")),
+        };
+    }
     if let Some(rest) = path.strip_prefix("/v1/league/league-2026/") {
         return match rest {
             "rosters" => {
@@ -215,6 +223,45 @@ async fn the_sweep_totals_only_the_weeks_already_played() {
     // has not been played and must not, or every player looks like they have
     // already banked their whole season.
     assert_eq!(season.season_points.get("qb-1"), Some(&4.0));
+    cleanup(engine);
+}
+
+/// The bug: a `null` answer for a finished week parsed as no rows and was
+/// written to that week's cache, and a finished week's cache is read back at
+/// any age. One lost response then stood as that week's result, and its
+/// points, for the rest of the season.
+#[tokio::test]
+async fn an_empty_answer_for_a_finished_week_is_reported_and_never_cached() {
+    let engine = engine("null-week");
+    let _state_up = STATE_GATE.read().await;
+    let season = engine
+        .load_season(&league("league-null", None), None, true)
+        .await
+        .expect("loaded");
+
+    assert!(
+        season
+            .warnings
+            .iter()
+            .any(|w| w.contains("matchups unavailable for weeks 1, 2")),
+        "a finished week with no rows must be reported: {:?}",
+        season.warnings
+    );
+    assert!(
+        !engine
+            .data_dir
+            .join("season_league-null_week1.json")
+            .exists(),
+        "the empty week was written to the cache it would be read back from forever"
+    );
+    // A week that did answer is cached as before.
+    assert!(engine
+        .data_dir
+        .join("season_league-null_week3.json")
+        .exists());
+    // And the week's rows were not counted as zero points for everyone: only
+    // week 3 (3.0) reaches the total, week 1 is missing rather than blank.
+    assert_eq!(season.season_points.get("qb-1"), Some(&3.0));
     cleanup(engine);
 }
 

@@ -189,14 +189,26 @@ fn a_bye_week_matchup_faces_an_empty_opponent() {
     );
 }
 
+/// The bug: with no matchup rows, the lineup "as set" was taken to be the
+/// optimal one, so a matchups outage or a `null` answer read as "your lineup
+/// is already optimal" with every real call hidden behind it. Sleeper keeps
+/// the roster's own starter list in step with the matchup row, so that is
+/// what stands in.
 #[test]
-fn with_no_matchups_the_roster_assumes_the_optimal_lineup() {
+fn with_no_matchups_the_starters_sleeper_lists_still_get_their_calls() {
     let (loaded, mut season, config) = common::fixture();
     std::sync::Arc::make_mut(&mut season.matchups).clear();
     let v = build_season_view(&loaded, &season, config.my_user_id.as_deref());
 
     assert!(v.matchup.is_none());
-    assert!(v.calls.is_empty(), "optimal vs optimal has no diff");
+    assert_eq!(
+        v.calls.len(),
+        1,
+        "the bench back over the flex: {:?}",
+        v.calls
+    );
+    assert_eq!(v.calls[0].player_in_id, "r2");
+    assert_eq!(v.calls[0].player_out_id, "w2");
     let role_of = |id: &str| {
         v.roster
             .iter()
@@ -204,12 +216,23 @@ fn with_no_matchups_the_roster_assumes_the_optimal_lineup() {
             .map(|r| r.role.clone())
             .unwrap()
     };
-    assert_eq!(role_of("r2"), "Start", "the optimal flex is r2");
-    assert_eq!(role_of("w2"), "Bench");
+    assert_eq!(role_of("w2"), "Start", "the roster still says w2 is set");
+    assert_eq!(role_of("r2"), "Bench");
     assert!(
         v.live.games.is_empty(),
         "nobody is tracked without a matchup"
     );
+}
+
+/// Without a matchup row or a starter list there is nothing set to compare
+/// against, and only then does the optimal lineup stand in.
+#[test]
+fn with_neither_matchups_nor_starters_the_optimal_lineup_stands_in() {
+    let (loaded, mut season, config) = common::fixture();
+    std::sync::Arc::make_mut(&mut season.matchups).clear();
+    std::sync::Arc::make_mut(&mut season.rosters)[0].starters = None;
+    let v = build_season_view(&loaded, &season, config.my_user_id.as_deref());
+    assert!(v.calls.is_empty(), "{:?}", v.calls);
 }
 
 #[test]

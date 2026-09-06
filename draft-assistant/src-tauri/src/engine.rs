@@ -253,51 +253,6 @@ impl Engine {
         Ok(fetched_at)
     }
 
-    /// Read the config, falling back to the last good copy if the live file
-    /// is missing or unreadable. A key still sitting in the file from before
-    /// Keychain storage existed is moved there on the way in.
-    pub fn load_config(&self) -> AppConfig {
-        let read = |name: &str| {
-            std::fs::read_to_string(self.cache_path(name))
-                .ok()
-                .and_then(|s| serde_json::from_str::<AppConfig>(&s).ok())
-        };
-        let mut config = read("config.json")
-            .or_else(|| read("config.json.bak"))
-            .unwrap_or_default();
-        if let Some(key) = config.anthropic_api_key.take() {
-            if crate::secrets::available() && crate::secrets::store(&key).is_ok() {
-                // The key is safely in the Keychain either way; if rewriting
-                // the file to drop it fails, the next save tries again.
-                let _ = self.save_config(&config);
-            } else {
-                config.anthropic_api_key = Some(key);
-            }
-        }
-        config
-    }
-
-    /// Write the config atomically: to a temp file first, then swapped into
-    /// place, with the previous copy kept as `config.json.bak`. A crash
-    /// mid-write can never leave a half-written config behind.
-    ///
-    /// Every failure comes back to the caller: a save that quietly did nothing
-    /// loses the user's league list at the next launch with nothing said.
-    pub fn save_config(&self, config: &AppConfig) -> Result<(), String> {
-        let json = serde_json::to_string_pretty(config)
-            .map_err(|e| format!("could not prepare your settings to be saved: {e}"))?;
-        let live = self.cache_path("config.json");
-        let tmp = temp_sibling(&live);
-        crate::cache::write_synced(&tmp, json.as_bytes())
-            .map_err(|e| format!("could not save your settings to {}: {e}", tmp.display()))?;
-        crate::cache::owner_only(&tmp);
-        if live.exists() {
-            crate::cache::back_up(&live, &self.cache_path("config.json.bak"));
-        }
-        std::fs::rename(&tmp, &live)
-            .map_err(|e| format!("could not save your settings to {}: {e}", live.display()))
-    }
-
     /// Load a league end-to-end and build its scored board.
     pub async fn load_league(&self, league_id: &str, force: bool) -> Result<LoadedLeague, String> {
         let league = self.client.league(league_id).await.map_err(to_message)?;

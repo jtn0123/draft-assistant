@@ -188,3 +188,54 @@ fn logging_before_init_writes_nothing_to_disk_and_does_not_panic() {
     assert!(DIR.get().is_none(), "no test in this binary may call init");
     assert_eq!(log_path(), None);
 }
+
+/// The claim "Verbose logging changes the tail" was not true: nothing in the
+/// app wrote a debug line, so ticking the box did nothing. This is the gate
+/// itself, captured at the point a line is handed to the file.
+#[test]
+fn turning_verbose_logging_on_makes_debug_lines_reach_the_log_and_off_stops_them() {
+    let _held = LEVEL_GATE.lock().unwrap_or_else(|e| e.into_inner());
+    reset_level_for_tests();
+    let capture = Capture::start();
+
+    debug("tick fetched draft=d1 picks=12 in 80ms");
+    assert!(capture.lines().is_empty(), "quiet by default");
+
+    set_level(LEVEL_DEBUG);
+    debug("tick fetched draft=d1 picks=12 in 80ms");
+    assert!(
+        capture.saw("DEBUG tick fetched draft=d1 picks=12 in 80ms"),
+        "{:?}",
+        capture.lines()
+    );
+
+    set_level(LEVEL_INFO);
+    debug("tick fetched draft=d1 picks=13 in 70ms");
+    assert!(!capture.saw("picks=13"), "{:?}", capture.lines());
+    info("polling stopped");
+    assert!(
+        capture.saw("INFO polling stopped"),
+        "info is written at either level"
+    );
+    reset_level_for_tests();
+}
+
+/// The checkbox has to have lines to turn on. Each loop that matters on draft
+/// night writes one at its tick boundary; a refactor that drops them makes
+/// "Verbose logging" a checkbox that does nothing, which is where it started.
+#[test]
+fn the_verbose_checkbox_has_debug_lines_to_turn_on_at_every_tick_boundary() {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for (file, what) in [
+        ("commands_draft/poll_loop.rs", "the draft tick"),
+        ("poll/season_loop.rs", "the season tick"),
+        ("companion/hub.rs", "companion sockets and pairing"),
+        ("chat.rs", "chat requests"),
+    ] {
+        let text = std::fs::read_to_string(src.join(file)).expect(file);
+        assert!(
+            text.contains("applog::debug("),
+            "{file} no longer writes a debug line for {what}"
+        );
+    }
+}

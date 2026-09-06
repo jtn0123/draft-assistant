@@ -3,111 +3,58 @@
 //! On macOS it goes in the login Keychain through the system `security` tool,
 //! so it never sits in a plaintext JSON file next to the caches. Anywhere the
 //! Keychain is unavailable the key stays in the config file as before.
+//!
+//! This is a thin layer over [`crate::yahoo_secrets`], the app's one secret
+//! store: the key is [`Item::AnthropicKey`] there, under the account name
+//! this module has always used, so a key an older build stored still reads.
+//! It used to be a store of its own that answered the `security` tool's
+//! password prompt on stdin and read the answer back literally. That prompt
+//! keeps 128 bytes and drops the rest without a word, and
+//! `find-generic-password -w` prints an item as hex the moment it holds one
+//! non-ASCII byte, so a long key came back cut short and an odd one came back
+//! as a hex string the API rejected. The shared store hex-encodes the value
+//! into argv and decodes it on the way back, whatever its length.
 
 use crate::engine::AppConfig;
-use std::io::Write;
-use std::process::{Command, Stdio};
+use crate::yahoo_secrets::{Item, Keychain, SecretStore};
 
-const SERVICE: &str = "draft-assistant";
-const ACCOUNT: &str = "anthropic-api-key";
+pub use crate::yahoo_secrets::Op;
 
-/// The three things we ask the Keychain to do. An enum rather than a string so
-/// an unknown operation cannot be constructed at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Op {
-    Store,
-    Load,
-    Clear,
-}
-
-impl Op {
-    fn name(self) -> &'static str {
-        match self {
-            Op::Store => "store",
-            Op::Load => "load",
-            Op::Clear => "clear",
-        }
-    }
-}
-
-/// The `security` subcommand and arguments for one operation. Pure, so the
+/// The `security` invocation for one operation on the key. `key` is what a
+/// store writes, hex-encoded; the other two operations ignore it. Pure, so the
 /// exact invocation is testable without touching a real Keychain.
-///
-/// The key is never an argument: `add-generic-password -w` with no value reads
-/// it from stdin instead. Passing it here would put an `sk-ant-...` string in
-/// `ps` output for every process on the machine to read.
-pub fn args_for(op: Op) -> Vec<String> {
-    let mut args: Vec<String> = match op {
-        Op::Store => vec!["add-generic-password".into(), "-U".into()],
-        Op::Load => vec!["find-generic-password".into()],
-        Op::Clear => vec!["delete-generic-password".into()],
-    };
-    args.extend(["-s".into(), SERVICE.into(), "-a".into(), ACCOUNT.into()]);
-    if matches!(op, Op::Store | Op::Load) {
-        args.push("-w".into());
-    }
-    args
+pub fn args_for(op: Op, key: Option<&str>) -> Vec<String> {
+    crate::yahoo_secrets::args_for(op, Item::AnthropicKey, key)
 }
 
 /// Keychain storage is a macOS thing; everywhere else falls back to the file.
 pub fn available() -> bool {
-    cfg!(target_os = "macos") && std::path::Path::new("/usr/bin/security").is_file()
+    crate::yahoo_secrets::available()
 }
 
-fn run(op: Op, key: Option<&str>) -> Result<String, String> {
-    let mut child = Command::new("/usr/bin/security")
-        .args(args_for(op))
-        .stdin(if key.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("keychain: {e}"))?;
+/// The key as `store` holds it, or `None` when it holds nothing.
+pub fn load_from(store: &dyn SecretStore) -> Option<String> {
+    store.read(Item::AnthropicKey)
+}
 
-    if let Some(key) = key {
-        // `security` asks for the password and then asks again to confirm, so
-        // it wants the value twice.
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "keychain: no stdin".to_string())?;
-        stdin
-            .write_all(format!("{key}\n{key}\n").as_bytes())
-            .map_err(|e| format!("keychain: {e}"))?;
-        // Dropping closes the pipe, which is what ends the prompt.
-    }
+pub fn store_in(store: &dyn SecretStore, key: &str) -> Result<(), String> {
+    store.write(Item::AnthropicKey, key)
+}
 
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("keychain: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "keychain {} failed: {}",
-            op.name(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+pub fn clear_in(store: &dyn SecretStore) -> Result<(), String> {
+    store.clear(Item::AnthropicKey)
 }
 
 pub fn store(key: &str) -> Result<(), String> {
-    run(Op::Store, Some(key)).map(|_| ())
+    store_in(&Keychain, key)
 }
 
 pub fn load() -> Option<String> {
-    run(Op::Load, None).ok().filter(|k| !k.is_empty())
+    load_from(&Keychain)
 }
 
 pub fn clear() -> Result<(), String> {
-    match run(Op::Clear, None) {
-        Ok(_) => Ok(()),
-        // Nothing stored is the state we wanted.
-        Err(e) if e.contains("could not be found") => Ok(()),
-        Err(e) => Err(e),
-    }
+    clear_in(&Keychain)
 }
 
 /// How the rest of the app gets at the key.
@@ -122,17 +69,14 @@ impl crate::engine::Engine {
     /// rather than on a runtime thread, and its answer is cached: a chat
     /// question used to spawn `security` every time it was asked.
     pub async fn api_key(&self, config: &AppConfig) -> Option<String> {
-        if !crate::secrets::available() {
+        if !available() {
             return config.anthropic_api_key.clone();
         }
         let mut cache = self.key_cache.lock().await;
         let stored = match cache.as_ref() {
             Some(known) => known.clone(),
             None => {
-                let loaded = tokio::task::spawn_blocking(crate::secrets::load)
-                    .await
-                    .ok()
-                    .flatten();
+                let loaded = tokio::task::spawn_blocking(load).await.ok().flatten();
                 *cache = Some(loaded.clone());
                 loaded
             }
@@ -152,14 +96,14 @@ impl crate::engine::Engine {
     /// instead is the one field that changed: it re-reads the live config,
     /// sets that field, and saves under the lock.
     pub async fn store_api_key(&self, key: Option<String>) -> Result<Option<String>, String> {
-        if !crate::secrets::available() {
+        if !available() {
             // No Keychain: the key itself is what belongs in the config file.
             return Ok(key);
         }
         let writing = key.clone();
         tokio::task::spawn_blocking(move || match &writing {
-            Some(k) => crate::secrets::store(k),
-            None => crate::secrets::clear(),
+            Some(k) => store(k),
+            None => clear(),
         })
         .await
         .map_err(|e| format!("could not reach the Keychain: {e}"))??;
@@ -181,6 +125,36 @@ fn chosen_key(stored: Option<String>, config: &AppConfig) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::yahoo_secrets::{decode_stored, hex_of, FileStore};
+    use std::path::PathBuf;
+
+    /// A directory of this test's own, removed when it is done. Nothing here
+    /// runs `/usr/bin/security`; the round trips go through a file store so
+    /// the developer's real login Keychain is never written.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(label: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "draft-assistant-key-{label}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("clock")
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&path).expect("scratch dir");
+            Self(path)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const KEY: &str = "sk-ant-api03-not-a-real-key";
 
     fn config_with(key: Option<&str>) -> AppConfig {
         AppConfig {
@@ -210,43 +184,80 @@ mod tests {
     }
 
     #[test]
-    fn the_key_never_appears_in_the_arguments() {
-        // The whole point: anything in argv is visible in `ps` to every other
-        // process on the machine.
+    fn the_key_never_appears_in_the_arguments_as_plain_text() {
+        // Anything in argv is visible in `ps` to every other process of this
+        // user for as long as the tool runs; the hex form at least keeps a
+        // casual `ps | grep sk-` from finding it, and a load or clear has no
+        // business carrying it at all.
         for op in [Op::Store, Op::Load, Op::Clear] {
-            let args = args_for(op);
+            let args = args_for(op, Some(KEY));
             assert!(
-                !args.iter().any(|a| a.starts_with("sk-")),
-                "{op:?} leaked a key into argv: {args:?}"
+                !args.iter().any(|a| a.contains("sk-")),
+                "{op:?} put the key in argv as text: {args:?}"
+            );
+        }
+        for op in [Op::Load, Op::Clear] {
+            let args = args_for(op, Some(KEY));
+            assert!(
+                !args.contains(&hex_of(KEY)),
+                "{op:?} carries a key it has no use for: {args:?}"
             );
         }
     }
 
+    /// The stdin route answered the tool's password prompt, which keeps 128
+    /// bytes and drops the rest without a word. The key has to travel as a
+    /// hex argument, the way every other item does, so all of it arrives.
     #[test]
-    fn store_updates_in_place_and_asks_for_the_password_on_stdin() {
-        let args = args_for(Op::Store);
+    fn store_passes_the_key_as_hex_in_argv_rather_than_on_the_password_prompt() {
+        let args = args_for(Op::Store, Some(KEY));
         assert_eq!(args[0], "add-generic-password");
         assert!(
             args.contains(&"-U".to_string()),
             "must overwrite, not duplicate"
         );
-        // A bare trailing -w means "read it from stdin".
-        assert_eq!(args.last().map(String::as_str), Some("-w"));
+        let n = args.len();
+        assert_eq!(args[n - 2], "-w");
+        assert_eq!(args[n - 1], hex_of(KEY));
+        assert_eq!(decode_stored(&args[n - 1]), KEY);
     }
 
     #[test]
-    fn load_asks_for_the_password_only() {
-        let args = args_for(Op::Load);
-        assert_eq!(args[0], "find-generic-password");
-        assert_eq!(args.last().map(String::as_str), Some("-w"));
-        assert!(args.contains(&SERVICE.to_string()));
+    fn a_key_longer_than_the_password_prompt_keeps_round_trips_whole() {
+        let long = format!("sk-ant-api03-{}", "k".repeat(300));
+        assert!(long.len() > 128);
+        // Through argv: the whole thing is there to be decoded.
+        let args = args_for(Op::Store, Some(&long));
+        assert_eq!(decode_stored(args.last().expect("a value")), long);
+        // Through the file store: what went in comes out.
+        let scratch = Scratch::new("long");
+        let store = FileStore::in_dir(&scratch.0);
+        assert!(load_from(&store).is_none());
+        store_in(&store, &long).expect("store");
+        assert_eq!(load_from(&store).as_deref(), Some(long.as_str()));
+        clear_in(&store).expect("clear");
+        assert!(load_from(&store).is_none());
     }
 
+    /// A key an older build wrote went into the Keychain as its own text, and
+    /// `find-generic-password -w` prints it back as that text. The decoder
+    /// must hand it on unchanged rather than try to read it as hex.
     #[test]
-    fn clear_names_the_item_and_asks_for_nothing() {
-        let args = args_for(Op::Clear);
-        assert_eq!(args[0], "delete-generic-password");
-        assert!(args.contains(&ACCOUNT.to_string()));
-        assert!(!args.contains(&"-w".to_string()));
+    fn a_key_stored_before_values_were_hex_encoded_still_reads() {
+        assert_eq!(decode_stored(KEY), KEY);
+        assert_eq!(decode_stored(&format!("{KEY}\n")), KEY);
+    }
+
+    /// The account name is what an existing user's key is filed under. Change
+    /// it and every Mac that already has a key stored asks for it again.
+    #[test]
+    fn load_and_clear_name_the_account_older_builds_wrote_to() {
+        for op in [Op::Load, Op::Clear] {
+            let args = args_for(op, None);
+            assert_eq!(args[3], "-a");
+            assert_eq!(args[4], "anthropic-api-key");
+            assert!(args.contains(&"draft-assistant".to_string()));
+        }
+        assert!(!args_for(Op::Clear, None).contains(&"-w".to_string()));
     }
 }

@@ -382,3 +382,31 @@ fn the_final_pick_of_a_finished_draft_is_on_the_feed() {
     assert_eq!(v.draft.current_pick, 24);
     assert_eq!(v.recent_picks.first().map(|p| p.pick_no), Some(23));
 }
+
+/// Three "Mark drafted" cards sat under a finished board, each offering to
+/// record a pick nobody can make: the recommender does not know the draft
+/// is over, so the view has to.
+#[test]
+fn a_finished_draft_offers_nothing_to_mark_drafted() {
+    let (mut loaded, config) = league();
+    // One pick short of the 24-pick board, there is still advice to give.
+    loaded.api_picks = (1..=23).map(|n| pick(n, &format!("x{n}"), false)).collect();
+    let v = view(&loaded, &config);
+    assert_eq!(v.draft.current_pick, 24);
+    assert!(
+        !v.recommendations.is_empty(),
+        "with a pick still to make there is advice"
+    );
+
+    loaded.api_picks.push(pick(24, "x24", false));
+    let v = view(&loaded, &config);
+    assert_eq!(v.draft.status, "complete");
+    assert!(
+        v.recommendations.is_empty(),
+        "nothing to recommend once the last pick is in: {:?}",
+        v.recommendations
+            .iter()
+            .map(|r| &r.player_id)
+            .collect::<Vec<_>>()
+    );
+}

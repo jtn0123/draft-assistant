@@ -152,6 +152,10 @@ export interface LiveSection {
   next_kickoff_ms: number | null;
   /** NFL teams idle this week; empty when no schedule has loaded. */
   bye_teams: string[];
+  /** True when no legal lineup change is left this week. Decided by the
+   *  backend, which knows about empty and bye slots the scoreboard chips do
+   *  not carry; see `LiveSection` in `season_types.rs`. */
+  lineup_locked: boolean;
 }
 
 export interface RosterRow {
