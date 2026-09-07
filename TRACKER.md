@@ -359,3 +359,32 @@ moved to `view_signals_tests.rs`.
 
 Gate at `29ac5af`: 1393 Rust tests over 54 binaries, 951 frontend tests in 81
 files, 48 guard-script tests, clippy and every static check clean.
+
+## Recovered from the abandoned branch (2026-09-07) — `0c9410a`
+
+`t3code/review-prior-grade-report` (last commit 2026-08-29) had 82 commits
+never merged. It is a superseded layout of the same app: its `chat/cli.rs`,
+`engine_season.rs`, `log.rs`, `matchup.rs`, `lineup.rs` and `playoffs.rs` are
+main's `chat_cli.rs`, `season_engine.rs`, `applog.rs`, `season_view_matchup.rs`,
+`season_lineup.rs` and `season_odds.rs`, and in each case main's version is the
+later one. Its `verify.yml` is replaced by main's `ci.yml`, `e2e.yml` and
+`release.yml`. Merging it would be a regression.
+
+Two things on it were real gaps, and both are now on main:
+
+| Taken                           | Why it was worth it                                                                                                                                                                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src-tauri/tests/properties.rs` | Property-based testing was a technique main had nowhere. 15 proptest properties over the draft math, the ownership model and the Sleeper parsers, on stable, in the ordinary suite. Rewritten against today's API; two properties are new. |
+| `src-tauri/fuzz/`               | Three coverage-guided targets. The branch's README said they built but would not run: cargo-fuzz needed rustc 1.91 and the nightly here was 1.90. Nightly is now 1.100 and all three run, ~200k executions each, no crashes.               |
+
+The fuzz targets need `-s none`: with AddressSanitizer on, linking fails inside
+`tauri-utils`. Keeping ASan would mean making `tauri` optional across every
+`#[tauri::command]` module, which is a large change to the shipped app for a
+sanitizer this crate — which has no unsafe code — gains little from.
+
+To let the library build without Tauri, the app shell at the bottom of
+`lib.rs` is behind a `desktop` feature, on by default. Everything else on that
+branch is build artifacts: old grade reports and dogfood screenshots.
+
+Gate at `0c9410a`: 1408 Rust tests over 55 binaries, 951 frontend tests in 81
+files, 48 guard-script tests, clippy and every static check clean.
