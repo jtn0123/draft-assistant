@@ -303,3 +303,13 @@ Cheapest high-impact fixes, in order:
 12. Tests: companion e2e serves `pwa.js`/manifest/worker and imports the CSP; poll-until in `https_tests` and `yahoo_auth_wire`; Playwright retries 0; fill the coverage placeholder; pass the device `Item` into `CompanionServer::new` (Tests 2-5).
 
 Done 2026-09-07: `TAURI_SIGNING_PRIVATE_KEY` set by the user; `v0.3.1` at `a41c9e5` (run 34086367307) published the dmg, `Draft-Assistant-0.3.1-aarch64.app.tar.gz` with its `.sig`, and `latest.json`, so "Check for updates" now has a feed and 0.3.0 installs can update to it. Still open for the user: live tests L1–L10.
+
+## Grade 7 fix batches (2026-09-07) — all twelve items closed
+
+Three batches of parallel lanes, each committed only once the whole gate was green.
+
+- **A `d168fa2`** — Season 1-4 (30-minute refresh ceiling, season epoch invalidating the poll memory, rollover warning, Refresh button, live zero for a started player with no points, season disk work off the runtime, per-source and slow-tick watches, `record_history` serialised). Draft 1-4 and 6-7 (seat stays unconfirmed on a failed `/users` and is retried, a hole is adopted after three refusals, keeper floor carried through Refresh, `refresh_picks` writes off the lock, actions inert once the draft ends, live sync stays off across a switch). Security 2-6 and Companion 2, 7 (CSP `https: wss:`, TLS keeper that starts on the tailnet appearing, renews in place, keeps a valid cert when a re-mint fails, stable https port, headless TLS off). UX 2 and Companion 1, 3 (one timed fetch for every follower and phone request, drafts and questions survive a failed send, iOS identity and PNG touch icon, wake lock only while visible, follower logs its own errors). UX 3-6 (menu roles, stable row ids, version from package.json, live regions, username Save guard). Logging 3-7.
+- **B `03d7e9c`** — Chat 1-4 and 6 (retries with backoff, question survives a close, Cancel with partial text, spend refresh, claim reserved before post) plus the claim registry moved off a process-global. Yahoo 1-6 and Advice 1-2. Tests 1 (Engine takes its `SecretStore`, so sandboxing is by construction) and Backend 1 (headshot miss only on 404/410). Tests 2-5.
+- **C `6ad9a74`** — UX 1 and Advice 4 (em-dash sweep across every tree, with `scripts/check-dashes.mjs` in `verify:fast` and nine tests of its own). Backend 2 (`save_config` off the lock at all nine call sites, ordered by sequence number; the three that report failure write before committing in memory). Advice 3 and 5.
+
+Numbers at `6ad9a74`: Rust 51 test binaries green, frontend 915 tests in 78 files, Playwright 38. `verify:mid` clean, `cargo clippy --all-targets -D warnings` clean.
