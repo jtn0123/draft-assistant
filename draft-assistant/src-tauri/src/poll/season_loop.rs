@@ -175,8 +175,16 @@ async fn refresh_players<E: SeasonEngine>(
     season: u32,
 ) -> bool {
     let Some(refreshed) = engine.refresh_players(season).await else {
+        // Nothing came back and there was nothing on disk to fall back to,
+        // so the dictionary and the projections on screen are the ones the
+        // league loaded with. That is a source that is down, and until now
+        // the badge had no way to say so.
+        note_players(season_ref, league_id, Some(PLAYERS_UNREACHABLE.to_string())).await;
         return false;
     };
+    // A refresh served off the disk is worth applying and must not be stamped
+    // green: it is the same dictionary the last one applied.
+    let staleness = refreshed.staleness().map(str::to_string);
     let mut loaded = loaded_ref.lock().await;
     let Some(loaded) = loaded.as_mut() else {
         return false;
@@ -213,6 +221,9 @@ async fn refresh_players<E: SeasonEngine>(
             if !season.warnings.iter().any(|w| w == INCOMPLETE_PLAYERS) {
                 season.warnings.push(INCOMPLETE_PLAYERS.to_string());
             }
+            season
+                .sources
+                .players_refreshed(now_secs(), Some(INCOMPLETE_PLAYERS.to_string()));
         }
         return false;
     }
@@ -222,6 +233,7 @@ async fn refresh_players<E: SeasonEngine>(
     // that had been refreshed a dozen times since.
     if let Some(season) = season_guard.as_mut() {
         season.warnings.retain(|w| w != INCOMPLETE_PLAYERS);
+        season.sources.players_refreshed(now_secs(), staleness);
     }
     drop(season_guard);
     refreshed.apply(loaded);
@@ -231,6 +243,31 @@ async fn refresh_players<E: SeasonEngine>(
 /// The warning a refused player refresh leaves on the health badge, until the
 /// next refresh that is worth applying.
 pub const INCOMPLETE_PLAYERS: &str = "the player list came back incomplete, names and injury tags are the ones loaded with the league";
+
+/// What the badge says when the dictionary could not be fetched and there was
+/// no copy on disk to fall back to either.
+pub const PLAYERS_UNREACHABLE: &str =
+    "the player list could not be fetched, injury tags are the ones already on screen";
+
+/// Record how a player refresh went on the season's own source health, when
+/// there is a season to record it against.
+async fn note_players(
+    season_ref: &Mutex<Option<LoadedSeason>>,
+    league_id: &str,
+    error: Option<String>,
+) {
+    let mut season = season_ref.lock().await;
+    let Some(season) = season.as_mut() else {
+        return;
+    };
+    if let Some(error) = &error {
+        crate::applog::warn(format!(
+            "season player refresh failed: {error}{}",
+            crate::applog::context(&[("league", league_id)])
+        ));
+    }
+    season.sources.players_refreshed(now_secs(), error);
+}
 
 /// One turn of the season poll loop: refresh the live slice, note whether that
 /// worked, and rebuild the view if the scores moved.
@@ -295,6 +332,11 @@ pub async fn season_tick<E: SeasonEngine>(
                             .await;
                     }
                 }
+            } else {
+                // Nothing to roll over: whatever an earlier check thought it
+                // saw, the week on screen is the current one. Without this
+                // the warning a failed rollover left behind had no way down.
+                rollover::clear_failure(season_ref).await;
             }
         }
     }

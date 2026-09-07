@@ -11,6 +11,7 @@ mod season_loop;
 
 pub use season_loop::{
     refresh_or_roll, reload_for_week, season_tick, SeasonPollMemory, SeasonTick,
+    PLAYERS_UNREACHABLE,
 };
 
 use crate::engine::{now_secs, LoadedLeague};

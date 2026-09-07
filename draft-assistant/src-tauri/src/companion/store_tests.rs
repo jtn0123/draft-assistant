@@ -41,6 +41,7 @@ fn scratch(label: &str) -> Scratch {
 fn sample() -> StoredHub {
     StoredHub {
         code: "424242".to_string(),
+        code_at_ms: 9,
         devices: vec![StoredDevice {
             token: "tok".to_string(),
             device: Device {
@@ -233,4 +234,22 @@ fn the_device_list_is_refused_a_home_over_any_other_secret() {
             .expect("refused");
         assert!(error.contains(item.account()), "{error}");
     }
+}
+
+/// A device token is a bearer token for the whole read API, and a derived
+/// `Debug` puts it one `{:?}` away from the log. The Yahoo token pair is
+/// written by hand for the same reason; this is the same treatment.
+#[test]
+fn a_device_token_and_the_pairing_code_cannot_be_printed_by_accident() {
+    let mut stored = sample();
+    stored.devices[0].token = "s3cret-bearer".to_string();
+    let printed = format!("{stored:?}");
+    assert!(!printed.contains("s3cret-bearer"), "{printed}");
+    assert!(!printed.contains("424242"), "{printed}");
+    assert!(printed.contains("<redacted>"), "{printed}");
+    // The device itself is still there to debug with.
+    assert!(printed.contains("Rob's iPhone"), "{printed}");
+    let one = format!("{:?}", stored.devices[0]);
+    assert!(!one.contains("s3cret-bearer"), "{one}");
+    assert!(one.contains("<redacted>"), "{one}");
 }

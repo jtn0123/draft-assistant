@@ -27,9 +27,24 @@ pub struct RetryPolicy {
     /// The longest this will ever wait, `Retry-After` included. A Yahoo that
     /// asks for ten minutes is not worth holding the draft board for.
     pub cap: Duration,
+    /// The longest a single call may spend asleep across all of its retries.
+    ///
+    /// The cap alone is not enough: five attempts each honouring a 30s
+    /// `Retry-After` is two minutes inside one poll tick, and a poll tick has
+    /// no timeout of its own, so the board simply stopped with nothing on
+    /// screen to say why. Past this the call gives up and the failure reaches
+    /// the health strip, which is a thing the user can see.
+    pub budget: Duration,
     /// Whether to spread the wait out. Off in tests so a sleep is exact.
     pub jitter: bool,
 }
+
+/// How long a call may spend asleep between attempts, all told.
+///
+/// The draft poller ticks every three seconds and the request timeout is
+/// eight, so a tick already runs to seconds; ten of them is a late board, and
+/// two minutes of them is a dead one.
+pub const RETRY_BUDGET: Duration = Duration::from_secs(10);
 
 impl Default for RetryPolicy {
     fn default() -> Self {
@@ -37,6 +52,7 @@ impl Default for RetryPolicy {
             attempts: 5,
             base: Duration::from_secs(1),
             cap: Duration::from_secs(30),
+            budget: RETRY_BUDGET,
             jitter: true,
         }
     }
@@ -49,6 +65,7 @@ impl RetryPolicy {
             attempts: 3,
             base: Duration::from_millis(5),
             cap: Duration::from_millis(50),
+            budget: Duration::from_millis(500),
             jitter: false,
         }
     }
@@ -74,6 +91,54 @@ impl RetryPolicy {
         // requests that failed together no longer come back together.
         let spread = capped.as_millis() as u64 / 4;
         capped + Duration::from_millis(pseudo_random(spread))
+    }
+
+    /// [`Self::wait`], or `None` when there is no room left in the budget.
+    ///
+    /// `spent` is what this one call has already slept. `None` means give up
+    /// and report the failure rather than sleep past the budget: the total a
+    /// call spends waiting is therefore never more than [`Self::budget`],
+    /// however long a `Retry-After` asks for.
+    pub fn wait_within(
+        &self,
+        attempt: u32,
+        asked_for: Option<Duration>,
+        spent: Duration,
+    ) -> Option<Duration> {
+        let wait = self.wait(attempt, asked_for);
+        (wait <= self.budget.saturating_sub(spent)).then_some(wait)
+    }
+}
+
+/// What the board says while Yahoo is throttling this app.
+///
+/// The retry budget stops a throttle freezing the screen; this is what tells
+/// the user why the picks are a moment behind, instead of leaving them with a
+/// board that looks current and is not.
+pub const THROTTLED: &str =
+    "Yahoo is throttling this app, so new picks may take a few seconds longer to appear";
+
+/// How long after a throttled request [`ThrottleLog::warning`] keeps saying
+/// so. Long enough to cover several poll ticks, short enough that the line
+/// goes away on its own once Yahoo lets go.
+pub const THROTTLE_NOTICE_SECS: u64 = 60;
+
+/// When this client was last throttled. Epoch seconds, zero for never.
+#[derive(Debug, Default)]
+pub struct ThrottleLog {
+    at: std::sync::atomic::AtomicU64,
+}
+
+impl ThrottleLog {
+    /// Yahoo has just refused a request for being too busy.
+    pub fn note(&self, now: u64) {
+        self.at.store(now, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// [`THROTTLED`], while a throttle is recent enough to still be true.
+    pub fn warning(&self, now: u64) -> Option<&'static str> {
+        let at = self.at.load(std::sync::atomic::Ordering::SeqCst);
+        (at != 0 && now.saturating_sub(at) < THROTTLE_NOTICE_SECS).then_some(THROTTLED)
     }
 }
 

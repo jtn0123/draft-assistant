@@ -165,7 +165,9 @@ pub(crate) fn spawn<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: &AppStat
             for line in source_watch.observe(sources.as_ref(), crate::engine::now_secs()) {
                 crate::applog::warn(format!("season {line}{context}"));
             }
-            if let Some(line) = slow_watch.observe(took, std::time::Duration::from_secs(interval)) {
+            // Measured against the gap the loop is really leaving, which is
+            // the backoff while a feed is down rather than the base interval.
+            if let Some(line) = slow_watch.observe(took, interval, failures) {
                 crate::applog::warn(format!("{line}{context}"));
             }
             tokio::time::sleep(std::time::Duration::from_secs(wait)).await;

@@ -18,23 +18,41 @@ export type { SettingsOption, SettingsRow, SettingsRowKind } from "./HeaderSetti
 
 function SyncPill({
   polling,
+  hosted,
   health,
   screen,
 }: {
-  polling: boolean;
+  polling: boolean | null;
+  hosted: boolean;
   health: PollHealth | null;
   screen: Screen;
 }) {
   const failures = health?.consecutive_failures ?? 0;
   const detail = health?.last_error ?? null;
+  if (polling === null) {
+    // Following a host that has not yet said what its own sync is doing. The
+    // pill used to go green here whatever the answer turned out to be,
+    // because a follower's `startPolling` is a no-op that resolves.
+    return (
+      <span className="pill pill-off">
+        <span className="dot" />
+        Waiting for the host
+      </span>
+    );
+  }
   if (!polling) {
     // The season screen already has a DATA badge that says "Not updating" a
     // few centimetres away. Two words for one state read as two states, so
     // this pill borrows that one rather than introducing "sync" beside it.
+    // A follower says whose sync it is: it has none of its own to turn on.
     return (
       <span className="pill pill-off">
         <span className="dot" />
-        {screen === "season" ? "Not updating" : "Live sync off"}
+        {hosted
+          ? "Host's live sync is off"
+          : screen === "season"
+            ? "Not updating"
+            : "Live sync off"}
       </span>
     );
   }
@@ -182,7 +200,9 @@ export function Header({
   /** Which service the league is read from. Season is offered on Sleeper
    *  only; on Yahoo the button is disabled and the header says why. */
   platform: Platform;
-  polling: boolean;
+  /** Whether live sync is running: this app's poller, or the host's when
+   *  following one. Null while a follower has not been told yet. */
+  polling: boolean | null;
   pollHealth: PollHealth | null;
   /** Ask the backend for the picks again now. Live sync gets there on its own
    *  every few seconds; this is for the moment somebody is waiting on it. */
@@ -347,7 +367,12 @@ export function Header({
       </div>
 
       <div className="header-actions" ref={menuRef}>
-        <SyncPill polling={polling} health={pollHealth} screen={screen} />
+        <SyncPill
+          polling={polling}
+          hosted={hostedBy !== null}
+          health={pollHealth}
+          screen={screen}
+        />
 
         {/* Re-pulling and undoing are the host's: a follower's copy of either
             could only be refused, and the pill above says whose they are. */}

@@ -422,18 +422,23 @@ fn ranks_built_for_another_format_are_worth_half_and_say_so() {
         let (delta, reason) = rec_adjustment(&with_opinion(21, 9, None), 12, format)
             .unwrap_or_else(|| panic!("no adjustment at {format} per catch"));
         assert!((delta - half.0 / 2.0).abs() < 1e-9, "{format}: {delta}");
-        assert!(reason.ends_with(" (half-PPR ranks)"), "{format}: {reason}");
+        assert!(
+            reason.ends_with(", on half-PPR ranks"),
+            "{format}: {reason}"
+        );
     }
     // Half PPR itself is untouched, caveat and all.
     assert!(!half.1.contains("half-PPR ranks"), "{}", half.1);
-    // The caveat rides on every one of the three lines, market lag included.
+    // The caveat rides on every one of the three lines, market lag included,
+    // and never in brackets: see `recommend_tests`, which refuses a bracketed
+    // tag anywhere on a card.
     let (_, reason) = rec_adjustment(&with_opinion(21, 9, Some(58.0)), 12, 1.0).expect("a");
     assert_eq!(
         reason,
-        "Clay has him WR9, market is 3 rounds late (half-PPR ranks)"
+        "Clay has him WR9, market is 3 rounds late, on half-PPR ranks"
     );
     let (_, reason) = rec_adjustment(&with_opinion(9, 41, None), 12, 0.0).expect("a");
-    assert!(reason.ends_with(" (half-PPR ranks)"), "{reason}");
+    assert!(reason.ends_with(", on half-PPR ranks"), "{reason}");
     // The band is around half a point, not exactly it: a league paying 0.4
     // is a half-PPR league by any reading that matters.
     let (_, reason) = rec_adjustment(&with_opinion(21, 9, None), 12, 0.4).expect("a");

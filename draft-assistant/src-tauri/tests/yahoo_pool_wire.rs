@@ -160,6 +160,8 @@ async fn a_throttled_page_waits_as_long_as_yahoo_asked_and_resumes_on_that_page(
             attempts: 3,
             base: Duration::from_millis(5),
             cap: Duration::from_secs(5),
+            // Room for the one-second Retry-After this test waits out.
+            budget: Duration::from_secs(5),
             jitter: false,
         },
     );

@@ -24,8 +24,8 @@ import type { UpdateCheck } from "./updateRow";
 // SEASON_SCHEMA_VERSION in src-tauri/src/season.rs. Bump both sides together
 // with the fixtures in public/ — src-tauri/tests/fixture_shape.rs fails if the
 // fixtures and the structs disagree about a single field.
-const DRAFT_VIEW_SCHEMA_VERSION = "1.4";
-const SEASON_VIEW_SCHEMA_VERSION = "1.3";
+const DRAFT_VIEW_SCHEMA_VERSION = "1.5";
+const SEASON_VIEW_SCHEMA_VERSION = "1.4";
 
 export function validateDraftView(value: DraftView): DraftView {
   if (value.schema_version !== DRAFT_VIEW_SCHEMA_VERSION) {

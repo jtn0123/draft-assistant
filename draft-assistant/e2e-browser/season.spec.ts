@@ -23,9 +23,15 @@ test("opens on the season screen with this week's matchup across the top", async
   await expect(page.locator(".season-stat").first()).toContainText(/vs \S+.* · \d+\.\d - \d+\.\d/);
   await expect(page.getByText("Win odds")).toBeVisible();
   await expect(page.getByText("Playoffs")).toBeVisible();
-  // The draft cockpit is not on this screen.
+  // The draft cockpit is not on this screen. Both classes are then asked for
+  // on the screen that does have them: `toHaveCount(0)` on its own passes
+  // just as happily when a class is renamed, which is the one regression
+  // these two lines exist to catch.
   await expect(page.locator(".board")).toHaveCount(0);
   await expect(page.locator(".clock")).toHaveCount(0);
+  await page.getByRole("button", { name: "Draft", exact: true }).click();
+  await expect(page.locator(".board")).toBeVisible();
+  await expect(page.locator(".clock")).toBeVisible();
 });
 
 test("the lineup, the calls to make, and the waiver board share the main column", async ({
@@ -90,7 +96,10 @@ test("a replay source brings new scores in on its own", async ({ page }) => {
 
   // And live scoring never complained on the way: it is running, not refused.
   // (The draft half was not pointed anywhere, so its own sync still says so.)
-  await expect(page.locator(".toast")).not.toContainText("Live updates are not running");
+  // Asserted against the whole page rather than `.toast`: a negative on a
+  // locator that matches nothing passes whether the toast is absent or the
+  // class was renamed out from under the check.
+  await expect(page.locator("body")).not.toContainText("Live updates are not running");
 });
 
 test("without a replay source the preview says live scoring needs the desktop app", async ({

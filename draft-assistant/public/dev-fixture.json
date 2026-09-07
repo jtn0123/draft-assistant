@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.4",
+  "schema_version": "1.5",
   "generated_at": 1787882005,
   "league": {
     "league_id": "1389710366300200960",
@@ -121,7 +121,9 @@
     "paused": false,
     "clock_deadline_ms": null,
     "pick_slot_overrides": {},
-    "keeper_picks": []
+    "keeper_picks": [],
+    "is_auction": false,
+    "seat_note": null
   },
   "my_roster": {
     "slot": 2,

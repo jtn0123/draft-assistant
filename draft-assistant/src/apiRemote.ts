@@ -13,19 +13,19 @@ import type { Api } from "./api";
 import { validateDraftView, validateSeasonView } from "./api";
 import { hostFetch, remoteFetcher } from "./apiRemoteFetch";
 import {
+  followerDiagnostics,
   followerLog,
-  followerLogDiagnostics,
   followerOpenLogFolder,
   followerSetLogLevel,
 } from "./apiRemoteLog";
 import { clearFollow } from "./companion";
 import { REVOKED_CLOSE_CODE, setFollowStatus } from "./followStatus";
+import { noteHostStatus } from "./hostSync";
 import type { ChatSettings } from "./chat-types";
 import type { SeasonView } from "./season-types";
 import type {
   AppConfig,
   CompanionDevice,
-  Diagnostics,
   DraftView,
   FollowRecord,
   PollHealth,
@@ -154,10 +154,13 @@ class HostSocket {
     } catch {
       return;
     }
-    // The answer to our own keep-alive. Nothing on screen wants it; the point
-    // is only that it arrived.
-    if (frame.type === "pong") {
+    // The answer to our own keep-alive, and the frame the host opens with.
+    // Both carry what the host is doing and what it is calling itself, which
+    // is the only honest source a follower has for either: it has no poller
+    // of its own, and the name it paired under can be changed under it.
+    if (frame.type === "pong" || frame.type === "hello") {
       this.missedPongs = 0;
+      noteHostStatus(this.follow, frame.payload);
       return;
     }
     if (frame.type === "revoked") {
@@ -413,26 +416,10 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
     setDeviceName: refused,
 
     // ---------- diagnostics ----------
-    // The host's log is the host's: reading it over the wire would mean
-    // handing every paired phone the host's error history. What is reported
-    // here is what this window knows, plus this window's own log (the local
-    // backend's file inside Tauri, a ring buffer in a browser tab; see
-    // apiRemoteLog.ts).
-    diagnostics: async () => {
-      const [view, log] = await Promise.all([state().catch(() => null), followerLogDiagnostics()]);
-      return {
-        ...log,
-        platform: `following ${follow.host_name}`,
-        league_id: view?.league.league_id ?? null,
-        league_name: view?.league.name ?? null,
-        draft_id: null,
-        platform_name: view?.league.platform ?? null,
-        polling: view !== null,
-        poll: null,
-        companion_enabled: false,
-        companion_devices: 0,
-      } satisfies Diagnostics;
-    },
+    // Built in apiRemoteLog.ts, beside the follower's own log, which is the
+    // only log it may report from: reading the host's over the wire would
+    // mean handing every paired phone the host's error history.
+    diagnostics: async () => followerDiagnostics(follow.host_name, await state().catch(() => null)),
     // The follower's own log, never the host's: reporting into the host's
     // would let any paired device write lines the host cannot account for,
     // and a follower that crashed used to leave no line anywhere.

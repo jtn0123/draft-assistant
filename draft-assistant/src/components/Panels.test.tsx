@@ -180,6 +180,7 @@ describe("SidePanel", () => {
   it("prompts for a username instead of showing an empty roster", () => {
     const view = fixture();
     view.my_roster = null;
+    view.draft.seat_note = "Set your Sleeper username to track your team.";
 
     render(<SidePanel view={view} />);
     expect(screen.getByText("Set your Sleeper username to track your team.")).toBeInTheDocument();
@@ -191,10 +192,54 @@ describe("SidePanel", () => {
     const view = fixture();
     view.my_roster = null;
     view.league = { ...view.league, platform: "yahoo" };
+    view.draft.seat_note = "Connect Yahoo to track your team.";
 
     render(<SidePanel view={view} />);
     expect(screen.getByText("Connect Yahoo to track your team.")).toBeInTheDocument();
     expect(screen.queryByText(/Sleeper username/)).not.toBeInTheDocument();
+  });
+
+  // The wrong sentence this ends: a user who set their username hours ago,
+  // shown "set your Sleeper username" every time the draft order had not been
+  // published yet, or every time they opened a league they are not in.
+  it("says the true reason there is no seat, not always the username one", () => {
+    for (const note of [
+      "The draft order has not been posted yet.",
+      "You are not in this league.",
+      "Your saved draft slot is not one this league has.",
+    ]) {
+      const view = fixture();
+      view.my_roster = null;
+      view.draft.seat_note = note;
+
+      const { unmount } = render(<SidePanel view={view} />);
+      expect(screen.getByText(note)).toBeInTheDocument();
+      expect(screen.queryByText(/Sleeper username/)).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  // An auction has no pick order, so a survival probability is a chance that a
+  // player lasts to a pick number the draft does not have.
+  it("shows no survival rail in an auction", () => {
+    const view = fixture();
+    view.draft.is_auction = true;
+    view.available = view.available.map((p) => ({ ...p, survival_next: 0.1 }));
+
+    render(<SidePanel view={view} />);
+    expect(screen.queryByText(/Won't last/)).not.toBeInTheDocument();
+  });
+
+  // The tooltip read "what a pickthere has actually been worth", two strings
+  // joined with no space, and said nothing about the keeper picks that lift
+  // the early rounds' medians (`pick_value.rs`).
+  it("explains the pick market in whole words, keepers included", () => {
+    const view = fixture();
+    render(<SidePanel view={view} />);
+    const note = screen.getAllByTitle(/median VORP/)[0].getAttribute("title") ?? "";
+    expect(note).toContain("what a pick there has actually been worth");
+    expect(note).not.toContain("pickthere");
+    expect(note).toContain("Keeper picks");
   });
 });
 

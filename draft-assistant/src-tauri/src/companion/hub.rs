@@ -102,10 +102,18 @@ impl CompanionHub {
         let (events, _) = broadcast::channel(EVENT_BACKLOG);
         let (closes, _) = broadcast::channel(EVENT_BACKLOG);
         let stored = store::load(secrets.as_ref(), &data_dir).unwrap_or_default();
-        let code = if stored.code.len() == 6 {
-            stored.code
-        } else {
-            rand::pairing_code()?
+        let now = now_ms();
+        // A restored code keeps the age it was written down with. It used to
+        // be stamped as if it had just been minted, and the server autostarts,
+        // so a code somebody read off the host's screen weeks ago was live
+        // again for ten minutes after every launch, on whatever network the
+        // Mac happened to be on. A store written before the mint time existed
+        // reads as 0, which is older than any window, so it is replaced.
+        let (code, code_at_ms) = match stored.code {
+            code if code.len() == 6 && now.saturating_sub(stored.code_at_ms) < CODE_MAX_AGE_MS => {
+                (code, stored.code_at_ms)
+            }
+            _ => (rand::pairing_code()?, now),
         };
         // Nothing is connected to a server that has only just started, however
         // the flag was left when the app was last closed.
@@ -125,7 +133,7 @@ impl CompanionHub {
         Ok(Self {
             inner: Mutex::new(HubInner {
                 code,
-                code_at_ms: now_ms(),
+                code_at_ms,
                 devices,
                 lockout: Lockout::default(),
                 port: None,
@@ -155,6 +163,7 @@ impl CompanionHub {
             let inner = self.lock();
             StoredHub {
                 code: inner.code.clone(),
+                code_at_ms: inner.code_at_ms,
                 devices: inner
                     .devices
                     .iter()
@@ -278,9 +287,10 @@ impl CompanionHub {
         Ok(code)
     }
 
-    /// Try to pair. The code is compared in constant time and five wrong ones
+    /// Try to pair. The code is compared in constant time; five wrong ones
     /// from one address inside a minute stop that address's sixth from being
-    /// tried at all.
+    /// tried at all, and twenty from everyone at once stop the next from any
+    /// address, so presenting several addresses does not buy more guesses.
     pub fn pair(&self, attempt: PairAttempt<'_>) -> Result<PairOutcome, String> {
         let now = now_ms();
         let token = rand::token()?;

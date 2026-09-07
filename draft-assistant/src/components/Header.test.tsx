@@ -365,6 +365,51 @@ describe("the sync pill", () => {
     expect(screen.getByText("Live sync off")).toHaveClass("pill-off");
   });
 
+  it("says whose sync is off, and admits when the host has not said yet", () => {
+    // The failure this prevents: a follower's `startPolling` is a no-op that
+    // resolves, so this window's flag was true whatever the host was doing
+    // and the pill went green over a board the host had stopped syncing.
+    const following = (polling: boolean | null) => (
+      <Header
+        leagueName="Dynasty Warriors"
+        hostedBy="Justin's Mac"
+        followStatus="connected"
+        onPairAgain={() => {}}
+        onSwitchLeague={() => {}}
+        platform="sleeper"
+        subtitle="Week 3"
+        meta="14-team full-PPR"
+        screen="draft"
+        onScreen={() => {}}
+        polling={polling}
+        pollHealth={null}
+        onRefreshPicks={() => {}}
+        refreshingPicks={false}
+        onUndo={() => {}}
+        chatOpen={false}
+        onToggleChat={() => {}}
+        settingsOpen={false}
+        onToggleSettings={() => {}}
+        settingsRows={rows()}
+        footerNote="read-only connection"
+      />
+    );
+    const { unmount } = render(following(false));
+    expect(screen.getByText("Host's live sync is off")).toHaveClass("pill-off");
+    expect(screen.queryByText(/^Live ·/)).not.toBeInTheDocument();
+    unmount();
+
+    // Nothing has come down the socket yet: neither on nor off is honest.
+    const second = render(following(null));
+    expect(screen.getByText("Waiting for the host")).toHaveClass("pill-off");
+    expect(screen.queryByText(/^Live ·/)).not.toBeInTheDocument();
+    second.unmount();
+
+    // And a host that is syncing gets the ordinary live pill.
+    render(following(true));
+    expect(screen.getByText(/^Live ·/)).toBeInTheDocument();
+  });
+
   it("says nothing extra while sync is healthy", () => {
     render(
       <Harness

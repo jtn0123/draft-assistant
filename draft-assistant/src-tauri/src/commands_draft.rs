@@ -32,8 +32,8 @@ pub use poll_loop::{
 };
 use refusal::{refusal_for, Verdict};
 use tick::{
-    adopt_traded, draft_update, fetch_tick, save_keepers_off_lock, save_picks_off_lock,
-    tick_target, traded_update, view_now, DraftUpdate, TickTarget,
+    adopt_traded, build_view_off_lock, draft_update, fetch_tick, save_keepers_off_lock,
+    save_picks_off_lock, tick_target, traded_update, view_now, DraftUpdate, TickTarget,
 };
 
 /// What every command and tick says when the league moved on under it. The
@@ -301,6 +301,11 @@ async fn refresh_picks_inner(state: &AppState) -> Result<DraftView, String> {
                 refused = Some(reason);
             }
             Verdict::Adopt(note) => {
+                // The manual re-pull adopts on the same rule the tick does,
+                // so it owes the user the same explanation on screen.
+                if let Some(note) = &note {
+                    refusal::warn_adopted(loaded, note);
+                }
                 notes.extend(note);
                 loaded.api_picks = picks;
                 if picks::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
@@ -398,9 +403,18 @@ async fn refresh_data_inner(state: &AppState) -> Result<DraftView, String> {
     {
         rebuild::carry_keepers(&previous.keeper_pick_nos, &mut new_loaded.keeper_pick_nos);
     }
-    let view = view_from(&new_loaded, &config);
+    // Built from a copy, with both locks let go first. Under the locks this
+    // was the stall the poll loop was rewritten to avoid: every undrafted
+    // player is copied into the view, and for the length of that copy every
+    // command, both pollers and the companion's sockets waited. The copy is
+    // cheap, because the board and the dictionaries behind it are shared
+    // `Arc`s. See `tick::build_view_off_lock`.
+    let copy = new_loaded.clone();
+    let config_copy = config.clone();
     *loaded = Some(new_loaded);
-    Ok(view)
+    drop(config);
+    drop(loaded);
+    build_view_off_lock(copy, config_copy).await
 }
 
 /// Export the full AI-readable state to a JSON file; returns the path.
@@ -441,35 +455,5 @@ async fn export_state_inner(state: &AppState) -> Result<String, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The failure this prevents: a command returned `Err`, the string became
-    /// a toast, the toast was dismissed, and nothing anywhere recorded that
-    /// the command had been called at all.
-    #[test]
-    fn a_draft_command_that_fails_leaves_an_error_line_naming_it() {
-        let (state, dir) = AppState::scratch("draft-log");
-        // The same wrapper the `get_state` command is, with the Tauri `State`
-        // it cannot have in a unit test taken out.
-        let (out, lines) = crate::applog::captured(|| async {
-            crate::applog::logged!(
-                "get_state",
-                ids(&state).await,
-                get_state_inner(&state).await
-            )
-        });
-        assert_eq!(
-            out.unwrap_err(),
-            "no league loaded",
-            "the sentence the user sees is unchanged"
-        );
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.contains("ERROR get_state failed: no league loaded")),
-            "{lines:?}"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}
+#[path = "commands_draft/command_tests.rs"]
+mod command_tests;

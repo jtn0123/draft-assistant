@@ -43,6 +43,12 @@ async fn the_page_is_served_under_a_content_security_policy() {
     }
 }
 
+/// What `POST /api/chat` answers an allowed origin with: taken, or refused
+/// because one question is already being answered. Anything else means the
+/// request never reached the route as itself.
+const ACCEPTED: u16 = 202;
+const BUSY: u16 = 409;
+
 /// The failure this prevents: a page the phone has open in another tab
 /// posting to the host in the background, on a token the browser will happily
 /// attach to a request the user never made.
@@ -79,9 +85,17 @@ async fn a_page_on_another_site_cannot_post_to_the_host() {
         403
     );
     // The follower desktop and the dev server are the two other origins that
-    // are ours, and they must go on working.
-    assert_ne!(post("tauri://localhost").await, 403);
-    assert_ne!(post("http://localhost:1420").await, 403);
+    // are ours, and they must go on working: the request reaches the route
+    // and is answered on its own merits. Asserting only "not 403" used to
+    // pass on a 400, a 429 or a 500, which is every way this could break
+    // without the origin check being the reason.
+    for ours in ["tauri://localhost", "http://localhost:1420"] {
+        let status = post(ours).await;
+        assert!(
+            matches!(status, ACCEPTED | BUSY),
+            "{ours} was answered {status}"
+        );
+    }
     // The phone page itself: its own origin is this server.
     let same = host
         .http
@@ -92,7 +106,11 @@ async fn a_page_on_another_site_cannot_post_to_the_host() {
         .send()
         .await
         .expect("the request goes through");
-    assert_ne!(same.status().as_u16(), 403);
+    assert!(
+        matches!(same.status().as_u16(), ACCEPTED | BUSY),
+        "the page's own origin was answered {}",
+        same.status()
+    );
     // A read is not a change, and stays open to anyone holding the token.
     let read = host
         .http

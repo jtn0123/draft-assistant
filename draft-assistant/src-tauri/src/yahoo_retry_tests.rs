@@ -102,3 +102,71 @@ fn the_fast_policy_retries_a_known_number_of_times_and_waits_in_milliseconds() {
     assert!(fast.wait(3, None) <= Duration::from_millis(50));
     assert!(!fast.jitter, "a test asserting on a sleep wants no jitter");
 }
+
+#[test]
+fn the_waits_of_one_call_never_add_up_to_more_than_the_budget() {
+    // The failure this prevents: five attempts each honouring a thirty-second
+    // `Retry-After` is two minutes of sleeping inside one poll tick, and the
+    // tick has no timeout of its own, so the board stopped dead.
+    let policy = RetryPolicy {
+        jitter: false,
+        ..RetryPolicy::default()
+    };
+    let mut spent = Duration::ZERO;
+    let mut taken = Vec::new();
+    for attempt in 1..policy.attempts {
+        let Some(wait) = policy.wait_within(attempt, None, spent) else {
+            break;
+        };
+        spent += wait;
+        taken.push(wait.as_secs());
+    }
+    assert_eq!(
+        taken,
+        vec![1, 2, 4],
+        "8s would run past the ten-second budget"
+    );
+    assert!(
+        spent <= policy.budget,
+        "{spent:?} is past {:?}",
+        policy.budget
+    );
+
+    // Yahoo asking for its full cap is refused outright rather than slept.
+    assert_eq!(
+        policy.wait_within(1, Some(Duration::from_secs(600)), Duration::ZERO),
+        None,
+        "a thirty-second wait does not fit in a ten-second budget"
+    );
+    // A wait that fits is still taken.
+    assert_eq!(
+        policy.wait_within(1, Some(Duration::from_secs(2)), Duration::ZERO),
+        Some(Duration::from_secs(2))
+    );
+    // …but not once the budget has already gone.
+    assert_eq!(
+        policy.wait_within(1, Some(Duration::from_secs(2)), policy.budget),
+        None
+    );
+}
+
+#[test]
+fn a_throttle_is_reported_for_a_while_and_then_stops_being_reported() {
+    let log = ThrottleLog::default();
+    assert_eq!(log.warning(1_000), None, "nothing has been throttled yet");
+    log.note(1_000);
+    assert_eq!(log.warning(1_000), Some(THROTTLED));
+    assert_eq!(
+        log.warning(1_000 + THROTTLE_NOTICE_SECS - 1),
+        Some(THROTTLED)
+    );
+    assert_eq!(
+        log.warning(1_000 + THROTTLE_NOTICE_SECS),
+        None,
+        "the line has to go away on its own once Yahoo lets go"
+    );
+    // The sentence is for the board, so it says what it means rather than
+    // repeating Yahoo's own status, which means nothing to anybody.
+    assert!(!THROTTLED.contains("999"), "{THROTTLED}");
+    assert!(THROTTLED.contains("Yahoo"), "{THROTTLED}");
+}

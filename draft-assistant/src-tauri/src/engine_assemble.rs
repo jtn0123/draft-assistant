@@ -158,13 +158,20 @@ impl Engine {
         // pick list that can be trusted to mean "keeper". Every later snapshot
         // is judged against it, so one `/picks` answer that drops a pick
         // cannot brand the rest of the board. See `keepers::evidence`.
+        let remembered = off_runtime(|| self.load_keepers(&draft.draft_id));
+        let floor =
+            crate::picks::next_open_pick(&api_picks, draft.settings.teams, draft.settings.rounds);
+        // A keeper already passed cannot be told from a pick the room made,
+        // so a first load of a draft in progress knows less about this league
+        // than it looks like it does. See `keepers::unseen_keeper_warning`.
+        warnings.extend(crate::keepers::unseen_keeper_warning(
+            &api_picks,
+            &remembered,
+            floor,
+        ));
         let keeper_pick_nos = crate::keepers::KeeperMemory {
-            picks: off_runtime(|| self.load_keepers(&draft.draft_id)),
-            floor: crate::picks::next_open_pick(
-                &api_picks,
-                draft.settings.teams,
-                draft.settings.rounds,
-            ),
+            picks: remembered,
+            floor,
         };
         Ok(LoadedLeague {
             league,
@@ -192,7 +199,11 @@ impl Engine {
             projections_fetched_at,
             weekly_fetched_at,
             warnings,
-            weekly_points: std::sync::Arc::new(WeeklyPoints::build(&weekly_rows, &scoring_map)),
+            weekly_points: std::sync::Arc::new(WeeklyPoints::build_with(
+                &weekly_rows,
+                &scoring_map,
+                &player_meta,
+            )),
             player_meta: std::sync::Arc::new(player_meta),
             second_opinion_loaded_at,
         })

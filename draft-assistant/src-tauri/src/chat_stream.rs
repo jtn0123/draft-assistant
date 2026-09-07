@@ -120,8 +120,33 @@ struct StopDetails {
 
 #[derive(Deserialize)]
 struct ErrorDetail {
+    /// `overloaded_error`, `rate_limit_error` and the rest: what the same
+    /// condition would have been called on a status line.
+    #[serde(default, rename = "type")]
+    kind: String,
     #[serde(default)]
     message: String,
+}
+
+/// Why a stream stopped being an answer.
+///
+/// `status` is set only for an `error` event the API sent inside a 200, and
+/// holds the status that error stands for, so the caller can treat a
+/// mid-stream overload as the 529 it is instead of as a dead end. A body that
+/// simply would not parse has no status to claim.
+#[derive(Debug)]
+pub struct Failure {
+    pub message: String,
+    pub status: Option<reqwest::StatusCode>,
+}
+
+impl From<String> for Failure {
+    fn from(message: String) -> Self {
+        Failure {
+            message,
+            status: None,
+        }
+    }
 }
 
 /// The answer so far, fed the body a chunk at a time.
@@ -161,7 +186,7 @@ impl Stream {
 
     /// Take in the next chunk of the body and act on every event that is now
     /// complete. Events end at a blank line; a chunk can end anywhere.
-    pub fn feed(&mut self, bytes: &[u8]) -> Result<(), String> {
+    pub fn feed(&mut self, bytes: &[u8]) -> Result<(), Failure> {
         self.buffer.extend_from_slice(bytes);
         while let Some((end, gap)) = event_end(&self.buffer) {
             let raw: Vec<u8> = self.buffer.drain(..end + gap).collect();
@@ -178,24 +203,30 @@ impl Stream {
 
     /// The body has ended. Whatever is left in the buffer is one last event
     /// without its blank line.
-    pub fn finish(mut self) -> Result<Answer, String> {
+    /// Takes `&mut self` rather than `self` so that a failure here still
+    /// leaves the caller holding the stream: a malformed trailing event on an
+    /// answer that had already started is billed from `message_start` on, and
+    /// consuming the stream to report it threw that usage away.
+    pub fn finish(&mut self) -> Result<Answer, Failure> {
         if !self.buffer.is_empty() {
             let raw = std::mem::take(&mut self.buffer);
             self.event(&String::from_utf8_lossy(&raw))?;
         }
         if !self.started {
-            return Err("the Anthropic stream ended before the answer began".to_string());
+            return Err("the Anthropic stream ended before the answer began"
+                .to_string()
+                .into());
         }
         Ok(Answer {
-            model: self.model,
-            text: join_blocks(self.texts.into_values()),
-            stop_reason: self.stop_reason,
-            stop_category: self.stop_category,
-            usage: self.usage,
+            model: self.model.clone(),
+            text: join_blocks(self.texts.values().cloned()),
+            stop_reason: self.stop_reason.clone(),
+            stop_category: self.stop_category.clone(),
+            usage: self.usage.clone(),
         })
     }
 
-    fn event(&mut self, raw: &str) -> Result<(), String> {
+    fn event(&mut self, raw: &str) -> Result<(), Failure> {
         // Per the SSE spec, an event's data is its `data:` lines joined with
         // newlines; `event:` names it, `:` opens a comment, and both are
         // skipped. The JSON carries its own `type`, so the name is not needed.
@@ -213,7 +244,8 @@ impl Stream {
             let shown: String = line.chars().take(60).collect();
             return Err(format!(
                 "unexpected Anthropic stream event: not server-sent events ({shown})"
-            ));
+            )
+            .into());
         }
         let data = raw
             .lines()
@@ -225,7 +257,7 @@ impl Stream {
             return Ok(());
         }
         let event: Event = serde_json::from_str(&data)
-            .map_err(|e| format!("unexpected Anthropic stream event: {e}"))?;
+            .map_err(|e| Failure::from(format!("unexpected Anthropic stream event: {e}")))?;
         match event {
             Event::MessageStart { message } => {
                 self.started = true;
@@ -253,8 +285,16 @@ impl Stream {
                 }
             }
             // An error event ends the stream: the answer so far is not one.
+            // It goes through the same classification a status does, so an
+            // overload delivered inside a 200 reads, and retries, like the 529
+            // the same overload would have been.
             Event::Error { error } => {
-                return Err(format!("Anthropic API error: {}", error.message));
+                let status = super::retry::stream_error_status(&error.kind);
+                let message = match status {
+                    Some(status) => super::retry::sentence_for(status, Some(&error.message)),
+                    None => format!("Anthropic API error: {}", error.message),
+                };
+                return Err(Failure { message, status });
             }
             Event::ContentBlockStart { .. } | Event::ContentBlockDelta { .. } | Event::Other => {}
         }

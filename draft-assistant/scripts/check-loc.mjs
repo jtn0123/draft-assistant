@@ -1,11 +1,10 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 
-const repositoryRoot = resolve(process.cwd(), "..");
-const maxLines = 500;
+export const MAX_LINES = 500;
 // The cap is about keeping source readable. Generated audit reports and
 // coverage output are neither source nor hand-maintained.
-const excludedDirectories = new Set([
+export const EXCLUDED_DIRECTORIES = new Set([
   ".Codex",
   ".claude",
   ".git",
@@ -17,38 +16,79 @@ const excludedDirectories = new Set([
   "research",
   "target",
 ]);
-const excludedFiles = new Set([
+export const EXCLUDED_FILES = new Set([
   "Cargo.lock",
   "package-lock.json",
   `draft-assistant${sep}public${sep}dev-fixture.json`,
   `draft-assistant${sep}public${sep}dev-season-fixture.json`,
 ]);
 
-async function filesUnder(directory) {
+/**
+ * True when a directory entry is generated, vendored, or otherwise not
+ * first-party source. `entry` is the bare name; `repositoryPath` is the path
+ * from the repository root, which is how the two big fixtures are named.
+ */
+export function isExcluded(entry, repositoryPath) {
+  return (
+    EXCLUDED_DIRECTORIES.has(entry) ||
+    EXCLUDED_FILES.has(entry) ||
+    EXCLUDED_FILES.has(repositoryPath)
+  );
+}
+
+/**
+ * Lines in one file, or null when it holds a NUL byte: that is a binary, and
+ * counting its "lines" would mean nothing. Takes the file's bytes.
+ */
+export function lineCount(content) {
+  if (content.includes(0)) return null;
+  return content.length === 0 ? 0 : content.toString("utf8").split(/\r?\n/).length;
+}
+
+/**
+ * The files over the cap, each named with its count. `files` is a list of
+ * [path, bytes] pairs; a file exactly at the cap is fine.
+ */
+export function oversized(files) {
+  const over = [];
+  for (const [path, content] of files) {
+    const lines = lineCount(content);
+    if (lines !== null && lines > MAX_LINES) over.push([path, lines]);
+  }
+  return over;
+}
+
+async function filesUnder(directory, repositoryRoot) {
   const files = [];
   for (const entry of await readdir(directory)) {
-    if (excludedDirectories.has(entry)) continue;
     const path = resolve(directory, entry);
-    const repositoryPath = relative(repositoryRoot, path);
-    if (excludedFiles.has(entry) || excludedFiles.has(repositoryPath)) continue;
+    if (isExcluded(entry, relative(repositoryRoot, path))) continue;
     const metadata = await stat(path);
-    if (metadata.isDirectory()) files.push(...(await filesUnder(path)));
+    if (metadata.isDirectory()) files.push(...(await filesUnder(path, repositoryRoot)));
     else files.push(path);
   }
   return files;
 }
 
-const oversized = [];
-for (const path of await filesUnder(repositoryRoot)) {
-  const content = await readFile(path);
-  if (content.includes(0)) continue;
-  const lines = content.length === 0 ? 0 : content.toString("utf8").split(/\r?\n/).length;
-  if (lines > maxLines) oversized.push([relative(repositoryRoot, path), lines]);
+async function main() {
+  const repositoryRoot = resolve(process.cwd(), "..");
+  const read = [];
+  // One at a time: the tree holds thousands of files, and reading them all at
+  // once would open thousands of descriptors for no gain.
+  for (const path of await filesUnder(repositoryRoot, repositoryRoot)) {
+    read.push([relative(repositoryRoot, path), await readFile(path)]);
+  }
+
+  const over = oversized(read);
+  if (over.length > 0) {
+    for (const [path, lines] of over) console.error(`${path}: ${lines} lines`);
+    process.exitCode = 1;
+  } else {
+    console.log(`All first-party non-generated files are ${MAX_LINES} lines or fewer.`);
+  }
 }
 
-if (oversized.length > 0) {
-  for (const [path, lines] of oversized) console.error(`${path}: ${lines} lines`);
-  process.exitCode = 1;
-} else {
-  console.log(`All first-party non-generated files are ${maxLines} lines or fewer.`);
+// Only the CLI touches the filesystem, so the test can import the pure parts.
+if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+  await main();
 }

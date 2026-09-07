@@ -250,3 +250,70 @@ fn the_remembered_port_is_read_back_and_nonsense_is_ignored() {
     assert_eq!(remembered_port(&file), None);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// The failure this prevents: `retry_after` was pushed an hour ahead before
+/// the listener was even attempted, so a port that happened to be busy for a
+/// moment left every phone on plain http for the rest of the hour, with a
+/// perfectly good certificate sitting on disk.
+#[tokio::test]
+async fn a_port_that_was_busy_is_tried_again_at_the_next_look_rather_than_in_an_hour() {
+    let dir = scratch("bind");
+    write_pair(&cert_paths(&dir, NAME), &self_signed(NAME, (2027, 1, 1)));
+    // The only port this keeper can reach: `http_port + 1`, with nothing
+    // above it for the search to fall through to.
+    const ONLY: u16 = u16::MAX;
+    let held = std::net::TcpListener::bind(("0.0.0.0", ONLY)).expect("the top port is free");
+    let keeper = Keeper::new(
+        TlsSource::Tailscale {
+            dir: dir.to_path_buf(),
+        },
+        ONLY - 1,
+        dir.join("port"),
+        axum::Router::new(),
+        Arc::new(|_| panic!("good files on disk, nothing to mint")),
+    );
+    let now = midnight(2026, 9, 6);
+    let capture = Capture::start();
+    assert_eq!(
+        keeper.tick(Some(&on_tailnet()), now),
+        None,
+        "nothing to bind to"
+    );
+    assert!(capture.saw("WARN phone connection stays http only"));
+    drop(held);
+    let https = keeper
+        .tick(Some(&on_tailnet()), now + super::BIND_RETRY_AFTER_SECS)
+        .expect("the port came free and the next look took it");
+    assert_eq!(https.port, ONLY);
+    assert!(answers(https.port));
+    keeper.stop();
+    assert!(stopped_answering(https.port).await);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The other half of the same decision: a certificate that could not be
+/// minted is worth an hour's quiet, because asking `tailscale cert` every
+/// thirty seconds fills the log and leans on Let's Encrypt for nothing.
+#[tokio::test]
+async fn a_certificate_that_could_not_be_minted_is_left_alone_for_the_hour() {
+    let dir = scratch("mint-fail");
+    let tried = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = tried.clone();
+    let keeper = keeper(&dir, move |_| {
+        count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        false
+    });
+    let now = midnight(2026, 9, 6);
+    assert_eq!(keeper.tick(Some(&on_tailnet()), now), None);
+    assert_eq!(tried.load(std::sync::atomic::Ordering::SeqCst), 1);
+    // Thirty seconds and half an hour on: not asked again.
+    assert_eq!(keeper.tick(Some(&on_tailnet()), now + 30), None);
+    assert_eq!(keeper.tick(Some(&on_tailnet()), now + 1_800), None);
+    assert_eq!(tried.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        keeper.tick(Some(&on_tailnet()), now + super::RETRY_AFTER_SECS),
+        None
+    );
+    assert_eq!(tried.load(std::sync::atomic::Ordering::SeqCst), 2);
+    let _ = std::fs::remove_dir_all(dir);
+}

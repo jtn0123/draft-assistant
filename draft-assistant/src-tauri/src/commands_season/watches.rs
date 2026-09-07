@@ -5,6 +5,7 @@
 //! this is the same rule on the other loop: a line when it starts, a line
 //! when it stops, nothing in between.
 
+use crate::commands_draft::tick::backoff_secs;
 use crate::season_sources::{SourceHealth, SourceStatus};
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -36,11 +37,17 @@ impl SourceWatch {
         };
         let mut lines = Vec::new();
         let mut still: BTreeMap<&'static str, String> = BTreeMap::new();
-        for (name, status) in [
+        let named: Vec<(&'static str, &SourceStatus)> = [
             ("matchups", &sources.matchups),
             ("scores", &sources.scores),
             ("rosters", &sources.rosters),
-        ] {
+        ]
+        .into_iter()
+        // The dictionary joins the list once the half-hour refresh has run
+        // for the first time; before that there is nothing to report.
+        .chain(sources.players.as_ref().map(|s| ("players", s)))
+        .collect();
+        for (name, status) in named {
             let Some(reason) = failing_long_enough(status, now) else {
                 continue;
             };
@@ -77,20 +84,29 @@ pub(super) struct SlowTickWatch {
 }
 
 impl SlowTickWatch {
-    /// What to log about a tick that took `took` against a poll interval of
-    /// `interval`, or `None` when nothing changed.
+    /// What to log about a tick that took `took`, or `None` when nothing
+    /// changed.
     ///
-    /// A tick longer than its interval means the next one starts late and the
-    /// scores on screen are older than the badge says. The draft loop reports
-    /// this; the season loop, whose ticks include a full view build, did not.
-    pub(super) fn observe(&mut self, took: Duration, interval: Duration) -> Option<String> {
-        let slow = took > interval;
+    /// A tick longer than the gap before the next one means that next one
+    /// starts late and the scores on screen are older than the badge says.
+    /// The gap is worked out here from `interval` and the run of `failures`
+    /// behind it, rather than taken as the base interval: the loop backs off
+    /// while a feed is down, so a 40s tick inside a 60s backoff is on time.
+    /// Comparing it against the 30s base logged a slow tick and a recovery
+    /// during exactly the outage a reader is trying to follow.
+    pub(super) fn observe(
+        &mut self,
+        took: Duration,
+        interval: u64,
+        failures: u32,
+    ) -> Option<String> {
+        let cadence = backoff_secs(interval, failures);
+        let slow = took > Duration::from_secs(cadence);
         if slow && !self.slow {
             self.slow = true;
             return Some(format!(
-                "season tick took {:.1}s, longer than the {}s interval: the scores on screen are older than the badge says",
+                "season tick took {:.1}s, longer than the {cadence}s until the next one: the scores on screen are older than the badge says",
                 took.as_secs_f64(),
-                interval.as_secs()
             ));
         }
         if !slow && self.slow {
@@ -197,20 +213,36 @@ mod tests {
     #[test]
     fn a_slow_tick_is_reported_once_and_its_recovery_once() {
         let mut watch = SlowTickWatch::default();
-        let interval = Duration::from_secs(30);
-        assert_eq!(watch.observe(Duration::from_secs(4), interval), None);
+        assert_eq!(watch.observe(Duration::from_secs(4), 30, 0), None);
         let slow = watch
-            .observe(Duration::from_secs(40), interval)
+            .observe(Duration::from_secs(40), 30, 0)
             .expect("the first slow tick is reported");
         assert!(
-            slow.contains("40.0s") && slow.contains("30s interval"),
+            slow.contains("40.0s") && slow.contains("30s until"),
             "{slow}"
         );
-        assert_eq!(watch.observe(Duration::from_secs(41), interval), None);
+        assert_eq!(watch.observe(Duration::from_secs(41), 30, 0), None);
         assert_eq!(
-            watch.observe(Duration::from_secs(3), interval).as_deref(),
+            watch.observe(Duration::from_secs(3), 30, 0).as_deref(),
             Some("season tick back inside its interval")
         );
-        assert_eq!(watch.observe(Duration::from_secs(3), interval), None);
+        assert_eq!(watch.observe(Duration::from_secs(3), 30, 0), None);
+    }
+
+    /// The bug: the tick was measured against the base interval rather than
+    /// the gap the loop actually sleeps for, so during a backoff every tick
+    /// that ran longer than 30s was logged as slow and then "recovered" a
+    /// tick later, in the middle of the outage a reader is trying to follow.
+    #[test]
+    fn a_tick_inside_the_backoff_it_is_running_under_is_not_slow() {
+        let mut watch = SlowTickWatch::default();
+        // Three failures in a row: the loop waits 60s, not 30s, before the
+        // next tick, so a 40s tick is comfortably on time.
+        assert_eq!(watch.observe(Duration::from_secs(40), 30, 3), None);
+        // Past the real cadence it is slow again, and says the real number.
+        let slow = watch
+            .observe(Duration::from_secs(70), 30, 3)
+            .expect("70s is longer than the 60s the loop is waiting");
+        assert!(slow.contains("60s until"), "{slow}");
     }
 }

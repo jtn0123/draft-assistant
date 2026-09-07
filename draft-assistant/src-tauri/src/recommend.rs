@@ -95,9 +95,19 @@ pub struct RecommendInputs<'a> {
     /// caller, which is the only place that can look a rostered player's bye
     /// up on the board.
     pub my_byes: &'a HashMap<u32, u32>,
-    /// The draft has not started. Weekly practice tags ("Questionable" and
-    /// "Doubtful") are left over from last season and mean nothing yet.
-    pub pre_draft: bool,
+    /// The season this draft is drafting for has not kicked off. Weekly
+    /// practice tags ("Questionable", "Doubtful") and camp reserve lists
+    /// (PUP, NFI) are then left over from last season, or are camp news, and
+    /// say nothing about the season being drafted.
+    ///
+    /// Deliberately *not* "the draft has not started". That was
+    /// `draft.status == "pre_draft"`, which flips the instant the draft opens
+    /// — so a tag this file itself calls meaningless was free at 7:59 and
+    /// cost a safe-mode card nine points at 8:00, and every card reordered at
+    /// the moment the room filled up. Nothing about a stale August practice
+    /// report changes when the first pick is made; what changes it is week
+    /// one being played. See `before_kickoff`.
+    pub before_kickoff: bool,
     /// Every player the board knows, drafted or not. The starting demand is
     /// worked out from this rather than from `available`, because demand is a
     /// property of the league and not of what is left: allocating a superflex
@@ -139,7 +149,7 @@ impl<'a> RecommendInputs<'a> {
             points_per_reception: HALF_PPR,
             position_run: None,
             my_byes: &NO_BYES,
-            pre_draft: false,
+            before_kickoff: false,
             full_board: &[],
             weeks_left: crate::board::WEEKS,
         }
@@ -172,6 +182,18 @@ impl<'a> RecommendInputs<'a> {
 pub fn weeks_left(league: &League) -> u32 {
     let start_week = league.settings.start_week.unwrap_or(1).max(1);
     crate::board::WEEKS.saturating_sub(start_week - 1).max(1)
+}
+
+/// Whether this league is drafting for a season that has not kicked off yet.
+///
+/// The draft loader knows nothing about the NFL calendar, but the league
+/// knows which week it starts scoring in: week one for a league drafted in
+/// August, the current week for one created and drafted mid-season. So a
+/// full season still to play means the draft is happening before kickoff,
+/// and — unlike the draft's own status — that answer is the same at the
+/// first pick and at the last.
+pub fn before_kickoff(league: &League) -> bool {
+    weeks_left(league) >= crate::board::WEEKS
 }
 
 pub fn recommend(inputs: &RecommendInputs) -> Vec<Recommendation> {

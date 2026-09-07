@@ -4,6 +4,7 @@
 //! Its own file because `commands_chat.rs` is at the line cap.
 
 use super::*;
+use crate::chat;
 
 fn config(provider: Option<&str>) -> AppConfig {
     AppConfig {

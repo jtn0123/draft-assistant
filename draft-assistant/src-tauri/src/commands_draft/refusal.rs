@@ -52,6 +52,24 @@ impl Refusal {
     }
 }
 
+/// Put an adopted refusal in front of the user, once.
+///
+/// A refused answer that is finally believed moves the board in a way nobody
+/// asked for: picks reappear, or a pick vanishes, four ticks after the app
+/// started disagreeing with the platform about them. That explanation used to
+/// go to `notes`, which reach the log and nothing else, so on screen the
+/// board simply jumped. It belongs with the league's other warnings, where
+/// the draft screen and the diagnostics panel both show it.
+///
+/// Written once: the same sentence every three seconds would be a leak as
+/// much as a nuisance, and the warning is a standing fact about this board,
+/// not an event.
+pub(super) fn warn_adopted(loaded: &mut LoadedLeague, note: &str) {
+    if !loaded.warnings.iter().any(|warning| warning == note) {
+        loaded.warnings.push(note.to_string());
+    }
+}
+
 /// What this answer would be refused for, judged against the board on screen.
 pub(super) fn refusal_for(loaded: &LoadedLeague, picks: &[Pick]) -> Option<Refusal> {
     if picks.is_empty() {
@@ -143,6 +161,20 @@ mod tests {
         let mut loaded = crate::keepers::bare_league("draft-hole");
         loaded.api_picks = picks.iter().copied().map(pick).collect();
         loaded
+    }
+
+    /// The silent jump this ends: after four bad ticks the board moved and
+    /// the only account of why went to the log file.
+    #[test]
+    fn an_adopted_answer_reaches_the_user_once() {
+        let mut loaded = league_at(&[1, 2, 3, 4]);
+        let note = Refusal::Hole(2).adopted_note();
+        warn_adopted(&mut loaded, &note);
+        warn_adopted(&mut loaded, &note);
+        assert_eq!(loaded.warnings, vec![note.clone()]);
+        assert!(note.contains("without pick 2"), "{note}");
+        warn_adopted(&mut loaded, &Refusal::Empty.adopted_note());
+        assert_eq!(loaded.warnings.len(), 2, "{:?}", loaded.warnings);
     }
 
     #[test]

@@ -10,7 +10,9 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 import { remoteApi } from "./apiRemote";
 import { followerLog, followerLogDiagnostics, resetFollowerLog } from "./apiRemoteLog";
+import { pollSummary } from "./components/diagnosticsText";
 import { resetFollowStatus } from "./followStatus";
+import { resetHostSync, setHostSync } from "./hostSync";
 import type { FollowRecord } from "./types";
 
 const follow: FollowRecord = {
@@ -104,5 +106,64 @@ describe("in a browser tab", () => {
     expect(log_tail).toHaveLength(50);
     expect(log_tail[0]).toContain("failure 10");
     expect(log_tail[49]).toContain("failure 59");
+  });
+});
+
+describe("what a follower reports about live sync", () => {
+  const view = {
+    schema_version: "1.5",
+    generated_at: 1_700_000_000,
+    league: { league_id: "L1", name: "Rob's league", season: "2026", platform: "sleeper" },
+    data_health: {
+      poll_last_success_at: 1_699_999_000,
+      poll_consecutive_failures: 2,
+      poll_last_error: "Sleeper timed out",
+    },
+  };
+
+  beforeEach(() => {
+    resetHostSync();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: () => Promise.resolve(view),
+        }),
+      ),
+    );
+  });
+
+  it("reports the host's poll record instead of claiming a poller it does not have", async () => {
+    // The whole failure: a follower reported `polling: true` for any view at
+    // all and no poll record beside it, which the dialog rendered as
+    // "Live sync: On, nothing reported yet" on the one screen meant to answer
+    // "what happened?".
+    setHostSync({ polling: true, hostName: "Justin's Mac" });
+    const report = await remoteApi(follow, () => undefined).diagnostics();
+    expect(report.poll).toEqual({
+      last_success_at: 1_699_999_000,
+      consecutive_failures: 2,
+      last_error: "Sleeper timed out",
+    });
+    expect(report.polling).toBe(true);
+    expect(pollSummary(report)).toBe("Failing (2 in a row): Sleeper timed out");
+  });
+
+  it("says live sync is off when that is what the host said, view or no view", async () => {
+    setHostSync({ polling: false, hostName: "Justin's Mac" });
+    const report = await remoteApi(follow, () => undefined).diagnostics();
+    expect(report.polling).toBe(false);
+    expect(pollSummary(report)).toBe("Off");
+    // And the league it is following is still named, so the report is usable.
+    expect(report.league_name).toBe("Rob's league");
+    expect(report.platform).toBe("following Justin's Mac");
+  });
+
+  it("claims nothing before the host has said anything at all", async () => {
+    const report = await remoteApi(follow, () => undefined).diagnostics();
+    expect(report.polling).toBe(false);
   });
 });

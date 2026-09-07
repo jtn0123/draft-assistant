@@ -104,11 +104,12 @@ export function SidePanel({ view }: { view: DraftView }) {
           note={roster === null ? undefined : `${roster.players.length} of ${rounds}`}
         />
         {roster === null ? (
-          <Empty>
-            {view.league.platform === "yahoo"
-              ? "Connect Yahoo to track your team."
-              : "Set your Sleeper username to track your team."}
-          </Empty>
+          // Why there is no roster, in the true words for this case. The two
+          // sentences here used to be the whole vocabulary, so a user whose
+          // username was saved hours ago was told to set it whenever the
+          // draft order had not been posted, or whenever they were looking at
+          // a league they are not in. The backend knows which it is.
+          <Empty>{view.draft.seat_note ?? "No seat in this draft."}</Empty>
         ) : roster.players.length === 0 ? (
           <Empty>No picks yet.</Empty>
         ) : (
@@ -134,7 +135,11 @@ export function SidePanel({ view }: { view: DraftView }) {
         )}
       </section>
 
-      {atRisk.length > 0 && (
+      {/* Survival is a probability that a player lasts to a pick number.
+          An auction has no pick numbers, so there is nothing to price it
+          against; the backend sends no survival at all and this list is empty
+          in any case. Written out so it stays empty if that ever changes. */}
+      {!view.draft.is_auction && atRisk.length > 0 && (
         <section className="panel">
           <PanelHead
             title={
@@ -233,8 +238,10 @@ function PickMarket({ prices }: { prices: PickPrice[] }) {
 /** Said in full wherever the number is shown, because "R7 · 12" on its own
  * invites being read as a projection rather than a price. */
 const PRICE_NOTE =
-  "The median VORP taken in this round of this league's draft: what a pick" +
-  "there has actually been worth, and who went at that price.";
+  "The median VORP taken in this round of this league's draft: what a pick " +
+  "there has actually been worth, and who went at that price. Keeper picks " +
+  "count into their round's median, so in a keeper league the early rounds " +
+  "read higher than an ordinary pick there would fetch.";
 
 /**
  * The pick the backend priced survival against, so the headline over the

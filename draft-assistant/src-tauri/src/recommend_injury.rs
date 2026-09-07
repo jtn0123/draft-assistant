@@ -27,14 +27,14 @@ enum Tag {
     Weekly(f64),
 }
 
-fn classify(status: &str, weeks_left: u32, pre_draft: bool) -> Option<Tag> {
+fn classify(status: &str, weeks_left: u32, before_kickoff: bool) -> Option<Tag> {
     // A PUP or NFI tag in a draft room is camp news: the player has not been
     // ruled out of anything, and one who stays on the list misses the first
     // four games, not the year. The table prices those lists as
     // season-ending because in season they are; before it starts the same
     // tag cost a first-round back his whole card over a training-camp
     // hamstring.
-    if pre_draft && injury_class::is_camp_reserve(status) {
+    if before_kickoff && injury_class::is_camp_reserve(status) {
         return Some(Tag::Missing(
             0.25,
             format!("on {status} in camp: may miss the early weeks"),
@@ -67,10 +67,17 @@ fn classify(status: &str, weeks_left: u32, pre_draft: bool) -> Option<Tag> {
     })
 }
 
-/// A practice-report tag, which before a draft is left over from last season
-/// and says nothing about the one being drafted. "Doubtful" is one of these
-/// exactly as much as "Questionable" is; dropping only the latter left a
-/// stale August "Doubtful" taking nine points off a safe-mode card.
+/// A practice-report tag, which before the season kicks off is left over from
+/// last season and says nothing about the one being drafted. "Doubtful" is
+/// one of these exactly as much as "Questionable" is; dropping only the
+/// latter left a stale August "Doubtful" taking nine points off a safe-mode
+/// card.
+///
+/// Judged on `before_kickoff` rather than on the draft's status, so the same
+/// answer holds for the whole draft. It used to be dropped only while the
+/// draft sat in `pre_draft`, so every card carrying one reordered the instant
+/// the room opened, for a tag this comment calls meaningless either side of
+/// that moment.
 fn is_practice_report(status: &str) -> bool {
     matches!(
         injury_class::classify(status),
@@ -84,15 +91,15 @@ fn is_practice_report(status: &str) -> bool {
 /// play on the card, and safe docking a flat 15 for any tag at all demoted
 /// three of the top five over practice-report "Questionable" — a tag that in
 /// August is not about this season at all, which is why it is dropped outright
-/// before the draft starts.
+/// until the season kicks off.
 pub(crate) fn injury(a: &AvailablePlayer, inputs: &RecommendInputs, mode: Mode, score: &mut Score) {
     let Some(status) = a.player.injury_status.as_deref() else {
         return;
     };
-    if inputs.pre_draft && is_practice_report(status) {
+    if inputs.before_kickoff && is_practice_report(status) {
         return;
     }
-    let Some(tag) = classify(status, inputs.weeks_left, inputs.pre_draft) else {
+    let Some(tag) = classify(status, inputs.weeks_left, inputs.before_kickoff) else {
         return;
     };
     // Safe mode buys the games it can count on, so it reads every tag harder.

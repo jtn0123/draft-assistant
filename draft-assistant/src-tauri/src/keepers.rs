@@ -121,6 +121,49 @@ pub fn evidence(open_pick: Option<u32>, floor: Option<u32>) -> KeeperEvidence {
     }
 }
 
+/// What the app cannot know about a keeper league it met halfway through,
+/// said out loud, or `None` when there is nothing to say.
+///
+/// Position is the only keeper evidence that works when Sleeper leaves
+/// `is_keeper` off, and position only works *ahead* of the clock: a keeper
+/// already passed sits in a run of filled picks that looks exactly like the
+/// picks the room made. So a first load of a draft already under way finds
+/// the keepers still to come and none of the ones behind it, and every number
+/// built on the keeper set is then quietly pessimistic: survival odds read
+/// off a market pick that is too high, a pick market whose early rounds
+/// include picks nobody spent, kept players with no mark against their name.
+///
+/// Nothing here can recover those keepers; identifying them needs a keeper
+/// list the draft feed does not carry. What it can do is stop the numbers
+/// reading as certain. Opening the same league before its draft starts, which
+/// is the ordinary case, records every keeper and this says nothing.
+///
+/// `remembered` is what was on disk for this draft before the load: a league
+/// this app has seen before already has its judgement and is not guessing.
+pub fn unseen_keeper_warning(
+    picks: &[crate::sleeper::Pick],
+    remembered: &HashSet<u32>,
+    open_pick: Option<u32>,
+) -> Option<String> {
+    let open = open_pick?;
+    if open <= 1 || !remembered.is_empty() {
+        return None;
+    }
+    // Only worth saying in a league that plainly has keepers: one sitting
+    // ahead of the clock, or one Sleeper flagged.
+    let has_keepers = picks
+        .iter()
+        .any(|pick| pick.is_keeper == Some(true) || pick.pick_no >= open);
+    has_keepers.then(|| {
+        concat!(
+            "this draft was already under way the first time it was opened here, ",
+            "so keepers already passed cannot be told from ordinary picks: ",
+            "survival odds, the pick market and the wait until your turn may be pessimistic"
+        )
+        .to_string()
+    })
+}
+
 /// Fold newly seen keepers into the league's memory of them: judged from
 /// where each pick sits now, and never forgotten once judged.
 ///
@@ -222,6 +265,55 @@ mod tests {
             std::process::id(),
             now_secs()
         ))
+    }
+
+    fn plain(pick_no: u32) -> crate::sleeper::Pick {
+        crate::sleeper::Pick {
+            round: (pick_no - 1) / 14 + 1,
+            pick_no,
+            draft_slot: 1,
+            player_id: format!("p{pick_no}"),
+            picked_by: None,
+            metadata: None,
+            is_keeper: None,
+        }
+    }
+
+    /// The silence this ends: a fresh install opening a keeper league at pick
+    /// forty finds the keepers still to come, cannot see the ones behind the
+    /// clock, and presents every number built on the keeper set as fact.
+    #[test]
+    fn a_keeper_league_met_halfway_through_says_what_it_cannot_see() {
+        // Picks 1..=39 made, keepers still in the book at 60 and 177.
+        let mut picks: Vec<_> = (1..=39).map(plain).collect();
+        picks.push(plain(60));
+        picks.push(plain(177));
+        let none = HashSet::new();
+        let warning = unseen_keeper_warning(&picks, &none, Some(40))
+            .expect("a mid-draft first load of a keeper league says so");
+        assert!(warning.contains("keepers already passed"), "{warning}");
+
+        // Opened before the draft starts: every keeper is ahead of the clock
+        // and there is nothing the app cannot see.
+        let keepers_only = vec![plain(11), plain(20), plain(177)];
+        assert_eq!(unseen_keeper_warning(&keepers_only, &none, Some(1)), None);
+
+        // A league this app has judged before is not guessing.
+        let remembered: HashSet<u32> = [60, 177].into_iter().collect();
+        assert_eq!(unseen_keeper_warning(&picks, &remembered, Some(40)), None);
+
+        // A draft with no keepers in it at all has nothing to warn about.
+        let ordinary: Vec<_> = (1..=39).map(plain).collect();
+        assert_eq!(unseen_keeper_warning(&ordinary, &none, Some(40)), None);
+
+        // A flagged keeper behind the clock is evidence too: the league keeps
+        // players even though nothing sits ahead of the clock right now.
+        let mut flagged = ordinary.clone();
+        flagged[10].is_keeper = Some(true);
+        assert!(unseen_keeper_warning(&flagged, &none, Some(40)).is_some());
+
+        // A finished board has no open pick and nothing to say.
+        assert_eq!(unseen_keeper_warning(&picks, &none, None), None);
     }
 
     #[test]

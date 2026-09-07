@@ -46,6 +46,10 @@ pub struct Flaky {
     /// The dictionary the next player refresh hands back, or `None` for a
     /// refresh that finds nothing.
     pub players: Option<HashMap<String, PlayerMeta>>,
+    /// Why the next refresh came off the disk instead of the wire, when it
+    /// did. Stands in for a `/players` endpoint that is down while a cached
+    /// copy is still readable.
+    pub players_stale: Option<String>,
     pub refreshes: Cell<u32>,
 }
 
@@ -95,7 +99,11 @@ impl PlayerRefresh for Flaky {
     async fn refresh_players(&self, _season: u32) -> Option<PlayerRefreshData> {
         self.refreshes.set(self.refreshes.get() + 1);
         let players = self.players.clone()?;
-        Some(refresh_from(players, 1, Vec::new(), 1))
+        let data = refresh_from(players, 1, Vec::new(), 1);
+        Some(match &self.players_stale {
+            Some(note) => data.stale_because(note.clone()),
+            None => data,
+        })
     }
 }
 
@@ -121,6 +129,7 @@ impl Harness {
                 reloaded: None,
                 history: Engine::new(scratch(label)),
                 players: None,
+                players_stale: None,
                 refreshes: Cell::new(0),
             },
             loaded: Mutex::new(Some(loaded)),

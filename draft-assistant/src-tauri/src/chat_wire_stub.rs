@@ -235,8 +235,12 @@ pub(super) fn question() -> Vec<ChatMessage> {
 }
 
 /// The pause the wire tests retry with: long enough to be a pause, short
-/// enough that three attempts are still a fast test.
-pub(super) const TEST_BACKOFF: std::time::Duration = std::time::Duration::from_millis(10);
+/// enough that three attempts are still a fast test. The budget beside it is
+/// generous: the tests that care about it pass their own.
+pub(super) const TEST_LIMITS: super::retry::Limits = super::retry::Limits {
+    backoff: std::time::Duration::from_millis(10),
+    pauses: std::time::Duration::from_secs(30),
+};
 
 pub(super) fn ask_url(url: &str, http: &reqwest::Client) -> Result<ChatReply, ChatError> {
     ask_url_with(url, http, CancelSignal::never())
@@ -248,6 +252,16 @@ pub(super) fn ask_url_with(
     http: &reqwest::Client,
     cancel: Arc<CancelSignal>,
 ) -> Result<ChatReply, ChatError> {
+    ask_url_limited(url, http, cancel, TEST_LIMITS)
+}
+
+/// The same again, with the retry policy the test wants to show the edge of.
+pub(super) fn ask_url_limited(
+    url: &str,
+    http: &reqwest::Client,
+    cancel: Arc<CancelSignal>,
+    limits: super::retry::Limits,
+) -> Result<ChatReply, ChatError> {
     tokio_test_block(async {
         let call = Call {
             endpoint: url,
@@ -258,7 +272,7 @@ pub(super) fn ask_url_with(
             context: &context(),
             messages: &question(),
         };
-        ask_at(call, cancel, TEST_BACKOFF).await
+        ask_at(call, cancel, limits).await
     })
 }
 

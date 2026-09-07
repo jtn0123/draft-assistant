@@ -244,3 +244,102 @@ fn an_answer_that_stops_early_still_reports_what_had_been_charged() {
     assert_eq!(partial.model, "claude-opus-5");
     assert!(turn_cost_of(ChatModel::Opus5, &partial) > 0.0);
 }
+
+/// The API can send its "not right now" as an `error` event inside a 200
+/// instead of as a status. Before `message_start` nothing has been billed, so
+/// that is the same overload the 529 is and gets the same second try.
+#[test]
+fn an_overload_delivered_inside_a_200_is_retried_like_the_status_it_stands_for() {
+    let overloaded =
+        event(r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#);
+    let (url, requests) = stub_sequence(vec![
+        Canned::new(200, overloaded),
+        Canned::new(
+            200,
+            answer("Take Bowers.", "end_turn", r#"{"input_tokens":10}"#, 5),
+        ),
+    ]);
+    let reply = ask_url(&url, &client()).expect("the second attempt is a reply");
+    assert_eq!(reply.text, "Take Bowers.");
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(
+        requests.try_iter().count(),
+        2,
+        "the error event was a dead end"
+    );
+}
+
+/// The same overload that does not lift reads as the 529 it is rather than
+/// quoting the API's own one word, which in the panel looks like something
+/// Claude said.
+#[test]
+fn an_overload_inside_a_200_that_does_not_lift_is_named_and_counted() {
+    let overloaded = format!(
+        "{}{}",
+        message_start("claude-opus-5", r#"{"input_tokens":1500}"#),
+        event(r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#)
+    );
+    // After `message_start` the turn is billed, so this one is not sent again:
+    // what it must do is say what happened and carry what it cost.
+    let (url, requests) = stub_sequence(vec![Canned::new(200, overloaded)]);
+    let error = ask_url(&url, &client()).unwrap_err();
+    assert_eq!(
+        error.message,
+        "Anthropic is overloaded, try again in a moment: Overloaded"
+    );
+    let partial = error.partial.expect("the tokens that were billed");
+    assert_eq!(partial.input_tokens, 1500);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(
+        requests.try_iter().count(),
+        1,
+        "a billed turn was sent again"
+    );
+}
+
+/// A trailing event that will not parse arrives after `message_start`, which
+/// is where the billing begins. It used to come back as a bare message, so the
+/// tokens Anthropic had already charged for were never counted against the
+/// screen's cap.
+#[test]
+fn a_malformed_last_event_still_reports_what_had_been_charged() {
+    let body = message_start(
+        "claude-opus-5",
+        r#"{"input_tokens":1500,"cache_read_input_tokens":4000}"#,
+    ) + &text_block(0, "Take Bowers")
+        // No blank line after it: the body ends mid-event.
+        + "data: {\"type\":";
+    let error = ask_url(&stub_server(200, body), &client()).unwrap_err();
+    assert!(
+        error
+            .message
+            .starts_with("unexpected Anthropic stream event"),
+        "{}",
+        error.message
+    );
+    let partial = error.partial.expect("the usage that arrived is reported");
+    assert_eq!(partial.input_tokens, 1500);
+    assert_eq!(partial.cache_read_input_tokens, 4000);
+    assert_eq!(partial.model, "claude-opus-5");
+    assert!(turn_cost_of(ChatModel::Opus5, &partial) > 0.0);
+}
+
+/// Three attempts of a ten-minute request plus the pauses between them is half
+/// an hour, which is longer than anything waiting on the answer will wait. The
+/// retries are held to a budget, so a question that has already spent it is
+/// given up on rather than started again.
+#[test]
+fn a_question_that_has_run_out_of_budget_is_not_tried_again() {
+    let (url, requests) = stub_sequence(vec![
+        Canned::new(429, r#"{"error":{"message":"slow down"}}"#),
+        Canned::new(200, answer("never", "end_turn", r#"{"input_tokens":1}"#, 1)),
+    ]);
+    let spent = super::retry::Limits {
+        backoff: std::time::Duration::from_millis(10),
+        pauses: std::time::Duration::from_millis(1),
+    };
+    let error = ask_url_limited(&url, &client(), CancelSignal::never(), spent).unwrap_err();
+    assert_eq!(error.message, "Rate limited by Anthropic: slow down");
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(requests.try_iter().count(), 1, "the retry went out anyway");
+}

@@ -71,6 +71,11 @@ const SOURCES: [keyof SourceHealth, string][] = [
   ["matchups", "Matchups"],
   ["scores", "Scores"],
   ["rosters", "Rosters"],
+  // The player dictionary and the weekly projections had no health surface at
+  // all, so a dead /players feed all Sunday re-applied a day-old dictionary
+  // every half hour with the badge still green. It only joins the list once
+  // that refresh has run, because until then there is nothing to report.
+  ["players", "Player list"],
 ];
 
 /** "Scores: 5 seconds ago" / "Rosters: failing for 12 minutes (timeout)". */
@@ -98,7 +103,7 @@ interface BadgeStatus {
  * Overall freshness alone can be a lie: two feeds answering every thirty
  * seconds keep the stamp green while the third has been down for an hour. So
  * the badge counts how many sources are actually behind, and the breakdown
- * spells out all three.
+ * spells out every one it has a record for.
  */
 function badgeStatus(health: SeasonHealth, now: number): BadgeStatus {
   const sources = health.sources;
@@ -113,7 +118,10 @@ function badgeStatus(health: SeasonHealth, now: number): BadgeStatus {
       title: undefined,
     };
   }
-  const entries = SOURCES.map(([key, label]) => ({ label, status: sources[key] }));
+  const entries = SOURCES.flatMap(([key, label]) => {
+    const status = sources[key];
+    return status === undefined || status === null ? [] : [{ label, status }];
+  });
   const behind = entries.filter(
     (e) => e.status.error !== null || now - e.status.last_success_secs > SOURCE_STALE_SECS,
   );
@@ -281,9 +289,17 @@ export function SeasonScreen({
   const myProjected = best ? header.my_projected : header.my_set_projected;
   const winOdds = best ? header.win_odds_best : header.win_odds_set;
   const { my_live_points: myLive, opp_live_points: oppLive } = view.live.totals;
+  // A bye and a lost matchups response used to look identical here: both
+  // arrive as a null opponent, so a week whose rows never came back was
+  // announced as a bye, and the head to head, the live scoreboard and the
+  // start/sit panel all went quietly missing with it. A real bye still has my
+  // own row in the week's matchups, just with nobody paired to it, so the
+  // presence of `view.matchup` is what tells the two apart.
   const thisWeek =
     header.opponent_name === null
-      ? `Week ${view.week} · bye`
+      ? view.matchup === null
+        ? `Week ${view.week} · matchup not loaded`
+        : `Week ${view.week} · bye`
       : anyStarted
         ? `vs ${header.opponent_name} · ${fmt(myLive, 1)} - ${fmt(oppLive, 1)}`
         : `vs ${header.opponent_name} · ${fmt(myProjected, 1)} - ${fmt(header.opp_projected, 1)}`;

@@ -438,3 +438,28 @@ fn idp_slots_the_board_cannot_fill_do_not_inflate_the_need_pressure() {
         );
     }
 }
+
+/// The moment this stops moving: `before_kickoff` used to be `pre_draft`, the
+/// draft's own status, so a stale practice tag was free at 7:59 and cost a
+/// safe-mode card nine points at 8:00, and every card carrying one reordered
+/// as the room opened. It is a fact about the league's season now, and the
+/// draft is not one of its inputs.
+#[test]
+fn whether_the_season_has_kicked_off_is_read_off_the_league_not_the_draft() {
+    let league = |start_week: u32| -> League {
+        serde_json::from_value(serde_json::json!({
+            "league_id": "1", "name": "L", "season": "2026", "status": "in_season",
+            "total_rosters": 12, "roster_positions": ["QB", "BN"], "scoring_settings": {},
+            "settings": {"start_week": start_week},
+        }))
+        .expect("a league")
+    };
+    assert!(
+        before_kickoff(&league(1)),
+        "a league drafted in August is drafting a whole season"
+    );
+    assert!(
+        !before_kickoff(&league(5)),
+        "a league created in week five is drafting into a live practice report"
+    );
+}

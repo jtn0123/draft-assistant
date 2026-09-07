@@ -61,20 +61,55 @@ const LEAGUES: [(&str, &str); 9] = [
 /// makes the switch while the request is genuinely in flight, and then lets it
 /// finish.
 pub struct Gate {
-    served: AtomicUsize,
+    /// How many requests are sitting in this gate right now, waiting to be
+    /// let through. Only counted while the gate is held, which makes a
+    /// non-zero reading the one thing a switch test needs to know before it
+    /// switches: a request is genuinely in flight *inside* the gate.
+    waiting: AtomicUsize,
     held: AtomicBool,
+    /// A request really did sit in this gate while it was held, and was let
+    /// out by `release` rather than by the timeout. This is the whole point
+    /// of the gate, and without it a switch test could pass having never
+    /// entered the code it is about: the request comes and goes before the
+    /// test gets to `hold`, the switch happens with nothing in flight, and
+    /// the discard path is never reached.
+    raced: AtomicBool,
+    /// A request gave up waiting. The gate never blocks forever, so a test
+    /// that fails before releasing fails rather than hanging; but a timeout
+    /// means the race did not happen the way the test describes it, and it
+    /// must be told rather than quietly carrying on.
+    timed_out: AtomicBool,
 }
 
 impl Gate {
     const fn new() -> Self {
         Self {
-            served: AtomicUsize::new(0),
+            waiting: AtomicUsize::new(0),
             held: AtomicBool::new(false),
+            raced: AtomicBool::new(false),
+            timed_out: AtomicBool::new(false),
         }
     }
 
-    /// Stop answering until `release`.
+    /// Whether a held request was let through by the test rather than by the
+    /// timeout: the proof that the race under test actually happened.
+    pub fn raced(&self) -> bool {
+        self.raced.load(Ordering::SeqCst)
+    }
+
+    /// Whether a request in this gate ran out of patience.
+    pub fn timed_out(&self) -> bool {
+        self.timed_out.load(Ordering::SeqCst)
+    }
+
+    /// Stop answering until `release`, and start this round's evidence over.
+    ///
+    /// Resetting here rather than leaving the flags from a previous hold is
+    /// what lets `raced` mean "during *this* hold".
     pub fn hold(&self) {
+        self.waiting.store(0, Ordering::SeqCst);
+        self.raced.store(false, Ordering::SeqCst);
+        self.timed_out.store(false, Ordering::SeqCst);
         self.held.store(true, Ordering::SeqCst);
     }
 
@@ -82,23 +117,35 @@ impl Gate {
         self.held.store(false, Ordering::SeqCst);
     }
 
-    /// How many requests this endpoint has taken, so a test can wait for the
-    /// one it is interested in rather than sleeping and hoping.
-    pub fn served(&self) -> usize {
-        self.served.load(Ordering::SeqCst)
+    /// How many requests are held in this gate right now. A test waits for
+    /// this to be non-zero rather than counting requests served: a request
+    /// that came and went before `hold` was called is not the one in flight,
+    /// and switching on the strength of it left the code under test never
+    /// entered.
+    pub fn waiting(&self) -> usize {
+        self.waiting.load(Ordering::SeqCst)
     }
 
     /// Called from the stub's own thread: count the request, then wait for the
     /// test to let it through. Never waits forever — a test that fails before
     /// releasing should fail, not hang.
     fn wait(&self) {
-        self.served.fetch_add(1, Ordering::SeqCst);
+        // Not held: this request is not the one the test is holding, and it
+        // is not evidence of anything either way.
+        if !self.held.load(Ordering::SeqCst) {
+            return;
+        }
+        self.waiting.fetch_add(1, Ordering::SeqCst);
         for _ in 0..2000 {
             if !self.held.load(Ordering::SeqCst) {
+                self.raced.store(true, Ordering::SeqCst);
+                self.waiting.fetch_sub(1, Ordering::SeqCst);
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        self.timed_out.store(true, Ordering::SeqCst);
+        self.waiting.fetch_sub(1, Ordering::SeqCst);
     }
 }
 

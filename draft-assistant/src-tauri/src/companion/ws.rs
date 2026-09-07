@@ -142,10 +142,12 @@ async fn answer_client(srv: &Srv, device: &Device, socket: &mut WebSocket, text:
     }
     let kind = frame_kind(text);
     if kind.as_deref() == Some("ping") {
-        // The keep-alive the contract names. Its other job is the check above:
-        // a device revoked while it sat idle finds out on its next ping.
+        // The keep-alive the contract names. It has two other jobs: the check
+        // above, so a device revoked while it sat idle finds out on its next
+        // ping, and carrying [`host_status`] back, so what the client says
+        // about the host is at most one heartbeat old.
         return socket
-            .send(Message::Text(r#"{"type":"pong"}"#.into()))
+            .send(Message::Text(frame("pong", Ok(host_status(srv))).into()))
             .await
             .is_ok();
     }
@@ -163,13 +165,7 @@ async fn opening_frames(srv: &Srv) -> Vec<String> {
     // show a pick timer that is minutes wrong. The page keeps the difference
     // and applies it wherever it counts something down.
     let mut frames = vec![
-        frame(
-            "hello",
-            Ok(serde_json::json!({
-                "server_now_ms": super::hub::now_ms(),
-                "host_name": srv.hub.host_name(),
-            })),
-        ),
+        frame("hello", Ok(host_status(srv))),
         frame("devices", serde_json::to_value(srv.hub.devices())),
     ];
     if let Some(view) = draft_view(srv).await {
@@ -192,6 +188,26 @@ async fn opening_frames(srv: &Srv) -> Vec<String> {
         }
     }
     frames
+}
+
+/// What the host is doing right now: its clock, its name, and whether its
+/// live sync is actually running. Sent with the opening `hello` and again
+/// with every `pong`, so a client that has been connected all afternoon is
+/// never more than one heartbeat behind any of the three.
+///
+/// The clock is here because a pick deadline is the host's, not the phone's.
+/// The name is here as well as in the pairing answer because renaming the Mac
+/// in Settings used to leave every paired phone and follower calling it by
+/// the name it had when they paired. The polling flag is here because without
+/// it nothing downstream could tell a host that is syncing from one whose
+/// live sync is off: both report zero failed polls, so a frozen board read as
+/// a healthy one.
+fn host_status(srv: &Srv) -> serde_json::Value {
+    serde_json::json!({
+        "server_now_ms": super::hub::now_ms(),
+        "host_name": srv.hub.host_name(),
+        "polling": srv.state.polling.load(std::sync::atomic::Ordering::SeqCst),
+    })
 }
 
 /// The same draft view `GET /api/state` answers with, when a league is open.

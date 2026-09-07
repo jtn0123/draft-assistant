@@ -7,16 +7,20 @@
 //! switched off so it can only read what it is given.
 
 use crate::chat::{ChatMessage, ChatModel, ChatReply, Effort};
+use crate::chat_client::CancelSignal;
 use crate::chat_copy::GUIDANCE;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 /// A subscription-backed answer can take a while at high effort; give it room.
-const TIMEOUT: Duration = Duration::from_secs(240);
+/// Public within the crate because the shared thread's deadline has to outwait
+/// this route as well as the API one.
+pub(crate) const TIMEOUT: Duration = Duration::from_secs(240);
 
 /// Where the CLI is found. A Tauri app launched from the Dock does not inherit
 /// the shell's PATH, so the usual install locations are checked by hand
@@ -169,16 +173,45 @@ fn friendly_failure(stderr: &str, code: Option<i32>) -> String {
     }
 }
 
+/// The answer the user stopped, on this route.
+///
+/// The CLI prints its JSON when the whole turn is done and not before, so
+/// there is no half-written answer to hand back the way the API route has one:
+/// what the panel needs from a stopped run is the flag, at once, rather than
+/// four more minutes of "Thinking". Not an error, for the same reason the API
+/// route's is not: the user asked for it.
+fn cut_short(model: ChatModel) -> ChatReply {
+    ChatReply {
+        text: String::new(),
+        thinking: None,
+        model: model.id().to_string(),
+        refused: false,
+        truncated: false,
+        cancelled: true,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        provider: String::new(),
+        cost_usd: 0.0,
+        screen_spend_usd: 0.0,
+    }
+}
+
 /// Ask through the CLI. `context` is the same serialized view the API path
-/// puts in its system prompt.
+/// puts in its system prompt. `cancel` is the signal the panel's Cancel button
+/// pulls, the same one the API path races: without it here, Cancel was inert
+/// on the route the app picks by default, and the panel sat on "Thinking" for
+/// the whole of [`TIMEOUT`].
 pub async fn ask(
     cli: &Path,
     model: ChatModel,
     effort: Effort,
     context: &str,
     messages: &[ChatMessage],
+    cancel: Arc<CancelSignal>,
 ) -> Result<ChatReply, String> {
-    ask_within(cli, model, effort, context, messages, TIMEOUT).await
+    ask_within(cli, model, effort, context, messages, cancel, TIMEOUT).await
 }
 
 /// The same, with the deadline passed in. Only [`ask`] and the process tests,
@@ -189,10 +222,14 @@ async fn ask_within(
     effort: Effort,
     context: &str,
     messages: &[ChatMessage],
+    cancel: Arc<CancelSignal>,
     timeout: Duration,
 ) -> Result<ChatReply, String> {
     if messages.is_empty() {
         return Err("nothing to ask".into());
+    }
+    if cancel.is_cancelled() {
+        return Ok(cut_short(model));
     }
     let system = format!("{GUIDANCE}\n\n{context}");
     let mut child = Command::new(cli)
@@ -222,7 +259,7 @@ async fn ask_within(
     // Writing and waiting share one deadline. A CLI that never reads its
     // stdin blocks the write forever once the pipe buffer is full, and that
     // write used to sit outside the timeout entirely.
-    let output = tokio::time::timeout(timeout, async move {
+    let run = async move {
         // The prompt goes over stdin so a long transcript never hits ARG_MAX.
         if let Some(mut stdin) = child.stdin.take() {
             stdin
@@ -234,8 +271,14 @@ async fn ask_within(
             .wait_with_output()
             .await
             .map_err(|e| format!("Claude Code failed: {e}"))
-    })
-    .await
+    };
+    let output = tokio::select! {
+        // Dropping the run drops the child, and `kill_on_drop` above turns
+        // that into a kill: a stopped question does not leave the CLI
+        // answering it for another four minutes with the app's privileges.
+        () = cancel.cancelled() => return Ok(cut_short(model)),
+        output = tokio::time::timeout(timeout, run) => output,
+    }
     .map_err(|_| "Claude Code took too long to answer, try a lower effort".to_string())??;
 
     let stdout = String::from_utf8_lossy(&output.stdout);

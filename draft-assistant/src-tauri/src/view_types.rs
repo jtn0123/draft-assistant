@@ -16,7 +16,7 @@ use std::collections::HashMap;
 /// The frontend gate in `src/api.ts` refuses any other version outright, and
 /// `tests/fixture_shape.rs` refuses to let it move without the checked-in
 /// `public/dev-fixture.json` moving with it.
-pub const DRAFT_SCHEMA_VERSION: &str = "1.4";
+pub const DRAFT_SCHEMA_VERSION: &str = "1.5";
 
 /// The two platforms a league can come from, as they are spelled on the wire.
 pub const SLEEPER: &str = "sleeper";
@@ -76,6 +76,17 @@ pub struct DraftStatus {
     pub pick_slot_overrides: HashMap<u32, u32>,
     /// Pick numbers held by keepers: already in the book, nobody's turn.
     pub keeper_picks: Vec<u32>,
+    /// This draft is an auction, which this app does not model: there is no
+    /// budget, no nomination and no pick order here, so every number built on
+    /// snake pick math is meaningless. The screen reads this to suppress
+    /// those panels outright rather than presenting them as fact.
+    pub is_auction: bool,
+    /// Why there is no `my_slot`, in the user's own terms, or `None` when the
+    /// seat is known. Three quite different situations used to share one
+    /// sentence telling the user to set a username they had already set: no
+    /// username saved, a draft order the platform has not published yet, and
+    /// a league the user is simply not in.
+    pub seat_note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

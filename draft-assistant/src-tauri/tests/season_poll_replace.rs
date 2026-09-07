@@ -160,3 +160,84 @@ async fn a_rollover_that_later_succeeds_takes_the_warning_down() {
         view.data_health.warnings
     );
 }
+
+/// The bug: `ROLLOVER_FAILED` was cleared only by a season that replaced the
+/// whole one on screen. So when the week check stopped reporting a new week —
+/// which is what a cached NFL state served after the network fallback does —
+/// the rollover was never retried and the warning sat on the badge for the
+/// life of the process with no path down.
+#[tokio::test]
+async fn a_rollover_that_is_no_longer_wanted_takes_its_warning_down() {
+    let mut harness = Harness::named("rollover-stuck");
+    let was = harness.season.lock().await.as_ref().expect("loaded").week;
+    harness.engine.week.set(was + 1);
+    harness.tick().await;
+    assert!(
+        harness
+            .season
+            .lock()
+            .await
+            .as_ref()
+            .expect("loaded")
+            .warnings
+            .iter()
+            .any(|w| w.starts_with(ROLLOVER_FAILED)),
+        "the failed rollover has to be on the badge first"
+    );
+
+    // The week check goes back to the week already loaded: a cached NFL state,
+    // or an early check that read the rollover a few minutes too soon.
+    harness.engine.week.set(was);
+    harness.memory = SeasonPollMemory::new(20);
+    harness.tick().await;
+
+    let season = harness.season.lock().await;
+    let season = season.as_ref().expect("loaded");
+    assert_eq!(season.week, was);
+    assert!(
+        !season
+            .warnings
+            .iter()
+            .any(|w| w.starts_with(ROLLOVER_FAILED)),
+        "the warning has no way down: {:?}",
+        season.warnings
+    );
+}
+
+/// The same path through the Refresh button, which makes the same week check.
+#[tokio::test]
+async fn refresh_clears_a_rollover_warning_that_no_longer_applies() {
+    let harness = Harness::named("refresh-rollover-clears");
+    let was = harness.season.lock().await.as_ref().expect("loaded").week;
+    harness.engine.week.set(was + 1);
+    refresh_or_roll(
+        &harness.engine,
+        &harness.loaded,
+        &harness.season,
+        &harness.config,
+    )
+    .await
+    .expect("the old week's live slice still refreshes");
+
+    harness.engine.week.set(was);
+    refresh_or_roll(
+        &harness.engine,
+        &harness.loaded,
+        &harness.season,
+        &harness.config,
+    )
+    .await
+    .expect("a plain refresh");
+
+    let season = harness.season.lock().await;
+    assert!(
+        !season
+            .as_ref()
+            .expect("loaded")
+            .warnings
+            .iter()
+            .any(|w| w.starts_with(ROLLOVER_FAILED)),
+        "{:?}",
+        season.as_ref().expect("loaded").warnings
+    );
+}

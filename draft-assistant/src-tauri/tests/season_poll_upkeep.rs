@@ -377,3 +377,71 @@ async fn the_tick_input_shares_the_season_instead_of_copying_it() {
         assert!(shared, "the tick copied {what} rather than pointing at it");
     }
 }
+
+/// The bug: the staleness warning `players_no_older_than` attaches when the
+/// fetch failed and it fell back to a day-old cache was thrown away at the
+/// call site, and the badge tracked only matchups, scores and rosters. So
+/// `/players` could be down all Sunday, the half-hour refresh would re-apply
+/// the same day-old dictionary every tick, a Saturday-night Out would never
+/// reach the optimal lineup, and the badge stayed green throughout.
+#[tokio::test]
+async fn a_player_list_served_off_the_disk_shows_on_the_badge() {
+    let mut harness = Harness::named("players-stale");
+    harness.engine.players = Some(dictionary(&every_player(), &[]));
+    harness.engine.players_stale =
+        Some("players refresh failed; using cache aged 19h (503)".to_string());
+
+    let view = harness.tick().await.view.expect("a view is still built");
+
+    let players = view
+        .data_health
+        .sources
+        .players
+        .as_ref()
+        .expect("the player list is a tracked source once it has been asked for");
+    assert_eq!(
+        players.error.as_deref(),
+        Some("players refresh failed; using cache aged 19h (503)"),
+        "a dictionary served off the disk must not be stamped as a live source"
+    );
+
+    // And a refresh that did come off the wire takes the complaint down.
+    harness.engine.players_stale = None;
+    harness.memory = SeasonPollMemory::new(20);
+    let recovered = harness.tick().await.view.expect("a view is built");
+    let players = recovered
+        .data_health
+        .sources
+        .players
+        .as_ref()
+        .expect("still tracked");
+    assert_eq!(players.error, None);
+    assert!(players.last_success_secs > 0, "a good refresh is stamped");
+}
+
+/// The other half: nothing came back and there was nothing on disk either,
+/// which is the state `refresh_players` reports as `None`. The names and
+/// injury tags on screen are then as old as the league load, and the badge
+/// has to say which feed is responsible for that.
+#[tokio::test]
+async fn a_player_list_that_cannot_be_fetched_at_all_shows_on_the_badge() {
+    let mut harness = Harness::named("players-down");
+    harness.engine.players = None;
+
+    let view = harness.tick().await.view.expect("a view is still built");
+
+    let players = view
+        .data_health
+        .sources
+        .players
+        .as_ref()
+        .expect("a refresh that found nothing is still a refresh that was made");
+    assert_eq!(
+        players.error.as_deref(),
+        Some(draft_assistant_lib::poll::PLAYERS_UNREACHABLE)
+    );
+    assert_eq!(
+        players.last_success_secs, 0,
+        "it has never answered since the season was loaded"
+    );
+}

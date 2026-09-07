@@ -110,8 +110,27 @@ export interface Harness {
   reset: () => void;
 }
 
+/**
+ * The default behind every stub: a call the test never set up.
+ *
+ * A bare `vi.fn()` would resolve to `undefined`, the component would quietly
+ * take its empty-or-error branch, and a test asserting "nothing is shown"
+ * would be asserting this hole rather than the app. Throwing by name means an
+ * unstubbed call has to be noticed and answered.
+ */
+function unstubbed(name: keyof Api): () => never {
+  return () => {
+    throw new Error(
+      `appHarness: api.${String(name)} was called but this test never stubbed it. ` +
+        `Set one up, e.g. harness().api.${String(name)}.mockResolvedValue(...).`,
+    );
+  };
+}
+
 function build(): Harness {
-  const api = Object.fromEntries(METHOD_NAMES.map((name) => [name, vi.fn()])) as ApiMock;
+  const api = Object.fromEntries(
+    METHOD_NAMES.map((name): [keyof Api, Mock] => [name, vi.fn(unstubbed(name))]),
+  ) as ApiMock;
   const push: PushHandlers = {
     draft: null,
     health: null,
@@ -281,7 +300,7 @@ export function fakeStorage(initial: Record<string, string> = {}): Map<string, s
 /** A season view with one standings row, the user's own. */
 export function seasonFixture(overrides: Partial<SeasonView> = {}): SeasonView {
   return {
-    schema_version: "1.3",
+    schema_version: "1.4",
     generated_at: 0,
     team_avatars: {},
     league: {

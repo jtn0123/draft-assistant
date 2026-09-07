@@ -213,15 +213,30 @@ async fn revoking_tells_every_device_and_then_drops_it() {
     host.companion.hub.revoke().expect("revoke runs");
     assert_ne!(host.companion.hub.code(), before);
 
-    // Told why, and only then dropped.
+    // Told why, and only then dropped. The drop is asserted rather than
+    // merely waited for: this loop used to bind nothing and assert nothing,
+    // so a revoked phone that kept its live socket open spent five seconds
+    // timing out here and passed on the 401 below, which token revocation
+    // alone already satisfies.
     let frame = next_of(&mut socket, "revoked").await;
     assert!(frame["payload"].is_object());
+    let mut closed = false;
     for _ in 0..50 {
         match tokio::time::timeout(std::time::Duration::from_millis(100), socket.next()).await {
-            Ok(None) | Ok(Some(Err(_))) => break,
+            Ok(None) | Ok(Some(Err(_))) => {
+                closed = true;
+                break;
+            }
+            Ok(Some(Ok(Message::Close(_)))) => {
+                closed = true;
+                break;
+            }
+            // Nothing yet, or a frame that is not the close: keep looking,
+            // up to the five seconds these fifty turns add up to.
             Ok(Some(Ok(_))) | Err(_) => continue,
         }
     }
+    assert!(closed, "the revoked device's socket was left open");
     // The token is worthless from here on, socket or no socket.
     let (status, body) = host.get("/api/state", &paired.token).await;
     assert_eq!(status, 401);
@@ -322,4 +337,65 @@ async fn switching_league_sends_the_phones_the_new_threads_and_clears_the_week()
     ];
     screens.sort_unstable();
     assert_eq!(screens, ["draft", "season"]);
+}
+
+/// The failure this prevents: the phone read only the failed-poll count, which
+/// is 0 on a host that is not polling at all, and printed "sync healthy" over
+/// a board that had stopped moving. Whether the host's live sync is running
+/// now rides on `hello` and on every `pong`.
+#[tokio::test]
+async fn the_host_says_whether_its_live_sync_is_actually_running() {
+    let host = host("ws-polling").await;
+    let paired = host.pair_ok("Rob's iPhone", "phone").await;
+    let mut socket = open(&host.base, &paired.token).await;
+    let hello = next_of(&mut socket, "hello").await;
+    assert_eq!(
+        hello["payload"]["polling"], false,
+        "the fixture polls nothing"
+    );
+
+    host.state
+        .polling
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    socket
+        .send(Message::Text(r#"{"type":"ping"}"#.into()))
+        .await
+        .expect("the ping is sent");
+    let pong = next_of(&mut socket, "pong").await;
+    assert_eq!(pong["payload"]["polling"], true);
+
+    host.state
+        .polling
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    socket
+        .send(Message::Text(r#"{"type":"ping"}"#.into()))
+        .await
+        .expect("the second ping is sent");
+    assert_eq!(
+        next_of(&mut socket, "pong").await["payload"]["polling"],
+        false
+    );
+}
+
+/// The failure this prevents: the host's name was taken once, at pairing, so
+/// renaming the Mac left every connected phone and follower calling it by the
+/// old name until it paired again.
+#[tokio::test]
+async fn a_renamed_host_says_its_new_name_on_the_next_heartbeat() {
+    let host = host("ws-rename").await;
+    let paired = host.pair_ok("Rob's iPhone", "phone").await;
+    let mut socket = open(&host.base, &paired.token).await;
+    assert_eq!(
+        next_of(&mut socket, "hello").await["payload"]["host_name"],
+        "Justin's Mac"
+    );
+    host.companion
+        .hub
+        .set_host_name("The Big Board".to_string());
+    socket
+        .send(Message::Text(r#"{"type":"ping"}"#.into()))
+        .await
+        .expect("the ping is sent");
+    let pong = next_of(&mut socket, "pong").await;
+    assert_eq!(pong["payload"]["host_name"], "The Big Board");
 }

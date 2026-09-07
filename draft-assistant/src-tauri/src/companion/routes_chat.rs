@@ -17,6 +17,10 @@ use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// The margin between the longest answer the desktop can produce and the
+/// moment the shared thread stops waiting for one.
+const ANSWER_MARGIN: Duration = Duration::from_secs(30);
+
 /// How long a shared question may run before the thread stops waiting for it.
 ///
 /// Nothing used to bound this, so an answer that hung left `busy` set, and
@@ -24,12 +28,32 @@ use std::time::Duration;
 /// The bound was then set at five minutes, which is shorter than the HTTP
 /// client's own ten: a long answer was abandoned here while the request was
 /// still running and still being billed, so it was paid for, thrown away, and
-/// never counted against the cap. The limit now sits past the client's
-/// timeout, so the client gives up first and the answer path records what the
-/// turn cost before this ever fires. What is left for this to catch is a call
-/// that hangs without the client noticing, which is the case it was for.
+/// never counted against the cap. Writing the client's timeout plus a margin
+/// in its place only moved the same bug: retries made one question three
+/// requests and two pauses long, so a question could still run half an hour
+/// while this gave up in ten minutes.
+///
+/// So it is not written down at all any more. It is the worst case the answer
+/// path holds itself to, plus a margin, taken from the retry policy that
+/// decides that worst case ([`crate::chat::WORST_CASE_ELAPSED`]). Whatever the
+/// timeout, the attempts or the backoff become, the answer path gives up
+/// first, and the turn's cost is recorded before this ever fires. What is left
+/// for this to catch is a call that hangs without the client noticing, which
+/// is the case it was for.
 pub(crate) const ANSWER_TIMEOUT: Duration =
-    Duration::from_secs(crate::chat_client::REQUEST_TIMEOUT.as_secs() + 30);
+    Duration::from_secs(longest_answer().as_secs() + ANSWER_MARGIN.as_secs());
+
+/// The longest either route can take: the API's retries and pauses, or the
+/// CLI's own deadline, whichever is further out.
+const fn longest_answer() -> Duration {
+    let api = crate::chat::WORST_CASE_ELAPSED;
+    let cli = crate::chat_cli::TIMEOUT;
+    if api.as_secs() > cli.as_secs() {
+        api
+    } else {
+        cli
+    }
+}
 
 /// The screens a shared question may be asked about — the same two the desktop
 /// panel answers for.
@@ -332,14 +356,28 @@ mod tests {
 
     /// The shared limit used to be five minutes against a ten-minute client
     /// timeout, so an answer in its sixth minute was abandoned here while the
-    /// request ran on: billed, discarded, and never counted. Whatever the
-    /// client's timeout becomes, this must stay on the far side of it.
+    /// request ran on: billed, discarded, and never counted. Comparing it
+    /// against one request's timeout stopped being enough the moment one
+    /// question became three requests and two pauses; what it has to outwait
+    /// is the whole retry policy's worst case, on either route.
     #[test]
-    fn a_shared_answer_is_not_abandoned_before_the_client_has_given_up() {
+    fn a_shared_answer_is_not_abandoned_before_the_answer_path_has_given_up() {
         assert!(
-            ANSWER_TIMEOUT > crate::chat_client::REQUEST_TIMEOUT,
-            "{ANSWER_TIMEOUT:?} vs {:?}",
-            crate::chat_client::REQUEST_TIMEOUT
+            ANSWER_TIMEOUT > crate::chat::WORST_CASE_ELAPSED,
+            "{ANSWER_TIMEOUT:?} vs the API route's {:?}",
+            crate::chat::WORST_CASE_ELAPSED
+        );
+        assert!(
+            ANSWER_TIMEOUT > crate::chat_cli::TIMEOUT,
+            "{ANSWER_TIMEOUT:?} vs the CLI route's {:?}",
+            crate::chat_cli::TIMEOUT
+        );
+        // And the worst case is a worst case: at least one whole request,
+        // rather than a number that happens to be larger than this one.
+        assert!(
+            crate::chat::WORST_CASE_ELAPSED > crate::chat_client::REQUEST_TIMEOUT,
+            "{:?}",
+            crate::chat::WORST_CASE_ELAPSED
         );
     }
 

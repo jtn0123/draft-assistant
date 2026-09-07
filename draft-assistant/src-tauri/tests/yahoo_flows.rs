@@ -219,6 +219,10 @@ fn a_yahoo_league_key_builds_a_board_out_of_sleepers_numbers() {
     assert_eq!(view["my_roster"]["slot"], 1);
 
     // Bijan Robinson is in Yahoo's pool and not in Sleeper's dictionary.
+    assert!(
+        !s.throttled.load(Ordering::SeqCst),
+        "the stub never served the throttled answer"
+    );
     let warnings = view["data_health"]["warnings"].to_string();
     assert!(
         warnings.contains("had no Sleeper match"),
@@ -463,6 +467,30 @@ fn the_board_says_out_loud_that_it_has_not_read_yahoos_traded_picks() {
     assert!(
         warnings.contains("traded picks are not read"),
         "the board did not say pick ownership is guessed: {warnings}"
+    );
+    s.finish();
+}
+
+/// The failure this prevents: Yahoo throttles one call of a load, the client
+/// gives up inside its retry budget rather than sleeping two minutes, and the
+/// board is drawn from what did answer. Without the line that carries the
+/// client's throttle notice into the league's warnings, the screen shows a
+/// thinner board with nothing to say why, which reads as a quiet draft rather
+/// than a rate-limited one.
+#[test]
+fn a_throttled_load_says_so_on_the_health_strip() {
+    let s = session("yahoo-throttled-load");
+    s.connect();
+    s.throttled.store(true, Ordering::SeqCst);
+    let view = s.ok("add_league", json!({"leagueId": LEAGUE_KEY, "force": true}));
+    let warnings = view["data_health"]["warnings"]
+        .as_array()
+        .expect("the health strip carries a list of warnings");
+    assert!(
+        warnings.iter().any(|w| w
+            .as_str()
+            .is_some_and(|w| w == draft_assistant_lib::yahoo_retry::THROTTLED)),
+        "a throttled load said nothing about it: {warnings:?}"
     );
     s.finish();
 }

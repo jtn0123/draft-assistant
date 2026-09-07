@@ -85,6 +85,8 @@ pub fn draft_fixture() -> DraftView {
             clock_deadline_ms: None,
             pick_slot_overrides: HashMap::new(),
             keeper_picks: Vec::new(),
+            is_auction: false,
+            seat_note: None,
         },
         my_roster: Some(TeamRoster {
             slot: 3,

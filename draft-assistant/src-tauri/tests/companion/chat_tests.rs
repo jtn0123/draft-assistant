@@ -196,11 +196,11 @@ async fn a_question_about_a_screen_that_is_not_one_is_refused() {
 }
 
 #[tokio::test]
-async fn a_device_gets_ten_questions_a_minute() {
+async fn a_device_gets_ten_questions_a_minute_and_the_eleventh_is_refused() {
     let host = host("chat-rate").await;
     make_answers_fail(&host).await;
     let paired = host.pair_ok("Rob's iPhone", "phone").await;
-    let mut refusals = 0;
+    let mut statuses = Vec::new();
     for n in 0..12 {
         let (status, _) = host
             .post(
@@ -209,13 +209,23 @@ async fn a_device_gets_ten_questions_a_minute() {
                 serde_json::json!({ "screen": "draft", "text": format!("question {n}") }),
             )
             .await;
-        // 409 while an answer is in flight, 429 once the allowance is gone.
-        if status == 429 {
-            refusals += 1;
-        }
+        statuses.push(status);
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
-    assert!(refusals >= 2, "the per-minute cap never bit");
+    // The cap is counted before anything else about the question, so exactly
+    // the first ten get past it, whatever then becomes of the answer (202
+    // when it is taken, 409 while one is already in flight). This used to
+    // assert only that two of the twelve were refused, which a cap of one a
+    // minute satisfies with eleven refusals.
+    assert!(
+        statuses[..10].iter().all(|status| *status != 429),
+        "the cap bit before the tenth question: {statuses:?}"
+    );
+    assert_eq!(
+        &statuses[10..],
+        &[429, 429],
+        "the eleventh question was not refused: {statuses:?}"
+    );
 }
 
 #[tokio::test]

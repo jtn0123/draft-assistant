@@ -3,7 +3,7 @@
 
 import { useMemo, useState } from "react";
 import type { DraftView, Platform, TeamRoster } from "../types";
-import { useNow } from "../clock";
+import { clockOffsetMs, clockSkewNote, useNow } from "../clock";
 import { clockLabel, pickLabel, spanLabel } from "../format";
 
 /** How many upcoming picks to show before the "+n" expander. */
@@ -17,8 +17,11 @@ const QUEUE_MAX = 24;
  * The pick clock as "0:41", re-rendered every second while a deadline is set.
  * Null when nothing is on the clock, so callers can leave the cell out.
  */
-function useClock(deadlineMs: number | null): string | null {
-  return clockLabel(deadlineMs, useNow(deadlineMs !== null));
+function useClock(view: DraftView, deadlineMs: number | null): string | null {
+  const now = useNow(deadlineMs !== null);
+  // Corrected for the gap between this device's clock and the host that read
+  // the deadline off the platform. See `clockOffsetMs`.
+  return clockLabel(deadlineMs, now + clockOffsetMs(view.generated_at, now));
 }
 
 /** Whole seconds left on the clock, or null when nothing is running. */
@@ -37,6 +40,9 @@ function secondsLeft(deadlineMs: number | null, nowMs: number): number | null {
 function clockSentence(d: DraftView["draft"], left: number | null): string {
   if (d.status === "complete") return "The draft is finished.";
   if (notStarted(d)) return "The draft has not started yet.";
+  // An auction has no pick order, so there is no turn to announce and no
+  // count of picks until yours. Saying either would be inventing one.
+  if (d.is_auction) return "This is an auction draft, which this app does not support.";
   // A paused draft still names a manager and a pick, and both are stale: the
   // timer is stopped and nobody can act. Saying whose turn it is invited
   // people to wonder why that manager was taking so long.
@@ -112,10 +118,18 @@ export function ClockBanner({ view }: { view: DraftView }) {
   // older host that does not.
   const deadline = complete || d.paused ? null : d.clock_deadline_ms;
   const now = useNow(deadline !== null);
-  const clock = clockLabel(deadline, now);
+  // The deadline is built from the platform's stamps on the host that talks
+  // to it; the countdown runs on this device's clock. Correct for the gap
+  // between the two rather than counting down a wrong number in silence.
+  const offset = clockOffsetMs(view.generated_at, now);
+  const skew = clockSkewNote(offset);
+  const clock = clockLabel(deadline, now + offset);
   // Everything that decides what the sentence says, and nothing that ticks.
   const situation = `${d.status}|${String(d.is_my_pick)}|${d.current_pick}|${d.on_clock_slot}`;
-  const announcement = useHeldSentence(situation, clockSentence(d, secondsLeft(deadline, now)));
+  const announcement = useHeldSentence(
+    situation,
+    clockSentence(d, secondsLeft(deadline, now + offset)),
+  );
   // Four picks and a "+n", the same shape the queue strip uses — the list used
   // to stop at four and say nothing about the rest of the draft.
   const shownPicks = d.my_next_picks.slice(0, COLLAPSED);
@@ -152,6 +166,13 @@ export function ClockBanner({ view }: { view: DraftView }) {
           <span className="clock-status" aria-hidden="true">
             Draft paused
           </span>
+        ) : d.is_auction ? (
+          // Everything this cell would otherwise say (who is on the clock,
+          // how many picks until yours) is snake math on a draft that has no
+          // pick order at all.
+          <span className="clock-status" aria-hidden="true">
+            Auction draft
+          </span>
         ) : d.is_my_pick ? (
           <span className="clock-status is-you" aria-hidden="true">
             You are on the clock
@@ -173,6 +194,7 @@ export function ClockBanner({ view }: { view: DraftView }) {
         <div className="clock-cell">
           <span className="label">Clock</span>
           <span className="clock-big num clock-timer">{clock}</span>
+          {skew !== null && <span className="mid clock-sub">{skew}</span>}
         </div>
       ) : (
         noClock !== null && (
@@ -185,13 +207,18 @@ export function ClockBanner({ view }: { view: DraftView }) {
           </div>
         )
       )}
-      <div className="clock-cell clock-next">
-        <span className="label">Your picks</span>
-        <span className="clock-next-list num">
-          {shownPicks.map((p) => pickLabel(p, d.teams)).join(" · ") || "-"}
-          {morePicks > 0 && <span className="muted"> +{morePicks}</span>}
-        </span>
-      </div>
+      {/* Nobody holds a pick number in an auction, so there is no queue of
+          yours to show. The backend sends an empty list; drawing the cell
+          anyway left a "Your picks -" that read as a draft going wrong. */}
+      {!d.is_auction && (
+        <div className="clock-cell clock-next">
+          <span className="label">Your picks</span>
+          <span className="clock-next-list num">
+            {shownPicks.map((p) => pickLabel(p, d.teams)).join(" · ") || "-"}
+            {morePicks > 0 && <span className="muted"> +{morePicks}</span>}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -256,6 +283,7 @@ export function SnakeStrip({ view }: { view: DraftView }) {
   const draft = view.draft;
   const rosters = view.rosters;
   const clock = useClock(
+    view,
     draft.status === "complete" || draft.paused ? null : draft.clock_deadline_ms,
   );
   // The queue is 24 picks of snake arithmetic and as many roster lookups, and
@@ -266,7 +294,11 @@ export function SnakeStrip({ view }: { view: DraftView }) {
       // the last pick left it, so building from it drew a chip marked "on the
       // clock" — and, in a draft whose last pick is still numbered, a whole
       // queue of picks nobody would ever make.
-      draft.status === "complete" ? [] : buildQueue(draft, rosters, new Set(draft.keeper_picks)),
+      // An auction has no pick order, so there is no queue: every chip here
+      // would be a snake pick number on a draft that does not use them.
+      draft.status === "complete" || draft.is_auction
+        ? []
+        : buildQueue(draft, rosters, new Set(draft.keeper_picks)),
     [draft, rosters],
   );
   if (queue.length === 0) return null;

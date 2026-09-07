@@ -22,7 +22,8 @@ use crate::board::BoardPlayer;
 /// different sport at the receiving positions — a possession receiver is two
 /// rounds apart between the two. Rather than throw the file away, the rank gap
 /// is worth half as much there, and the line says which ruler it was measured
-/// with so the user can discount it themselves.
+/// with so the user can discount it themselves. Said in prose rather than in
+/// brackets, because a rec-card reason is a sentence.
 pub fn rec_adjustment(
     player: &BoardPlayer,
     teams: u32,
@@ -35,10 +36,15 @@ pub fn rec_adjustment(
     }
     let near_half_ppr = (0.25..0.75).contains(&points_per_reception);
     let weight = if near_half_ppr { 1.0 } else { 0.5 };
+    // Plain prose, not a bracketed tag. Every reason on a rec card is written
+    // as a sentence a person reads out loud (`recommend_tests`, "every reason
+    // reads as a plain sentence"), and a parenthesised label was the one term
+    // that broke the convention: the guard test could not see it because its
+    // fixture carried no imported opinion at all.
     let caveat = if near_half_ppr {
         ""
     } else {
-        " (half-PPR ranks)"
+        ", on half-PPR ranks"
     };
     let delta = (gap as f64 / 4.0).clamp(-8.0, 8.0) * weight;
     let headline = format!(

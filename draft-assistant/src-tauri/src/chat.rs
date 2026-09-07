@@ -8,7 +8,6 @@
 //! is here is the call and everything that happens to the reply.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 /// The models, the effort levels, a turn, a reply and the error type.
 #[path = "chat_types.rs"]
@@ -21,6 +20,12 @@ pub use crate::chat_client::CancelSignal;
 /// The sentence for a status, and the retry policy in front of it.
 #[path = "chat_retry.rs"]
 mod retry;
+
+/// The longest one question can take, retries and pauses included. Derived
+/// from the retry policy itself in `chat_retry.rs`, and re-exported here so
+/// anything that has to outwait an answer (the shared thread's deadline) reads
+/// the same number rather than adding it up again.
+pub use retry::WORST_CASE_ELAPSED;
 
 const ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
@@ -158,7 +163,7 @@ pub async fn ask(
         context,
         messages,
     };
-    ask_at(call, cancel, retry::BASE_BACKOFF).await
+    ask_at(call, cancel, retry::Limits::LIVE).await
 }
 
 /// One question as the wire sees it: where it goes, what it says, and the
@@ -173,13 +178,75 @@ struct Call<'a> {
     messages: &'a [ChatMessage],
 }
 
-/// The same request against an arbitrary endpoint, with the retry backoff
+/// How one attempt at a 200 ended.
+enum Attempt {
+    Done(stream::Answer),
+    /// The user pulled the cancel signal: a reply, not an error.
+    Stopped(ChatReply),
+    Failed(ChatError),
+    /// The stream carried an error event before anything had been billed, so
+    /// the same request may still get through. The status it stands for and
+    /// the sentence for it, for the retry loop to decide on.
+    Again(reqwest::StatusCode, String),
+}
+
+/// Read the events of an accepted request until the answer is whole, the user
+/// stops it, or it stops being an answer.
+///
+/// A body that ends early — the client's own timeout, or the socket dropping —
+/// is still a billed request from `message_start` on, so the error carries
+/// what had been charged so far. A cancel drops the response, which closes the
+/// request, and hands back what had arrived.
+async fn read_answer(mut response: reqwest::Response, cancel: &CancelSignal) -> Attempt {
+    let mut stream = stream::Stream::new();
+    loop {
+        let chunk = tokio::select! {
+            chunk = response.chunk() => chunk,
+            () = cancel.cancelled() => return Attempt::Stopped(cut_short(&stream)),
+        };
+        match chunk {
+            Ok(Some(bytes)) => {
+                if let Err(failure) = stream.feed(&bytes) {
+                    return stopped_by(&stream, failure);
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                return Attempt::Failed(ChatError {
+                    partial: partial_reply(&stream),
+                    message: format!("the Anthropic answer stopped early: {e}"),
+                });
+            }
+        }
+    }
+    match stream.finish() {
+        Ok(answer) => Attempt::Done(answer),
+        Err(failure) => stopped_by(&stream, failure),
+    }
+}
+
+/// What a stream failure means to the attempt it happened in: another try when
+/// nothing has been billed and the API said something that lifts, and
+/// otherwise the error, carrying whatever the turn had already been charged.
+fn stopped_by(stream: &stream::Stream, failure: stream::Failure) -> Attempt {
+    match failure.status {
+        Some(status) if !stream.started() && retry::is_retryable(status) => {
+            Attempt::Again(status, failure.message)
+        }
+        _ => Attempt::Failed(ChatError {
+            partial: partial_reply(stream),
+            message: failure.message,
+        }),
+    }
+}
+
+/// The same request against an arbitrary endpoint, with the retry policy
 /// passed in. Only [`ask`] and the wire tests, which point it at a stub server
 /// and cannot wait seconds between attempts, call this.
 async fn ask_at(
     call: Call<'_>,
     cancel: Arc<CancelSignal>,
-    backoff: Duration,
+    limits: retry::Limits,
 ) -> Result<ChatReply, ChatError> {
     let Call {
         endpoint,
@@ -220,9 +287,11 @@ async fn ask_at(
 
     // A 429, a 529 or a 5xx is "not right now": the same request is sent
     // again after a pause, twice, before its status is shown. Nothing is
-    // billed until a 200 begins, so a retry never pays for the attempt before.
+    // billed until a 200 begins, so a retry never pays for the attempt before,
+    // and an overload that arrives inside a 200 before `message_start` is the
+    // same "not right now" wearing an event.
     let mut attempt = 1;
-    let mut response = loop {
+    let answer = loop {
         if cancel.is_cancelled() {
             return Ok(cut_short(&stream::Stream::new()));
         }
@@ -230,18 +299,39 @@ async fn ask_at(
             .await
             .map_err(|e| format!("could not reach the Anthropic API: {e}"))?;
         let status = response.status();
-        if status.is_success() {
-            break response;
-        }
-        let retry_after = retry::retry_after(response.headers());
-        let body = response
-            .text()
-            .await
-            .map_err(|e| format!("could not read the Anthropic response: {e}"))?;
-        let message = retry::error_message(status, &body);
-        let Some(wait) = retry::delay_before(status, attempt + 1, retry_after, backoff) else {
+        let (status, retry_after, message) = if status.is_success() {
+            match read_answer(response, &cancel).await {
+                Attempt::Done(answer) => break answer,
+                Attempt::Stopped(reply) => return Ok(reply),
+                Attempt::Failed(error) => return Err(error),
+                Attempt::Again(status, message) => (status, None, message),
+            }
+        } else {
+            let retry_after = retry::retry_after(response.headers());
+            let body = response
+                .text()
+                .await
+                .map_err(|e| format!("could not read the Anthropic response: {e}"))?;
+            let message = retry::error_message(status, &body);
+            (status, retry_after, message)
+        };
+        let Some(wait) = retry::delay_before(status, attempt + 1, retry_after, limits.backoff)
+        else {
             return Err(retry::gave_up(message, attempt).into());
         };
+        // Each attempt is bounded by the client's own request timeout, and the
+        // pauses are bounded here, so one question cannot run for as long as
+        // every attempt and every pause end to end. Without this a single
+        // question could outlast the shared thread's patience several times
+        // over: answered, billed, and thrown away.
+        if sent_at.elapsed() + wait > limits.pauses {
+            crate::applog::warn(format!(
+                "Anthropic API {}: not retrying, the question has already run {}ms",
+                status.as_u16(),
+                sent_at.elapsed().as_millis()
+            ));
+            return Err(retry::gave_up(message, attempt).into());
+        }
         crate::applog::warn(format!(
             "Anthropic API {}: retrying in {}ms (attempt {} of {})",
             status.as_u16(),
@@ -255,37 +345,6 @@ async fn ask_at(
         }
         attempt += 1;
     };
-
-    // Read the events as they arrive. A body that stops early — the client's
-    // own timeout, or the socket dropping — is still a billed request from
-    // `message_start` on, so the error carries what had been charged so far.
-    // A cancel drops the response, which closes the request, and hands back
-    // what had arrived.
-    let mut stream = stream::Stream::new();
-    loop {
-        let chunk = tokio::select! {
-            chunk = response.chunk() => chunk,
-            () = cancel.cancelled() => return Ok(cut_short(&stream)),
-        };
-        match chunk {
-            Ok(Some(bytes)) => {
-                if let Err(message) = stream.feed(&bytes) {
-                    return Err(ChatError {
-                        partial: partial_reply(&stream),
-                        message,
-                    });
-                }
-            }
-            Ok(None) => break,
-            Err(e) => {
-                return Err(ChatError {
-                    partial: partial_reply(&stream),
-                    message: format!("the Anthropic answer stopped early: {e}"),
-                });
-            }
-        }
-    }
-    let answer = stream.finish()?;
 
     // Model, effort, token counts and the round trip. Never the prompt or the
     // answer: the log is for pasting into a chat window.

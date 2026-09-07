@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { answer, ask, backend, emit, pair, serve, thread } from "./companionServer";
 import { dump } from "./fixtures";
 
@@ -16,6 +16,16 @@ import { dump } from "./fixtures";
  * a `draft-updated` or `shared-chat` frame at the exact moment it wants one.
  */
 
+/**
+ * A locator that matches only while the element is actually on screen.
+ *
+ * The page hides whole panels with the `hidden` attribute, and Playwright's
+ * text assertions wait for an element to be *attached*, not visible: a
+ * regression that filled the Picks panel while the Now panel was showing used
+ * to satisfy every one of them.
+ */
+const shown = (page: Page, selector: string) => page.locator(`${selector}:visible`);
+
 test("refuses the wrong code and opens the draft on the right one", async ({ page }) => {
   const host = backend();
   await serve(page, host);
@@ -25,10 +35,10 @@ test("refuses the wrong code and opens the draft on the right one", async ({ pag
 
   await page.getByLabel("Pairing code").fill(host.code);
   await page.getByRole("button", { name: "Connect" }).click();
-  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  await expect(shown(page, "#clock-strip")).toContainText("Pick");
   await expect(page.getByRole("button", { name: "Now" })).toHaveAttribute("aria-current", "page");
   // The fixture has us on the clock, and the host's name is now known.
-  await expect(page.locator("#clock-strip")).toContainText("Your pick");
+  await expect(shown(page, "#clock-strip")).toContainText("Your pick");
   expect(await page.evaluate(() => window.localStorage.getItem("da.companion.token"))).toBe(
     "tok-1",
   );
@@ -41,7 +51,7 @@ test("names the device from the user agent and remembers what was typed", async 
   await page.getByLabel("This device").fill("Rob's iPhone");
   await page.getByLabel("Pairing code").fill("424242");
   await page.getByRole("button", { name: "Connect" }).click();
-  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  await expect(shown(page, "#clock-strip")).toContainText("Pick");
   expect(await page.evaluate(() => window.localStorage.getItem("da.companion.device"))).toBe(
     "Rob's iPhone",
   );
@@ -53,7 +63,7 @@ test("renders the recommendations the fixture captured", async ({ page }) => {
   await pair(page);
   const fixture = host.draft as { recommendations: { name: string; reasons: string[] }[] };
   const top = fixture.recommendations[0];
-  const card = page.locator("#recs .card").first();
+  const card = shown(page, "#recs .card").first();
   await expect(card.locator(".name")).toHaveText(top.name);
   await expect(card.locator(".pos")).toHaveCount(1);
   await expect(card.locator(".facts")).toContainText("Tier");
@@ -67,7 +77,7 @@ test("lists the most recent picks newest first", async ({ page }) => {
   await serve(page, host);
   await pair(page);
   await page.getByRole("button", { name: "Picks" }).click();
-  const rows = page.locator("#picks .row");
+  const rows = shown(page, "#picks .row");
   const count = await rows.count();
   expect(count).toBeGreaterThan(0);
   expect(count).toBeLessThanOrEqual(25);
@@ -88,7 +98,7 @@ test("attributes chat entries, renders light markdown and shows the cost", async
   await serve(page, host);
   await pair(page);
   await page.getByRole("button", { name: "Chat" }).click();
-  const entries = page.locator("#chat-list .entry");
+  const entries = shown(page, "#chat-list .entry");
   await expect(entries.first()).toContainText("Rob's iPhone asked");
   await expect(entries.first()).toContainText("phone");
   await expect(entries.first()).toContainText("ago");
@@ -106,7 +116,7 @@ test("markdown is text, never markup", async ({ page }) => {
   await serve(page, host);
   await pair(page);
   await page.getByRole("button", { name: "Chat" }).click();
-  await expect(page.locator("#chat-list .entry")).toContainText("<img src=x onerror=alert(1)>");
+  await expect(shown(page, "#chat-list .entry")).toContainText("<img src=x onerror=alert(1)>");
   await expect(page.locator("#chat-list img")).toHaveCount(0);
 });
 
@@ -142,7 +152,7 @@ test("a busy host answers 409 and the page says so inline", async ({ page }) => 
   host.postStatus = 429;
   await page.getByLabel("Ask the assistant").fill("and now?");
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.locator("#chat-note")).toContainText("Too many questions");
+  await expect(shown(page, "#chat-note")).toContainText("Too many questions");
 });
 
 test("a draft-updated frame repaints the board", async ({ page }) => {
@@ -153,7 +163,7 @@ test("a draft-updated frame repaints the board", async ({ page }) => {
     draft: Record<string, unknown>;
     recommendations: Record<string, unknown>[];
   };
-  await expect(page.locator("#clock-strip")).toContainText(
+  await expect(shown(page, "#clock-strip")).toContainText(
     `Pick ${String(view.draft.current_pick)}`,
   );
   const moved = {
@@ -164,9 +174,9 @@ test("a draft-updated frame repaints the board", async ({ page }) => {
     ],
   };
   await emit(page, { type: "draft-updated", payload: moved });
-  await expect(page.locator("#clock-strip")).toContainText("Pick 99");
-  await expect(page.locator("#clock-strip")).toContainText("Dana");
-  await expect(page.locator("#clock-strip")).not.toContainText("Your pick");
+  await expect(shown(page, "#clock-strip")).toContainText("Pick 99");
+  await expect(shown(page, "#clock-strip")).toContainText("Dana");
+  await expect(shown(page, "#clock-strip")).not.toContainText("Your pick");
   await expect(page.locator("#recs .name").first()).toHaveText("Somebody Else");
 });
 
@@ -192,7 +202,8 @@ test("a ping the host never answers drops the socket and says so", async ({ page
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __socketUrl: string }).__socketUrl))
     .toContain("/api/events?token=tok-1");
-  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  await expect(shown(page, "#clock-strip")).toContainText("Pick");
+  await expect(page.locator("#reconnect-pill")).toBeAttached();
   await expect(page.locator("#reconnect-pill")).toBeHidden();
   // The failure this prevents: the page pinged and never read the reply, so a
   // socket the phone's network had quietly dropped stayed "open" for ever and
@@ -207,14 +218,14 @@ test("a ping the host never answers drops the socket and says so", async ({ page
 test("the pick clock counts down by the host's clock, not the phone's", async ({ page }) => {
   await serve(page, backend());
   await pair(page);
-  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  await expect(shown(page, "#clock-strip")).toContainText("Pick");
   // This phone is four minutes behind the host. Without the offset the 45
   // second pick clock would read as long over.
   const board = dump("dev-fixture.json") as { draft: Record<string, unknown> };
   await emit(page, { type: "hello", payload: { server_now_ms: Date.now() + 240_000 } });
   board.draft.clock_deadline_ms = Date.now() + 240_000 + 45_000;
   await emit(page, { type: "draft-updated", payload: board });
-  await expect(page.locator("#clock-strip")).toContainText("0:4");
+  await expect(shown(page, "#clock-strip")).toContainText("0:4");
 });
 
 test("the Week tab appears only once the host has a season loaded", async ({ page }) => {
@@ -225,11 +236,11 @@ test("the Week tab appears only once the host has a season loaded", async ({ pag
   const week = page.getByRole("button", { name: "Week" });
   await expect(week).toBeVisible();
   await week.click();
-  await expect(page.locator("#week-header")).toContainText(`Week ${String(season.week)}`);
+  await expect(shown(page, "#week-header")).toContainText(`Week ${String(season.week)}`);
   await expect(page.locator("#week-calls li")).not.toHaveCount(0);
   // The Week tab carries the season thread, not the draft one.
-  await expect(page.locator("#chat-list .entry")).toContainText("Rob's iPhone asked");
-  await expect(page.locator("#chat-list .entry")).toContainText("start him?");
+  await expect(shown(page, "#chat-list .entry")).toContainText("Rob's iPhone asked");
+  await expect(shown(page, "#chat-list .entry")).toContainText("start him?");
 });
 
 test("the Week tab is hidden when the host has no season", async ({ page }) => {
@@ -264,7 +275,7 @@ test("a 401 on any request sends the phone back to the pair screen", async ({ pa
 test("a socket closed with 4401 asks for the code instead of retrying", async ({ page }) => {
   await serve(page, backend());
   await pair(page);
-  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  await expect(shown(page, "#clock-strip")).toContainText("Pick");
   // What a restarted host does to a phone holding a token it has forgotten:
   // the page used to reconnect for ever against a socket that always refused.
   await page.evaluate(() => {
@@ -274,13 +285,15 @@ test("a socket closed with 4401 asks for the code instead of retrying", async ({
   });
   await expect(page.getByRole("alert")).toContainText("The host restarted or revoked this device");
   await expect(page.getByRole("button", { name: "Connect" })).toBeVisible();
+  await expect(page.locator("#reconnect-pill")).toBeAttached();
   await expect(page.locator("#reconnect-pill")).toBeHidden();
 });
 
 test("the reconnecting pill shows while the socket is down", async ({ page }) => {
   await serve(page, backend());
   await pair(page);
-  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  await expect(shown(page, "#clock-strip")).toContainText("Pick");
+  await expect(page.locator("#reconnect-pill")).toBeAttached();
   await expect(page.locator("#reconnect-pill")).toBeHidden();
   // Drop the connection and refuse the retries, the way a phone that has
   // walked out of Wi-Fi range sees it.
@@ -299,7 +312,7 @@ test("a poll-health frame updates the sync line", async ({ page }) => {
     type: "poll-health",
     payload: { last_success_at: null, consecutive_failures: 3, last_error: "timeout" },
   });
-  await expect(page.locator("#health")).toContainText("3 failed syncs");
+  await expect(shown(page, "#health")).toContainText("3 failed syncs");
 });
 
 test("serves every file the page loads, the touch icon and manifest included", async ({ page }) => {
@@ -314,7 +327,7 @@ test("serves every file the page loads, the touch icon and manifest included", a
   });
   await serve(page, backend());
   await pair(page);
-  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  await expect(shown(page, "#clock-strip")).toContainText("Pick");
   // The two files the browser fetches only on install, asked for by hand.
   const touchIcon = page.locator('link[rel="apple-touch-icon"]');
   await expect(touchIcon).toHaveAttribute("href", /\.png$/);
@@ -352,7 +365,7 @@ test("after pairing, the address carries the identity an installed copy pairs wi
   await page.getByLabel("This device").fill("Rob's iPhone");
   await page.getByLabel("Pairing code").fill("424242");
   await page.getByRole("button", { name: "Connect" }).click();
-  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  await expect(shown(page, "#clock-strip")).toContainText("Pick");
   const url = new URL(page.url());
   expect(url.searchParams.get("device")).toBe("dev-1");
   expect(url.searchParams.get("name")).toBe("Rob's iPhone");
@@ -371,7 +384,7 @@ test("after pairing, the address carries the identity an installed copy pairs wi
   await expect(page.getByLabel("This device")).toHaveValue("Rob's iPhone");
   await page.getByLabel("Pairing code").fill("424242");
   await page.getByRole("button", { name: "Connect" }).click();
-  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  await expect(shown(page, "#clock-strip")).toContainText("Pick");
   expect(sentIds).toEqual(["dev-1"]);
 });
 

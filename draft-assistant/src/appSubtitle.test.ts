@@ -1,7 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { footerNote, headerMeta, headerSubtitle } from "./appSubtitle";
-import { ordinal } from "./format";
+import type { StandingsRow } from "./season-types";
 import { draftFixture, seasonFixture } from "./test/appHarness";
+
+/** One standings row, named and seeded by the test and dull everywhere else. */
+function standing(overrides: Partial<StandingsRow> = {}): StandingsRow {
+  return {
+    roster_id: 9,
+    seed: 9,
+    name: "Somebody",
+    record: "0-0",
+    wins: 0,
+    losses: 0,
+    ties: 0,
+    points_for: 0,
+    projected_points: 0,
+    playoff_odds: 0.5,
+    is_mine: false,
+    ...overrides,
+  };
+}
+
+/** Three teams, the user third by seed. Written out rather than derived: the
+ *  point of these tests is the literal line the header shows. */
+const threeTeams = (mine: boolean): StandingsRow[] => [
+  standing({ roster_id: 2, seed: 1, name: "punt_god", record: "3-0" }),
+  standing({ roster_id: 3, seed: 2, name: "Hurts Donut", record: "2-1" }),
+  standing({ roster_id: 1, seed: 3, name: "You", record: "2-1", is_mine: mine }),
+];
 
 describe("the header's second line", () => {
   it("counts the draft's progress on the board", () => {
@@ -18,11 +44,13 @@ describe("the header's second line", () => {
   });
 
   it("names the week and the user's record once it has", () => {
-    const season = seasonFixture();
-    const mine = season.standings.find((s) => s.is_mine);
-    expect(headerSubtitle("season", draftFixture(), season)).toBe(
-      `Week ${season.week} · ${mine?.record} · ${ordinal(mine?.seed ?? 0)} of ${season.standings.length}`,
-    );
+    const season = seasonFixture({ week: 5, standings: threeTeams(true) });
+    expect(headerSubtitle("season", draftFixture(), season)).toBe("Week 5 · 2-1 · 3rd of 3");
+  });
+
+  it("counts the league instead when no row is the user's", () => {
+    const season = seasonFixture({ week: 5, standings: threeTeams(false) });
+    expect(headerSubtitle("season", draftFixture(), season)).toBe("Week 5 · 3 teams");
   });
 });
 

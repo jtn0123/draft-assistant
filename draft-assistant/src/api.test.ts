@@ -2,6 +2,7 @@
 // fixtures), so each arm is loaded fresh with the environment it expects.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Api } from "./api";
 import type { DraftView } from "./types";
 import type { SeasonView } from "./season-types";
 
@@ -15,10 +16,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 const draftView = {
-  schema_version: "1.4",
+  schema_version: "1.5",
   league: { league_id: "L1", name: "Test", season: "2026", platform: "sleeper" },
 } as unknown as DraftView;
-const seasonView = { schema_version: "1.3" } as unknown as SeasonView;
+const seasonView = { schema_version: "1.4" } as unknown as SeasonView;
 
 async function load(shell: boolean, search = "") {
   vi.resetModules();
@@ -45,96 +46,113 @@ describe("schema validation", () => {
     expect(validateDraftView(draftView)).toBe(draftView);
     expect(validateSeasonView(seasonView)).toBe(seasonView);
     expect(() => validateDraftView({ schema_version: "0.9" } as DraftView)).toThrow(
-      /expected schema 1\.4, received 0\.9/,
+      /expected schema 1\.5, received 0\.9/,
     );
     expect(() => validateSeasonView({} as SeasonView)).toThrow(/received missing/);
   });
 });
 
+/**
+ * Every command the desktop arm can send, as [the call, the reply it needs,
+ * the invoke it must make]. Kept as data so each row names both halves of the
+ * contract: the Rust command name and the exact argument payload. A call that
+ * is pointed at the wrong command, or that drops or renames an argument, fails
+ * on its own row.
+ */
+type Route = [(a: Api) => Promise<unknown>, unknown, unknown[]];
+const ROUTES: Route[] = [
+  [(a) => a.addLeague("L1", true), draftView, ["add_league", { leagueId: "L1", force: true }]],
+  [(a) => a.addLeague("L2"), draftView, ["add_league", { leagueId: "L2", force: false }]],
+  [
+    (a) => a.setMyUsername("chriswitz"),
+    "chriswitz",
+    ["set_my_username", { username: "chriswitz" }],
+  ],
+  [(a) => a.getConfig(), {}, ["get_config"]],
+  [(a) => a.sleeperLeagues("2026"), [], ["sleeper_leagues", { season: "2026" }]],
+  [(a) => a.removeLeague("L1"), [], ["remove_league", { leagueId: "L1" }]],
+  [(a) => a.yahooStatus(), {}, ["yahoo_status"]],
+  [
+    (a) => a.yahooSaveCredentials("dj0yJm", "shh"),
+    {},
+    ["yahoo_save_credentials", { clientId: "dj0yJm", clientSecret: "shh" }],
+  ],
+  [(a) => a.yahooBeginConnect(), {}, ["yahoo_begin_connect"]],
+  [
+    (a) => a.yahooFinishConnect("xy7q9", "s-1"),
+    {},
+    ["yahoo_finish_connect", { code: "xy7q9", state: "s-1" }],
+  ],
+  [(a) => a.yahooCancelConnect(), undefined, ["yahoo_cancel_connect"]],
+  [(a) => a.yahooDisconnect(), {}, ["yahoo_disconnect", { forgetCredentials: false }]],
+  [(a) => a.yahooDisconnect(true), {}, ["yahoo_disconnect", { forgetCredentials: true }]],
+  [(a) => a.yahooLeagues(), [], ["yahoo_leagues"]],
+  [(a) => a.getState(), draftView, ["get_state", undefined]],
+  [(a) => a.refreshPicks(), draftView, ["refresh_picks", undefined]],
+  [(a) => a.refreshData(), draftView, ["refresh_data", undefined]],
+  [(a) => a.recordManualPick("123"), draftView, ["record_manual_pick", { playerId: "123" }]],
+  [(a) => a.undoManualPick(), draftView, ["undo_manual_pick", undefined]],
+  [(a) => a.clearKeepers(), draftView, ["clear_keepers", undefined]],
+  [(a) => a.exportState(), "/tmp/draft.json", ["export_state"]],
+  [(a) => a.importSecondOpinion(), null, ["import_second_opinion"]],
+  [(a) => a.headshot("123"), null, ["headshot", { playerId: "123" }]],
+  [(a) => a.avatar("abc123", true), null, ["avatar", { reference: "abc123", full: true }]],
+  [(a) => a.startPolling(), undefined, ["start_polling", { intervalSecs: 3 }]],
+  [(a) => a.startPolling(7), undefined, ["start_polling", { intervalSecs: 7 }]],
+  [(a) => a.stopPolling(), undefined, ["stop_polling"]],
+  [(a) => a.loadSeason(), seasonView, ["load_season", { force: false }]],
+  [(a) => a.loadSeason(true), seasonView, ["load_season", { force: true }]],
+  [(a) => a.getSeason(), seasonView, ["get_season", undefined]],
+  [(a) => a.refreshSeason(), seasonView, ["refresh_season", undefined]],
+  [(a) => a.startSeasonPolling(), undefined, ["start_season_polling", { intervalSecs: 30 }]],
+  [(a) => a.startSeasonPolling(9), undefined, ["start_season_polling", { intervalSecs: 9 }]],
+  [(a) => a.stopSeasonPolling(), undefined, ["stop_season_polling"]],
+  [(a) => a.setApiKey("sk-test"), true, ["set_api_key", { key: "sk-test" }]],
+  [(a) => a.setChatProvider("api"), "api", ["set_chat_provider", { provider: "api" }]],
+  [(a) => a.setChatBudget(5), 5, ["set_chat_budget", { dollars: 5 }]],
+  [(a) => a.chatSettings(), { provider: "api" }, ["chat_settings"]],
+  [(a) => a.chatSuggestions("season"), [], ["chat_suggestions", { screen: "season" }]],
+  [
+    (a) => a.askClaude({ screen: "season", model: "Opus 5", effort: "Low", messages: [] }),
+    { text: "hi" },
+    ["ask_claude", { screen: "season", model: "Opus 5", effort: "Low", messages: [] }],
+  ],
+  [(a) => a.companionStatus(), {}, ["companion_status"]],
+  [(a) => a.companionEnable(), {}, ["companion_enable"]],
+  [(a) => a.companionDisable(), {}, ["companion_disable"]],
+  [(a) => a.companionRevoke(), {}, ["companion_revoke"]],
+  [(a) => a.setDeviceName("Mac"), "Mac", ["set_device_name", { name: "Mac" }]],
+  [(a) => a.sharedChatGet("draft"), {}, ["shared_chat_get", { screen: "draft" }]],
+  [
+    (a) => a.sharedChatSend("draft", "who is left"),
+    undefined,
+    ["shared_chat_send", { screen: "draft", text: "who is left" }],
+  ],
+  [(a) => a.sharedChatReset("draft"), undefined, ["shared_chat_reset", { screen: "draft" }]],
+  [(a) => a.diagnostics(), {}, ["diagnostics"]],
+  [(a) => a.openLogFolder(), "/tmp/logs", ["open_log_folder"]],
+  [
+    (a) => a.logFrontendError("boom", "render", "at x"),
+    undefined,
+    ["log_frontend_error", { message: "boom", source: "render", stack: "at x" }],
+  ],
+  [(a) => a.setLogLevel("debug"), "debug", ["set_log_level", { level: "debug" }]],
+  [(a) => a.checkForUpdate?.() ?? Promise.resolve(), {}, ["check_for_update"]],
+  [(a) => a.installUpdate?.() ?? Promise.resolve(), undefined, ["install_update"]],
+];
+
 describe("tauri arm", () => {
   it("routes commands through invoke with their arguments", async () => {
     const { api } = await load(true);
-    invoke.mockResolvedValue(draftView);
-    await api.addLeague("L1", true);
-    expect(invoke).toHaveBeenCalledWith("add_league", { leagueId: "L1", force: true });
-    await api.recordManualPick("123");
-    expect(invoke).toHaveBeenCalledWith("record_manual_pick", { playerId: "123" });
-    await api.getState();
-    await api.refreshPicks();
-    await api.refreshData();
-    await api.undoManualPick();
-
-    invoke.mockResolvedValue(seasonView);
-    await api.loadSeason();
-    expect(invoke).toHaveBeenCalledWith("load_season", { force: false });
-    await api.getSeason();
-    await api.refreshSeason();
-
-    invoke.mockResolvedValue(undefined);
-    await api.startPolling();
-    expect(invoke).toHaveBeenCalledWith("start_polling", { intervalSecs: 3 });
-    await api.startSeasonPolling();
-    expect(invoke).toHaveBeenCalledWith("start_season_polling", { intervalSecs: 30 });
-    await api.stopPolling();
-    await api.stopSeasonPolling();
-
-    invoke.mockResolvedValue("chriswitz");
-    await api.setMyUsername("chriswitz");
-    expect(invoke).toHaveBeenCalledWith("set_my_username", { username: "chriswitz" });
-    await api.exportState();
-    invoke.mockResolvedValue(null);
-    await api.headshot("123");
-    expect(invoke).toHaveBeenCalledWith("headshot", { playerId: "123" });
-    await api.avatar("abc123", true);
-    expect(invoke).toHaveBeenCalledWith("avatar", { reference: "abc123", full: true });
-    invoke.mockResolvedValue({});
-    await api.getConfig();
-    invoke.mockResolvedValue({
-      configured: true,
-      connected: false,
-      redirect: "oob",
-      account: null,
-    });
-    await api.yahooStatus();
-    expect(invoke).toHaveBeenCalledWith("yahoo_status");
-    await api.yahooSaveCredentials("dj0yJm", "secret");
-    expect(invoke).toHaveBeenCalledWith("yahoo_save_credentials", {
-      clientId: "dj0yJm",
-      clientSecret: "secret",
-    });
-    await api.yahooFinishConnect("xy7q9", "s-1");
-    expect(invoke).toHaveBeenCalledWith("yahoo_finish_connect", { code: "xy7q9", state: "s-1" });
-    await api.yahooDisconnect();
-    expect(invoke).toHaveBeenCalledWith("yahoo_disconnect", { forgetCredentials: false });
-    invoke.mockResolvedValue(undefined);
-    await api.yahooCancelConnect();
-    expect(invoke).toHaveBeenCalledWith("yahoo_cancel_connect");
-    invoke.mockResolvedValue({
-      authorize_url: "https://yahoo.example",
-      state: "s",
-      redirect: "oob",
-    });
-    await api.yahooBeginConnect();
-    expect(invoke).toHaveBeenCalledWith("yahoo_begin_connect");
-    invoke.mockResolvedValue([]);
-    await api.yahooLeagues();
-    expect(invoke).toHaveBeenCalledWith("yahoo_leagues");
-    invoke.mockResolvedValue(true);
-    await api.setApiKey("sk-test");
-    invoke.mockResolvedValue("api");
-    await api.setChatProvider("api");
-    invoke.mockResolvedValue({ provider: "api" });
-    await api.chatSettings();
-    invoke.mockResolvedValue([]);
-    await api.chatSuggestions("season");
-    invoke.mockResolvedValue({ text: "hi" });
-    await api.askClaude({ screen: "season", model: "Opus 5", effort: "Low", messages: [] });
-    expect(invoke).toHaveBeenCalledWith("ask_claude", {
-      screen: "season",
-      model: "Opus 5",
-      effort: "Low",
-      messages: [],
-    });
+    for (const [run, reply, expected] of ROUTES) {
+      invoke.mockReset();
+      invoke.mockResolvedValue(reply);
+      await run(api);
+      // The message names the row, so a failure says which command moved.
+      expect(invoke.mock.calls, `api call expected to invoke ${String(expected[0])}`).toEqual([
+        expected,
+      ]);
+    }
   });
 
   it("rejects a draft view with the wrong schema before it reaches the UI", async () => {
@@ -240,10 +258,9 @@ describe("browser arm", () => {
     expect((await api.chatSettings()).has_key).toBe(false);
     await api.stopPolling();
     await api.stopSeasonPolling();
-    expect((await api.onDraftUpdated(() => undefined))()).toBeUndefined();
-    expect((await api.onPollHealth(() => undefined))()).toBeUndefined();
-    expect((await api.onSeasonUpdated(() => undefined))()).toBeUndefined();
-    expect((await api.onSeasonPollHealth(() => undefined))()).toBeUndefined();
+    // Nothing can arrive on a fixture that never moves, so what an
+    // unsubscriber actually does is asserted in the replay arm below, where a
+    // dump can be pushed after it has been called.
   });
 
   it("says Yahoo needs the desktop app, and reports nothing configured", async () => {
@@ -325,6 +342,42 @@ describe("replay arm", () => {
     dumps["/live-season.json"] = { ...seasonView, generated_at: 6 };
     await vi.advanceTimersByTimeAsync(3000);
     expect(seen.map((v) => v.generated_at)).toEqual([6]);
+    await api.stopSeasonPolling();
+  });
+
+  it("stops delivering to a listener once its unsubscriber is called", async () => {
+    vi.useFakeTimers();
+    const dumps: Record<string, unknown> = {
+      "/live-state.json": { ...draftView, generated_at: 200 },
+      "/live-season.json": { ...seasonView, generated_at: 200 },
+    };
+    replayFetch(dumps);
+    const { api } = await load(false, "?replay=/live-state.json&replay-season=/live-season.json");
+    const gone: string[] = [];
+    const kept: string[] = [];
+    const drop = [
+      await api.onDraftUpdated(() => gone.push("draft")),
+      await api.onPollHealth(() => gone.push("health")),
+      await api.onSeasonUpdated(() => gone.push("season")),
+      await api.onSeasonPollHealth(() => gone.push("season-health")),
+    ];
+    await api.onDraftUpdated(() => kept.push("draft"));
+    await api.onPollHealth(() => kept.push("health"));
+    await api.onSeasonUpdated(() => kept.push("season"));
+    await api.onSeasonPollHealth(() => kept.push("season-health"));
+    for (const unsubscribe of drop) unsubscribe();
+
+    await api.startPolling();
+    await api.startSeasonPolling();
+    dumps["/live-state.json"] = { ...draftView, generated_at: 201 };
+    dumps["/live-season.json"] = { ...seasonView, generated_at: 201 };
+    await vi.advanceTimersByTimeAsync(3000);
+
+    // The listeners that stayed prove a dump really was pushed, so an empty
+    // `gone` means removal rather than a tick that never happened.
+    expect(kept).toEqual(["draft", "health", "season", "season-health"]);
+    expect(gone).toEqual([]);
+    await api.stopPolling();
     await api.stopSeasonPolling();
   });
 

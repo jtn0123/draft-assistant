@@ -39,6 +39,7 @@ interface CompanionState {
   seasonHealth: unknown;
   connection: string;
   offset: number;
+  polling: boolean | null;
 }
 
 interface Action {
@@ -62,6 +63,7 @@ interface Companion {
   parseMarkdown(text: string | null): Block[];
   initialState(): CompanionState;
   reduce(state: CompanionState, action: Action): CompanionState;
+  syncLine(state: Partial<CompanionState> | null, nowMs: number): string;
   REVOKED_CLOSE: number;
   TICK_MS: number;
   isRevokedClose(event: { code?: number } | null): boolean;
@@ -223,6 +225,79 @@ describe("the frames the page acts on", () => {
       "poll-health",
       "season-poll-health",
     ]);
+  });
+});
+
+describe("what the Now tab says about the host's sync", () => {
+  const now = 1_700_000_000_000;
+  /** A state whose last successful poll was `agoMs` before `now`. */
+  const at = (agoMs: number) => ({
+    health: { consecutive_failures: 0, last_success_at: (now - agoMs) / 1000 },
+  });
+
+  it("says the host's sync is off rather than calling a frozen board healthy", () => {
+    // The whole failure: the page read the failed-poll count and nothing
+    // else. That count is 0 on a host whose live sync is off exactly as it is
+    // on one that is syncing fine, so the phone printed "sync healthy", with
+    // no timestamp beside it, while the pick clock counted down over a board
+    // that had stopped moving.
+    const frozen = { ...at(9 * 60_000), polling: false } as Partial<CompanionState>;
+    expect(companion.syncLine(frozen, now)).toBe("The host's live sync is off, last update 9m ago");
+    expect(companion.syncLine(frozen, now)).not.toContain("healthy");
+  });
+
+  it("puts the age of the board beside a sync that is running", () => {
+    const live = { ...at(20_000), polling: true } as Partial<CompanionState>;
+    expect(companion.syncLine(live, now)).toBe("Syncing, last update just now");
+    const failing = {
+      health: { consecutive_failures: 3, last_success_at: (now - 4 * 60_000) / 1000 },
+      polling: true,
+    } as Partial<CompanionState>;
+    expect(companion.syncLine(failing, now)).toBe("3 failed syncs, last update 4m ago");
+  });
+
+  it("claims nothing before the host has said what it is doing", () => {
+    // Null is "not told yet", which is neither on nor off.
+    expect(companion.syncLine({ ...at(60_000), polling: null }, now)).toBe("Last update 1m ago");
+    expect(companion.syncLine({ polling: null }, now)).toBe("");
+    expect(companion.syncLine(null, now)).toBe("");
+  });
+
+  it("falls back to the view's own record when no health frame has arrived", () => {
+    const fromView = {
+      polling: false,
+      draft: {
+        data_health: {
+          poll_consecutive_failures: 0,
+          poll_last_success_at: (now - 3 * 3600_000) / 1000,
+        },
+      },
+    } as Partial<CompanionState>;
+    expect(companion.syncLine(fromView, now)).toBe(
+      "The host's live sync is off, last update 3h ago",
+    );
+  });
+});
+
+describe("what the host says about itself on the socket", () => {
+  it("takes the host's name and its sync from the frame, not from the pairing", () => {
+    // The failure this prevents: the name was stored once, when the phone
+    // paired, so renaming the Mac in Settings left every paired phone showing
+    // the old one until it paired again.
+    const start = companion.initialState();
+    expect(start.polling).toBe(null);
+    const named = companion.reduce(start, {
+      type: "host-status",
+      hostName: "The Big Board",
+      polling: true,
+    });
+    expect(named.hostName).toBe("The Big Board");
+    expect(named.polling).toBe(true);
+    // A frame that says nothing about a field leaves it alone.
+    const quiet = companion.reduce(named, { type: "host-status" });
+    expect(quiet.hostName).toBe("The Big Board");
+    expect(quiet.polling).toBe(true);
+    expect(companion.reduce(named, { type: "host-status", polling: false }).polling).toBe(false);
   });
 });
 

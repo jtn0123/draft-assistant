@@ -38,7 +38,7 @@ impl SourceStatus {
     }
 }
 
-/// The three feeds the live poll depends on, tracked one by one.
+/// The feeds behind the season screen, tracked one by one.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SourceHealth {
     #[serde(default)]
@@ -47,6 +47,27 @@ pub struct SourceHealth {
     pub scores: SourceStatus,
     #[serde(default)]
     pub rosters: SourceStatus,
+    /// The player dictionary and the weekly projections, which the season
+    /// load does not fetch: they belong to the league load and are re-read on
+    /// the poller's own half-hour clock. `None` until that clock has fired
+    /// once, so a badge cannot report them as behind before anything has
+    /// tried. They had no health surface at all, so a dead `/players` all
+    /// Sunday re-applied a day-old dictionary every tick, a Saturday-night
+    /// Out never reached the optimal lineup, and the badge stayed green.
+    #[serde(default)]
+    pub players: Option<SourceStatus>,
+}
+
+impl SourceHealth {
+    /// Record how the half-hour player refresh went, creating the record on
+    /// the first one.
+    pub fn players_refreshed(&mut self, now: u64, error: Option<String>) {
+        let status = self.players.get_or_insert_with(SourceStatus::default);
+        match error {
+            Some(error) => status.failed(error),
+            None => status.succeeded(now),
+        }
+    }
 }
 
 /// One round of live fetches, before anything has been locked to apply them.

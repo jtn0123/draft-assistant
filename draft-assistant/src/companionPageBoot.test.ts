@@ -117,6 +117,17 @@ describe("the chat block under a finger", () => {
     expect(list.textContent).toContain("Nothing asked yet.");
   });
 
+  it("empties the box once the host has taken the question", async () => {
+    const { input, byId } = await typingIntoChat();
+    input.value = "is Rob's trade fair?";
+    byId("chat-form").dispatchEvent(new Event("submit", { cancelable: true }));
+    await flush();
+    // The other half of the rule below: the question is held only until the
+    // host has it. Without this, never clearing the box would pass too.
+    expect(input.value).toBe("");
+    expect(byId("chat-note").hidden).toBe(true);
+  });
+
   it("a question the host did not take is put back with a note, not lost", async () => {
     const { input, byId, fetch } = await typingIntoChat();
     fetch.mockImplementation((path: string) =>
@@ -178,5 +189,58 @@ describe("the screen during a draft", () => {
     socket?.open();
     socket?.frame("draft-updated", drafting);
     expect(byId("clock-strip").textContent).toContain("Pick 12");
+  });
+});
+
+describe("what the phone says about the host", () => {
+  const board = {
+    draft: { status: "drafting", current_pick: 12, current_round: 2, on_clock_slot: 3 },
+    recommendations: [],
+    recent_picks: [],
+    my_roster: { players: [], open_starters: [] },
+    data_health: { board_size: 300, poll_consecutive_failures: 0, poll_last_success_at: 1000 },
+  };
+
+  it("says the host's sync is off rather than 'sync healthy' over a frozen board", async () => {
+    // The whole failure: the line read the failed-poll count, which is 0 both
+    // on a host that is syncing and on one that is not polling at all, so a
+    // phone printed "sync healthy" with no timestamp beside it while the pick
+    // clock counted down over a board that had stopped moving.
+    const { byId } = boot(() => okJson(null));
+    await flush();
+    const socket = FakeSocket.instances[0];
+    if (!socket) throw new Error("no socket");
+    socket.open();
+    socket.frame("draft-updated", board);
+    socket.frame("hello", { server_now_ms: Date.now(), host_name: "Justin's Mac", polling: false });
+    await flush();
+    expect(byId("health").textContent).toContain("The host's live sync is off");
+    expect(byId("health").textContent).toContain("300 players on the board");
+    expect(byId("health").textContent).not.toContain("healthy");
+    // The host turns live sync back on: the next heartbeat says so.
+    socket.frame("pong", { server_now_ms: Date.now(), host_name: "Justin's Mac", polling: true });
+    await flush();
+    expect(byId("health").textContent).toContain("Syncing");
+    expect(byId("health").textContent).not.toContain("off");
+  });
+
+  it("takes the host's new name off the socket rather than the pairing it did once", async () => {
+    // The failure this prevents: the name was written down when the phone
+    // paired, so renaming the Mac under "Your name in shared chat" left every
+    // paired phone showing the old one until it paired again.
+    const { byId, stored } = boot(() => okJson(null), {
+      saved: { "da.companion.token": "tok-1", "da.companion.host": "Justin's Mac" },
+    });
+    await flush();
+    const socket = FakeSocket.instances[0];
+    if (!socket) throw new Error("no socket");
+    socket.open();
+    socket.frame("hello", { server_now_ms: Date.now(), host_name: "The Big Board", polling: true });
+    await flush();
+    expect(stored("da.companion.host")).toBe("The Big Board");
+    // And that is the name the pairing screen offers if the token is dropped.
+    socket.frame("revoked", {});
+    await flush();
+    expect(byId("pair-host").textContent).toBe("Hosted by The Big Board");
   });
 });

@@ -212,6 +212,10 @@ impl Engine {
         warnings.extend(projections_warning);
         warnings.extend(weekly_warning);
         warnings.extend(crosswalk.warning());
+        // Yahoo throttling stops the pick feed for as long as the retry
+        // budget allows, and a board that has simply stopped looks the same
+        // as one nobody is picking on. Say which it is.
+        warnings.extend(client.throttle_warning());
         // Yahoo has a traded-pick resource and this app does not read it, so a
         // league that has traded picks is drawn in plain snake order with the
         // picks in the wrong hands. Silently: the board looks right and is

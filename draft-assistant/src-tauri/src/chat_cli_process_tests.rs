@@ -53,6 +53,7 @@ async fn ask_script(cli: &Path) -> Result<ChatReply, String> {
         Effort::High,
         "the board",
         &question(),
+        CancelSignal::never(),
     )
     .await
 }
@@ -91,6 +92,7 @@ echo '{"is_error":false,"result":"ok"}'"#,
         Effort::High,
         "BOARD-MARKER",
         &question(),
+        CancelSignal::never(),
     )
     .await
     .expect("the script answered");
@@ -222,6 +224,7 @@ exec sleep 30"#,
         Effort::High,
         "the board",
         &question(),
+        CancelSignal::never(),
         Duration::from_millis(800),
     )
     .await
@@ -256,6 +259,7 @@ async fn a_child_that_never_reads_its_stdin_times_out_instead_of_hanging() {
         Effort::High,
         "the board",
         &question,
+        CancelSignal::never(),
         Duration::from_millis(500),
     )
     .await
@@ -284,6 +288,7 @@ async fn an_empty_thread_is_refused_before_anything_is_spawned() {
         Effort::Off,
         "",
         &[],
+        CancelSignal::never(),
     )
     .await
     .expect_err("there is no question");
@@ -314,4 +319,76 @@ fn looking_for_the_cli_never_returns_something_unrunnable() {
     if let Some(found) = find_cli() {
         assert!(found.is_file(), "{} is not a file", found.display());
     }
+}
+
+/// The Cancel button used to reach only the API route. On the route the app
+/// picks by itself -- Claude Code installed, no API key -- it stopped nothing:
+/// the panel sat on "Thinking" for the CLI's whole four-minute deadline while
+/// the child went on answering.
+#[cfg(unix)]
+#[tokio::test]
+async fn cancelling_kills_the_cli_and_comes_back_at_once_marked_cut_short() {
+    let cli = fake_cli(
+        "cancel",
+        r#"here=$(dirname "$0")
+echo $$ > "$here/pid.tmp"
+mv "$here/pid.tmp" "$here/pid.txt"
+cat > /dev/null
+exec sleep 30"#,
+    );
+    let cancel = CancelSignal::never();
+    let puller = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        puller.cancel();
+    });
+    let started = std::time::Instant::now();
+    let reply = ask_within(
+        &cli,
+        ChatModel::Opus5,
+        Effort::High,
+        "the board",
+        &question(),
+        cancel,
+        // Four minutes, as in the shipped route: the cancel is what has to end
+        // this, not the deadline.
+        TIMEOUT,
+    )
+    .await
+    .expect("a cancel is a reply, not an error");
+    assert!(reply.cancelled);
+    assert!(reply.text.is_empty());
+    assert_eq!(reply.model, ChatModel::Opus5.id());
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "the cancel did not stop the wait: {:?}",
+        started.elapsed()
+    );
+
+    let pid = wait_for_file(&cli.parent().expect("scratch dir").join("pid.txt"))
+        .expect("the script recorded its pid");
+    let pid = pid.trim();
+    assert!(
+        process_is_gone(pid),
+        "the cancelled CLI (pid {pid}) is still running"
+    );
+    remove(&cli);
+}
+
+/// A question cancelled before the child is spawned never spawns one.
+#[tokio::test]
+async fn a_question_cancelled_before_it_starts_never_runs_the_cli() {
+    let cancel = CancelSignal::never();
+    cancel.cancel();
+    let reply = ask(
+        Path::new("/nonexistent/bin/claude"),
+        ChatModel::Opus5,
+        Effort::High,
+        "the board",
+        &question(),
+        cancel,
+    )
+    .await
+    .expect("a cancel is a reply, not the missing-CLI error");
+    assert!(reply.cancelled);
 }

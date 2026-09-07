@@ -274,6 +274,57 @@ fn a_used_code_is_spent_and_an_idle_one_is_replaced_after_ten_minutes() {
     assert_ne!(idle.code(), first);
 }
 
+/// The failure this prevents: a code restored from the store kept its digits
+/// but was stamped as if it had just been minted, and the companion server
+/// autostarts, so six digits somebody wrote off the host's screen weeks ago
+/// were live again for ten minutes after every launch, on whatever network
+/// the Mac happened to be on that day.
+#[test]
+fn a_stored_code_is_honoured_by_its_own_age_and_not_by_the_launch() {
+    let write = |dir: &PathBuf, at: u64| {
+        let secrets = crate::yahoo_secrets::FileStore::in_dir(dir.join("secrets"));
+        store::save(
+            &secrets,
+            &StoredHub {
+                code: "424242".to_string(),
+                code_at_ms: at,
+                devices: Vec::new(),
+            },
+        );
+    };
+
+    let stale = scratch("stale-code");
+    write(&stale, now_ms().saturating_sub(CODE_MAX_AGE_MS + 1));
+    assert_ne!(
+        hub_in(stale).code(),
+        "424242",
+        "a code from another week was live again"
+    );
+
+    // One minted a couple of minutes ago is still the one on screen, and its
+    // ten minutes run from when it was minted rather than from this launch.
+    let fresh = scratch("fresh-code");
+    let minted_at = now_ms().saturating_sub(CODE_MAX_AGE_MS / 2);
+    write(&fresh, minted_at);
+    let hub = hub_in(fresh);
+    assert_eq!(hub.code(), "424242");
+    assert!(hub.rotate_if_idle(minted_at + CODE_MAX_AGE_MS + 1));
+    assert_ne!(hub.code(), "424242");
+}
+
+/// A store written before the mint time existed has nothing to date its code
+/// by, so the code is replaced rather than trusted.
+#[test]
+fn a_code_from_a_store_that_never_wrote_a_mint_time_is_replaced() {
+    let dir = scratch("undated-code");
+    let secrets = crate::yahoo_secrets::FileStore::in_dir(dir.join("secrets"));
+    let raw = serde_json::json!({ "code": "424242", "devices": [] }).to_string();
+    secrets
+        .write(crate::yahoo_secrets::Item::CompanionDevices, &raw)
+        .expect("the scratch store is writable");
+    assert_ne!(hub_in(dir).code(), "424242");
+}
+
 #[test]
 fn a_restarted_host_still_knows_the_phones_that_were_paired_with_it() {
     let dir = scratch("restart");

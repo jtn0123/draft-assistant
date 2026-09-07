@@ -23,7 +23,7 @@ fn fixture_csv() -> String {
 fn the_view_carries_every_players_second_opinion_and_the_load_date() {
     let (loaded, _, config) = common::fixture();
     let view = build_view(&loaded, &config);
-    assert_eq!(view.schema_version, "1.4");
+    assert_eq!(view.schema_version, "1.5");
     assert_eq!(
         view.data_health.second_opinion_loaded_at,
         Some(1_756_000_000)
@@ -94,7 +94,7 @@ fn a_big_disagreement_in_the_players_favour_reaches_the_rec_card() {
             // The fixture league scores no receptions at all, so the imported
             // half-PPR ranks are read at half weight and the line says so.
             format!(
-                "Clay has him {}9, market is 9 rounds late (half-PPR ranks)",
+                "Clay has him {}9, market is 9 rounds late, on half-PPR ranks",
                 rec.position
             )
         );

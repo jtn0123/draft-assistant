@@ -271,7 +271,7 @@ fn a_practice_tag_is_ignored_before_the_draft_starts() {
     let rules = RosterRules::new(&slots());
     let mut inputs = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 1, 12);
     let during = recommend(&inputs);
-    inputs.pre_draft = true;
+    inputs.before_kickoff = true;
     let before = recommend(&inputs);
     assert!(
         of_mode(&before, "safe").score > of_mode(&during, "safe").score,
@@ -287,7 +287,7 @@ fn a_practice_tag_is_ignored_before_the_draft_starts() {
     // needs off the card is how much of the season is gone.
     let available = vec![with_tag("o", Some("Out"))];
     let mut inputs = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 1, 12);
-    inputs.pre_draft = true;
+    inputs.before_kickoff = true;
     assert!(of_mode(&recommend(&inputs), "safe")
         .reasons
         .iter()

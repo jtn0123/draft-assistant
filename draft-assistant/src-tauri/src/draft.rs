@@ -48,6 +48,18 @@ impl DraftOrder {
     }
 }
 
+/// Whether this draft is an auction.
+///
+/// An auction has no pick order at all: managers bid a budget on nominated
+/// players, so "who is on the clock", "how many picks until yours" and every
+/// survival probability read off a snake pick number are not approximations
+/// here, they are answers to a question this draft does not ask. This app
+/// does not model auctions, and the one thing it can do honestly is say so
+/// and take those numbers off the screen. See `DraftStatus::is_auction`.
+pub fn is_auction(draft: &Draft) -> bool {
+    draft.draft_type.eq_ignore_ascii_case("auction")
+}
+
 /// Which slot (1-based) is on the clock at a given overall pick (1-based)?
 ///
 /// `None` when the draft has no teams or the pick is before the first one —
@@ -265,6 +277,11 @@ mod tests {
         let (order, warning) = DraftOrder::from_draft(&draft);
         assert_eq!(order, DraftOrder::SNAKE);
         assert!(warning.unwrap().contains("auction"));
+        assert!(is_auction(&draft));
+        draft.draft_type = "AUCTION".into();
+        assert!(is_auction(&draft), "the type is matched case-insensitively");
+        draft.draft_type = "snake".into();
+        assert!(!is_auction(&draft));
     }
 
     #[test]

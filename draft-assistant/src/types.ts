@@ -83,6 +83,19 @@ export interface DraftStatus {
   pick_slot_overrides: Record<string, number>;
   /** Picks already in the book as keepers: nobody's turn, ever. */
   keeper_picks: number[];
+  /**
+   * This draft is an auction, which the app does not model. There is no pick
+   * order, no budget and no nomination here, so every number built on snake
+   * pick math is meaningless and the screen takes those panels off rather
+   * than presenting them as fact.
+   */
+  is_auction: boolean;
+  /**
+   * Why there is no seat, in words, or null when the seat is known. Three
+   * different situations used to share one sentence telling people to set a
+   * username they had already set.
+   */
+  seat_note: string | null;
 }
 
 export interface TierAlert {

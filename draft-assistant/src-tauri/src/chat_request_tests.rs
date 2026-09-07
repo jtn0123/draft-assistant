@@ -132,7 +132,8 @@ fn a_thread_ending_on_the_assistants_turn_is_refused_before_it_is_sent() {
         context: &context,
         messages: &messages,
     };
-    let error = tokio_test_block(ask_at(call, CancelSignal::never(), Duration::ZERO)).unwrap_err();
+    let error =
+        tokio_test_block(ask_at(call, CancelSignal::never(), retry::Limits::LIVE)).unwrap_err();
     assert_eq!(error.message, "the last turn must be a question");
 }
 

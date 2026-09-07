@@ -49,7 +49,7 @@ export function fresh(): SourceHealth {
 
 export function view(overrides: Partial<SeasonView> = {}): SeasonView {
   return {
-    schema_version: "1.3",
+    schema_version: "1.4",
     generated_at: 0,
     team_avatars: {},
     league: {

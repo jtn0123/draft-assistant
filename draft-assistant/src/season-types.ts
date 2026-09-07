@@ -272,11 +272,17 @@ export interface SourceStatus {
   error: string | null;
 }
 
-/** The three feeds the live poll depends on, tracked one by one. */
+/** The feeds behind the season screen, tracked one by one. */
 export interface SourceHealth {
   matchups: SourceStatus;
   scores: SourceStatus;
   rosters: SourceStatus;
+  /**
+   * The player dictionary and weekly projections. Optional: the season load
+   * does not fetch them, so there is nothing to report until the poller's own
+   * half-hour refresh has run once.
+   */
+  players?: SourceStatus | null;
 }
 
 export interface SeasonHealth {

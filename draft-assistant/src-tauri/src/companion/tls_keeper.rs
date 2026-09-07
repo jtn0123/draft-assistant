@@ -21,6 +21,12 @@ use std::sync::Mutex;
 /// same warning and lean on Let's Encrypt for nothing.
 pub const RETRY_AFTER_SECS: i64 = 60 * 60;
 
+/// How long after a listener that failed only to bind a port before it is
+/// tried again. Nothing was wrong with the certificate, so backing off for an
+/// hour left every phone on plain http over a port that another process may
+/// have let go of seconds later. Short enough that the next look picks it up.
+pub const BIND_RETRY_AFTER_SECS: i64 = 30;
+
 /// The HTTPS listener and what it takes to bring it up or keep it current.
 pub struct Keeper {
     source: TlsSource,
@@ -92,11 +98,24 @@ impl Keeper {
                 if now < inner.retry_after {
                     return None;
                 }
-                inner.retry_after = now + RETRY_AFTER_SECS;
-                let materials = tls::materials_with(&self.source, &name, now, &*self.mint)?;
+                let Some(materials) = tls::materials_with(&self.source, &name, now, &*self.mint)
+                else {
+                    // No certificate. Asking `tailscale cert` again in thirty
+                    // seconds would fill the log with the same warning and
+                    // lean on Let's Encrypt for nothing.
+                    inner.retry_after = now + RETRY_AFTER_SECS;
+                    return None;
+                };
                 let preferred = tls_serve::remembered_port(&self.port_file);
-                let listener =
-                    tls_serve::start(self.http_port, preferred, materials, self.router.clone())?;
+                let Some(listener) =
+                    tls_serve::start(self.http_port, preferred, materials, self.router.clone())
+                else {
+                    // The certificate is good and only the port was not free.
+                    // That is somebody else's process for a moment, not a
+                    // reason to leave the phones on http for an hour.
+                    inner.retry_after = now + BIND_RETRY_AFTER_SECS;
+                    return None;
+                };
                 tls_serve::remember_port(&self.port_file, listener.https.port);
                 let https = listener.https.clone();
                 inner.listener = Some(listener);

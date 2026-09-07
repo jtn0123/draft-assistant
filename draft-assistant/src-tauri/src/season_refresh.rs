@@ -32,6 +32,14 @@ pub struct PlayerRefreshData {
     players_at: u64,
     weekly: Vec<ProjectionRow>,
     weekly_at: u64,
+    /// Why this refresh is not live: the fetch failed and a stale copy off
+    /// the disk was handed back instead. `None` when it came off the wire.
+    ///
+    /// This used to be dropped on the floor at the call site, which is what
+    /// made a dead `/players` invisible: the poller re-applied yesterday's
+    /// dictionary every half hour, said nothing, and the badge went on
+    /// vouching for injury tags that had not moved since the league loaded.
+    stale: Option<String>,
 }
 
 /// How much of the roster-and-board population a refreshed dictionary has to
@@ -77,6 +85,19 @@ impl PlayerRefreshData {
             .filter(|id| self.players.contains_key(**id))
             .count();
         known as f64 >= COVERAGE * wanted.len() as f64
+    }
+
+    /// Why this refresh came off the disk rather than the wire, if it did.
+    pub fn staleness(&self) -> Option<&str> {
+        self.stale.as_deref()
+    }
+
+    /// The same refresh, marked as having fallen back to a stale copy. The
+    /// poller's tests stand one up this way rather than an endpoint that is
+    /// down.
+    pub fn stale_because(mut self, note: impl Into<String>) -> Self {
+        self.stale = Some(note.into());
+        self
     }
 
     /// Swap the refreshed halves into a loaded league.
@@ -150,13 +171,15 @@ impl PlayerRefresh for Engine {
             self.players_no_older_than(ceiling),
             self.weekly_projections_no_older_than(season, ceiling)
         );
-        let (players_at, players, _) = players.ok()?;
-        let (weekly_at, weekly, _) = weekly.ok()?;
+        let (players_at, players, players_stale) = players.ok()?;
+        let (weekly_at, weekly, weekly_stale) = weekly.ok()?;
+        let stale: Vec<String> = players_stale.into_iter().chain(weekly_stale).collect();
         Some(PlayerRefreshData {
             players,
             players_at,
             weekly,
             weekly_at,
+            stale: (!stale.is_empty()).then(|| stale.join("; ")),
         })
     }
 }
@@ -174,6 +197,7 @@ pub fn refresh_from(
         players_at,
         weekly,
         weekly_at,
+        stale: None,
     }
 }
 

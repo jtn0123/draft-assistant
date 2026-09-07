@@ -191,10 +191,13 @@ fn the_reasons_still_add_up_to_the_score_with_a_tag_on_the_card() {
 }
 
 #[test]
-fn a_doubtful_tag_before_the_draft_is_last_seasons_news() {
+fn a_doubtful_tag_before_kickoff_is_last_seasons_news() {
     // The pre-draft gate dropped "Questionable" and left "Doubtful" standing,
     // so an August practice report left over from January took nine points
-    // off a safe-mode card.
+    // off a safe-mode card. And the gate itself was the draft's own status,
+    // so the tag was free while the room filled and cost nine points from the
+    // first pick on: the cards reordered at the moment the draft opened, for
+    // a reason that had not changed.
     let available = vec![
         tagged("doubtful", "WR", 40.0, Some("Doubtful")),
         tagged("fit", "WR", 40.0, None),
@@ -202,7 +205,7 @@ fn a_doubtful_tag_before_the_draft_is_last_seasons_news() {
     let mine = roster(&["QB", "RB"]);
     let rules = RosterRules::new(&slots());
     let mut inputs = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 1, 12);
-    inputs.pre_draft = true;
+    inputs.before_kickoff = true;
     let ctx = context(&inputs, HashMap::from([("QB", 1), ("RB", 1)]));
     let hurt = score_candidate(&ctx, &available[0], Mode::Safe).expect("a WR");
     let fit = score_candidate(&ctx, &available[1], Mode::Safe).expect("a WR");
@@ -211,11 +214,30 @@ fn a_doubtful_tag_before_the_draft_is_last_seasons_news() {
         "a pre-draft practice tag cost {}",
         fit.total - hurt.total
     );
-    // Once the draft is live the same tag counts again.
+    // The draft opening does not change what an August practice report means,
+    // so it does not change the card either. `before_kickoff` is a fact about
+    // the season, and the same inputs are what a live draft in that season is
+    // scored with.
+    let mut opened = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 1, 12);
+    opened.before_kickoff = true;
+    let ctx = context(&opened, HashMap::from([("QB", 1), ("RB", 1)]));
+    let live = score_candidate(&ctx, &available[0], Mode::Safe).expect("a WR");
+    assert!(
+        (live.total - fit.total).abs() < 1e-9,
+        "the same tag cost {} once the draft opened",
+        fit.total - live.total
+    );
+    // A league drafting mid-season is drafting into this week's practice
+    // report, and there the tag is news.
     let inputs = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 1, 12);
     let ctx = context(&inputs, HashMap::from([("QB", 1), ("RB", 1)]));
-    let live = score_candidate(&ctx, &available[0], Mode::Safe).expect("a WR");
-    assert!(live.total < fit.total, "{} vs {}", live.total, fit.total);
+    let in_season = score_candidate(&ctx, &available[0], Mode::Safe).expect("a WR");
+    assert!(
+        in_season.total < fit.total,
+        "{} vs {}",
+        in_season.total,
+        fit.total
+    );
 }
 
 #[test]
@@ -309,7 +331,7 @@ fn a_camp_pup_tag_before_the_draft_is_early_weeks_not_a_lost_season() {
     let mine = roster(&["QB", "WR"]);
     let rules = RosterRules::new(&slots());
     let mut inputs = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 1, 12);
-    inputs.pre_draft = true;
+    inputs.before_kickoff = true;
     let ctx = context(&inputs, HashMap::from([("QB", 1), ("WR", 1)]));
     let score =
         |index: usize| score_candidate(&ctx, &available[index], Mode::Balanced).expect("an RB");

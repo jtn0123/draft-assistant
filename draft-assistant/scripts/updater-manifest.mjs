@@ -7,15 +7,24 @@
 // so the URL written into the manifest is the URL GitHub serves (GitHub
 // rewrites spaces in asset names) and two releases never share a filename.
 //
-// Usage: node scripts/updater-manifest.mjs <tag> <bundle-dir> <out-dir>
+// Usage: node scripts/updater-manifest.mjs <tag> <bundle-dir> <out-dir> <arch>
 //   tag         the git tag, `v0.3.0`
 //   bundle-dir  src-tauri/target/release/bundle/macos
 //   out-dir     where the renamed archive, its .sig and latest.json go
+//   arch        `aarch64` or `x86_64`: the platform key the manifest is for
+//
+// The arch is named rather than taken from whatever the runner happens to be.
+// It used to be `process.arch`, which is right today and would have been
+// silently wrong the day the runner image changed: every install would poll a
+// manifest with no key matching its own Mac and answer "no build for this
+// Mac". Named and cross-checked against the runner, a mismatch fails the
+// release instead.
 
 import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const REPO = "jtn0123/draft-assistant";
+/** The repository the release assets and the update feed live under. */
+export const REPO = "jtn0123/draft-assistant";
 const ARCHIVE = ".app.tar.gz";
 
 /**
@@ -40,12 +49,76 @@ export function manifest({ tag, arch, signature, pubDate }) {
     notes: `Release ${tag}. Notes: https://github.com/${REPO}/releases/tag/${tag}`,
     pub_date: pubDate,
     platforms: {
-      [`darwin-${arch}`]: {
+      [platformFor(arch)]: {
         signature: signature.trim(),
         url: `https://github.com/${REPO}/releases/download/${tag}/${assetName(tag, arch)}`,
       },
     },
   };
+}
+
+/** The platform keys the app is ever built for, by the arch that names them. */
+const PLATFORMS = { aarch64: "darwin-aarch64", x86_64: "darwin-x86_64" };
+
+/**
+ * The `platforms` key for `arch`. Throws on anything not in the table: a
+ * manifest under a key the plugin never asks for is a manifest no install can
+ * use, and it is better not to write one at all.
+ *
+ * @param {string} arch `aarch64` or `x86_64`
+ */
+export function platformFor(arch) {
+  if (!Object.hasOwn(PLATFORMS, arch)) {
+    throw new Error(
+      `unknown arch ${arch}; the app is built for: ${Object.keys(PLATFORMS).join(", ")}`,
+    );
+  }
+  return PLATFORMS[arch];
+}
+
+/**
+ * The `platforms` key for `arch`, checked against the machine that built the
+ * bundle. A complaint rather than a throw, so the CLI can print it and stop.
+ *
+ * @param {string | undefined} arch what the caller asked for
+ * @param {string} runner `process.arch` of the machine that ran the build
+ * @returns {{ key: string, arch: string } | { error: string }}
+ */
+export function platformKey(arch, runner) {
+  const known = Object.keys(PLATFORMS);
+  if (!arch) {
+    return { error: `name the arch to build the manifest for, one of: ${known.join(", ")}` };
+  }
+  if (!Object.hasOwn(PLATFORMS, arch)) {
+    return { error: `unknown arch ${arch}; the app is built for: ${known.join(", ")}` };
+  }
+  const built = runner === "arm64" ? "aarch64" : "x86_64";
+  if (built !== arch) {
+    return {
+      error: `asked for a ${arch} manifest but the bundle was built on ${built}; every install would be told there is no build for this Mac`,
+    };
+  }
+  return { key: PLATFORMS[arch], arch };
+}
+
+/**
+ * Every file a release needs before it is worth publishing, and what is
+ * missing from `names`.
+ *
+ * The updater archive, its signature and the manifest go up together or the
+ * release is not published at all: an install polling
+ * `releases/latest/download/latest.json` gets a 404 the moment a release
+ * without one becomes the latest, and "Check for updates" answers "No release
+ * feed yet" from then on.
+ *
+ * @param {string[]} names what is in the out dir
+ * @param {string} tag `v0.3.0`
+ * @param {string} arch `aarch64`
+ * @returns {string[]} the missing names, empty when the release is complete
+ */
+export function missingAssets(names, tag, arch) {
+  const asset = assetName(tag, arch);
+  return [asset, `${asset}.sig`, "latest.json"].filter((want) => !names.includes(want));
 }
 
 /**
@@ -71,12 +144,17 @@ export function pickArchive(names) {
 }
 
 async function main() {
-  const [tag, bundleDir, outDir] = process.argv.slice(2);
+  const [tag, bundleDir, outDir, wanted] = process.argv.slice(2);
   if (!tag || !bundleDir || !outDir) {
-    console.error("usage: node scripts/updater-manifest.mjs <tag> <bundle-dir> <out-dir>");
+    console.error("usage: node scripts/updater-manifest.mjs <tag> <bundle-dir> <out-dir> <arch>");
     process.exit(2);
   }
-  const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
+  const platform = platformKey(wanted, process.arch);
+  if ("error" in platform) {
+    console.error(platform.error);
+    process.exit(1);
+  }
+  const { arch } = platform;
   const picked = pickArchive(await readdir(bundleDir));
   if ("error" in picked) {
     console.error(picked.error);
@@ -89,7 +167,15 @@ async function main() {
   await writeFile(join(outDir, `${name}.sig`), signature);
   const body = manifest({ tag, arch, signature, pubDate: new Date().toISOString() });
   await writeFile(join(outDir, "latest.json"), `${JSON.stringify(body, null, 2)}\n`);
-  console.log(`wrote ${outDir}/latest.json pointing at ${body.platforms[`darwin-${arch}`].url}`);
+  // What was published is checked rather than assumed: the release step
+  // behind this refuses to publish an incomplete set, and this is where an
+  // incomplete set is noticed.
+  const missing = missingAssets(await readdir(outDir), tag, arch);
+  if (missing.length > 0) {
+    console.error(`the release would ship without: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+  console.log(`wrote ${outDir}/latest.json pointing at ${body.platforms[platform.key].url}`);
 }
 
 // Only the CLI touches the filesystem, so the test can import the pure parts.

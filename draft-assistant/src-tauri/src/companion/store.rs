@@ -76,21 +76,57 @@ const DEVICES: Item = Item::CompanionDevices;
 
 /// One paired device as it survives a restart: the device the contract
 /// describes, plus the token that device authenticates with.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StoredDevice {
     pub token: String,
     pub device: Device,
 }
 
+/// Written by hand rather than derived, for the reason
+/// [`crate::yahoo_oauth::TokenSet`]'s is: a device token is a bearer token for
+/// the whole read API, and a derived `Debug` puts it into any `{:?}` — one
+/// `dbg!` in a panic message or a log line is all it would take to spill it.
+/// The device it belongs to stays, because that is the field a failing test
+/// actually wants to see.
+impl std::fmt::Debug for StoredDevice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoredDevice")
+            .field("token", &"<redacted>")
+            .field("device", &self.device)
+            .finish()
+    }
+}
+
 /// The whole of what the hub carries across a restart.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct StoredHub {
     /// The six digits currently on the host's screen. Kept so a code read off
     /// the Mac a moment before a crash still works after it.
     #[serde(default)]
     pub code: String,
+    /// When that code was minted, in epoch milliseconds.
+    ///
+    /// Kept beside the code because the code alone is not enough to know
+    /// whether it is still worth honouring. A restart used to stamp whatever
+    /// was in the store as freshly minted, so six digits somebody wrote down
+    /// weeks ago were live again for ten minutes after every launch. A store
+    /// written before this field existed reads as 0, which is older than any
+    /// window and so is replaced rather than trusted.
+    #[serde(default)]
+    pub code_at_ms: u64,
     #[serde(default)]
     pub devices: Vec<StoredDevice>,
+}
+
+/// Also by hand: the pairing code is what turns a stranger on the LAN into a
+/// paired device, so it is no more printable than the tokens beside it.
+impl std::fmt::Debug for StoredHub {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoredHub")
+            .field("code", &"<redacted>")
+            .field("devices", &self.devices)
+            .finish()
+    }
 }
 
 /// The plaintext file older builds wrote. Nothing writes it any more; it is

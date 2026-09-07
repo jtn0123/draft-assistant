@@ -20,7 +20,7 @@
     "lint": "npm run lint:frontend && npm run lint:rust",
     "lint:frontend": "eslint . --max-warnings=0",
     "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
-    "verify": "npm run verify:fast && npm run test:ci && npm run build",
+    "verify": "npm run verify:fast && npm run test:scripts && npm run test:ci && npm run build",
     "preview": "vite preview",
     "tauri": "tauri",
     "check:css": "node scripts/check-css.mjs",

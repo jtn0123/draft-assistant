@@ -165,6 +165,9 @@ describe("asking on it", () => {
 
     expect(mocks.sharedChatSend).toHaveBeenCalledWith("draft", "who is left at RB?");
     expect(mocks.askClaude).not.toHaveBeenCalled();
+    // Taken by the host, so the box empties. The refusal test below asserts
+    // the opposite; without this one, never clearing would pass both.
+    await waitFor(() => expect(box).toHaveValue(""));
   });
 
   it("keeps the question and says why when the host refuses it", async () => {

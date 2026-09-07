@@ -28,7 +28,7 @@
 use crate::yahoo_oauth::{
     redirect_uri, AuthError, OauthClient, TokenSet, YahooCredentials, LOGIN_BASE,
 };
-use crate::yahoo_retry::{retry_after, RetryPolicy};
+use crate::yahoo_retry::{retry_after, RetryPolicy, ThrottleLog};
 use crate::yahoo_types::{PlayerPage, YahooDraftPick, YahooLeague, YahooTeam};
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -113,6 +113,10 @@ pub struct YahooClient {
     /// The one caller allowed to be refreshing at any moment.
     refresh_gate: Mutex<()>,
     retry: RetryPolicy,
+    /// When Yahoo last refused a request for being too busy. Read by whoever
+    /// builds the board, so a throttle that is making the picks late says so
+    /// on screen instead of only in the log.
+    throttled: ThrottleLog,
     /// Set once Yahoo has said the grant is gone. Read by whoever persists the
     /// tokens afterwards, which is how a dead pair leaves the Keychain.
     signed_out: AtomicBool,
@@ -159,6 +163,7 @@ impl YahooClient {
             tokens: Mutex::new(tokens),
             refresh_gate: Mutex::new(()),
             retry: RetryPolicy::default(),
+            throttled: ThrottleLog::default(),
             signed_out: AtomicBool::new(false),
         }
     }
@@ -197,6 +202,14 @@ impl YahooClient {
     /// pair is not worth persisting; it is worth clearing.
     pub fn signed_out(&self) -> bool {
         self.signed_out.load(Ordering::SeqCst)
+    }
+
+    /// The one line the board shows while Yahoo is throttling this app, or
+    /// nothing when it is not. Whoever assembles a league's warnings adds it.
+    pub fn throttle_warning(&self) -> Option<String> {
+        self.throttled
+            .warning(crate::yahoo_oauth::now_secs())
+            .map(str::to_string)
     }
 
     fn sign_out(&self) -> YahooError {
@@ -300,6 +313,12 @@ impl YahooClient {
 
     /// One GET, with the retry policy and exactly one refresh-and-retry.
     ///
+    /// The retries are bounded twice over: by their count, and by
+    /// [`RetryPolicy::budget`], the total this call may spend asleep. The
+    /// second bound is the one that matters mid-draft, because a throttled
+    /// Yahoo can ask for thirty seconds five times over and the poll tick
+    /// waiting on it has no timeout of its own.
+    ///
     /// A 401 is not counted as an attempt: it is answered by renewing the
     /// token and going again immediately, and only once — a second 401 means
     /// the grant is gone, and repeating it would only spend the refresh token
@@ -309,6 +328,7 @@ impl YahooClient {
     async fn get_body(&self, url: &str) -> Result<String, YahooError> {
         let mut attempts = 0;
         let mut refreshed = false;
+        let mut slept = Duration::ZERO;
         loop {
             let token = self.access_token().await?;
             match self.get_once(url, &token).await {
@@ -321,11 +341,24 @@ impl YahooClient {
                     self.renew().await?;
                 }
                 Err(failure) => {
+                    if let YahooError::Http { status, .. } = failure.error {
+                        if RATE_LIMITED.contains(&status) {
+                            self.throttled.note(crate::yahoo_oauth::now_secs());
+                        }
+                    }
                     attempts += 1;
                     if !failure.error.retryable() || attempts >= self.retry.attempts {
                         return Err(failure.error);
                     }
-                    tokio::time::sleep(self.retry.wait(attempts, failure.asked_for)).await;
+                    // Out of budget: report the failure rather than hold the
+                    // caller, and the poll tick that is waiting on this goes
+                    // round again instead of stopping for two minutes.
+                    let Some(wait) = self.retry.wait_within(attempts, failure.asked_for, slept)
+                    else {
+                        return Err(failure.error);
+                    };
+                    slept += wait;
+                    tokio::time::sleep(wait).await;
                 }
             }
         }

@@ -75,12 +75,18 @@ impl Engine {
 
     /// Sweep every regular-season week: pairings for the simulation and
     /// season-to-date points per player. Weeks already on disk cost nothing.
+    ///
+    /// `current` is the current week's rows, already fetched by the caller.
+    /// The sweep's range includes that week, so asking for it again would put
+    /// two concurrent requests for the same rows on the wire and leave the two
+    /// halves of the load free to disagree about the week being played.
     pub(super) async fn week_sweep(
         &self,
         league_id: &str,
         week: u32,
         last_regular_week: u32,
         force: bool,
+        current: &[Matchup],
         warnings: &mut Vec<String>,
     ) -> WeekSweep {
         let mut schedule = Vec::new();
@@ -90,11 +96,17 @@ impl Engine {
         // Fifteen-odd weeks, six requests at a time rather than one after
         // another; the results come back out of order, so sort before use.
         let mut fetched: Vec<(u32, Result<Vec<Matchup>, String>)> =
-            futures_util::stream::iter(1..=last_regular_week.max(week))
+            futures_util::stream::iter((1..=last_regular_week.max(week)).filter(|w| *w != week))
                 .map(|w| async move { (w, self.week_matchups(league_id, w, week, force).await) })
                 .buffer_unordered(REQUEST_CONCURRENCY)
                 .collect()
                 .await;
+        // The caller's rows stand in for the week it already asked about. An
+        // empty set means that request was lost, which the caller has already
+        // said on the badge, so it is not counted as a second failure here.
+        if !current.is_empty() {
+            fetched.push((week, Ok(current.to_vec())));
+        }
         fetched.sort_by_key(|(w, _)| *w);
 
         for (w, result) in fetched {

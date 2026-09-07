@@ -9,6 +9,8 @@ import { usePickChime } from "./pickChime";
 import { setChime, setScreen, useChime, useScreen, type Screen } from "./prefs";
 import { importSecondOpinion } from "./secondOpinionImport";
 import { clearFollow, readFollow, useCompanionEnabled, useFollowStatus } from "./companion";
+import { useHostSync } from "./hostSync";
+import { SkipLink } from "./components/SkipLink";
 import { useToast } from "./toast";
 import { buildSettingsRows } from "./settingsRows";
 import { useSeasonSession } from "./session";
@@ -44,7 +46,13 @@ export default function App() {
   const avatars = useAvatarMode();
   // Read once, as the window opens: `api` chose its backend off the same
   // record, so a change to it mid-session would leave the two disagreeing.
-  const [follow] = useState(readFollow);
+  const [joined] = useState(readFollow);
+  // What the host says about itself on every heartbeat. The name is taken
+  // from here rather than from the record because the host can be renamed
+  // under a follower, which used to leave it showing the name it joined with.
+  const hostSync = useHostSync();
+  const follow =
+    joined === null ? null : { ...joined, host_name: hostSync.hostName ?? joined.host_name };
   // One strip, one timer, and the revoked follower's note on the way in.
   const { toast, showToast, dismissToast } = useToast();
   // Whether this follower can still hear its host, for the line beside the
@@ -340,6 +348,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <SkipLink target="board-main">Skip to the board</SkipLink>
       <div className={chatOpen ? "shell has-chat" : "shell"}>
         <div className="shell-main">
           <Header
@@ -361,7 +370,10 @@ export default function App() {
             screen={screen}
             onScreen={setScreen}
             platform={view.league.platform}
-            polling={polling}
+            // A follower has no poller of its own, so this window's flag says
+            // nothing: what the host's own sync is doing is what the pill has
+            // to show, and null while the host has not said yet.
+            polling={follow === null ? polling : hostSync.polling}
             pollHealth={pollHealth}
             onRefreshPicks={() => void refreshPicks()}
             refreshingPicks={pullingPicks}
@@ -376,30 +388,36 @@ export default function App() {
 
           <ToastStrip toast={toast} onDismiss={dismissToast} />
 
-          {/* Keyed per screen: one reused instance kept the season screen's
+          {/* The one landmark past the header, and where the skip link lands:
+              without it a screen reader had the whole app under `banner` and
+              no way to jump to the board. `tabIndex` so the link can move the
+              keyboard here as well as the reading position. */}
+          <main id="board-main" tabIndex={-1}>
+            {/* Keyed per screen: one reused instance kept the season screen's
               crash on screen after switching to the draft, and back. */}
-          {screen === "draft" ? (
-            <ErrorBoundary key="draft">
-              <Suspense fallback={<ScreenFallback />}>
-                <DraftScreen view={view} busy={busy} onDraft={onDraft} />
-              </Suspense>
-            </ErrorBoundary>
-          ) : season !== null ? (
-            <ErrorBoundary key="season">
-              <Suspense fallback={<ScreenFallback />}>
-                <SeasonScreen view={season} pollHealth={seasonPollHealth} />
-              </Suspense>
-            </ErrorBoundary>
-          ) : seasonError !== null ? (
-            <div className="season-loading is-error" role="alert">
-              <span>{seasonError}</span>
-              <button type="button" className="btn-primary" onClick={retrySeason}>
-                Try again
-              </button>
-            </div>
-          ) : (
-            <div className="season-loading">Loading this week…</div>
-          )}
+            {screen === "draft" ? (
+              <ErrorBoundary key="draft">
+                <Suspense fallback={<ScreenFallback />}>
+                  <DraftScreen view={view} busy={busy} onDraft={onDraft} />
+                </Suspense>
+              </ErrorBoundary>
+            ) : season !== null ? (
+              <ErrorBoundary key="season">
+                <Suspense fallback={<ScreenFallback />}>
+                  <SeasonScreen view={season} pollHealth={seasonPollHealth} />
+                </Suspense>
+              </ErrorBoundary>
+            ) : seasonError !== null ? (
+              <div className="season-loading is-error" role="alert">
+                <span>{seasonError}</span>
+                <button type="button" className="btn-primary" onClick={retrySeason}>
+                  Try again
+                </button>
+              </div>
+            ) : (
+              <div className="season-loading">Loading this week…</div>
+            )}
+          </main>
         </div>
 
         {chatOpen && (

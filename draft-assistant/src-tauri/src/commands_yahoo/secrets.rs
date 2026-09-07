@@ -67,6 +67,11 @@ pub(super) async fn status_now(state: &AppState) -> Result<YahooStatus, String> 
 /// The manager nickname off whichever Yahoo league this install has already
 /// loaded. A cache read, never a request — the settings screen must not wait
 /// on Yahoo to render.
+///
+/// The read itself is a file open and a JSON parse of a whole team list, and
+/// it used to happen on the runtime thread, which is exactly what the rest of
+/// this module goes out of its way not to do: it stalls both pollers for as
+/// long as the parse takes.
 async fn cached_account(state: &AppState) -> Option<String> {
     let keys: Vec<String> = {
         let config = state.config.lock().await;
@@ -77,8 +82,24 @@ async fn cached_account(state: &AppState) -> Option<String> {
             .map(|league| league.league_id.clone())
             .collect()
     };
-    keys.iter()
-        .find_map(|key| state.engine.yahoo_cached_account(key))
+    let engine = state.engine.clone();
+    tokio::task::spawn_blocking(move || {
+        keys.iter().find_map(|key| engine.yahoo_cached_account(key))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// The one caller allowed to be building a client at any moment.
+///
+/// Process-wide rather than a field on [`YahooState`]: there is one of those
+/// per app and this is only held for the length of a build, so the only thing
+/// it can make wait is a second caller that was about to do the same work.
+static BUILD_GATE: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+fn build_gate() -> &'static tokio::sync::Mutex<()> {
+    BUILD_GATE.get_or_init(tokio::sync::Mutex::default)
 }
 
 /// The client to make Yahoo calls with, built from the Keychain on first use.
@@ -93,6 +114,17 @@ pub async fn client_for(state: &AppState) -> Result<Arc<YahooClient>, String> {
 /// [`client_for`] for a caller that holds the parts rather than the state —
 /// the background poll task, which owns clones of both and no `State`.
 pub async fn client_from(engine: &Engine, yahoo: &YahooState) -> Result<Arc<YahooClient>, String> {
+    if let Some(client) = yahoo.client().await {
+        return Ok(client);
+    }
+    // Check-then-act, so the gate: the load and the first poll tick both find
+    // no client, both build one, and only one of them is kept. The loser's
+    // client refreshes the access token too, which defeats the "only one
+    // refresh in flight" guarantee the client itself makes, and its refreshed
+    // pair is then thrown away rather than written to the Keychain.
+    let _building = build_gate().lock().await;
+    // Look again inside the gate: whoever held it may have built the client
+    // while this caller queued, and that one is the one to use.
     if let Some(client) = yahoo.client().await {
         return Ok(client);
     }

@@ -29,6 +29,14 @@ pub const REDIRECT_WAIT: Duration = Duration::from_secs(300);
 /// and arrives at once; a connection that then says nothing is not the
 /// redirect.
 const REDIRECT_READ_WAIT: Duration = Duration::from_secs(10);
+/// The most of one request the listener will hold.
+///
+/// The redirect is a few hundred bytes and the longest legitimate one is a
+/// Yahoo code and a state on a GET line. Without a ceiling the buffer grew
+/// for the whole read window, so any local process could make the listener
+/// allocate as fast as it could write for ten seconds. A request that runs
+/// past this is not the redirect and is dropped unanswered.
+const REDIRECT_MAX_REQUEST: usize = 8 * 1024;
 /// How often a waiting listener looks at its cancel flag and its deadline.
 /// The standard library has no timed accept, so both are polled; 50ms of
 /// latency on a step the user spends a minute on costs nothing.
@@ -174,6 +182,9 @@ fn answer(mut socket: TcpStream, deadline: Instant, cancel: &AtomicBool) -> Opti
         if cancel.load(Ordering::SeqCst) || Instant::now() >= give_up {
             return None;
         }
+        if request.len() >= REDIRECT_MAX_REQUEST {
+            return None;
+        }
         match socket.read(&mut chunk) {
             Ok(0) => return None,
             Ok(n) => request.extend_from_slice(&chunk[..n]),
@@ -264,3 +275,7 @@ fn hex_pair(high: Option<&u8>, low: Option<&u8>) -> Option<u8> {
     let low = (*low? as char).to_digit(16)?;
     Some((high * 16 + low) as u8)
 }
+
+#[cfg(test)]
+#[path = "yahoo_redirect_tests.rs"]
+mod tests;

@@ -9,7 +9,8 @@
 // to the console and into a ring buffer the diagnostics dialog can show.
 
 import { invoke } from "@tauri-apps/api/core";
-import type { Diagnostics } from "./types";
+import { getHostSync } from "./hostSync";
+import type { Diagnostics, DraftView } from "./types";
 
 /** How many lines the browser keeps. Enough to see what led up to a failure;
  *  small enough that a component failing on every poll cannot grow it. */
@@ -59,6 +60,43 @@ export async function followerLogDiagnostics(): Promise<
     }
   }
   return { app_version: "", log_path: null, log_level: "info", log_tail: [...ring] };
+}
+
+/**
+ * The whole of a follower's diagnostics report.
+ *
+ * The host's log is the host's: reading it over the wire would hand every
+ * paired device the host's error history. What is reported is what this
+ * window knows, and only that. It used to claim a poller it does not have,
+ * saying `polling: true` for any view at all with no poll record beside it,
+ * which rendered as "Live sync: On, nothing reported yet" on the one screen
+ * meant to answer "what happened?". The truth is the host's own account of
+ * its sync, off the heartbeat, and the poll record carried in the last view
+ * the host sent.
+ */
+export async function followerDiagnostics(
+  hostName: string,
+  view: DraftView | null,
+): Promise<Diagnostics> {
+  return {
+    ...(await followerLogDiagnostics()),
+    platform: `following ${hostName}`,
+    league_id: view?.league.league_id ?? null,
+    league_name: view?.league.name ?? null,
+    draft_id: null,
+    platform_name: view?.league.platform ?? null,
+    polling: getHostSync().polling === true,
+    poll:
+      view === null
+        ? null
+        : {
+            last_success_at: view.data_health.poll_last_success_at ?? view.generated_at,
+            consecutive_failures: view.data_health.poll_consecutive_failures,
+            last_error: view.data_health.poll_last_error,
+          },
+    companion_enabled: false,
+    companion_devices: 0,
+  };
 }
 
 /** Open the follower's own log folder, or explain why there is none. */

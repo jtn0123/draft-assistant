@@ -3,9 +3,7 @@
 //! self-signed for a made-up MagicDNS name, which is why the client below
 //! is told not to check it.
 
-use crate::harness::{
-    fixture_state, host, host_over_tls, port_is_open, scratch_dir, wait_for_port_closed, Host,
-};
+use crate::harness::{fixture_state, host, host_over_tls, scratch_dir, wait_for_port_closed, Host};
 use draft_assistant_lib::companion::tls::TlsSource;
 use std::sync::Arc;
 
@@ -104,11 +102,10 @@ async fn https_origin_is_accepted_once_the_cert_listener_is_up() {
     // by `stop` itself, not by the listener winding down after it.
     host.companion.stop();
     assert_eq!(host.companion.https_port(), None);
+    // This panics with the port in the message if the listener is still
+    // answering. A `!port_is_open` assertion after it used to read as a
+    // second, independent check; it was true by construction.
     wait_for_port_closed(https_port).await;
-    assert!(
-        !port_is_open(https_port),
-        "the https port is still answering after stop"
-    );
 }
 
 #[tokio::test]

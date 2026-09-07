@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SourceHealth } from "../season-types";
+import type { SeasonView, SourceHealth } from "../season-types";
 import { FROZEN, NOW, fresh, matchup, myChip, view } from "./season-screen-fixture";
 import { ODDS_NOTE } from "../odds";
 import { SeasonScreen } from "./SeasonScreen";
@@ -98,6 +98,38 @@ describe("the live badge", () => {
     };
     expect(at(90)).toBe("Live · 0s ago");
     expect(at(91)).toBe("Live · rosters behind");
+  });
+
+  // The bug: the player dictionary and the weekly projections had no health
+  // surface at all, so `/players` could be down all Sunday, the half-hour
+  // refresh could re-apply the same day-old dictionary every tick, and the
+  // badge stayed green over injury tags that had not moved since the load.
+  it("names the player list when it is the feed that is behind", () => {
+    const sources = fresh();
+    sources.players = {
+      last_success_secs: NOW() - 3600,
+      error: "players refresh failed; using cache aged 19h (503)",
+    };
+    render(
+      <SeasonScreen view={view({ data_health: { fetched_at: NOW(), warnings: [], sources } })} />,
+    );
+
+    expect(screen.getByText("Live · player list behind")).toHaveClass("pill-stale");
+    expect(
+      screen.getByText(
+        "Player list: failing for 1 hour (players refresh failed; using cache aged 19h (503))",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  // It joins the list only once the poller's half-hour refresh has run, so a
+  // screen opened a minute ago is not told a feed it has never asked for is
+  // behind.
+  it("says nothing about the player list before the first refresh", () => {
+    render(<SeasonScreen view={view()} />);
+    const badge = screen.getByText(/^Live · /);
+    expect(badge).toHaveClass("pill-live");
+    expect(badge.getAttribute("title") ?? "").not.toContain("Player list");
   });
 
   it("keeps the breakdown out of the way while every source is current", () => {
@@ -331,5 +363,29 @@ describe("a Yahoo league", () => {
     fireEvent.click(screen.getByRole("tab", { name: "My team" }));
     expect(screen.getByText(/connected Yahoo account/)).toBeInTheDocument();
     expect(screen.queryByText(/Sleeper username/)).toBeNull();
+  });
+});
+
+// The bug: a bye and a lost matchups response both arrive as a null opponent,
+// so a week whose rows never came back was announced as a bye, and the head to
+// head, the live scoreboard and the start/sit panel went quietly missing with
+// it. A real bye still has my own row in the week's matchups, with nobody
+// paired to it, which is what tells the two apart.
+describe("a week with no opponent", () => {
+  const noOpponent = (matchupView: SeasonView["matchup"]) =>
+    view({
+      matchup: matchupView,
+      header: { ...view().header, opponent_name: null },
+    });
+
+  it("calls a real bye a bye", () => {
+    render(<SeasonScreen view={noOpponent(matchup())} />);
+    expect(screen.getByText("Week 3 · bye")).toBeInTheDocument();
+  });
+
+  it("refuses to call a matchup it never received a bye", () => {
+    render(<SeasonScreen view={noOpponent(null)} />);
+    expect(screen.getByText("Week 3 · matchup not loaded")).toBeInTheDocument();
+    expect(screen.queryByText("Week 3 · bye")).not.toBeInTheDocument();
   });
 });

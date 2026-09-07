@@ -156,3 +156,57 @@ async fn an_unchanged_token_pair_is_not_written_back_on_every_tick() {
     drop(state);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn only_one_yahoo_client_is_ever_built_however_many_callers_want_one() {
+    // The failure this prevents: building the client was check-then-act with
+    // nothing holding the two halves together, so the league load and the
+    // first poll tick each found no client and each built one. Only one was
+    // kept, and the other went on refreshing the access token on its own,
+    // which is exactly what the client's single refresh gate exists to stop;
+    // the pair the loser refreshed was then dropped rather than stored.
+    let (state, dir) = AppState::scratch("yahoo-one-client");
+    let yahoo = Arc::new(YahooState::sandboxed(YahooHosts::default()));
+    let store = crate::yahoo_secrets::FileStore::in_dir(&dir);
+    crate::yahoo_secrets::save_credentials(
+        &store,
+        &crate::yahoo_oauth::YahooCredentials {
+            client_id: "dj0yJmk9unit".into(),
+            client_secret: "unit-secret".into(),
+        },
+    )
+    .expect("the app is registered");
+    crate::yahoo_secrets::save_tokens(
+        &store,
+        &crate::yahoo_oauth::TokenSet {
+            access_token: "access-1".into(),
+            refresh_token: "refresh-1".into(),
+            expires_at: u64::MAX,
+        },
+    )
+    .expect("the pair is stored");
+
+    // Spawned rather than joined in place: the race is two tasks on two
+    // threads, which is how the poll tick and the load meet in the app.
+    let mut tasks = Vec::new();
+    for _ in 0..8 {
+        let engine = state.engine.clone();
+        let yahoo = yahoo.clone();
+        tasks.push(tokio::spawn(async move {
+            super::client_from(&engine, &yahoo).await.expect("a client")
+        }));
+    }
+    let mut built = Vec::new();
+    for task in tasks {
+        built.push(task.await.expect("the builder task"));
+    }
+    let first = built.first().expect("eight of them").clone();
+    assert!(
+        built.iter().all(|client| Arc::ptr_eq(client, &first)),
+        "more than one client was built for the same account"
+    );
+    // …and the one every caller got is the one the state kept.
+    let kept = yahoo.client().await.expect("the client was remembered");
+    assert!(Arc::ptr_eq(&kept, &first));
+    let _ = std::fs::remove_dir_all(&dir);
+}

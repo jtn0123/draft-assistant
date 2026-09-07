@@ -20,6 +20,56 @@ const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 /// time. Only [`super::ask`] uses this value; the wire tests pass their own.
 pub(super) const BASE_BACKOFF: Duration = Duration::from_secs(1);
 
+const fn millis(d: Duration) -> u64 {
+    d.as_millis() as u64
+}
+
+/// The longest the pauses between attempts can add up to: every pause a
+/// retried question may take, each one as long as the policy would ever let
+/// it be (the doubling backoff, or a `retry-after` at its ceiling).
+///
+/// It is also the budget: a retry is only started while less than this much
+/// wall clock has gone by, so the attempts cannot stack up behind each other.
+pub(super) const fn max_pauses(base: Duration) -> Duration {
+    let mut total = 0;
+    let mut next = 2;
+    while next <= MAX_ATTEMPTS {
+        let planned = millis(base) * (1u64 << (next - 2));
+        let named = millis(MAX_RETRY_AFTER);
+        total += if named > planned { named } else { planned };
+        next += 1;
+    }
+    Duration::from_millis(total)
+}
+
+/// The longest one question can take, start to finish.
+///
+/// Derived rather than written down: the pauses the retry policy allows, plus
+/// the one attempt that may still be started at the end of them, bounded by
+/// the client's own request timeout. [`super::ask`] holds itself to this, and
+/// the shared thread's deadline is read off it, so the two cannot drift apart
+/// the way a hand-written sum did.
+pub const WORST_CASE_ELAPSED: Duration = Duration::from_millis(
+    millis(crate::chat_client::REQUEST_TIMEOUT) + millis(max_pauses(BASE_BACKOFF)),
+);
+
+/// What one question is allowed to spend: the pause before the first retry,
+/// and the wall clock the pauses together may not outrun.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Limits {
+    pub(super) backoff: Duration,
+    pub(super) pauses: Duration,
+}
+
+impl Limits {
+    /// The shipped policy. The wire tests build their own, with pauses short
+    /// enough that three attempts are still a fast test.
+    pub(super) const LIVE: Limits = Limits {
+        backoff: BASE_BACKOFF,
+        pauses: max_pauses(BASE_BACKOFF),
+    };
+}
+
 #[derive(Deserialize)]
 struct ApiErrorBody {
     #[serde(default)]
@@ -68,6 +118,29 @@ pub(super) fn delay_before(
     Some(retry_after.unwrap_or_else(|| base * 2u32.pow(next.saturating_sub(2))))
 }
 
+/// The status an `error` event delivered inside a 200 stands for.
+///
+/// The API names the same conditions in an in-stream error as it does in a
+/// status: an overload that arrives halfway through an answer is the same
+/// overload as a 529, and reading it as one is what gets it the sentence the
+/// user can act on, and the retry, instead of the API's own bare wording.
+/// `None` for a type this build has not heard of, which is nothing to claim a
+/// status for.
+pub(super) fn stream_error_status(kind: &str) -> Option<reqwest::StatusCode> {
+    let code = match kind {
+        "invalid_request_error" => 400,
+        "authentication_error" => 401,
+        "permission_error" => 403,
+        "not_found_error" => 404,
+        "request_too_large" => 413,
+        "rate_limit_error" => 429,
+        "api_error" | "timeout_error" => 500,
+        "overloaded_error" => 529,
+        _ => return None,
+    };
+    reqwest::StatusCode::from_u16(code).ok()
+}
+
 /// The sentence the panel shows for a non-2xx status.
 pub(super) fn error_message(status: reqwest::StatusCode, body: &str) -> String {
     let detail = serde_json::from_str::<ApiErrorBody>(body)
@@ -91,6 +164,13 @@ pub(super) fn error_message(status: reqwest::StatusCode, body: &str) -> String {
             crate::applog::redact(&sample)
         ));
     }
+    sentence_for(status, detail.as_deref())
+}
+
+/// The sentence for a status, with the API's own message after it when there
+/// is one. The one place a status becomes words, whether it arrived as a
+/// status line or as an `error` event inside a 200.
+pub(super) fn sentence_for(status: reqwest::StatusCode, detail: Option<&str>) -> String {
     let sentence = match status.as_u16() {
         401 => "Anthropic rejected the API key".to_string(),
         429 => "Rate limited by Anthropic".to_string(),
@@ -103,7 +183,7 @@ pub(super) fn error_message(status: reqwest::StatusCode, body: &str) -> String {
             None => format!("Anthropic API error {code}"),
         },
     };
-    match detail {
+    match detail.map(str::trim).filter(|d| !d.is_empty()) {
         Some(detail) => format!("{sentence}: {detail}"),
         None => sentence,
     }

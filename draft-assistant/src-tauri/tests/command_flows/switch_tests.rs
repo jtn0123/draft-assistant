@@ -24,26 +24,68 @@ use std::time::Duration;
 use tauri::Manager;
 use tokio::sync::Mutex;
 
-/// Wait for `gate` to take one more request than `before`, run `switch`, and
-/// then let the answer through.
+/// Wait until a request is actually sitting in `gate`, run `switch`, and then
+/// let the answer through. Answers whether a request really was in flight.
 ///
 /// On its own thread, because the command under test is holding the test's
 /// thread inside the IPC call while its request sits in the gate.
+///
+/// The answer matters. This used to count requests *served* and then switch
+/// after ten seconds regardless, with nothing said either way: a request that
+/// came and went before the gate was held counted, and one that never arrived
+/// counted for nothing but was not complained about either. Both left the
+/// switch happening with nothing in flight and the discard path under test
+/// never entered, with all four tests green. `assert_raced` below is what
+/// every caller closes with.
 fn switch_while_in_flight(
     gate: &'static Gate,
-    before: usize,
     switch: impl FnOnce() + Send + 'static,
-) -> std::thread::JoinHandle<()> {
+) -> std::thread::JoinHandle<bool> {
     std::thread::spawn(move || {
+        let mut arrived = false;
         for _ in 0..2000 {
-            if gate.served() > before {
+            if gate.waiting() > 0 {
+                arrived = true;
                 break;
             }
             std::thread::sleep(Duration::from_millis(5));
         }
         switch();
         gate.release();
+        arrived
     })
+}
+
+/// Join the switching thread and refuse to let the test claim anything unless
+/// the race it describes actually happened: the request reached the gate, sat
+/// there across the switch, and was let out by the test rather than by the
+/// gate's own timeout.
+fn assert_raced(switcher: std::thread::JoinHandle<bool>, gate: &'static Gate, what: &str) {
+    let arrived = switcher.join().expect("the switching thread finished");
+    // The held request records that it was let through from the stub's own
+    // thread, which may not have woken yet: the switcher returns the instant
+    // it releases the gate. Where the command under test is still blocked on
+    // the answer this is already true; where it is not (the poll tick, which
+    // nobody is waiting on) it is true a few milliseconds later.
+    for _ in 0..400 {
+        if gate.raced() || gate.timed_out() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        arrived,
+        "{what}: the request never reached the gate, so the switch happened with nothing in \
+         flight and the discard path was never entered"
+    );
+    assert!(
+        gate.raced(),
+        "{what}: no request was held across the switch"
+    );
+    assert!(
+        !gate.timed_out(),
+        "{what}: the held request gave up waiting instead of being let through"
+    );
 }
 
 /// The loaded league, as the poller and the commands share it.
@@ -98,15 +140,14 @@ fn a_pick_refresh_that_lands_after_a_league_switch_is_thrown_away() {
     );
 
     let loaded = loaded_of(&s);
-    let before = SWITCH_PICKS.served();
     SWITCH_PICKS.hold();
     let switched = loaded.clone();
-    let switcher = switch_while_in_flight(&SWITCH_PICKS, before, move || {
+    let switcher = switch_while_in_flight(&SWITCH_PICKS, move || {
         become_league(&switched, LEAGUE_ID, DRAFT_ID);
     });
 
     let error = s.err("refresh_picks", json!({}));
-    switcher.join().expect("the switching thread finished");
+    assert_raced(switcher, &SWITCH_PICKS, "a pick refresh across a switch");
     assert!(error.contains("league changed"), "{error}");
 
     // The old league's picks must not be on the new league's board, and its
@@ -133,16 +174,15 @@ fn a_poll_tick_that_lands_after_a_league_switch_is_thrown_away() {
     );
 
     let loaded = loaded_of(&s);
-    let before = TICK_PICKS.served();
     TICK_PICKS.hold();
     let watched = loaded.clone();
-    let switcher = switch_while_in_flight(&TICK_PICKS, before, move || {
+    let switcher = switch_while_in_flight(&TICK_PICKS, move || {
         become_league(&watched, LEAGUE_ID, DRAFT_ID);
     });
     // The shortest interval there is, so the tick after the discarded one
     // comes round within the wait below.
     s.ok("start_polling", json!({"intervalSecs": 2}));
-    switcher.join().expect("the switching thread finished");
+    assert_raced(switcher, &TICK_PICKS, "a poll tick across a switch");
 
     // The answer was let through the moment the switch landed, and the tick
     // that carried it records nothing on the new league. The tick after it
@@ -179,21 +219,65 @@ fn a_rebuild_that_lands_after_a_league_switch_does_not_reinstate_it() {
 
     let loaded = loaded_of(&s);
     let config = s.app.state::<AppState>().config.clone();
-    let before = REBUILD_PICKS.served();
     REBUILD_PICKS.hold();
-    let switcher = switch_while_in_flight(&REBUILD_PICKS, before, move || {
+    let switcher = switch_while_in_flight(&REBUILD_PICKS, move || {
         become_league(&loaded, LEAGUE_ID, DRAFT_ID);
         tauri::async_runtime::block_on(config.lock()).active_league_id =
             Some(LEAGUE_ID.to_string());
     });
 
     let error = s.err("refresh_data", json!({}));
-    switcher.join().expect("the switching thread finished");
+    assert_raced(switcher, &REBUILD_PICKS, "a rebuild across a switch");
     assert!(error.contains("league changed"), "{error}");
 
     // The league the user chose is still the one on screen.
     let view = s.ok("get_state", json!({}));
     assert_eq!(view["league"]["league_id"], LEAGUE_ID);
+    s.finish();
+}
+
+/// The judgement this keeps: a keeper is only recognisable while it sits
+/// ahead of the clock, so the answer is made once, when the league is loaded,
+/// and remembered. "Refresh projections" assembles a whole new `LoadedLeague`,
+/// and that assembly makes the judgement again from where the clock stands
+/// now, which mid-draft is a different and worse answer.
+///
+/// Through the command, not through `rebuild::carry_keepers` alone: the
+/// helper was unit-tested and the call site was not, so deleting the call
+/// left every test green and the bug back.
+#[test]
+fn a_rebuild_keeps_the_keeper_judgement_the_load_made() {
+    let s = session("rebuild-keepers");
+    s.ok("add_league", json!({"leagueId": LEAGUE_ID, "force": true}));
+    let loaded = loaded_of(&s);
+    // What the league on screen knows and the disk does not: a keeper noticed
+    // at pick 5 whose save failed, and the floor the load set. The rebuild
+    // reads the keeper file (which has neither) and an empty pick list, so
+    // its own assembly would answer "no keepers, floor at pick 1".
+    {
+        let mut guard = tauri::async_runtime::block_on(loaded.lock());
+        let league = guard.as_mut().expect("a league is loaded");
+        league.keeper_pick_nos.picks.insert(5);
+        league.keeper_pick_nos.floor = Some(2);
+    }
+
+    let rebuilt = s.ok("refresh_data", json!({}));
+    assert_eq!(
+        rebuilt["draft"]["keeper_picks"],
+        json!([5]),
+        "the rebuild made the keeper judgement again instead of carrying it"
+    );
+    let guard = tauri::async_runtime::block_on(loaded.lock());
+    assert_eq!(
+        guard
+            .as_ref()
+            .expect("a league is loaded")
+            .keeper_pick_nos
+            .floor,
+        Some(2),
+        "the keeper floor was re-derived from where the clock stands now"
+    );
+    drop(guard);
     s.finish();
 }
 
@@ -207,14 +291,13 @@ fn a_live_refresh_that_lands_after_a_league_switch_is_thrown_away() {
     s.ok("load_season", json!({"force": true}));
 
     let loaded = loaded_of(&s);
-    let before = LIVE_MATCHUPS.served();
     LIVE_MATCHUPS.hold();
-    let switcher = switch_while_in_flight(&LIVE_MATCHUPS, before, move || {
+    let switcher = switch_while_in_flight(&LIVE_MATCHUPS, move || {
         become_league(&loaded, LEAGUE_ID, DRAFT_ID);
     });
 
     let error = s.err("refresh_season", json!({}));
-    switcher.join().expect("the switching thread finished");
+    assert_raced(switcher, &LIVE_MATCHUPS, "a live refresh across a switch");
     assert!(
         error.contains("league changed"),
         "one league's live scoring was folded into another's season: {error}"

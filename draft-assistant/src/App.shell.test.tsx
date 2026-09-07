@@ -152,3 +152,25 @@ describe("re-pulling the picks", () => {
     expect(h.api.refreshPicks).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("getting past the header", () => {
+  it("puts the board in a main landmark with a skip link ahead of it", async () => {
+    // The failure this prevents: the shell rendered a `<header>` and then
+    // plain `<div>`s, so a screen-reader user had one landmark for the whole
+    // app and no way to the board except tabbing through the league switcher,
+    // the screen toggle, the re-pull, the undo, the chime, Ask Claude and the
+    // settings gear.
+    await loaded();
+    const main = screen.getByRole("main");
+    // The screen is inside it, and the header is not.
+    expect(main).not.toBeEmptyDOMElement();
+    expect(main.textContent).toContain("Up next");
+    expect(main).not.toContainElement(screen.getByRole("banner"));
+    const skip = screen.getByRole("link", { name: "Skip to the board" });
+    expect(skip).toHaveAttribute("href", `#${main.id}`);
+    // The link is the first thing in the document, or it is not a skip link.
+    expect(skip.compareDocumentPosition(screen.getByRole("banner"))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+});

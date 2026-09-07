@@ -26,6 +26,7 @@
     parseMarkdown,
     initialState,
     reduce,
+    syncLine,
     isRevokedClose,
     needsTicker,
     createTicker,
@@ -209,13 +210,17 @@
         } catch {
           return;
         }
-        if (frame?.type === "pong") heartbeat.pong();
-        else if (frame?.type === "hello") {
+        // `hello` on connect and `pong` on every heartbeat carry the same
+        // three facts about the host: its clock, its name, and whether its
+        // live sync is actually running. The name is taken from here rather
+        // than only from the pairing answer, so renaming the Mac reaches a
+        // phone that is already connected.
+        if (frame?.type === "pong" || frame?.type === "hello") {
           heartbeat.pong();
-          dispatch({
-            type: "clock-offset",
-            offset: clockOffset(frame.payload?.server_now_ms, Date.now()),
-          });
+          const status = frame.payload ?? {};
+          if (status.host_name) store(HOST_KEY, status.host_name);
+          dispatch({ type: "clock-offset", offset: clockOffset(status.server_now_ms, Date.now()) });
+          dispatch({ type: "host-status", hostName: status.host_name, polling: status.polling });
         } else if (frame?.type === "revoked") dropToken();
         else if (LIVE.includes(frame?.type)) dispatch({ type: frame.type, payload: frame.payload });
       };
@@ -363,11 +368,8 @@
         [null, drafted || "Nothing drafted yet."],
         ["muted", open && `Still to fill: ${open}`],
       );
-      const failures =
-        state.health?.consecutive_failures ?? view?.data_health?.poll_consecutive_failures ?? null;
-      const sync = failures ? `${failures} failed syncs` : failures === 0 ? "sync healthy" : "";
       const size = view ? `${view.data_health.board_size} players on the board` : "";
-      $("health").textContent = [size, sync].filter(Boolean).join(" · ");
+      $("health").textContent = [size, syncLine(state, Date.now())].filter(Boolean).join(" · ");
     }
 
     function renderPicks() {

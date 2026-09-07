@@ -119,6 +119,12 @@ pub async fn start_polling<R: tauri::Runtime>(
                                 match verdict {
                                     Verdict::Refuse(reason) => errors.push(reason),
                                     Verdict::Adopt(note) => {
+                                        // On screen as well as in the log:
+                                        // the board is about to move for a
+                                        // reason the user never saw.
+                                        if let Some(note) = &note {
+                                            refusal::warn_adopted(loaded, note);
+                                        }
                                         notes.extend(note);
                                         changed |= memory.picks_changed(&picks);
                                         loaded.api_picks = picks;

@@ -48,6 +48,12 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let current_round = (current_pick - 1) / teams.max(1) + 1;
     let keepers = crate::keepers::known_keepers(loaded, teams, rounds);
     let (order, order_warning) = draft::DraftOrder::from_draft(draft);
+    // An auction is drawn by the snake code below because there is nothing
+    // else to draw it with, and every number that comes out of that is an
+    // answer to a question an auction does not ask. Rather than dress those
+    // numbers up, the ones that cannot mean anything are withheld here and
+    // the screen says why. See `draft::is_auction`.
+    let auction = draft::is_auction(draft);
     // Who actually picks where: the snake (third-round reversal included),
     // corrected for picks that changed hands.
     let ownership = PickOwnership::from_draft(draft, &loaded.traded_picks, teams, rounds, order);
@@ -103,6 +109,14 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     // look it up with.
     let my_slot = my_slot.or(loaded.my_slot);
     let (my_slot, slot_warning) = validated_slot(my_slot, teams);
+    let seat_note = my_slot.is_none().then(|| {
+        crate::view_signals::seat_note(
+            crate::view_types::platform_for(&league.league_id),
+            config.my_user_id.as_deref(),
+            draft.draft_order.as_ref(),
+            slot_warning.is_some(),
+        )
+    });
 
     // Mine by ownership, not by slot — a pick I traded away is not mine, and
     // one I acquired is. Picks already in the book (my own keepers) are not
@@ -117,7 +131,11 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
                 .collect()
         })
         .unwrap_or_default();
-    let is_my_pick = !draft_over && my_slot.is_some() && my_slot == on_clock_slot;
+    // Nobody holds a pick number in an auction, so the upcoming-picks queue,
+    // the wait until your turn and the survival window all fall away with
+    // this one line rather than each pretending to an answer.
+    let my_next_picks = if auction { Vec::new() } else { my_next_picks };
+    let is_my_pick = !auction && !draft_over && my_slot.is_some() && my_slot == on_clock_slot;
     let picks_until_mine = my_next_picks
         .first()
         .map(|&mine| crate::picks::picks_until(current_pick, mine, &picks));
@@ -255,7 +273,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             points_per_reception: league.scoring_settings.get("rec").copied().unwrap_or(0.0),
             position_run: position_run.as_ref(),
             my_byes: &my_byes,
-            pre_draft: draft.status == "pre_draft",
+            before_kickoff: crate::recommend::before_kickoff(league),
             full_board: &loaded.board,
             weeks_left: crate::recommend::weeks_left(league),
         })
@@ -314,7 +332,9 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             current_round,
             // assemble() refuses a draft with no teams, so this is always Some.
             on_clock_slot: on_clock_slot.unwrap_or(1),
-            on_clock_name: on_clock_slot.and_then(|slot| slot_names.get(&slot).cloned()),
+            on_clock_name: (!auction)
+                .then(|| on_clock_slot.and_then(|slot| slot_names.get(&slot).cloned()))
+                .flatten(),
             my_slot,
             is_my_pick,
             picks_until_mine,
@@ -331,9 +351,11 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
                 draft.settings.pick_timer,
                 draft.start_time,
             )
-            .filter(|_| !draft_over),
+            .filter(|_| !draft_over && !auction),
             pick_slot_overrides: ownership.overrides(),
             keeper_picks,
+            is_auction: auction,
+            seat_note,
         },
         my_roster,
         rosters,

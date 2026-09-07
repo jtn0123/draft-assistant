@@ -8,6 +8,7 @@ use super::*;
 use crate::board::AvailablePlayer;
 use crate::board::BoardPlayer;
 use crate::draft::RosterEntry;
+use crate::second_opinion::SecondOpinion;
 
 pub(super) fn player(id: &str, pos: &str, vorp: f64) -> AvailablePlayer {
     AvailablePlayer {
@@ -313,6 +314,17 @@ fn every_reason_reads_as_a_plain_sentence() {
             a.player.weekly_cv = Some(0.3 + 0.2 * f64::from(n));
             a.player.bonus_points = 20.0;
             a.survival_next = Some([0.2, 0.5, 0.9][n as usize]);
+            // An imported second opinion on every candidate, disagreeing far
+            // enough to fire and in both directions, so all three of its
+            // reason lines are heard. Without one the guard below was blind
+            // to the whole of `second_opinion_reason.rs` — which is where the
+            // one bracketed tag on a card actually lived.
+            a.player.position_rank = 1 + n * 20;
+            a.player.second_opinion = Some(SecondOpinion {
+                positional_rank: if n == 0 { 40 } else { 1 },
+                overall_rank: 4,
+                source: "Clay".into(),
+            });
             available.push(a);
         }
     }
@@ -362,6 +374,9 @@ fn every_reason_reads_as_a_plain_sentence() {
         let mut inputs = RecommendInputs::new(&available, Some(&mine), rules, round, 15, pick, 12);
         inputs.my_byes = &byes;
         inputs.position_run = None;
+        // Standard scoring, so the imported ranks are read at half weight and
+        // the line that says which ruler was used is on every card.
+        inputs.points_per_reception = 0.0;
         let mut have: HashMap<&str, u32> = HashMap::new();
         for entry in &mine.players {
             *have.entry(entry.position.as_str()).or_default() += 1;

@@ -48,6 +48,7 @@ fn yahoo_route(
     request: &Request,
     advanced: &AtomicBool,
     revoked: &AtomicBool,
+    throttled: &AtomicBool,
     pool_calls: &AtomicU64,
 ) -> Reply {
     let path = request.path();
@@ -105,6 +106,13 @@ fn yahoo_route(
         };
     }
     if path.contains("/players") {
+        // One throttled answer, then the call goes through: a throttle the
+        // client waits out inside its retry budget. That is the case worth
+        // testing, because the load succeeds and the only thing that tells
+        // the user their picks are a moment behind is the warning.
+        if throttled.swap(false, Ordering::SeqCst) {
+            return Reply::throttled(1);
+        }
         pool_calls.fetch_add(1, Ordering::SeqCst);
         return Reply::ok(PLAYERS_0);
     }
@@ -156,6 +164,9 @@ pub(crate) struct Session {
     /// Flip it and this session's Yahoo refuses every call and every refresh,
     /// which is what a grant the user revoked looks like from here.
     pub(crate) revoked: Arc<AtomicBool>,
+    /// Flip it and this session's Yahoo throttles the next player-pool call
+    /// once, with a one-second `Retry-After`, then answers it.
+    pub(crate) throttled: Arc<AtomicBool>,
     /// How many player-pool pages this session's stub has served. The pool is
     /// 25 rows a page, so it is the one call worth not repeating.
     pub(crate) pool_calls: Arc<AtomicU64>,
@@ -175,10 +186,13 @@ pub(crate) fn session_with_redirect(label: &str, redirect_uri: &str) -> Session 
     let served = advanced.clone();
     let revoked = Arc::new(AtomicBool::new(false));
     let refused = revoked.clone();
+    let throttled = Arc::new(AtomicBool::new(false));
+    let slowed = throttled.clone();
     let pool_calls = Arc::new(AtomicU64::new(0));
     let counted = pool_calls.clone();
-    let yahoo_stub =
-        yahoo_stub::serve(move |request| yahoo_route(request, &served, &refused, &counted));
+    let yahoo_stub = yahoo_stub::serve(move |request| {
+        yahoo_route(request, &served, &refused, &slowed, &counted)
+    });
     let hosts = YahooHosts {
         api_base: format!("{}/fantasy/v2", yahoo_stub.base()),
         login_base: yahoo_stub.base(),
@@ -228,6 +242,7 @@ pub(crate) fn session_with_redirect(label: &str, redirect_uri: &str) -> Session 
         data_dir,
         advanced,
         revoked,
+        throttled,
         pool_calls,
         _stub: yahoo_stub,
     }

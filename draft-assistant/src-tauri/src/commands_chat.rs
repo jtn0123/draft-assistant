@@ -1,6 +1,6 @@
 //! Tauri commands for the Ask Claude panel.
 
-use crate::chat::{self, ChatMessage, ChatModel, ChatReply, Effort};
+use crate::chat::{ChatMessage, ChatModel, ChatReply, Effort};
 use crate::chat_cli;
 use crate::chat_client;
 use crate::chat_context;
@@ -18,10 +18,15 @@ mod budget;
 #[path = "commands_chat_settle.rs"]
 mod settle;
 
+/// The model call itself, on whichever route was resolved.
+#[path = "commands_chat_route.rs"]
+mod route;
+
 use budget::{billed_model, charged_league, check_budget, check_screen, checked_budget, window};
 pub use budget::{budget_of, spend_key, DEFAULT_BUDGET_USD};
 #[cfg(test)]
 use budget::{MAX_THREAD_BYTES, MAX_TURNS};
+use route::Route;
 pub(crate) use settle::{settle, Books};
 
 const PROVIDER_API: &str = "api";
@@ -420,32 +425,16 @@ pub(crate) async fn answer_holding(
         provider,
     };
     let cancel = in_flight.signal();
-    let call = async move {
-        if provider == PROVIDER_CLI {
-            let cli = cli.ok_or_else(|| {
-                "Claude Code CLI not found: install it or add an API key".to_string()
-            })?;
-            chat_cli::ask(&cli, model, effort, &context.joined(), &messages)
-                .await
-                .map_err(chat::ChatError::from)
-        } else {
-            let api_key = api_key
-                .ok_or_else(|| "no Anthropic API key set: add one in Settings".to_string())?;
-            chat::ask(
-                // Not the Sleeper client: its eight-second budget cut off every
-                // answer that took longer than a board refresh.
-                &chat_client::client(),
-                &api_key,
-                model,
-                effort,
-                &context,
-                &messages,
-                cancel,
-            )
-            .await
-        }
+    let route = Route {
+        provider,
+        cli,
+        api_key,
+        model,
+        effort,
+        context,
+        messages,
     };
-    settle(books, in_flight, call).await
+    settle(books, in_flight, route.call(cancel)).await
 }
 
 /// Suggested prompts for the current screen.

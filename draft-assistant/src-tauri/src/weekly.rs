@@ -6,7 +6,7 @@
 //! projection rows into one lookup so the season code never touches stat maps.
 
 use crate::scoring;
-use crate::sleeper::ProjectionRow;
+use crate::sleeper::{PlayerMeta, ProjectionRow};
 use std::collections::{HashMap, HashSet};
 
 /// player_id -> week -> projected points under this league's scoring.
@@ -20,15 +20,43 @@ pub struct WeeklyPoints {
 }
 
 impl WeeklyPoints {
+    /// Without a player dictionary to fall back on: the position comes from
+    /// the projection row alone. Kept for callers that rebuild the weekly
+    /// numbers from a refreshed feed and have no dictionary to hand.
     pub fn build(weekly_rows: &[ProjectionRow], scoring_map: &HashMap<String, f64>) -> Self {
+        Self::build_with(weekly_rows, scoring_map, &HashMap::new())
+    }
+
+    /// `player_meta` is Sleeper's player dictionary, used only to fill in a
+    /// position the projection row itself does not carry.
+    pub fn build_with(
+        weekly_rows: &[ProjectionRow],
+        scoring_map: &HashMap<String, f64>,
+        player_meta: &HashMap<String, PlayerMeta>,
+    ) -> Self {
         let mut points: HashMap<String, HashMap<u32, f64>> = HashMap::new();
         let mut weeks: HashSet<u32> = HashSet::new();
         for row in weekly_rows {
             let (Some(stats), Some(week)) = (row.stats.as_ref(), row.week) else {
                 continue;
             };
+            // The per-position reception bonus is a scoring key with no stat
+            // of the same name, so the dot product structurally cannot see
+            // it: `base_points` alone scored a TE-premium league exactly like
+            // a standard one, in every weekly number the season screens show.
+            // The board has always used `base_points_for`; this did not.
+            let position = row
+                .player
+                .as_ref()
+                .and_then(|meta| meta.position.as_deref())
+                .or_else(|| {
+                    player_meta
+                        .get(&row.player_id)
+                        .and_then(|meta| meta.position.as_deref())
+                })
+                .unwrap_or_default();
             // One week's bonus expectation uses that week's own stat line.
-            let pts = scoring::base_points(stats, scoring_map)
+            let pts = scoring::base_points_for(stats, scoring_map, position)
                 + scoring::bonus_points(&[stats], scoring_map);
             points
                 .entry(row.player_id.clone())
@@ -112,6 +140,48 @@ mod tests {
 
     fn scoring_map() -> HashMap<String, f64> {
         HashMap::from([("rush_yd".to_string(), 0.1)])
+    }
+
+    /// A TE-premium league pays extra per tight-end catch through
+    /// `bonus_rec_te`, a scoring key with no stat of the same name. The dot
+    /// product cannot see it, so every weekly number here understated tight
+    /// ends while the board next to them had it right.
+    #[test]
+    fn a_tight_end_premium_reaches_the_weekly_numbers() {
+        let scoring = HashMap::from([("rec".to_string(), 1.0), ("bonus_rec_te".to_string(), 0.5)]);
+        let catches = |player_id: &str, position: Option<&str>| ProjectionRow {
+            player_id: player_id.into(),
+            stats: Some(HashMap::from([("rec".to_string(), 6.0)])),
+            player: position.map(|position| PlayerMeta {
+                position: Some(position.into()),
+                ..serde_json::from_value(serde_json::json!({})).unwrap()
+            }),
+            week: Some(1),
+            opponent: None,
+        };
+        let rows = [catches("te", Some("TE")), catches("wr", Some("WR"))];
+        let weekly = WeeklyPoints::build(&rows, &scoring);
+        assert!(
+            (weekly.get("te", 1).unwrap() - 9.0).abs() < 1e-9,
+            "six catches at 1.0 plus the 0.5 tight-end premium"
+        );
+        assert!(
+            (weekly.get("wr", 1).unwrap() - 6.0).abs() < 1e-9,
+            "the premium is per position"
+        );
+
+        // A row that does not name the position falls back to the player
+        // dictionary rather than quietly dropping the premium.
+        let bare = [catches("te", None)];
+        let meta: HashMap<String, PlayerMeta> = HashMap::from([(
+            "te".to_string(),
+            PlayerMeta {
+                position: Some("TE".into()),
+                ..serde_json::from_value(serde_json::json!({})).unwrap()
+            },
+        )]);
+        let weekly = WeeklyPoints::build_with(&bare, &scoring, &meta);
+        assert!((weekly.get("te", 1).unwrap() - 9.0).abs() < 1e-9);
     }
 
     #[test]

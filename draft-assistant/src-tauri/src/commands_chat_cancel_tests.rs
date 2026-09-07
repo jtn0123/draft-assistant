@@ -70,3 +70,68 @@ async fn a_claim_made_up_front_is_the_one_the_answer_holds() {
         .await
         .expect("released with the answer");
 }
+
+/// A stand-in `claude` that never answers, so the only thing that can end the
+/// call is the cancel signal.
+#[cfg(unix)]
+fn slow_fake_cli() -> std::path::PathBuf {
+    use std::io::Write as _;
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!(
+        "draft-assistant-route-cancel-{}-{:?}",
+        std::process::id(),
+        std::time::SystemTime::now()
+    ));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let path = dir.join("claude");
+    let mut file = std::fs::File::create(&path).expect("script");
+    write!(file, "#!/bin/sh\ncat > /dev/null\nexec sleep 30\n").expect("write script");
+    drop(file);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+    path
+}
+
+/// The command layer used to hand the cancel signal to the API route only, so
+/// on the route it picks by itself when Claude Code is installed and no key
+/// has been added, Cancel did nothing at all: `cancel_claude` said it had
+/// found the claim and the panel sat on "Thinking" for four minutes.
+#[cfg(unix)]
+#[tokio::test]
+async fn cancelling_stops_the_cli_route_and_not_only_the_api_one() {
+    let cli = slow_fake_cli();
+    let route = Route {
+        provider: "claude_code",
+        cli: Some(cli.clone()),
+        api_key: None,
+        model: ChatModel::Opus5,
+        effort: Effort::High,
+        context: crate::chat_context::SplitContext {
+            stable: "the league".to_string(),
+            volatile: "the board\n".to_string(),
+        },
+        messages: vec![ChatMessage {
+            role: "user".to_string(),
+            content: "Walker or Bowers?".to_string(),
+        }],
+    };
+    let cancel = crate::chat_client::CancelSignal::never();
+    let puller = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        puller.cancel();
+    });
+    let started = std::time::Instant::now();
+    let reply = route
+        .call(cancel)
+        .await
+        .expect("a cancel is a reply, not an error");
+    assert!(reply.cancelled, "the CLI route ignored the signal");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "the panel waited {:?} for a cancel",
+        started.elapsed()
+    );
+    if let Some(dir) = cli.parent() {
+        std::fs::remove_dir_all(dir).ok();
+    }
+}

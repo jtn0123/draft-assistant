@@ -160,6 +160,10 @@
     note: {},
     health: null,
     seasonHealth: null,
+    /** Whether the host's own live sync is running, as the host last said.
+     *  Null until the first `hello`: the page knows nothing yet, and saying
+     *  either "on" or "off" before then would be making it up. */
+    polling: null,
     connection: "online",
     /** How far the host's clock is ahead of this one, in milliseconds. */
     offset: 0,
@@ -177,6 +181,11 @@
     }),
     "shared-chat": (s, a) =>
       a.payload?.screen ? { ...s, chat: { ...s.chat, [a.payload.screen]: a.payload } } : s,
+    "host-status": (s, a) => ({
+      ...s,
+      hostName: a.hostName || s.hostName,
+      polling: typeof a.polling === "boolean" ? a.polling : s.polling,
+    }),
     "poll-health": (s, a) => ({ ...s, health: a.payload ?? null }),
     "season-poll-health": (s, a) => ({ ...s, seasonHealth: a.payload ?? null }),
     note: (s, a) => ({ ...s, note: { ...s.note, [a.screen]: a.message } }),
@@ -186,6 +195,32 @@
     "clock-offset": (s, a) => ({ ...s, offset: a.offset }),
   };
   const reduce = (state, action) => ACTIONS[action.type]?.(state, action) ?? state;
+  /**
+   * The line under the roster about the host's own sync.
+   *
+   * The failure this replaces: the page read the failed-poll count and
+   * nothing else. That count is 0 on a host whose live sync is off just as it
+   * is on one that is syncing fine, so a phone printed "sync healthy", with
+   * no timestamp beside it, over a board that had stopped moving while the
+   * pick clock went on counting down. Whether the host is polling now rides
+   * on every heartbeat, and how old the board is is said out loud either way.
+   */
+  const syncLine = (state, nowMs) => {
+    const view = state?.draft ?? null;
+    const failures =
+      state?.health?.consecutive_failures ?? view?.data_health?.poll_consecutive_failures ?? null;
+    // Both halves of the host stamp this in epoch seconds.
+    const atSecs =
+      state?.health?.last_success_at ?? view?.data_health?.poll_last_success_at ?? null;
+    const when = typeof atSecs === "number" ? relativeTime(atSecs * 1000, nowMs) : null;
+    const last = when ? `last update ${when}` : "no update yet";
+    if (state?.polling === false) return `The host's live sync is off, ${last}`;
+    if (failures) return `${failures} failed syncs, ${last}`;
+    // Nothing has come down the socket yet: what is on screen is all the page
+    // can honestly speak for.
+    if (state?.polling !== true) return when ? `Last update ${when}` : "";
+    return `Syncing, ${last}`;
+  };
   // ---------------------------------------------------- node builders --
   // Nothing here reads the page; each makes nodes for app.js to place.
   // Here rather than in app.js only to keep that file under the size cap.
@@ -275,6 +310,7 @@
     parseMarkdown,
     initialState,
     reduce,
+    syncLine,
     el,
     clear,
     spans,

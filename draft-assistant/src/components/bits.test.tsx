@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({ headshot: vi.fn() }));
 vi.mock("../api", () => ({ api: mocks }));
 
 import { resetAvatarCache, setAvatarMode } from "../avatars";
+// The slot's size is a CSS fact, so the stylesheet has to be in the document
+// for the test below to be able to read it back.
+import "../bits.css";
 import { PlayerName, ZoomLayer } from "./bits";
 import { closeZoom } from "../zoom";
 import { settle } from "../test/settle";
@@ -186,14 +189,37 @@ describe("PlayerName", () => {
   });
 
   it("gives the photo, the team mark and the blank the same slot", async () => {
+    // The row must not reflow when the Headshots/Team logos toggle moves, so
+    // the three fillings have to measure the same, not merely share a name.
+    const slot = (element: Element | null) => {
+      expect(element).not.toBeNull();
+      const style = getComputedStyle(element as Element);
+      return {
+        width: style.width,
+        height: style.height,
+        flexBasis: style.flexBasis,
+        borderRadius: style.borderRadius,
+      };
+    };
+
     mocks.headshot.mockResolvedValue("data:image/png;base64,AAAA");
     const { container } = render(<PlayerName name="Josh Downs" team="IND" playerId="11560" />);
     await waitFor(() => expect(container.querySelector(".avatar.headshot")).not.toBeNull());
+    const photo = slot(container.querySelector(".avatar.headshot"));
     act(() => setAvatarMode("logos"));
-    expect(container.querySelector(".avatar.avatar-logo")).not.toBeNull();
+    const logo = slot(container.querySelector(".avatar.avatar-logo"));
 
     // A free agent has neither, and still occupies the row the same way.
     const free = render(<PlayerName name="Nobody" team={null} playerId="99999" />);
-    expect(free.container.querySelector(".avatar.avatar-blank")).not.toBeNull();
+    const blank = slot(free.container.querySelector(".avatar.avatar-blank"));
+
+    expect(photo).toEqual({
+      width: "22px",
+      height: "22px",
+      flexBasis: "22px",
+      borderRadius: "50%",
+    });
+    expect(logo).toEqual(photo);
+    expect(blank).toEqual(photo);
   });
 });

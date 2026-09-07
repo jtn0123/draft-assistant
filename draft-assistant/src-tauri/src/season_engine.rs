@@ -191,6 +191,55 @@ impl Engine {
         }
     }
 
+    /// This week's matchup rows, from the network when it answers with rows
+    /// and from the last good copy on disk when it does not.
+    ///
+    /// This was the one live source in the load with neither a cache fallback
+    /// nor the `refuse_empty` guard the poller has, and the cost of that was
+    /// not a missing panel but a wrong one: with no rows nobody has an
+    /// opponent, and the screen said "bye" over a week that was being played.
+    /// Sleeper's occasional `null` parses as no rows and used to be stamped
+    /// green on the way through, so a lost response and a real bye looked
+    /// exactly alike.
+    ///
+    /// The same per-week file the sweep keeps (`week{n}`), so a load that
+    /// falls back here is usually reading rows fetched minutes ago. The
+    /// second value is the reason it is not live, and the caller marks the
+    /// source failed whenever it is set: rows off the disk are not a live
+    /// feed and the badge must not vouch for them.
+    async fn week_matchups_or_cached(
+        &self,
+        league_id: &str,
+        week: u32,
+    ) -> (Vec<Matchup>, Option<String>) {
+        let name = Self::season_cache_name(league_id, &format!("week{week}"));
+        let refused = match self.client.matchups(league_id, week).await {
+            Ok(rows) if !rows.is_empty() => {
+                self.write_season_cache(&name, &rows).await;
+                return (rows, None);
+            }
+            // A bye week still has a row per roster, with no `matchup_id` on
+            // it, so no rows at all is never a bye: it is a lost response.
+            Ok(_) => format!("week {week} {EMPTY_WEEK}"),
+            Err(error) => to_message(error),
+        };
+        match self.read_cache_any_off_thread::<Vec<Matchup>>(&name).await {
+            Some((at, rows)) if !rows.is_empty() => {
+                let age_hours = now_secs().saturating_sub(at) / 3600;
+                (
+                    rows,
+                    Some(format!(
+                        "this week's matchups could not be refreshed ({refused}), showing the ones last seen {age_hours}h ago"
+                    )),
+                )
+            }
+            _ => (
+                Vec::new(),
+                Some(format!("this week's matchups unavailable: {refused}")),
+            ),
+        }
+    }
+
     /// Where the NFL is, from the network when it answers and from the last
     /// good copy on disk when it does not.
     ///
@@ -250,7 +299,7 @@ impl SeasonLoader for Engine {
 
         let (rosters, matchups, scores) = tokio::join!(
             self.rosters_or_cached(league_id),
-            self.client.matchups(league_id, week),
+            self.week_matchups_or_cached(league_id, week),
             self.client.nfl_scores(season, week)
         );
         let (rosters, stale_rosters) = rosters?;
@@ -266,17 +315,16 @@ impl SeasonLoader for Engine {
             None => sources.rosters.succeeded(loaded_at),
         }
         warnings.extend(stale_rosters);
-        let matchups = match matchups {
-            Ok(matchups) => {
-                sources.matchups.succeeded(loaded_at);
-                matchups
-            }
-            Err(error) => {
-                warnings.push(format!("this week's matchups unavailable: {error}"));
-                sources.matchups.failed(error.to_string());
-                Vec::new()
-            }
-        };
+        let (matchups, stale_matchups) = matchups;
+        // Rows served from disk, or no rows at all, are not a live feed. The
+        // badge has to say so: the screen reads an absent matchup row as a
+        // bye, and a green stamp over one would have it announce a bye it
+        // never heard about.
+        match &stale_matchups {
+            Some(note) => sources.matchups.failed(note.clone()),
+            None => sources.matchups.succeeded(loaded_at),
+        }
+        warnings.extend(stale_matchups);
         let scores = match scores {
             Ok(scores) => {
                 sources.scores.succeeded(loaded_at);
@@ -315,12 +363,18 @@ impl SeasonLoader for Engine {
         };
         let transactions = merge_transactions(batches, &mut warnings);
 
+        // The sweep's range covers the current week too, so it used to ask for
+        // it a second time, concurrently with the request above. Two answers
+        // to the same question can disagree, and the loser was silently the
+        // one the header and the start/sit panel were built from. The rows
+        // already in hand are handed over instead.
         let sweep = self
             .week_sweep(
                 league_id,
                 week,
                 league.last_regular_week(),
                 force,
+                &matchups,
                 &mut warnings,
             )
             .await;

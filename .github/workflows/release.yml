@@ -5,14 +5,20 @@
 #
 # What gets attached:
 #   - the .dmg, for a first install by hand;
-#   - when the TAURI_SIGNING_PRIVATE_KEY secret is set, the updater archive
-#     (`Draft-Assistant-X.Y.Z-aarch64.app.tar.gz`), its minisign `.sig`, and
-#     `latest.json`. Installed copies poll
+#   - the updater archive (`Draft-Assistant-X.Y.Z-aarch64.app.tar.gz`), its
+#     minisign `.sig`, and `latest.json`. Installed copies poll
 #     https://github.com/jtn0123/draft-assistant/releases/latest/download/latest.json
 #     (the endpoint in tauri.conf.json) and install the archive if its
-#     signature checks against the public key baked into the app. Without the
-#     secret the tag still yields a .dmg, with a warning that no installed
-#     copy can update to it.
+#     signature checks against the public key baked into the app.
+#
+# All four go up together, into a DRAFT release that is only published once
+# every one of them is attached. A draft is not `latest`, so nothing points
+# `releases/latest/download/latest.json` at a release until that file is
+# really there. Before this, the .dmg was published first and became `latest`
+# on its own; if the attach step behind it failed, or the signing key was
+# missing, every installed copy's "Check for updates" answered "No release
+# feed yet" from that moment on. A missing key now fails the job rather than
+# shipping a release that breaks the update channel for everyone.
 #
 # The secret is the private half of the keypair whose public half is
 # `plugins.updater.pubkey` in tauri.conf.json. It was generated with
@@ -101,51 +107,77 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # With the key: the bundler signs the updater archive as tauri.conf.json
-      # asks (`createUpdaterArtifacts`). Without it the same build would fail
-      # asking for the key, so the flag is merged off for this run and the
-      # release ships a .dmg only. The key is passed as env and never echoed;
-      # the password is empty because the key was generated without one.
+      # The CSP, `createUpdaterArtifacts`, and the pubkey and endpoint the
+      # updater is built against. Checked here as well as in `test:scripts`
+      # because a release built with the artifacts switched off would publish
+      # a .dmg no installed copy could ever update from.
+      - name: Check the shipped config still pins the update feed
+        run: node scripts/check-tauri-config.mjs
+
+      # No key, no release. The bundler signs the updater archive as
+      # tauri.conf.json asks (`createUpdaterArtifacts`), and a build without
+      # the key can only produce a .dmg: publishing that would make it the
+      # latest release and point every installed copy's update check at a tag
+      # with no latest.json on it. Failing here leaves the previous release,
+      # and the feed it serves, exactly where they were. The key is passed as
+      # env and never echoed; the password is empty because the key was
+      # generated without one.
       - name: Build the desktop bundle
-        id: build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            npm run tauri build
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set: building without updater artifacts, so no installed copy can update to this release."
-            npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
-            echo "signed=false" >> "$GITHUB_OUTPUT"
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set. Publishing an unsigned release would break the update feed for every installed copy, so this tag is not being released. Restore the secret and re-run."
+            exit 1
           fi
+          npm run tauri build
 
-      # latest.json plus the archive under a name without spaces; the script
-      # refuses an archive with no .sig beside it.
+      # latest.json plus the archive under a name without spaces. The script
+      # refuses an archive with no .sig beside it, insists on being told which
+      # architecture the manifest is for, and checks that all three files
+      # exist before it exits.
       - name: Write the updater manifest
-        if: steps.build.outputs.signed == 'true'
-        run: node scripts/updater-manifest.mjs "$GITHUB_REF_NAME" src-tauri/target/release/bundle/macos updater
+        run: node scripts/updater-manifest.mjs "$GITHUB_REF_NAME" src-tauri/target/release/bundle/macos updater aarch64
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
 
+      # A draft, so it is not `latest` and nothing polls it yet. Every asset
+      # goes up in this one step: `fail_on_unmatched_files` means a missing
+      # .dmg or a missing updater directory fails the job with the release
+      # still a draft, which is a release nobody can see rather than a broken
+      # one everybody gets.
+      #
       # A tag with a `-` in it (v0.3.0-rc1) is a prerelease, so it does not
       # become the "latest release" people land on, and its latest.json is
       # not what installed copies poll either.
-      - name: Publish the release
+      - name: Stage the release as a draft with every asset
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          files: draft-assistant/src-tauri/target/release/bundle/dmg/*.dmg
+          draft: true
+          files: |
+            draft-assistant/src-tauri/target/release/bundle/dmg/*.dmg
+            draft-assistant/updater/*
           fail_on_unmatched_files: true
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
 
-      # Same release, three more assets. Separate so the .dmg step above can
-      # insist on its file whether or not the key was available.
-      - name: Attach the updater archive, signature and latest.json
-        if: steps.build.outputs.signed == 'true'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
-        with:
-          files: draft-assistant/updater/*
-          fail_on_unmatched_files: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+      # The last step, and the only one that makes anything visible: the
+      # release becomes `latest` only once the archive, its signature and
+      # latest.json are all attached to it.
+      - name: Publish the release once the whole feed is attached
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' > attached.txt
+          # Anchored, so the archive is not counted twice by its own .sig.
+          for want in '\.dmg$' '\.app\.tar\.gz$' '\.app\.tar\.gz\.sig$' '^latest\.json$'; do
+            if ! grep -qE "$want" attached.txt; then
+              echo "::error::no asset matching $want is attached to $GITHUB_REF_NAME, so the update feed would 404. Leaving the release a draft."
+              cat attached.txt
+              exit 1
+            fi
+          done
+          gh release edit "$GITHUB_REF_NAME" --draft=false

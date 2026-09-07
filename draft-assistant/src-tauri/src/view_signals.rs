@@ -23,6 +23,41 @@ pub(crate) fn validated_slot(slot: Option<u32>, teams: u32) -> (Option<u32>, Opt
     }
 }
 
+/// Why this user has no seat in this draft, said in terms they can act on.
+///
+/// Only ever asked when the seat is unknown, and there are four quite
+/// different reasons for that. They used to share one sentence: "set your
+/// Sleeper username", shown to people who had set it hours ago, because a
+/// draft whose order the platform has not published yet has no seat for
+/// anybody, and neither has a league the user is not in.
+pub(crate) fn seat_note(
+    platform: &str,
+    user_id: Option<&str>,
+    order: Option<&HashMap<String, u32>>,
+    slot_out_of_range: bool,
+) -> String {
+    if slot_out_of_range {
+        return "Your saved draft slot is not one this league has.".into();
+    }
+    if platform == crate::view_types::YAHOO {
+        return "Connect Yahoo to track your team.".into();
+    }
+    let Some(user_id) = user_id.filter(|id| !id.is_empty()) else {
+        return "Set your Sleeper username to track your team.".into();
+    };
+    match order {
+        // Before a draft opens Sleeper publishes no order at all, so nobody
+        // has a seat yet and there is nothing for the user to fix.
+        None => "The draft order has not been posted yet.".into(),
+        Some(order) if order.is_empty() => "The draft order has not been posted yet.".into(),
+        Some(order) if !order.contains_key(user_id) => "You are not in this league.".into(),
+        // The order names this user, so the slot came back and this is not
+        // called; kept total rather than panicking on a case that cannot
+        // happen today and might tomorrow.
+        Some(_) => "Your seat in this draft could not be worked out.".into(),
+    }
+}
+
 /// When the current pick's timer runs out, from Sleeper's `last_picked`
 /// stamp, the draft's scheduled `start_time`, and its `pick_timer`. Only
 /// meaningful mid-draft.

@@ -8,6 +8,10 @@ use super::*;
 const FIXTURE: &str = include_str!("../tests/fixtures/chat_stream.sse");
 
 fn parse(body: &str, chunk: usize) -> Result<Answer, String> {
+    failed(body, chunk).map_err(|failure| failure.message)
+}
+
+fn failed(body: &str, chunk: usize) -> Result<Answer, Failure> {
     let mut stream = Stream::new();
     for piece in body.as_bytes().chunks(chunk) {
         stream.feed(piece)?;
@@ -72,16 +76,49 @@ fn crlf_line_endings_are_accepted() {
 }
 
 /// The API's own failure mid-stream arrives as an `error` event on a 200.
+///
+/// The same overload as a status is named and retried; delivered inside a 200
+/// it used to be a dead end quoting the API's own one-word wording, which
+/// reads as something Claude said. It is classified the same way now.
 #[test]
-fn an_error_event_ends_the_stream_with_its_message() {
+fn an_overload_inside_a_200_is_named_the_same_way_the_status_is() {
     let body = concat!(
         r#"data: {"type":"message_start","message":{"model":"m","usage":{}}}"#,
         "\n\n",
         r#"data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
         "\n\n",
     );
-    let error = parse(body, 1000).unwrap_err();
-    assert_eq!(error, "Anthropic API error: Overloaded");
+    let failure = failed(body, 1000).unwrap_err();
+    assert_eq!(
+        failure.message,
+        "Anthropic is overloaded, try again in a moment: Overloaded"
+    );
+    assert_eq!(failure.status.map(|s| s.as_u16()), Some(529));
+
+    // A rate limit inside the stream is the 429 it would have been.
+    let limited = failed(
+        concat!(
+            r#"data: {"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#,
+            "\n\n",
+        ),
+        1000,
+    )
+    .unwrap_err();
+    assert_eq!(limited.message, "Rate limited by Anthropic: slow down");
+    assert_eq!(limited.status.map(|s| s.as_u16()), Some(429));
+
+    // A type this build has not heard of claims no status, and says what the
+    // API said rather than inventing a sentence for it.
+    let unknown = failed(
+        concat!(
+            r#"data: {"type":"error","error":{"type":"future_error","message":"something new"}}"#,
+            "\n\n",
+        ),
+        1000,
+    )
+    .unwrap_err();
+    assert_eq!(unknown.message, "Anthropic API error: something new");
+    assert_eq!(unknown.status, None);
 }
 
 #[test]

@@ -8,6 +8,24 @@
   flex-direction: column;
 }
 
+/* Off screen until it takes focus: the first stop in the tab order, and the
+   only way past the header's eight controls to the board itself. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 20;
+  padding: 8px 14px;
+  background: var(--paper);
+  border: 1px solid var(--rule2);
+  color: inherit;
+}
+
+.skip-link:focus {
+  left: 8px;
+  top: 8px;
+}
+
 .shell {
   flex: 1;
   max-width: 1560px;
@@ -259,6 +277,19 @@
   display: flex;
   gap: 10px;
   padding-top: 4px;
+}
+
+/* An auction draft, which this app does not model. Louder than `.warnings`
+   on purpose: it is not one more thing that went wrong with the data, it is
+   the whole screen not applying to the draft in front of the user. */
+.auction-notice {
+  margin: 0 20px;
+  padding: 12px 14px;
+  border: 2px solid var(--act);
+  background: var(--actbg);
+  color: var(--actink);
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .warnings {

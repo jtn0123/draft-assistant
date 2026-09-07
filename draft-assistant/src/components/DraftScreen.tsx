@@ -46,6 +46,20 @@ export function DraftScreen({
       <ClockBanner view={view} />
       <SnakeStrip view={view} />
 
+      {/* An auction is not a draft this app can read. Everything below is
+          built on snake pick numbers: who is on the clock, how many picks
+          until yours, whether a player lasts. The panels whose numbers cannot
+          mean anything are already off; this says why, once, where it cannot
+          be missed rather than as one more grey line in the warnings. */}
+      {view.draft.is_auction && (
+        <div className="auction-notice" role="alert">
+          <strong>Auction draft: not supported.</strong> This app models snake and linear drafts
+          only. There is no budget, no nomination and no pick order here, so the on the clock
+          manager, the picks until your turn and every survival chance have been left off. The
+          board, the projections and the recommendations are still this league's.
+        </div>
+      )}
+
       {view.data_health.warnings.length > 0 && (
         <div className="warnings">{view.data_health.warnings.join(" · ")}</div>
       )}

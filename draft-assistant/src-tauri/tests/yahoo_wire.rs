@@ -400,3 +400,69 @@ async fn the_players_a_page_hands_back_map_onto_the_apps_rows() {
     assert_eq!(mapped[0].bye_week, Some(10));
     assert_eq!(mapped[1].meta.injury_status.as_deref(), Some("Q"));
 }
+
+#[tokio::test]
+async fn a_throttle_yahoo_asks_thirty_seconds_for_does_not_freeze_the_call() {
+    // The failure this prevents: the shipped policy is five attempts, each
+    // honouring `Retry-After` up to a thirty-second cap, so one throttled
+    // call slept about two minutes inside a poll tick that has no timeout of
+    // its own. Mid-draft the board stopped with nothing on screen to say why.
+    // The retry budget is what bounds it: a wait that would run past the
+    // budget is not taken at all, and the failure reaches the health strip.
+    let stub = serve(|_: &Request| Reply::throttled(30));
+    let policy = RetryPolicy {
+        jitter: false,
+        ..RetryPolicy::default()
+    };
+    let budget = policy.budget;
+    let client =
+        YahooClient::with_hosts(credentials(), live_tokens(), hosts(&stub)).with_retry(policy);
+    let started = std::time::Instant::now();
+    let error = tokio::time::timeout(
+        budget + Duration::from_secs(10),
+        client.league_teams(LEAGUE_KEY),
+    )
+    .await
+    .expect("the call has to give up inside its own budget")
+    .expect_err("Yahoo said 999 to everything");
+    assert!(
+        started.elapsed() < budget + Duration::from_secs(5),
+        "the call spent {:?} asleep",
+        started.elapsed()
+    );
+    assert!(
+        matches!(error, YahooError::Http { status: 999, .. }),
+        "{error:?}"
+    );
+    // A thirty-second wait does not fit in a ten-second budget, so it is not
+    // taken: one attempt, and the caller is told rather than held.
+    assert_eq!(stub.count(), 1);
+    // …and the board can say why the picks are late.
+    assert_eq!(
+        client.throttle_warning().as_deref(),
+        Some(draft_assistant_lib::yahoo_retry::THROTTLED)
+    );
+}
+
+#[tokio::test]
+async fn a_short_throttle_is_still_waited_out_within_the_budget() {
+    // The other half: the budget must not turn the client back into the one
+    // that gave up on every throttle. A one-second Retry-After fits, so all
+    // five attempts are made.
+    let stub = serve(|_: &Request| Reply::throttled(1));
+    let client = YahooClient::with_hosts(credentials(), live_tokens(), hosts(&stub)).with_retry(
+        RetryPolicy {
+            jitter: false,
+            ..RetryPolicy::default()
+        },
+    );
+    let error = client
+        .league_teams(LEAGUE_KEY)
+        .await
+        .expect_err("Yahoo said 999 to everything");
+    assert!(
+        matches!(error, YahooError::Http { status: 999, .. }),
+        "{error:?}"
+    );
+    assert_eq!(stub.count(), 5);
+}

@@ -33,6 +33,21 @@ const CSP = cspTemplate
   // A header value with the macro's trailing newline in it is no header at
   // all: Chromium drops the whole response.
   .trim();
+/**
+ * The headers `companion/routes.rs` puts on *every* response through its
+ * middleware, not just on the page.
+ *
+ * The fake used to send the policy on `/` alone and `nosniff` nowhere, so a
+ * static file served under the wrong MIME type was refused by a real phone
+ * and ran happily under Playwright: exactly the drift this file exists to
+ * prevent.
+ */
+const HOST_HEADERS: Record<string, string> = {
+  "content-security-policy": CSP,
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+};
+
 /** Content types by extension, as `routes.rs` serves them. */
 const CONTENT_TYPES: Record<string, string> = {
   ".js": "text/javascript",
@@ -74,7 +89,11 @@ export function backend(overrides: Partial<Backend> = {}): Backend {
 }
 
 const json = (route: Route, status: number, body: unknown) =>
-  route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+  route.fulfill({
+    status,
+    headers: { ...HOST_HEADERS, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 
 /** Serve the three files and a host that answers the companion API. */
 export async function serve(page: Page, host: Backend): Promise<void> {
@@ -84,7 +103,7 @@ export async function serve(page: Page, host: Backend): Promise<void> {
     if (path === "/") {
       return route.fulfill({
         body: asset("index.html"),
-        headers: { "content-type": "text/html", "content-security-policy": CSP },
+        headers: { ...HOST_HEADERS, "content-type": "text/html" },
       });
     }
     // Every file under companion-static/. A file missing here is a 404 the
@@ -92,7 +111,10 @@ export async function serve(page: Page, host: Backend): Promise<void> {
     // one.
     const name = path.startsWith("/static/") ? path.slice("/static/".length) : "";
     if (name !== "" && STATIC_FILES.has(name)) {
-      return route.fulfill({ body: asset(name), headers: { "content-type": contentType(name) } });
+      return route.fulfill({
+        body: asset(name),
+        headers: { ...HOST_HEADERS, "content-type": contentType(name) },
+      });
     }
     if (path === "/api/pair") {
       const sent = route.request().postDataJSON() as { code: string; device_name: string };
@@ -115,7 +137,7 @@ export async function serve(page: Page, host: Backend): Promise<void> {
       const thread = host.chat[screen];
       return thread ? json(route, 200, thread) : json(route, 404, { error: "no thread" });
     }
-    return route.fulfill({ status: 404, body: "" });
+    return route.fulfill({ status: 404, body: "", headers: HOST_HEADERS });
   });
 
   // A WebSocket the test drives by hand. The page only ever uses `onopen`,

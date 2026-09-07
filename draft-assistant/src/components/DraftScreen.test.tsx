@@ -19,6 +19,26 @@ const screenFor = (view: DraftView) => <DraftScreen view={view} busy={false} onD
 describe("DraftScreen", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  // The whole screen is snake arithmetic, and an auction has no pick order at
+  // all. Until this, the only sign was one grey line joined in with the other
+  // data warnings, under a clock naming a manager as on the clock.
+  it("says an auction is not supported, where it cannot be missed", () => {
+    const view = fixture();
+    view.draft.is_auction = true;
+
+    render(screenFor(view));
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent("Auction draft: not supported");
+    expect(notice).toHaveTextContent(/survival chance/);
+    // And not buried in the grey warnings strip, which is where it used to be.
+    expect(notice).not.toHaveClass("warnings");
+  });
+
+  it("says nothing of the sort about an ordinary snake draft", () => {
+    render(screenFor(fixture()));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("shows a player once even when two modes recommend them", () => {
     const view = fixture();
     // The fixture's balanced and safe modes both land on Chris Olave.

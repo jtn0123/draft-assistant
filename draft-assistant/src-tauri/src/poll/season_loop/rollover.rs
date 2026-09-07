@@ -37,6 +37,29 @@ pub(super) async fn note_failure(
     ));
 }
 
+/// Take a rollover complaint back off the badge.
+///
+/// `ROLLOVER_FAILED` used to be cleared only by a season that replaced the
+/// whole one on screen. So when the week check went back to reporting the
+/// week already loaded — which is exactly what a cached NFL state served
+/// after the fallback in `season_engine` does — the rollover was never
+/// retried and the warning sat there for the life of the process with no
+/// path down. Every week check that finds nothing to roll over now clears it.
+pub(super) async fn clear_failure(season_ref: &Mutex<Option<LoadedSeason>>) {
+    let mut season = season_ref.lock().await;
+    let Some(season) = season.as_mut() else {
+        return;
+    };
+    let before = season.warnings.len();
+    season.warnings.retain(|w| !w.starts_with(ROLLOVER_FAILED));
+    if season.warnings.len() != before {
+        crate::applog::info(format!(
+            "season week rollover no longer pending, week {} is the current one",
+            season.week
+        ));
+    }
+}
+
 /// Reload the whole season for a week that has just turned over, replacing
 /// what the poller was watching. `Ok(false)` when the league changed
 /// underneath the load, so there is nothing to emit this tick; `Err` when the
@@ -129,6 +152,10 @@ pub async fn refresh_or_roll<E: SeasonEngine>(
                     note_failure(season_ref, &league_id, watching.1, week, &error).await;
                 }
             }
+        } else {
+            // The week on screen is the current one, so whatever an earlier
+            // check thought it saw, there is nothing left to roll over.
+            clear_failure(season_ref).await;
         }
     }
     // Fetched with nothing locked: three requests with retries behind them can
@@ -177,6 +204,27 @@ mod tests {
                 "{ROLLOVER_FAILED}: still showing week 3 (timed out)"
             )],
             "one warning, carrying the latest reason"
+        );
+    }
+
+    /// The bug: the warning was cleared only by a season that replaced the
+    /// whole one on screen, so a week check that stopped reporting a new week
+    /// left it stuck on the badge with no path down.
+    #[tokio::test]
+    async fn a_rollover_that_is_no_longer_pending_takes_its_warning_back_down() {
+        let season = Mutex::new(Some(LoadedSeason {
+            week: 3,
+            warnings: vec!["something else entirely".to_string()],
+            ..LoadedSeason::default()
+        }));
+        note_failure(&season, "42", 3, 4, "timed out").await;
+
+        clear_failure(&season).await;
+
+        assert_eq!(
+            season.lock().await.as_ref().unwrap().warnings,
+            vec!["something else entirely".to_string()],
+            "the rollover warning goes, and nothing else does"
         );
     }
 }
