@@ -1,6 +1,6 @@
 [package]
 name = "draft-assistant"
-version = "0.3.0"
+version = "0.3.1"
 description = "Local-first fantasy football draft assistant (Sleeper second screen)"
 authors = ["Justin"]
 edition = "2021"
