@@ -44,7 +44,7 @@ describe("inline runs", () => {
     expect(inlineTokens("**x**")).toEqual([{ kind: "bold", text: "x" }]);
   });
 
-  it("leaves underscores alone — player keys are not italics", () => {
+  it("leaves underscores alone: player keys are not italics", () => {
     expect(inlineTokens("my_roster and adp_ppr")).toEqual([
       { kind: "text", text: "my_roster and adp_ppr" },
     ]);

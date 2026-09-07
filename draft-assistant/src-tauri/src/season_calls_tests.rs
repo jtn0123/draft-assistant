@@ -194,7 +194,7 @@ fn a_sidelined_starter_becomes_a_call_the_maths_would_not_raise() {
     );
     assert_eq!(
         call.reason.as_deref(),
-        Some("WADDLE is listed Out — pick a replacement")
+        Some("WADDLE is listed Out, pick a replacement")
     );
     assert!(call.why.contains("is listed out this week"));
     assert!((call.gain - -3.0).abs() < 1e-9, "an honest, negative gain");

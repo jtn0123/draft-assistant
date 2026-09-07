@@ -184,7 +184,7 @@ impl Engine {
                 Ok((
                     rosters,
                     Some(format!(
-                        "rosters could not be refreshed ({error}) \u{2014} showing the ones last seen {age_hours}h ago"
+                        "rosters could not be refreshed ({error}), showing the ones last seen {age_hours}h ago"
                     )),
                 ))
             }
@@ -217,7 +217,7 @@ impl Engine {
                 Ok((
                     state,
                     Some(format!(
-                        "which NFL week it is could not be checked ({error}) \u{2014} showing the week last seen {age_hours}h ago"
+                        "which NFL week it is could not be checked ({error}), showing the week last seen {age_hours}h ago"
                     )),
                 ))
             }

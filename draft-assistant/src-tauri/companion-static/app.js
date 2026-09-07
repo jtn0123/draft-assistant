@@ -159,7 +159,7 @@
         const body = await response.json().catch(() => ({}));
         if (response.status !== 200 || !body.token) {
           const late = response.status === 429;
-          const message = late ? "Too many tries — wait a minute." : "That code did not work.";
+          const message = late ? "Too many tries. Wait a minute." : "That code did not work.";
           dispatch({ type: "pair-error", message });
           return;
         }
@@ -343,7 +343,7 @@
         spans(
           facts,
           [null, `Tier ${rec.tier}`],
-          [null, `ADP ${rec.adp === null ? "—" : rec.adp.toFixed(1)}`],
+          [null, `ADP ${rec.adp === null ? "-" : rec.adp.toFixed(1)}`],
           [null, typeof survives === "number" && `Survives ${Math.round(survives * 100)}%`],
         );
         const list = card.appendChild(el("ul", "reasons"));
@@ -427,12 +427,12 @@
       const live = view.live?.totals;
       const projected =
         typeof head.my_projected === "number" &&
-        `Projected ${head.my_projected.toFixed(1)} – ${head.opp_projected.toFixed(1)}`;
+        `Projected ${head.my_projected.toFixed(1)} - ${head.opp_projected.toFixed(1)}`;
       spans(
         header,
         ["headline", `Week ${view.week}`],
-        [null, `${view.matchup?.my_name ?? "You"} vs ${head.opponent_name ?? "—"}`],
-        ["mine", live && `${live.my_live_points.toFixed(1)} – ${live.opp_live_points.toFixed(1)}`],
+        [null, `${view.matchup?.my_name ?? "You"} vs ${head.opponent_name ?? "-"}`],
+        ["mine", live && `${live.my_live_points.toFixed(1)} - ${live.opp_live_points.toFixed(1)}`],
         ["muted", projected],
       );
       const behind = state.seasonHealth?.consecutive_failures ?? 0;

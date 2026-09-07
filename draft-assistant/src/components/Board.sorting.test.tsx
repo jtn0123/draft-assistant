@@ -191,7 +191,7 @@ describe("Board sorting", () => {
     const { container, sortBy } = board();
     sortBy("Surv");
     const survival = [...container.querySelectorAll(".board-body")].map((row) => row.children[9]);
-    expect(survival.map((c) => c.textContent)).toEqual(["10%", "90%", "–"]);
+    expect(survival.map((c) => c.textContent)).toEqual(["10%", "90%", "-"]);
     expect(survival[0].className).toContain("surv-low");
     expect(survival[1].className).toContain("surv-high");
     expect(survival[2].className).toContain("muted");

@@ -90,10 +90,11 @@ fn resolve_provider(config: &AppConfig, has_key: bool, cli_available: bool) -> &
 /// reads the config — and both poll ticks — waited on the Keychain.
 ///
 /// Committing is the clone-save-commit the rest of the app uses: the live
-/// config is re-read *after* the wait, edited on a copy, written, and only
-/// then swapped in. Nothing the pollers did while the Keychain was busy is
-/// rolled back, and a failed save leaves memory and disk agreeing.
-async fn store_key_unlocked<F, Fut, S>(
+/// config is re-read *after* the wait, edited on a copy, encoded, swapped in,
+/// and only then written, with the lock released again for the write.
+/// Nothing the pollers did while the Keychain was busy is rolled back, and a
+/// write that fails puts the one field back so memory and disk agree.
+async fn store_key_unlocked<F, Fut, S, W>(
     config: &Mutex<AppConfig>,
     store: F,
     save: S,
@@ -101,15 +102,43 @@ async fn store_key_unlocked<F, Fut, S>(
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<Option<String>, String>>,
-    S: FnOnce(&AppConfig) -> Result<(), String>,
+    S: FnOnce(&AppConfig) -> Result<W, String>,
+    W: Finish,
 {
     let in_file = store().await?;
-    let mut config = config.lock().await;
-    let mut next = config.clone();
-    next.anthropic_api_key = in_file;
-    save(&next)?;
-    *config = next;
+    let mut guard = config.lock().await;
+    let mut next = guard.clone();
+    let previous = std::mem::replace(&mut next.anthropic_api_key, in_file);
+    let write = save(&next)?;
+    *guard = next;
+    drop(guard);
+    if let Err(why) = write.finish().await {
+        config.lock().await.anthropic_api_key = previous;
+        return Err(why);
+    }
     Ok(())
+}
+
+/// What `store_key_unlocked`'s save still has to do once the lock is
+/// released: nothing, for a save that finished under it (the tests), or the
+/// write itself, for one that was only prepared there.
+trait Finish {
+    fn finish(self) -> impl std::future::Future<Output = Result<(), String>>;
+}
+
+impl Finish for () {
+    async fn finish(self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// A config write prepared under the lock and run after it.
+struct Deferred<Fut>(Fut);
+
+impl<Fut: std::future::Future<Output = Result<(), String>>> Finish for Deferred<Fut> {
+    async fn finish(self) -> Result<(), String> {
+        self.0.await
+    }
 }
 
 /// Store (or clear, with an empty string) the Anthropic API key.
@@ -134,7 +163,12 @@ async fn set_api_key_inner(state: &AppState, key: String) -> Result<bool, String
     store_key_unlocked(
         &state.config,
         || async move { engine.store_api_key(next).await },
-        |config| state.engine.save_config(config),
+        |config| {
+            state
+                .engine
+                .prepare_config_save(config)
+                .map(|pending| Deferred(pending.write()))
+        },
     )
     .await?;
     Ok(stored)
@@ -162,9 +196,14 @@ async fn set_chat_provider_inner(
         PROVIDER_CLI => PROVIDER_CLI,
         other => return Err(format!("unknown chat provider '{other}'")),
     };
-    let mut config = state.config.lock().await;
-    config.chat_provider = Some(chosen.to_string());
-    state.engine.save_config(&config)?;
+    let mut guard = state.config.lock().await;
+    guard.chat_provider = Some(chosen.to_string());
+    let pending = state.engine.prepare_config_save(&guard)?;
+    // Copied, so that neither the write nor the Keychain lookup below holds
+    // the lock.
+    let config = guard.clone();
+    drop(guard);
+    pending.write().await?;
     let has_key = state.engine.api_key(&config).await.is_some();
     Ok(resolve_provider(
         &config,
@@ -228,9 +267,12 @@ pub async fn set_chat_budget(state: State<'_, AppState>, dollars: f64) -> Result
 
 async fn set_chat_budget_inner(state: &AppState, dollars: f64) -> Result<f64, String> {
     let dollars = checked_budget(dollars)?;
-    let mut config = state.config.lock().await;
-    config.chat_budget_usd = Some(dollars);
-    state.engine.save_config(&config)?;
+    let pending = {
+        let mut config = state.config.lock().await;
+        config.chat_budget_usd = Some(dollars);
+        state.engine.prepare_config_save(&config)?
+    };
+    pending.write().await?;
     Ok(dollars)
 }
 
@@ -381,14 +423,14 @@ pub(crate) async fn answer_holding(
     let call = async move {
         if provider == PROVIDER_CLI {
             let cli = cli.ok_or_else(|| {
-                "Claude Code CLI not found — install it or add an API key".to_string()
+                "Claude Code CLI not found: install it or add an API key".to_string()
             })?;
             chat_cli::ask(&cli, model, effort, &context.joined(), &messages)
                 .await
                 .map_err(chat::ChatError::from)
         } else {
             let api_key = api_key
-                .ok_or_else(|| "no Anthropic API key set — add one in Settings".to_string())?;
+                .ok_or_else(|| "no Anthropic API key set: add one in Settings".to_string())?;
             chat::ask(
                 // Not the Sleeper client: its eight-second budget cut off every
                 // answer that took longer than a board refresh.

@@ -156,7 +156,7 @@ async fn yahoo_begin_connect_inner(state: &AppState) -> Result<YahooConnectStart
     let store = store_for(state.engine.data_dir.clone(), state.yahoo.keychain).await?;
     let (credentials, _) = read_secrets(store).await?;
     let credentials = credentials.ok_or(
-        "Yahoo is not set up — paste your Yahoo app's client id and secret in Settings first",
+        "Yahoo is not set up. Paste your Yahoo app's client id and secret in Settings first",
     )?;
     let redirect = state.yahoo.hosts.redirect_uri.clone();
     let nonce = nonce()?;
@@ -219,16 +219,16 @@ pub(crate) async fn finish_with(
     state: String,
 ) -> Result<(), String> {
     let Some(expected) = yahoo.take_state().await else {
-        return Err("no Yahoo sign-in is in progress — use Connect first".to_string());
+        return Err("no Yahoo sign-in is in progress, use Connect first".to_string());
     };
     if expected != state.trim() {
         // A reply from some other sign-in is not a typo to correct, so this one
         // stays consumed and the user starts again.
-        return Err("that code belongs to a different sign-in — start Connect again".to_string());
+        return Err("that code belongs to a different sign-in, start Connect again".to_string());
     }
     let store = store_for(engine.data_dir.clone(), yahoo.keychain).await?;
     let (credentials, _) = read_secrets(store.clone()).await?;
-    let credentials = credentials.ok_or("Yahoo is not set up — save your app credentials first")?;
+    let credentials = credentials.ok_or("Yahoo is not set up, save your app credentials first")?;
     let tokens = match OauthClient::with_base(yahoo.hosts.login_base.clone())
         .exchange_code(&credentials, &code, &yahoo.hosts.redirect_uri)
         .await
@@ -245,9 +245,9 @@ pub(crate) async fn finish_with(
             // wrapper above writes the line now, so this returns plainly.
             return Err(match error {
                 AuthError::Transport(_) => {
-                    format!("could not reach Yahoo to finish signing in — {error}")
+                    format!("could not reach Yahoo to finish signing in: {error}")
                 }
-                _ => "Yahoo rejected that code — check it and try again".to_string(),
+                _ => "Yahoo rejected that code, check it and try again".to_string(),
             });
         }
     };

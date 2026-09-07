@@ -24,7 +24,7 @@ pub struct SeasonHeader {
     /// the regular season: once `playoff_status` is set the bracket is cut and
     /// the percentage is a flat 1 or 0, which the screen must not print.
     pub playoff_odds: f64,
-    /// "In the playoffs — seed 3" or "Missed the playoffs", once the regular
+    /// "In the playoffs: seed 3" or "Missed the playoffs", once the regular
     /// season is over. `None` while the percentage still means something.
     #[serde(default)]
     pub playoff_status: Option<String>,

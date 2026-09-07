@@ -195,7 +195,7 @@ describe("App live workflow", () => {
     h.api.loadSeason.mockResolvedValue(seasonFixture());
 
     render(<App />);
-    expect(await screen.findByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
+    expect(await screen.findByText("vs punt_god · 122.4 - 108.9")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Season" })).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -210,7 +210,7 @@ describe("App live workflow", () => {
     await screen.findByRole("heading", { name: initial.league.name });
     await user.click(screen.getByRole("button", { name: "Season" }));
 
-    expect(await screen.findByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
+    expect(await screen.findByText("vs punt_god · 122.4 - 108.9")).toBeInTheDocument();
     expect(h.api.loadSeason).toHaveBeenCalledWith(false);
     // Playoff odds come through as a percentage, not a raw fraction — once in
     // the header strip and once in the standings row.
@@ -227,7 +227,7 @@ describe("App live workflow", () => {
     render(<App />);
     await screen.findByRole("heading", { name: initial.league.name });
     await user.click(screen.getByRole("button", { name: "Season" }));
-    await screen.findByText("vs punt_god · 122.4 – 108.9");
+    await screen.findByText("vs punt_god · 122.4 - 108.9");
 
     const standings = screen.getByRole("tab", { name: "Standings" });
     expect(standings).toHaveAttribute("aria-selected", "true");
@@ -273,7 +273,7 @@ describe("App live workflow", () => {
     expect(screen.getAllByText(/Sleeper timed out/)).toHaveLength(2);
 
     await user.click(retry);
-    expect(await screen.findByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
+    expect(await screen.findByText("vs punt_god · 122.4 - 108.9")).toBeInTheDocument();
     expect(h.api.loadSeason).toHaveBeenLastCalledWith(true);
   });
 });

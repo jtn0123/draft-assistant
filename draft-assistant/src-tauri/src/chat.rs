@@ -191,7 +191,7 @@ async fn ask_at(
         messages,
     } = call;
     if api_key.trim().is_empty() {
-        return Err("no Anthropic API key set — add one in Settings"
+        return Err("no Anthropic API key set, add one in Settings"
             .to_string()
             .into());
     }

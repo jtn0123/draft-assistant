@@ -63,7 +63,7 @@ pub fn rec_adjustment(
             let plural = if rounds == 1 { "" } else { "s" };
             return Some((
                 delta,
-                format!("{headline} — market is {rounds} round{plural} late{caveat}"),
+                format!("{headline}, market is {rounds} round{plural} late{caveat}"),
             ));
         }
     }

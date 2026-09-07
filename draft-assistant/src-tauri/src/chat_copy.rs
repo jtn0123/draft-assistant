@@ -24,7 +24,7 @@ already spent the picks named; picks the user traded away are not theirs to \
 plan around, and ones they acquired are. Where the order reverses instead of \
 snaking, count the gap to their next pick from the order given, not from a \
 plain snake. Round prices, where present, are what this draft has actually \
-paid — use them for value, not a generic chart.
+paid. Use them for value, not a generic chart.
 
 Kickers and defences are last-two-rounds picks, always. Their points over \
 replacement look competitive from about the seventh round on, but that value \
@@ -35,7 +35,7 @@ that.
 
 In season, the lineup rows are the user's BEST lineup, not the one they have \
 set: if the two differ, say what to change. A player carrying an injury tag \
-(Q, D, O) may not play at all — weigh that against the projection rather \
+(Q, D, O) may not play at all. Weigh that against the projection rather \
 than reading the projection as settled.
 
 This app cannot draft, set a lineup, or write anything to Sleeper. Never tell \
@@ -58,19 +58,19 @@ pub fn effort_note(effort: crate::chat::Effort) -> (&'static str, &'static str) 
     use crate::chat::Effort;
     match effort {
         Effort::Off => (
-            "Adaptive thinking disabled — Claude answers without a reasoning pass",
+            "Adaptive thinking disabled: Claude answers without a reasoning pass",
             "no extended thinking",
         ),
         Effort::Low => (
-            "Most efficient — significant token savings, some capability reduction",
+            "Most efficient: significant token savings, some capability reduction",
             "low effort · fastest",
         ),
         Effort::Medium => (
-            "Balanced — moderate token savings",
+            "Balanced: moderate token savings",
             "medium effort · balanced",
         ),
         Effort::High => (
-            "Default — spends as many tokens as needed for excellent results",
+            "Default: spends as many tokens as needed for excellent results",
             "high effort · the default",
         ),
         Effort::XHigh => (
@@ -78,7 +78,7 @@ pub fn effort_note(effort: crate::chat::Effort) -> (&'static str, &'static str) 
             "xhigh effort · sustained reasoning",
         ),
         Effort::Max => (
-            "No constraints on token spend — deepest analysis",
+            "No constraints on token spend: deepest analysis",
             "max effort · deepest, slowest",
         ),
     }

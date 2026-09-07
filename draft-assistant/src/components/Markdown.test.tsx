@@ -103,9 +103,9 @@ describe("Markdown", () => {
    * ran together into a wall of text, so a wrapped paragraph keeps its breaks.
    */
   it("keeps the line breaks inside a paragraph", () => {
-    const { container } = render(<Markdown text={"Bowers — value\nOdunze — upside"} />);
+    const { container } = render(<Markdown text={"Bowers: value\nOdunze: upside"} />);
     const paragraph = container.querySelector("p");
-    expect(paragraph?.textContent).toBe("Bowers — value\nOdunze — upside");
+    expect(paragraph?.textContent).toBe("Bowers: value\nOdunze: upside");
   });
 
   it("renders nothing rather than failing when there is nothing to render", () => {

@@ -41,7 +41,7 @@ pub(super) fn window(messages: &[ChatMessage]) -> Result<&[ChatMessage], String>
         // Nothing survived the trim: one turn on its own is over the byte
         // limit, and no window of the thread can carry it.
         return Err(format!(
-            "that question is too long to send ({} KB) — ask a shorter one",
+            "that question is too long to send ({} KB), ask a shorter one",
             bytes_from(messages.len() - 1) / 1024
         ));
     }
@@ -69,7 +69,7 @@ pub fn budget_of(config: &AppConfig) -> f64 {
 pub(super) fn check_budget(spent: f64, cap: f64, screen: &str) -> Result<(), String> {
     if cap > 0.0 && spent >= cap {
         return Err(format!(
-            "Ask Claude has spent ${spent:.2} of its ${cap:.2} cap on the {screen} screen — raise the budget above to keep asking."
+            "Ask Claude has spent ${spent:.2} of its ${cap:.2} cap on the {screen} screen. Raise the budget above to keep asking."
         ));
     }
     Ok(())
@@ -87,7 +87,7 @@ pub(super) fn checked_budget(dollars: f64) -> Result<f64, String> {
     }
     if dollars < 0.0 {
         return Err(format!(
-            "a budget cannot be negative (${dollars:.2}) — 0 is the way to turn the cap off"
+            "a budget cannot be negative (${dollars:.2}), 0 is the way to turn the cap off"
         ));
     }
     Ok(dollars)

@@ -149,7 +149,7 @@ export function CompanionPanel({ onClose }: { onClose: () => void }) {
               ? "Asking this Mac…"
               : on
                 ? `Listening on port ${status.port}`
-                : "Off — nothing is being served"}
+                : "Off, nothing is being served"}
           </span>
         </div>
 

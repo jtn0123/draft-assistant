@@ -378,7 +378,7 @@ impl Engine {
     ) -> Result<LoadedLeague, String> {
         if crate::view_types::is_yahoo_key(id) {
             let client = yahoo
-                .ok_or("that is a Yahoo league — connect your Yahoo account in Settings first")?;
+                .ok_or("that is a Yahoo league, connect your Yahoo account in Settings first")?;
             return self.load_yahoo_league(client, id, force).await;
         }
         match self.load_league(id, force).await {

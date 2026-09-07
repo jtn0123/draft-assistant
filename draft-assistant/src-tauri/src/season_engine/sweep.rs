@@ -115,7 +115,7 @@ impl Engine {
         }
         if !failed.is_empty() {
             warnings.push(format!(
-                "matchups unavailable for week{} {} \u{2014} playoff odds and season totals are approximate",
+                "matchups unavailable for week{} {}, playoff odds and season totals are approximate",
                 if failed.len() == 1 { "" } else { "s" },
                 failed
                     .iter()

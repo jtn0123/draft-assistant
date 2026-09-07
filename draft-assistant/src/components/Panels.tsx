@@ -178,7 +178,7 @@ export function SidePanel({ view }: { view: DraftView }) {
         </div>
         {view.position_run && (
           <span className="run-note">
-            {view.position_run.position} run in progress — {view.position_run.count} of the last{" "}
+            {view.position_run.position} run in progress: {view.position_run.count} of the last{" "}
             {view.position_run.window}
           </span>
         )}
@@ -221,7 +221,7 @@ function PickMarket({ prices }: { prices: PickPrice[] }) {
         {prices.map((price) => (
           <div className="price-row" key={price.round} title={PRICE_NOTE}>
             <span className="muted num">R{price.round}</span>
-            <span className="mid ellipsis">{price.example ?? "—"}</span>
+            <span className="mid ellipsis">{price.example ?? "-"}</span>
             <span className="num price-points">{fmt(price.points)}</span>
           </div>
         ))}
@@ -233,7 +233,7 @@ function PickMarket({ prices }: { prices: PickPrice[] }) {
 /** Said in full wherever the number is shown, because "R7 · 12" on its own
  * invites being read as a projection rather than a price. */
 const PRICE_NOTE =
-  "The median VORP taken in this round of this league's draft — what a pick " +
+  "The median VORP taken in this round of this league's draft: what a pick" +
   "there has actually been worth, and who went at that price.";
 
 /**

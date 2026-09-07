@@ -43,13 +43,13 @@ function clockSentence(d: DraftView["draft"], left: number | null): string {
   if (d.paused) return "The draft is paused.";
   const pick = `pick ${pickLabel(d.current_pick, d.teams)}`;
   const time = left === null ? "" : `, ${spanLabel(left)} left`;
-  if (d.is_my_pick) return `You are on the clock — ${pick}${time}.`;
+  if (d.is_my_pick) return `You are on the clock: ${pick}${time}.`;
   const who = d.on_clock_name ?? `slot ${d.on_clock_slot}`;
   const wait =
     d.picks_until_mine === null
       ? ""
       : ` ${d.picks_until_mine} pick${d.picks_until_mine === 1 ? "" : "s"} until your turn.`;
-  return `${who} is on the clock — ${pick}${time}.${wait}`;
+  return `${who} is on the clock: ${pick}${time}.${wait}`;
 }
 
 /**
@@ -188,7 +188,7 @@ export function ClockBanner({ view }: { view: DraftView }) {
       <div className="clock-cell clock-next">
         <span className="label">Your picks</span>
         <span className="clock-next-list num">
-          {shownPicks.map((p) => pickLabel(p, d.teams)).join(" · ") || "–"}
+          {shownPicks.map((p) => pickLabel(p, d.teams)).join(" · ") || "-"}
           {morePicks > 0 && <span className="muted"> +{morePicks}</span>}
         </span>
       </div>

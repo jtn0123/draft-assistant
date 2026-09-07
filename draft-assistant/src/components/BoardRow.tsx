@@ -45,9 +45,9 @@ export const BoardRow = memo(function BoardRow({
       </span>
       {showSecondOpinion && <SecondOpinionCell player={p} />}
       <span className="mid board-team">
-        <PlayerName name={p.team ?? "–"} team={p.team} />
+        <PlayerName name={p.team ?? "-"} team={p.team} />
       </span>
-      <span className="mid right">{p.bye_week ?? "–"}</span>
+      <span className="mid right">{p.bye_week ?? "-"}</span>
       <span className="strong right">{fmt(p.points)}</span>
       <span className="mid right">{fmt(p.vorp)}</span>
       <span className={`right tier tier-${Math.min(p.tier, 3)}`}>T{p.tier}</span>

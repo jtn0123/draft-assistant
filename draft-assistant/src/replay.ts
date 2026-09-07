@@ -62,7 +62,7 @@ export async function readDump<V>(spec: FeedSpec<V>): Promise<V> {
     body = (await response.json()) as unknown;
   } catch {
     throw new Error(
-      `could not read ${spec.what} from ${url} — it is not a state dump ` +
+      `could not read ${spec.what} from ${url}: it is not a state dump ` +
         `(check the path, and that the replay server is writing it)`,
     );
   }

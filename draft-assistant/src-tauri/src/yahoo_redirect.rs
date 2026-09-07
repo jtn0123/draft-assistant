@@ -110,7 +110,7 @@ pub fn catch_redirect_on_within_unless(
         }
         if let Some(error) = redirect.error {
             return Err(AuthError::Invalid(format!(
-                "Yahoo did not authorize the app ({error}) — start Connect again"
+                "Yahoo did not authorize the app ({error}), start Connect again"
             )));
         }
         // No code and no error: a favicon fetch or a bare `/`. Answered, and
@@ -134,7 +134,7 @@ fn accept_until(
                 let left = deadline.saturating_duration_since(Instant::now());
                 if left.is_zero() {
                     return Err(AuthError::Transport(
-                        "the browser never came back with a code — start Connect again".into(),
+                        "the browser never came back with a code, start Connect again".into(),
                     ));
                 }
                 std::thread::sleep(left.min(POLL));

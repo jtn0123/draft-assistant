@@ -200,7 +200,7 @@ export function Board({
         <input
           ref={searchRef}
           className="text-input board-search"
-          placeholder="Search players — press /"
+          placeholder="Search players (press /)"
           aria-label="Search players"
           value={query}
           onChange={(e) => changeQuery(e.target.value)}

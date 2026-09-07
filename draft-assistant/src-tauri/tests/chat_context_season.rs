@@ -19,7 +19,7 @@ fn context() -> String {
 
 /// The same context with an empty scoreboard, i.e. before anything has kicked
 /// off. The fixture's live game started in the second quarter, and a start/sit
-/// call about two players already on the field is no longer a call — so a test
+/// call about two players already on the field is no longer a call, so a test
 /// about the advice has to be taken at a moment the advice can be acted on.
 fn context_before_kickoff() -> String {
     let (loaded, mut season, config) = common::fixture();
@@ -39,7 +39,7 @@ fn the_context_opens_with_the_league_and_the_week_it_is_about() {
     let context = context();
     assert_eq!(
         line(&context, "League:"),
-        "League: Fixture League — week 2 of season 2025"
+        "League: Fixture League, week 2 of season 2025"
     );
 }
 
@@ -80,7 +80,10 @@ fn every_start_sit_call_is_offered_with_the_reason_for_it() {
         .lines()
         .find(|l| l.contains(" over ") && l.contains(" for "))
         .unwrap_or_else(|| panic!("no start/sit line in:\n{context}"));
-    assert!(call.contains(" — "), "{call}");
+    // The reason follows the points swing after a comma; the line reads
+    // "start X over Y for +2.4, <why>".
+    let why = call.rsplit_once(", ").map(|(_, why)| why).unwrap_or("");
+    assert!(!why.is_empty(), "{call}");
 }
 
 #[test]

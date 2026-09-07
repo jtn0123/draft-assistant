@@ -119,7 +119,7 @@ pub struct StandingsRow {
 /// What to say about a team once the bracket is cut.
 pub fn playoff_status(seed: u32, playoff_teams: u32) -> String {
     if seed <= playoff_teams.max(1) {
-        format!("In the playoffs \u{2014} seed {seed}")
+        format!("In the playoffs: seed {seed}")
     } else {
         "Missed the playoffs".to_string()
     }
@@ -340,9 +340,9 @@ pub fn standings(
             seed: i as u32 + 1,
             name: name_of(t.roster_id),
             record: if t.ties > 0 {
-                format!("{}\u{2013}{}\u{2013}{}", t.wins, t.losses, t.ties)
+                format!("{}-{}-{}", t.wins, t.losses, t.ties)
             } else {
-                format!("{}\u{2013}{}", t.wins, t.losses)
+                format!("{}-{}", t.wins, t.losses)
             },
             wins: t.wins,
             losses: t.losses,

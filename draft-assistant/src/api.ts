@@ -264,7 +264,7 @@ function browserApi(): Api {
   // always `await` or `.catch()`, and the preview must fail the same way the
   // desktop app does.
   const readOnly = (advice: string): Promise<never> =>
-    Promise.reject(new Error(`browser preview is read-only — ${advice}`));
+    Promise.reject(new Error(`browser preview is read-only: ${advice}`));
   // Yahoo needs a keychain and a browser the app can open, so every step of
   // it says the same thing rather than half-working.
   const needsDesktop = (): Promise<never> =>
@@ -326,7 +326,7 @@ function browserApi(): Api {
     recordManualPick: () => readOnly("run the desktop app to draft"),
     undoManualPick: () => readOnly("run the desktop app to draft"),
     clearKeepers: () => readOnly("run the desktop app to draft"),
-    exportState: () => Promise.resolve("browser preview — no export"),
+    exportState: () => Promise.resolve("browser preview: no export"),
     importSecondOpinion: () => readOnly("importing a CSV requires the desktop app"),
     headshot: (playerId) =>
       Promise.resolve(

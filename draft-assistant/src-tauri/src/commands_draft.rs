@@ -39,7 +39,7 @@ use tick::{
 /// What every command and tick says when the league moved on under it. The
 /// same sentence `same_league` uses on the season side, so the screen shows
 /// one wording for one situation.
-const LEAGUE_CHANGED: &str = "the league changed while this was loading — try again";
+const LEAGUE_CHANGED: &str = "the league changed while this was loading, try again";
 
 /// The ids a failure on this screen should be tied to, read off the league
 /// that is open.
@@ -93,7 +93,7 @@ async fn resolve_yahoo_league(state: &AppState, numeric: &str) -> Result<String,
         .map(|league| league.league_key)
         .ok_or_else(|| {
             format!(
-                "no league {numeric} on your Yahoo account — check you are signed in as \
+                "no league {numeric} on your Yahoo account. Check you are signed in as \
                  the manager who plays in it, or paste the league key (449.l.{numeric})"
             )
         })
@@ -165,7 +165,11 @@ async fn add_league_inner(
         stored.platform = platform_for(&league_id).to_string();
     }
     next.active_league_id = Some(league_id);
-    state.engine.save_config(&next)?;
+    // The write happens before the new config is the one in memory: a save
+    // that fails must leave no half-added league behind, and the guard is
+    // still held, so no reader can see either version mid-swap. The cost is
+    // the disk write under the lock, which a league switch pays once.
+    state.engine.prepare_config_save(&next)?.write().await?;
     *config = next;
     let view = view_from(&new_loaded, &config);
     // Never hold config while waiting for loaded: the live path reads loaded first.
@@ -200,7 +204,9 @@ async fn set_my_username_inner(state: &AppState, username: String) -> Result<Str
         .map_err(to_message)?;
     let mut config = state.config.lock().await;
     config.my_user_id = Some(user.user_id.clone());
-    state.engine.save_config(&config)?;
+    let pending = state.engine.prepare_config_save(&config)?;
+    drop(config);
+    pending.write().await?;
     Ok(user.user_id)
 }
 

@@ -57,7 +57,7 @@ describe("importNote", () => {
   });
 
   it("names the source once something is loaded", () => {
-    expect(importNote(1_700_000_000, "Clay")).toMatch(/^Clay loaded .* — import again to replace$/);
+    expect(importNote(1_700_000_000, "Clay")).toMatch(/^Clay loaded .*, import again to replace$/);
   });
 });
 

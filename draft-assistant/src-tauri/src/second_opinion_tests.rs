@@ -430,7 +430,7 @@ fn ranks_built_for_another_format_are_worth_half_and_say_so() {
     let (_, reason) = rec_adjustment(&with_opinion(21, 9, Some(58.0)), 12, 1.0).expect("a");
     assert_eq!(
         reason,
-        "Clay has him WR9 — market is 3 rounds late (half-PPR ranks)"
+        "Clay has him WR9, market is 3 rounds late (half-PPR ranks)"
     );
     let (_, reason) = rec_adjustment(&with_opinion(9, 41, None), 12, 0.0).expect("a");
     assert!(reason.ends_with(" (half-PPR ranks)"), "{reason}");
@@ -445,11 +445,11 @@ fn the_reason_counts_the_market_lag_in_rounds_when_there_is_an_adp() {
     // Clay's overall rank 22, ADP 58, twelve-team league: three rounds late.
     let (_, reason) =
         rec_adjustment(&with_opinion(21, 9, Some(58.0)), 12, HALF_PPR).expect("a reason");
-    assert_eq!(reason, "Clay has him WR9 — market is 3 rounds late");
+    assert_eq!(reason, "Clay has him WR9, market is 3 rounds late");
     // One round reads as one round, not "1 rounds".
     let (_, reason) =
         rec_adjustment(&with_opinion(21, 9, Some(36.0)), 12, HALF_PPR).expect("a reason");
-    assert_eq!(reason, "Clay has him WR9 — market is 1 round late");
+    assert_eq!(reason, "Clay has him WR9, market is 1 round late");
     // An ADP that is ahead of the source falls back to the plain comparison.
     let (_, reason) =
         rec_adjustment(&with_opinion(21, 9, Some(10.0)), 12, HALF_PPR).expect("a reason");

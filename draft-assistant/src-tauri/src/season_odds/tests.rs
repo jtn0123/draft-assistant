@@ -73,7 +73,7 @@ fn a_tie_is_worth_half_a_win_when_the_seeds_are_cut() {
         rows[0].roster_id, 1,
         "1-0-1 outranks 1-1 despite fewer points"
     );
-    assert_eq!(rows[0].record, "1\u{2013}0\u{2013}1");
+    assert_eq!(rows[0].record, "1-0-1");
     assert_eq!(rows[0].seed, 1);
     // And the odds agree with the seeding they are printed beside.
     assert_eq!(rows[0].playoff_odds, 1.0);
@@ -168,7 +168,7 @@ fn seeding_breaks_ties_on_points_and_flags_my_team() {
     let rows = standings(&teams, &[], 1, &|id| format!("team{id}"), Some(1), 5);
     assert_eq!(rows[0].roster_id, 2);
     assert_eq!(rows[0].seed, 1);
-    assert_eq!(rows[1].record, "2\u{2013}0");
+    assert_eq!(rows[1].record, "2-0");
     assert!(rows[1].is_mine);
     assert!(!rows[0].is_mine);
 }
@@ -210,11 +210,11 @@ fn a_forty_point_lead_over_an_exhausted_roster_is_a_win() {
 /// has a label to show instead of it.
 #[test]
 fn once_the_bracket_is_cut_there_is_a_state_to_show_instead_of_a_percentage() {
-    assert_eq!(playoff_status(1, 6), "In the playoffs \u{2014} seed 1");
-    assert_eq!(playoff_status(6, 6), "In the playoffs \u{2014} seed 6");
+    assert_eq!(playoff_status(1, 6), "In the playoffs: seed 1");
+    assert_eq!(playoff_status(6, 6), "In the playoffs: seed 6");
     assert_eq!(playoff_status(7, 6), "Missed the playoffs");
     // A league that somehow reports no playoff teams still cuts somebody.
-    assert_eq!(playoff_status(1, 0), "In the playoffs \u{2014} seed 1");
+    assert_eq!(playoff_status(1, 0), "In the playoffs: seed 1");
     assert_eq!(playoff_status(2, 0), "Missed the playoffs");
 }
 

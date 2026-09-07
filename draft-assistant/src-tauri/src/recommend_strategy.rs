@@ -25,9 +25,12 @@ pub(super) fn strategy(ctx: &Context, a: &AvailablePlayer, tier_left: usize, sco
         }
     }
     // Byes: a starting lineup with four men off in week 9 loses week 9.
+    // Not for a kicker or a defence: one of each is rostered and streamed
+    // through its bye, so a clash with the quarterback's week costs nothing.
+    let bye_matters = !crate::board::is_late_only(&p.position);
     if let Some(bye) = p.bye_week {
         let stacked = ctx.inputs.my_byes.get(&bye).copied().unwrap_or(0);
-        if stacked > 0 {
+        if bye_matters && stacked > 0 {
             let penalty = (3.0 * stacked as f64).min(9.0);
             score.add(
                 -penalty,

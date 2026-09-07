@@ -139,7 +139,7 @@ fn standings_seed_by_record_and_their_odds_sum_to_the_bracket_size() {
     assert_eq!(v.standings.len(), 4);
     assert_eq!(v.standings[0].roster_id, 1, "2-0 seeds first");
     assert_eq!(v.standings[0].seed, 1);
-    assert_eq!(v.standings[0].record, "2\u{2013}0");
+    assert_eq!(v.standings[0].record, "2-0");
     assert!(v.standings[0].is_mine);
     assert_eq!(v.standings[3].roster_id, 4, "0-2 seeds last");
     assert!(v.standings.iter().skip(1).all(|s| !s.is_mine));

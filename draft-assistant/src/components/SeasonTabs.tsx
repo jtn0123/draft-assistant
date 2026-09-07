@@ -16,7 +16,7 @@ import { Headshot, PlayerName, PosBadge, SortHead, TeamAvatar, Empty } from "./b
 
 /** The placeholder for a column with nothing in it yet, the same glyph `fmt`
  *  prints for a missing number. */
-const BLANK = "–";
+const BLANK = "-";
 
 // ---------- standings ----------
 
@@ -33,7 +33,7 @@ const STANDINGS_COLUMNS: {
   { key: "name", label: "Team", right: false, initial: "asc", value: (r) => r.name },
   {
     key: "rec",
-    label: "W–L",
+    label: "W-L",
     right: true,
     initial: "desc",
     value: (r) => r.wins * 1000 - r.losses,

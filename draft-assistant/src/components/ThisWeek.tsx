@@ -11,7 +11,7 @@ import { setLineupView, useLineupView } from "../prefs";
 
 /** The placeholder for a cell with nothing in it, the same glyph `fmt` prints
  *  for a missing number so an empty name and an empty score read alike. */
-const BLANK = "–";
+const BLANK = "-";
 
 // ---------- calls to make ----------
 

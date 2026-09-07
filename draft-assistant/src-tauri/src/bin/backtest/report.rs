@@ -23,7 +23,7 @@ pub fn report(label: &str, games: &[Game]) -> serde_json::Value {
     println!("  band          games   said   won");
     for b in &c.buckets {
         println!(
-            "  {:.0}–{:.0}%{:>12}  {:5.0}% {:5.0}%",
+            "  {:.0}-{:.0}%{:>12}  {:5.0}% {:5.0}%",
             b.low * 100.0,
             b.high * 100.0,
             b.games,
@@ -59,7 +59,7 @@ pub fn holdout(games: &[Game]) {
     }
     let (scale, _) = best_sigma_scale(&fit);
     println!(
-        "\nholdout: scale {:.2} fitted on weeks 1–{cut} ({} games) → weeks {}–{last} ({} games) \
+        "\nholdout: scale {:.2} fitted on weeks 1-{cut} ({} games) → weeks {}-{last} ({} games) \
          log loss {:.3}, against {:.3} unscaled",
         scale,
         fit.len(),

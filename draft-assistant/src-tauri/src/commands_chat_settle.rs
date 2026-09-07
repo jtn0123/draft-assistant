@@ -36,9 +36,18 @@ impl Books {
         let running = config.chat_spend_usd.entry(self.key.clone()).or_insert(0.0);
         *running += cost;
         let running = *running;
+        // Encoded under the lock, written off it: this runs once per chat
+        // turn, and the write is a fsync and a rename that every other
+        // reader of the config would otherwise wait behind.
+        let pending = self.engine.prepare_config_save(&config);
+        drop(config);
         // A failure to write it down is not a reason to withhold the answer
         // the user already paid for; the next turn re-reads whatever did land.
-        if let Err(e) = self.engine.save_config(&config) {
+        let wrote = match pending {
+            Ok(pending) => pending.write().await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = wrote {
             crate::applog::warn(format!("could not record what Ask Claude spent: {e}"));
         }
         running

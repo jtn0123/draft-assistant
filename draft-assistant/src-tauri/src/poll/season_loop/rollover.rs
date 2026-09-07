@@ -141,7 +141,7 @@ pub async fn refresh_or_roll<E: SeasonEngine>(
     // live points on another league's screen.
     let loaded = loaded_ref.lock().await;
     if loaded.as_ref().map(|l| l.league.league_id.as_str()) != Some(league_id.as_str()) {
-        return Err("the league changed while this was loading \u{2014} try again".to_string());
+        return Err("the league changed while this was loading, try again".to_string());
     }
     let mut season = season_ref.lock().await;
     let season = season.as_mut().ok_or("season data not loaded")?;

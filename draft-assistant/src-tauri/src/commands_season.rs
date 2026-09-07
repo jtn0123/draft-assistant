@@ -139,9 +139,9 @@ fn same_league<'a>(
     loaded: Option<&'a LoadedLeague>,
     loaded_for: &str,
 ) -> Result<&'a LoadedLeague, String> {
-    let loaded = loaded.ok_or("the league was closed while this was loading — try again")?;
+    let loaded = loaded.ok_or("the league was closed while this was loading, try again")?;
     if loaded.league.league_id != loaded_for {
-        return Err("the league changed while this was loading — try again".to_string());
+        return Err("the league changed while this was loading, try again".to_string());
     }
     Ok(loaded)
 }

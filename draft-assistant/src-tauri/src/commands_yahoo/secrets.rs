@@ -99,9 +99,9 @@ pub async fn client_from(engine: &Engine, yahoo: &YahooState) -> Result<Arc<Yaho
     let store = store_for(engine.data_dir.clone(), yahoo.keychain).await?;
     let (credentials, tokens) = read_secrets(store).await?;
     let credentials = credentials.ok_or(
-        "Yahoo is not set up — paste your Yahoo app's client id and secret in Settings first",
+        "Yahoo is not set up: paste your Yahoo app's client id and secret in Settings first",
     )?;
-    let tokens = tokens.ok_or("not connected to Yahoo — use Connect in Settings")?;
+    let tokens = tokens.ok_or("not connected to Yahoo: use Connect in Settings")?;
     let client = Arc::new(YahooClient::with_hosts(
         credentials,
         tokens,

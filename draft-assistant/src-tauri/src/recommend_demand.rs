@@ -54,6 +54,20 @@ fn shared_slot(rules: &RosterRules, position: &str) -> &'static str {
     name
 }
 
+/// A roster slot named the way a drafter says it out loud rather than the way
+/// Sleeper spells it in its API. "fills an open WRRB_FLEX slot" is the wire
+/// format leaking onto the card; "fills an open RB/WR flex slot" is the same
+/// fact in English.
+pub(crate) fn slot_label(slot: &str) -> &str {
+    match slot {
+        "FLEX" => "flex",
+        "SUPER_FLEX" => "superflex",
+        "WRRB_FLEX" => "RB/WR flex",
+        "REC_FLEX" => "WR/TE flex",
+        other => other,
+    }
+}
+
 /// What the league starts at a position, in words that survive the
 /// arithmetic. The old phrase rounded 1.25 up and called it "about 2 with
 /// flex", which is two claims the score does not make: the league does not

@@ -140,7 +140,7 @@ echo 'Error: not authenticated' >&2
 exit 1"#,
     );
     let err = ask_script(&cli).await.expect_err("the script failed");
-    assert!(err.contains("run `claude` in Terminal"), "{err}");
+    assert!(err.contains("Run `claude` in Terminal"), "{err}");
     remove(&cli);
 }
 

@@ -322,7 +322,7 @@ fn why_start(
     let out_bye = !player_out.is_empty() && weekly.is_bye(player_out, week);
     if out_bye {
         return format!(
-            "{} is on bye this week \u{2014} anyone projected above zero beats an empty slot.",
+            "{} is on bye this week, anyone projected above zero beats an empty slot.",
             lookup.name(player_out)
         );
     }
@@ -334,7 +334,7 @@ fn why_start(
     }
     let out_points = weekly.get(player_out, week).unwrap_or(0.0);
     format!(
-        "{} projects {in_points:.1} against {:.1} for {} \u{2014} a {:+.1} swing on this week's projection.",
+        "{} projects {in_points:.1} against {:.1} for {}, a {:+.1} swing on this week's projection.",
         lookup.name(player_in),
         out_points,
         lookup.name(player_out),

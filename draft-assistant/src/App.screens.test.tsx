@@ -67,7 +67,7 @@ describe("the season screen before it has anything to show", () => {
     h.api.loadSeason.mockResolvedValue(seasonFixture());
     await loaded();
 
-    expect(await screen.findByText("Week 3 · 2–0 · 2nd of 1")).toBeInTheDocument();
+    expect(await screen.findByText("Week 3 · 2-0 · 2nd of 1")).toBeInTheDocument();
   });
 
   it("counts the league instead when none of the standings are the user's", async () => {
@@ -89,7 +89,7 @@ describe("the season screen before it has anything to show", () => {
     h.api.loadSeason.mockResolvedValue(seasonFixture());
     h.api.refreshData.mockResolvedValue(refreshed);
     await loaded();
-    await screen.findByText("Week 3 · 2–0 · 2nd of 1");
+    await screen.findByText("Week 3 · 2-0 · 2nd of 1");
     expect(h.api.loadSeason).toHaveBeenCalledTimes(1);
 
     await settle(() => {
@@ -132,7 +132,7 @@ describe("the chat panel", () => {
     resetPrefs();
     h.api.loadSeason.mockResolvedValue(seasonFixture());
     await loaded();
-    await screen.findByText("Week 3 · 2–0 · 2nd of 1");
+    await screen.findByText("Week 3 · 2-0 · 2nd of 1");
 
     await settle(() => {
       screen.getByRole("button", { name: "Ask Claude" }).click();

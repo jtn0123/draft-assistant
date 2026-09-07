@@ -84,7 +84,7 @@ impl Engine {
         // rather than panicking on the next view build.
         if draft.settings.teams == 0 || draft.settings.rounds == 0 {
             return Err(format!(
-                "draft {} reports {} teams and {} rounds — it has not been set up yet",
+                "draft {} reports {} teams and {} rounds, it has not been set up yet",
                 draft.draft_id, draft.settings.teams, draft.settings.rounds
             ));
         }
@@ -124,7 +124,7 @@ impl Engine {
                     let report = crate::second_opinion::apply(&table, &mut board);
                     if report.matched == 0 {
                         warnings.push(
-                            "imported projections matched nobody on this board — \
+                            "imported projections matched nobody on this board, \
                          check it is the right season"
                                 .into(),
                         );
@@ -139,7 +139,7 @@ impl Engine {
             };
         if board.len() < 200 {
             warnings.push(format!(
-                "board unusually small ({} players) — projections may be incomplete",
+                "board unusually small ({} players), projections may be incomplete",
                 board.len()
             ));
         }

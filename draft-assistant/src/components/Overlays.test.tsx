@@ -156,7 +156,7 @@ describe("a toast with something to do about it", () => {
     const onClick = vi.fn();
     render(
       <Toast
-        message="Could not mark Josh Downs as drafted — Sleeper is not answering"
+        message="Could not mark Josh Downs as drafted: Sleeper is not answering"
         action={{ label: "Try again", onClick }}
         onDismiss={onDismiss}
       />,

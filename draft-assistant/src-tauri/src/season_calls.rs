@@ -118,7 +118,7 @@ impl WeekFacts<'_> {
                 slot.slot,
                 best.points,
             ),
-            reason: Some(format!("{out_name} is listed {word} — pick a replacement")),
+            reason: Some(format!("{out_name} is listed {word}, pick a replacement")),
             locks_at_ms: None,
         }
     }

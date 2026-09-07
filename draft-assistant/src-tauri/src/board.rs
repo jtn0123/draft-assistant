@@ -326,7 +326,7 @@ pub fn build_board(
     }
 
     if scored.is_empty() {
-        warnings.push("no scored players — projections fetch likely failed".into());
+        warnings.push("no scored players, projections fetch likely failed".into());
         return BoardBuild {
             players: scored,
             replacement: ReplacementModel::default(),

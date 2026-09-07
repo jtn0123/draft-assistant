@@ -27,11 +27,11 @@ describe("the Refresh button", () => {
   it("asks the backend for the season again and shows what came back", async () => {
     mocks.refreshSeason.mockResolvedValue(refreshedView());
     render(<SeasonScreen view={view()} />);
-    expect(screen.getByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
+    expect(screen.getByText("vs punt_god · 122.4 - 108.9")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
-    expect(await screen.findByText("vs punt_god · 130.2 – 108.9")).toBeInTheDocument();
+    expect(await screen.findByText("vs punt_god · 130.2 - 108.9")).toBeInTheDocument();
     expect(mocks.refreshSeason).toHaveBeenCalledTimes(1);
   });
 
@@ -65,7 +65,7 @@ describe("the Refresh button", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Could not refresh the season: no league loaded");
-    expect(screen.getByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
+    expect(screen.getByText("vs punt_god · 122.4 - 108.9")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
   });
 
@@ -73,11 +73,11 @@ describe("the Refresh button", () => {
     mocks.refreshSeason.mockResolvedValue(refreshedView());
     const { rerender } = render(<SeasonScreen view={view()} />);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    expect(await screen.findByText("vs punt_god · 130.2 – 108.9")).toBeInTheDocument();
+    expect(await screen.findByText("vs punt_god · 130.2 - 108.9")).toBeInTheDocument();
 
     const base = view();
     rerender(<SeasonScreen view={{ ...base, header: { ...base.header, my_projected: 99.9 } }} />);
-    expect(screen.getByText("vs punt_god · 99.9 – 108.9")).toBeInTheDocument();
-    expect(screen.queryByText("vs punt_god · 130.2 – 108.9")).not.toBeInTheDocument();
+    expect(screen.getByText("vs punt_god · 99.9 - 108.9")).toBeInTheDocument();
+    expect(screen.queryByText("vs punt_god · 130.2 - 108.9")).not.toBeInTheDocument();
   });
 });

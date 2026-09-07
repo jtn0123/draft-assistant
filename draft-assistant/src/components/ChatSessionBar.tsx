@@ -78,7 +78,7 @@ export function ChatSessionBar({
       setRejected(
         typed.trim() === ""
           ? "A budget is a number of dollars. 0 turns the cap off."
-          : `“${typed.trim()}” is not a budget — 0 turns the cap off.`,
+          : `“${typed.trim()}” is not a budget. 0 turns the cap off.`,
       );
       setTyped(null);
       return;
@@ -109,7 +109,7 @@ export function ChatSessionBar({
         {/* Pinned above the saved ones, and always there: the thread the
             phones are reading is not one of this Mac's conversations. */}
         <option value={SHARED_SESSION_ID}>{SHARED_SESSION_LABEL}</option>
-        {!listed && <option value={currentId}>This chat — nothing asked yet</option>}
+        {!listed && <option value={currentId}>This chat, nothing asked yet</option>}
         {sessions.map((s) => (
           <option key={s.id} value={s.id}>
             {describeSession(s)}
@@ -159,8 +159,8 @@ export function ChatSessionBar({
       )}
       {onSubscription && (
         <span className="muted small">
-          Answers from Claude Code are billed to your Claude subscription, not to this cap — which
-          is why nothing is being counted here.
+          Answers from Claude Code are billed to your Claude subscription, not to this cap, which is
+          why nothing is being counted here.
         </span>
       )}
     </div>

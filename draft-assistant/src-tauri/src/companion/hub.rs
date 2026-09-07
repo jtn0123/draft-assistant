@@ -85,17 +85,15 @@ pub struct CompanionHub {
 }
 
 impl CompanionHub {
-    /// A hub with whatever was paired last time, or a fresh code and nothing
-    /// paired. Fails only if the machine's random source cannot be read, which
-    /// is not a state to carry on from: a guessable pairing code is the one
-    /// thing this must never have.
-    pub fn new(host_name: String, data_dir: PathBuf) -> Result<Self, String> {
-        let secrets = crate::yahoo_secrets::store_for(&data_dir);
-        Self::with_secrets(host_name, data_dir, secrets)
-    }
-
-    /// The same hub against a given store. This is what the tests build, so
-    /// that a test run never puts a device token in the developer's Keychain.
+    /// A hub against the given store, with whatever was paired last time, or
+    /// a fresh code and nothing paired. Fails only if the machine's random
+    /// source cannot be read, which is not a state to carry on from: a
+    /// guessable pairing code is the one thing this must never have.
+    ///
+    /// The store is always handed in. [`super::CompanionServer`] decides
+    /// between the Keychain and a file, and the tests pass a file in a
+    /// scratch directory so that a test run never puts a device token in the
+    /// developer's Keychain.
     pub fn with_secrets(
         host_name: String,
         data_dir: PathBuf,

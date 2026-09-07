@@ -71,7 +71,7 @@ async fn sleeper_leagues_inner(
         config.my_user_id.clone()
     };
     let user_id = user_id.ok_or(
-        "no Sleeper account saved — set your Sleeper username before looking up your leagues",
+        "no Sleeper account saved, set your Sleeper username before looking up your leagues",
     )?;
     let season = match season {
         Some(season) => season.to_string(),
@@ -116,18 +116,25 @@ async fn remove_league_inner(
 ) -> Result<Vec<StoredLeague>, String> {
     let mut config = state.config.lock().await;
     if config.active_league_id.as_deref() == Some(league_id) {
-        return Err("that league is on screen — switch to another one first".to_string());
+        return Err("that league is on screen, switch to another one first".to_string());
     }
-    let before = config.leagues.len();
-    config.leagues.retain(|l| l.league_id != league_id);
-    if config.leagues.len() == before {
+    let mut next = config.clone();
+    let before = next.leagues.len();
+    next.leagues.retain(|l| l.league_id != league_id);
+    if next.leagues.len() == before {
         return Err(format!("league {league_id} is not in the list"));
     }
-    state.engine.save_config(&config)?;
+    // Written before it is the config in memory: a save that fails leaves
+    // the picker as it was rather than dropping a league the next launch
+    // would still find on disk.
+    state.engine.prepare_config_save(&next)?.write().await?;
+    let leagues = next.leagues.clone();
+    *config = next;
+    drop(config);
     // A league disappearing from the picker looks like data loss when the log
     // is read back a week later. This line says it was asked for, and when.
     crate::applog::info(format!("league {league_id} removed from the picker"));
-    Ok(config.leagues.clone())
+    Ok(leagues)
 }
 
 /// Sleeper returns them in creation order, which means nothing to a reader.

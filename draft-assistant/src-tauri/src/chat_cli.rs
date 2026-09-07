@@ -152,7 +152,7 @@ fn friendly_failure(stderr: &str, code: Option<i32>) -> String {
     let text = stderr.trim();
     let lower = text.to_ascii_lowercase();
     if lower.contains("log in") || lower.contains("login") || lower.contains("not authenticated") {
-        return "Claude Code is not signed in — run `claude` in Terminal and log in once, then try again".to_string();
+        return "Claude Code is not signed in. Run `claude` in Terminal and log in once, then try again".to_string();
     }
     let tail: String = text
         .chars()
@@ -236,7 +236,7 @@ async fn ask_within(
             .map_err(|e| format!("Claude Code failed: {e}"))
     })
     .await
-    .map_err(|_| "Claude Code took too long to answer — try a lower effort".to_string())??;
+    .map_err(|_| "Claude Code took too long to answer, try a lower effort".to_string())??;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     if !output.status.success() {
@@ -292,12 +292,12 @@ mod tests {
     fn earlier_turns_are_replayed_as_a_transcript() {
         let prompt = render_prompt(&[
             msg("user", "Am I thin at RB?"),
-            msg("assistant", "Yes — one starter."),
+            msg("assistant", "Yes, one starter."),
             msg("user", "Who fixes that?"),
         ]);
         assert!(prompt.starts_with("Earlier in this conversation:"));
         assert!(prompt.contains("User: Am I thin at RB?"));
-        assert!(prompt.contains("You: Yes — one starter."));
+        assert!(prompt.contains("You: Yes, one starter."));
         assert!(prompt.ends_with("Now the user asks:\n\nWho fixes that?"));
     }
 
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn a_login_failure_says_what_to_do() {
         let message = friendly_failure("Error: Please run /login first", Some(1));
-        assert!(message.contains("run `claude` in Terminal"));
+        assert!(message.contains("Run `claude` in Terminal"));
     }
 
     #[test]

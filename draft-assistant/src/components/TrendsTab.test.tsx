@@ -104,7 +104,7 @@ describe("TrendsTab", () => {
     );
     // Every team is its own baseline on the first snapshot, so "0.0" here
     // would be reporting a measurement nobody has taken yet.
-    expect(moves).toEqual(["—", "—"]);
+    expect(moves).toEqual(["-", "-"]);
     // The strength column is real data and still prints.
     expect(screen.getByText("130.0")).toBeInTheDocument();
   });

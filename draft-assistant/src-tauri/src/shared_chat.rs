@@ -156,7 +156,7 @@ impl SharedChat {
         }
         if text.len() > MAX_QUESTION_BYTES {
             return Err(PostError::BadText(format!(
-                "that question is too long ({} characters) — the limit is {MAX_QUESTION_BYTES}",
+                "that question is too long ({} characters), the limit is {MAX_QUESTION_BYTES}",
                 text.len()
             )));
         }

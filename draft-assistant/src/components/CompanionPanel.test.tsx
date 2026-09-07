@@ -46,7 +46,7 @@ describe("turning it on", () => {
         /Same Wi-Fi only\. Anyone with the code can read this league and ask questions on your budget\./,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Off — nothing is being served")).toBeInTheDocument();
+    expect(screen.getByText("Off, nothing is being served")).toBeInTheDocument();
   });
 
   it("shows the address, the QR of it, and the code once it is on", async () => {

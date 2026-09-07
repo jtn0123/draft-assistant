@@ -99,12 +99,10 @@ describe("CallsToMake", () => {
   it("shows the one-line reason without waiting to be asked", () => {
     const injury: LineupCall = {
       ...call("WR", -3, "the long form nobody has opened yet"),
-      reason: "Jaylen Waddle is listed Out — pick a replacement",
+      reason: "Jaylen Waddle is listed Out, pick a replacement",
     };
     render(<CallsToMake calls={[injury]} pointsOnTable={0} />);
-    expect(
-      screen.getByText(/Jaylen Waddle is listed Out — pick a replacement/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Jaylen Waddle is listed Out, pick a replacement/)).toBeInTheDocument();
     expect(screen.queryByText("the long form nobody has opened yet")).not.toBeInTheDocument();
   });
 
@@ -297,7 +295,7 @@ describe("LineupCompare", () => {
     expect(leans[0].textContent).toBe("+7.2");
     expect(leans[1].className).toContain("is-theirs");
     expect(leans[1].textContent).toBe("−8.8");
-    expect(leans[2].textContent).toBe("–");
+    expect(leans[2].textContent).toBe("-");
   });
 
   it("flags an injured starter with a tag that spells itself out without hovering", () => {
@@ -365,7 +363,7 @@ describe("Waivers", () => {
   it("handles a league with no FAAB budget", () => {
     render(<Waivers waivers={[waiver("Kraft", null, 1)]} budgetLeft={null} budgetTotal={null} />);
     expect(screen.getByText("no FAAB budget")).toBeInTheDocument();
-    expect(screen.getByText("– · 1 rival")).toBeInTheDocument();
+    expect(screen.getByText("- · 1 rival")).toBeInTheDocument();
   });
 
   it("explains an empty list instead of showing a blank panel", () => {

@@ -81,7 +81,7 @@ async fn a_failed_save_leaves_the_config_alone() {
     let error = store_key_unlocked(
         &config,
         || async { Ok(Some("sk-test".to_string())) },
-        |_| Err("disk full".to_string()),
+        |_| Err::<(), String>("disk full".to_string()),
     )
     .await
     .unwrap_err();
@@ -238,7 +238,7 @@ fn the_cap_stops_the_screen_that_reached_it_and_says_which_one() {
     let error = check_budget(5.0, 5.0, "draft").unwrap_err();
     assert!(error.contains("$5.00 of its $5.00 cap"), "{error}");
     assert!(error.contains("draft screen"), "{error}");
-    assert!(error.contains("raise the budget"), "{error}");
+    assert!(error.contains("Raise the budget"), "{error}");
     // A turn that overshot lands, and the next one is refused for it.
     assert!(check_budget(9.40, 5.0, "season").is_err());
 }

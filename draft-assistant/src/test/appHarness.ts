@@ -318,7 +318,7 @@ export function seasonFixture(overrides: Partial<SeasonView> = {}): SeasonView {
         roster_id: 1,
         seed: 2,
         name: "You",
-        record: "2–0",
+        record: "2-0",
         wins: 2,
         losses: 0,
         ties: 0,

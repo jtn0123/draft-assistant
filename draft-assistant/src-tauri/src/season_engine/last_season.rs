@@ -81,11 +81,11 @@ impl Engine {
                         .unwrap_or_else(|| format!("Team {}", r.roster_id)),
                     record: if r.settings.ties > 0 {
                         format!(
-                            "{}\u{2013}{}\u{2013}{}",
+                            "{}-{}-{}",
                             r.settings.wins, r.settings.losses, r.settings.ties
                         )
                     } else {
-                        format!("{}\u{2013}{}", r.settings.wins, r.settings.losses)
+                        format!("{}-{}", r.settings.wins, r.settings.losses)
                     },
                     points: r.settings.points_for(),
                     tag: if is_champ {

@@ -73,7 +73,7 @@ describe("readDump", () => {
   it("says a dev server answered with a page, not the raw parse failure", async () => {
     serve("html");
     await expect(readDump(spec({ url: "/typo.json", live: true }))).rejects.toThrow(
-      /could not read draft state from \/typo\.json — it is not a state dump/,
+      /could not read draft state from \/typo\.json: it is not a state dump/,
     );
     // The message a reader cannot act on must not be the one they get.
     serve("html");

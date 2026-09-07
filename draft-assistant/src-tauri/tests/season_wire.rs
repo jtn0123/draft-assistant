@@ -291,7 +291,7 @@ async fn last_seasons_table_puts_the_champion_above_the_points_leader() {
     // A manager who has left the league keeps a usable label, and a tie shows
     // as three numbers rather than being silently dropped.
     assert_eq!(table[2].name, "Team 3");
-    assert_eq!(table[2].record, "1\u{2013}12\u{2013}1");
+    assert_eq!(table[2].record, "1-12-1");
     assert_eq!(table[2].tag, None);
     cleanup(engine);
 }

@@ -8,7 +8,7 @@ import { DISAGREEMENT } from "../secondOpinion";
  *  two boards are at least `DISAGREEMENT` spots apart. */
 export function SecondOpinionCell({ player: p }: { player: AvailablePlayer }) {
   const opinion = p.second_opinion;
-  if (opinion === null) return <span className="mid right">–</span>;
+  if (opinion === null) return <span className="mid right">-</span>;
   const label = `${p.position}${opinion.positional_rank}`;
   const gap = p.position_rank - opinion.positional_rank;
   if (Math.abs(gap) < DISAGREEMENT) {

@@ -161,7 +161,7 @@ describe("SidePanel", () => {
     view.position_run = { position: "RB", count: 4, window: 6 };
 
     render(<SidePanel view={view} />);
-    expect(screen.getByText("RB run in progress — 4 of the last 6")).toBeInTheDocument();
+    expect(screen.getByText("RB run in progress: 4 of the last 6")).toBeInTheDocument();
   });
 
   it("only alarms at-risk survival once it drops to a quarter", () => {
@@ -265,7 +265,7 @@ describe("SidePanel pick market", () => {
     expect(rows.map((row) => row.textContent)).toEqual([
       "R1Alpha Back82",
       "R2Beta Wideout40",
-      "R3\u201440",
+      "R3-40",
     ]);
     // Said in full on the row itself, so the number cannot be read as a
     // projection.

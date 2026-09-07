@@ -9,7 +9,9 @@
 use crate::engine::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
@@ -65,7 +67,7 @@ pub struct StoredLeague {
     #[serde(default)]
     pub status: Option<String>,
     /// `"sleeper"` or `"yahoo"`. Defaulted so a config written before Yahoo
-    /// existed still loads, with every league in it read as a Sleeper one —
+    /// existed still loads, with every league in it read as a Sleeper one,
     /// which is what it was.
     #[serde(default = "sleeper")]
     pub platform: String,
@@ -175,25 +177,145 @@ impl Engine {
         config
     }
 
-    /// Write the config atomically: to a temp file first, then swapped into
-    /// place, with the previous copy kept as `config.json.bak`. A crash
-    /// mid-write can never leave a half-written config behind.
+    /// Write the config atomically, on this thread: to a temp file first,
+    /// then swapped into place, with the previous copy kept as
+    /// `config.json.bak`. A crash mid-write can never leave a half-written
+    /// config behind.
     ///
     /// Every failure comes back to the caller: a save that quietly did nothing
     /// loses the user's league list at the next launch with nothing said.
+    ///
+    /// This is the synchronous form, for the two places that have no runtime
+    /// to step off: [`Engine::load_config`], which runs once at startup before
+    /// anything else holds the config, and the tests. Every command goes
+    /// through [`Engine::prepare_config_save`] and writes on the blocking
+    /// pool with the config lock already released.
     pub fn save_config(&self, config: &AppConfig) -> Result<(), String> {
+        self.prepare_config_save(config)?.write_now()
+    }
+
+    /// Everything a save needs, taken while the caller still holds the config
+    /// lock: the encoded bytes and a place in the save order. The caller then
+    /// drops the lock and awaits [`PendingConfigSave::write`].
+    ///
+    /// The save used to happen under the lock: encode, write, fsync, back up,
+    /// rename, all while every command that reads the config, and both poll
+    /// ticks, waited. Once per chat turn, too, because the spend is written
+    /// down after every answer. Now only the encode is under the lock.
+    ///
+    /// The sequence number is what keeps two saves in flight honest. It is
+    /// taken here, under the same lock that ordered the two configs, so a
+    /// save prepared later always carries the higher number, and a write
+    /// that finds a higher number already on disk steps aside rather than
+    /// putting a stale config over a newer one.
+    pub fn prepare_config_save(&self, config: &AppConfig) -> Result<PendingConfigSave, String> {
         let json = serde_json::to_string_pretty(config)
             .map_err(|e| format!("could not prepare your settings to be saved: {e}"))?;
         let live = self.cache_path("config.json");
-        let tmp = crate::cache::temp_sibling(&live);
-        crate::cache::write_synced(&tmp, json.as_bytes())
+        let order = save_order_for(&live);
+        let seq = order.next.fetch_add(1, Ordering::SeqCst);
+        Ok(PendingConfigSave {
+            json,
+            backup: self.cache_path("config.json.bak"),
+            live,
+            seq,
+            order,
+            before_write: None,
+        })
+    }
+}
+
+/// The save order of one settings file: the next number to hand out, and the
+/// number of the save that most recently reached the disk.
+///
+/// Kept per file path rather than per `Engine` so that two engines over the
+/// same directory, which the tests build, agree on the order, and two over
+/// different directories never wait on each other.
+struct SaveOrder {
+    next: AtomicU64,
+    /// Held for the whole of a write, so saves of one file land one at a
+    /// time and the comparison against it cannot race the rename.
+    written: std::sync::Mutex<u64>,
+}
+
+fn save_order_for(live: &Path) -> Arc<SaveOrder> {
+    static ORDERS: OnceLock<std::sync::Mutex<HashMap<PathBuf, Arc<SaveOrder>>>> = OnceLock::new();
+    let mut orders = ORDERS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    orders
+        .entry(live.to_path_buf())
+        .or_insert_with(|| {
+            Arc::new(SaveOrder {
+                next: AtomicU64::new(1),
+                written: std::sync::Mutex::new(0),
+            })
+        })
+        .clone()
+}
+
+/// A config encoded and queued, waiting to be written. Owns everything the
+/// write needs, so the config lock it was prepared under can be dropped
+/// before the write starts; by construction it cannot hold a guard.
+pub struct PendingConfigSave {
+    json: String,
+    live: PathBuf,
+    backup: PathBuf,
+    seq: u64,
+    order: Arc<SaveOrder>,
+    before_write: Option<Box<dyn FnOnce() + Send>>,
+}
+
+impl PendingConfigSave {
+    /// Write on the blocking pool. The caller must have released the config
+    /// lock; nothing here needs it, and holding it would put the wait back.
+    pub async fn write(self) -> Result<(), String> {
+        tokio::task::spawn_blocking(move || self.write_now())
+            .await
+            .unwrap_or_else(|e| Err(format!("could not save your settings: {e}")))
+    }
+
+    /// The write itself, on whatever thread this is called from.
+    pub fn write_now(self) -> Result<(), String> {
+        if let Some(hook) = self.before_write {
+            hook();
+        }
+        let mut written = self
+            .order
+            .written
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.seq < *written {
+            // A save prepared after this one has already landed, and it was
+            // prepared from a config that included this change. Writing
+            // these bytes now would roll the file back.
+            return Ok(());
+        }
+        let tmp = crate::cache::temp_sibling(&self.live);
+        crate::cache::write_synced(&tmp, self.json.as_bytes())
             .map_err(|e| format!("could not save your settings to {}: {e}", tmp.display()))?;
         crate::cache::owner_only(&tmp);
-        if live.exists() {
-            crate::cache::back_up(&live, &self.cache_path("config.json.bak"));
+        if self.live.exists() {
+            crate::cache::back_up(&self.live, &self.backup);
         }
-        std::fs::rename(&tmp, &live)
-            .map_err(|e| format!("could not save your settings to {}: {e}", live.display()))
+        std::fs::rename(&tmp, &self.live).map_err(|e| {
+            format!(
+                "could not save your settings to {}: {e}",
+                self.live.display()
+            )
+        })?;
+        *written = self.seq;
+        Ok(())
+    }
+
+    /// Run `hook` on the writing thread just before the file is touched. A
+    /// seam for the tests, which park the write here to show that the config
+    /// lock is free while a save is in flight; nothing in the app sets it.
+    #[doc(hidden)]
+    pub fn before_writing(mut self, hook: impl FnOnce() + Send + 'static) -> Self {
+        self.before_write = Some(Box::new(hook));
+        self
     }
 }
 

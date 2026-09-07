@@ -59,7 +59,7 @@ describe("the second-opinion column", () => {
     board([player("w1", "Alpha Wideout", "WR")], null);
     expect(screen.queryByRole("button", { name: /^Clay,/ })).toBeNull();
     // And no stand-in dash where the column would have been.
-    expect(screen.queryByText("–")).toBeNull();
+    expect(screen.queryByText("-")).toBeNull();
   });
 
   it("heads itself with the source and names the import date in its tooltip", () => {
@@ -97,7 +97,7 @@ describe("the second-opinion column", () => {
 
   it("leaves a dash for a player the import did not match", () => {
     board([withOpinion("w1", "Known Wideout", 21, 9), player("w2", "Unknown Wideout", "WR")]);
-    expect(screen.getByText("–")).toBeInTheDocument();
+    expect(screen.getByText("-")).toBeInTheDocument();
   });
 
   it("sorts by the imported rank, unmatched players last", () => {

@@ -172,7 +172,7 @@ async fn replay(client: &SleeperClient, league_id: &str, max_week: u32) -> Resul
     let players = players(client).await?;
     let rules = RosterRules::new(&league.roster_positions);
     let last = max_week.min(league.last_regular_week());
-    eprintln!("{} ({season}) — weeks 1..{last}", league.name);
+    eprintln!("{} ({season}): weeks 1..{last}", league.name);
 
     let mut out = Season::default();
     for week in 1..=last {

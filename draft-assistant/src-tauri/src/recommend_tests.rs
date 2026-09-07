@@ -241,7 +241,7 @@ fn superflex_qb_is_recognized_as_filling_a_starter() {
     assert!(recs[0]
         .reasons
         .iter()
-        .any(|reason| reason.contains("SUPER_FLEX")));
+        .any(|reason| reason.contains("superflex")));
 }
 
 #[test]
@@ -263,4 +263,136 @@ fn never_recommends_a_second_kicker() {
     assert!(recs
         .iter()
         .all(|recommendation| recommendation.position != "K"));
+}
+
+#[test]
+fn a_kicker_is_not_docked_for_sharing_a_bye_with_the_starters() {
+    // One kicker and one defence are rostered and streamed through their bye
+    // week, so a clash with the quarterback's week costs the lineup nothing.
+    // A running back on the same week is a real hole.
+    let mut kicker = player("k1", "K", 5.0);
+    kicker.player.bye_week = Some(9);
+    let mut back = player("rb9", "RB", 5.0);
+    back.player.bye_week = Some(9);
+    let available = vec![kicker, back];
+    let mut mine = roster(&["QB", "RB", "WR", "TE"]);
+    mine.open_starters = vec![("K".into(), 1), ("FLEX".into(), 1)];
+    let rules = RosterRules::new(&["QB", "RB", "WR", "TE", "FLEX", "K", "BN"].map(String::from));
+    let mut byes = HashMap::new();
+    byes.insert(9u32, 3u32);
+    let mut inputs = RecommendInputs::new(&available, Some(&mine), &rules, 14, 15, 160, 12);
+    inputs.my_byes = &byes;
+    let have: HashMap<&str, u32> = HashMap::from([("QB", 1), ("RB", 1), ("WR", 1), ("TE", 1)]);
+    let ctx = super::league_tests::context(&inputs, have);
+    let docked = |a: &AvailablePlayer| {
+        super::score::score_candidate(&ctx, a, Mode::Balanced)
+            .expect("neither is disqualified")
+            .into_reasons()
+            .iter()
+            .any(|r| r.contains("bye"))
+    };
+    assert!(!docked(&available[0]), "the kicker took the bye penalty");
+    assert!(docked(&available[1]), "the back did not");
+}
+
+#[test]
+fn every_reason_reads_as_a_plain_sentence() {
+    // The card used to show "best available (fallback)" and "depth pick — 0
+    // RB already rostered" verbatim: an internal mode name in brackets and
+    // a dash the design bans. Score enough situations to fire every term
+    // and check none of them slips either back onto the card.
+    let mut available: Vec<AvailablePlayer> = Vec::new();
+    for (i, pos) in ["QB", "RB", "WR", "TE", "K", "DEF"].iter().enumerate() {
+        for n in 0..3u32 {
+            let mut a = player(&format!("{pos}{n}"), pos, 40.0 - f64::from(n) * 15.0);
+            a.player.tier = n + 1;
+            a.player.bye_week = Some(9);
+            a.player.team = Some("DET".into());
+            a.player.adp = Some(20.0 + f64::from(i as u32 * 30 + n * 60));
+            a.player.overall_rank = 5 + i as u32 * 10;
+            a.player.weekly_cv = Some(0.3 + 0.2 * f64::from(n));
+            a.player.bonus_points = 20.0;
+            a.survival_next = Some([0.2, 0.5, 0.9][n as usize]);
+            available.push(a);
+        }
+    }
+    let mut byes = HashMap::new();
+    byes.insert(9u32, 2u32);
+    let rules = RosterRules::new(&slots());
+    // And a league whose shared slots carry Sleeper's wire spellings, so the
+    // flex reasons fire under the names that would leak if they were printed
+    // raw.
+    let wire_slots = [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "SUPER_FLEX",
+        "WRRB_FLEX",
+        "REC_FLEX",
+        "DEF",
+        "BN",
+    ]
+    .map(String::from);
+    let wire_rules = RosterRules::new(&wire_slots);
+    let mut wire_roster = roster(&["QB", "RB", "WR", "TE"]);
+    wire_roster.open_starters = vec![
+        ("SUPER_FLEX".into(), 1),
+        ("WRRB_FLEX".into(), 1),
+        ("REC_FLEX".into(), 1),
+    ];
+    let mut heard: Vec<String> = Score::fallback().into_reasons();
+    for (rules, mine, round, pick) in [
+        (&rules, roster(&[]), 1, 5),
+        (&rules, roster(&["QB", "RB", "WR", "TE"]), 5, 50),
+        (
+            &rules,
+            roster(&["QB", "RB", "RB", "RB", "WR", "WR", "TE", "TE"]),
+            10,
+            110,
+        ),
+        (
+            &rules,
+            roster(&["QB", "QB", "RB", "RB", "WR", "WR", "TE", "DEF"]),
+            14,
+            160,
+        ),
+        (&wire_rules, wire_roster.clone(), 5, 50),
+    ] {
+        let mut inputs = RecommendInputs::new(&available, Some(&mine), rules, round, 15, pick, 12);
+        inputs.my_byes = &byes;
+        inputs.position_run = None;
+        let mut have: HashMap<&str, u32> = HashMap::new();
+        for entry in &mine.players {
+            *have.entry(entry.position.as_str()).or_default() += 1;
+        }
+        let mut ctx = super::league_tests::context(&inputs, have);
+        ctx.rb_teams.insert("DET");
+        ctx.median_cv = Some(0.4);
+        for a in &available {
+            for mode in [Mode::Balanced, Mode::Safe, Mode::Upside] {
+                if let Some(score) = super::score::score_candidate(&ctx, a, mode) {
+                    heard.extend(score.into_reasons());
+                }
+            }
+        }
+    }
+    assert!(heard.len() > 50, "not enough terms fired: {}", heard.len());
+    for reason in &heard {
+        assert!(
+            !reason.contains('('),
+            "bracketed tag on the card: {reason:?}"
+        );
+        assert!(
+            !reason.contains('\u{2014}'),
+            "em-dash on the card: {reason:?}"
+        );
+        // Sleeper spells its shared slots SUPER_FLEX and WRRB_FLEX. The
+        // underscore is the only thing those wire names have that English
+        // does not, so it is the cheapest test for one reaching the card.
+        assert!(
+            !reason.contains('_'),
+            "wire slot name on the card: {reason:?}"
+        );
+    }
 }

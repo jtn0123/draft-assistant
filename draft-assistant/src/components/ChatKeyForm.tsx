@@ -10,7 +10,7 @@ import { describeError } from "../errorText";
  *  one they are getting. */
 const STORE_NOTE: Record<string, string> = {
   keychain: "Kept in the macOS Keychain, under this app's own item.",
-  file: "No Keychain on this machine — kept in a file in this app's data directory, readable by your user account.",
+  file: "No Keychain on this machine, so the key is kept in a file in this app's data directory, readable by your user account.",
 };
 
 export function ChatKeyForm({

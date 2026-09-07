@@ -14,7 +14,7 @@ export function importNote(loadedAt: number | null | undefined, source: string |
     return "Add a second opinion column to the board";
   }
   const when = new Date(loadedAt * 1000).toLocaleDateString();
-  return `${source ?? "Imported"} loaded ${when} — import again to replace`;
+  return `${source ?? "Imported"} loaded ${when}, import again to replace`;
 }
 
 /**

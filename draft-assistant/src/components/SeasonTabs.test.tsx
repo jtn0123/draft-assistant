@@ -70,7 +70,7 @@ describe("TeamRoster", () => {
       />,
     );
     const seasons = [...container.querySelectorAll(".team-season")].map((c) => c.textContent);
-    expect(seasons).toEqual(["–", "–"]);
+    expect(seasons).toEqual(["-", "-"]);
     // The projections are real, so that column still prints.
     expect(screen.getByText("23.4")).toBeInTheDocument();
     expect(screen.getByText(/A dash means that column has nothing in it yet/)).toBeInTheDocument();
@@ -108,7 +108,7 @@ function standing(overrides: Partial<StandingsRow>): StandingsRow {
     roster_id: 1,
     seed: 1,
     name: "AllDay21",
-    record: "0–0",
+    record: "0-0",
     wins: 0,
     losses: 0,
     ties: 0,
@@ -191,7 +191,7 @@ function finish(overrides: Partial<LastSeasonRow>): LastSeasonRow {
   return {
     place: 1,
     name: "AllDay21",
-    record: "11–3",
+    record: "11-3",
     points: 1800,
     tag: null,
     is_mine: false,
@@ -255,13 +255,13 @@ describe("Standings once the bracket is cut", () => {
     render(
       <Standings
         rows={[
-          standing({ roster_id: 1, playoff_odds: 1, playoff_status: "In the playoffs — seed 1" }),
+          standing({ roster_id: 1, playoff_odds: 1, playoff_status: "In the playoffs: seed 1" }),
           standing({ roster_id: 2, playoff_odds: 0, playoff_status: "Missed the playoffs" }),
         ]}
         avatars={{}}
       />,
     );
-    expect(screen.getByText("In the playoffs — seed 1")).toBeInTheDocument();
+    expect(screen.getByText("In the playoffs: seed 1")).toBeInTheDocument();
     expect(screen.getByText("Missed the playoffs")).toBeInTheDocument();
     expect(screen.queryByText("100%")).not.toBeInTheDocument();
   });

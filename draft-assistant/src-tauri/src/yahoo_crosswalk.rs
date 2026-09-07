@@ -52,7 +52,7 @@ impl Crosswalk {
     pub fn warning(&self) -> Option<String> {
         (self.unmatched > 0).then(|| {
             format!(
-                "{} Yahoo players had no Sleeper match — they are on the board \
+                "{} Yahoo players had no Sleeper match, they are on the board \
                  with no projection",
                 self.unmatched
             )

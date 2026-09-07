@@ -21,7 +21,7 @@ pub(crate) fn extract_id(input: &str) -> Result<String, String> {
         .filter(|run| (15..=25).contains(&run.len()))
         .map(str::to_string)
         .ok_or_else(|| {
-            "that doesn't look like a Sleeper ID — paste the league or draft link, \
+            "that doesn't look like a Sleeper ID. Paste the league or draft link, \
              or the long number from it"
                 .to_string()
         })
@@ -54,7 +54,7 @@ pub(crate) fn extract_ref(input: &str) -> Result<Pasted, String> {
         return yahoo_url_id(trimmed)
             .map(Pasted::YahooNumeric)
             .ok_or_else(|| {
-                "that Yahoo link has no league id in it — open your league and copy the \
+                "that Yahoo link has no league id in it. Open your league and copy the \
              address from the browser, or paste the league key (449.l.12345)"
                     .to_string()
             });

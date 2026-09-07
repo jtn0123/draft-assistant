@@ -1,12 +1,12 @@
 // Small display helpers shared across components.
 
 export function fmt(n: number | null | undefined, digits = 0): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return "–";
+  if (n === null || n === undefined || Number.isNaN(n)) return "-";
   return n.toFixed(digits);
 }
 
 export function pct(p: number | null): string {
-  if (p === null) return "–";
+  if (p === null) return "-";
   return `${Math.round(p * 100)}%`;
 }
 
@@ -65,7 +65,7 @@ export function pickLabel(pickNo: number, teams: number): string {
 
 /** "4s ago", "3m ago". Ages are always shown relative, never as a clock. */
 export function age(timestamp: number | null): string {
-  if (timestamp === null) return "–";
+  if (timestamp === null) return "-";
   const seconds = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
   if (seconds < 60) return `${seconds}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
@@ -171,7 +171,7 @@ export function injuryTag(status: string | null | undefined): string | null {
  * meant "Locks in 6h 12m" sat frozen at 6h 12m for hours.
  */
 export function untilLabel(ms: number | null, nowMs: number = Date.now()): string {
-  if (ms === null) return "–";
+  if (ms === null) return "-";
   const diff = ms - nowMs;
   if (diff <= 0) return "now";
   const minutes = Math.floor(diff / 60000);

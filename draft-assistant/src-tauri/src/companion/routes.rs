@@ -236,7 +236,7 @@ async fn pair(
         Ok(PairOutcome::WrongCode) => fail(StatusCode::FORBIDDEN, "wrong code"),
         Ok(PairOutcome::LockedOut) => fail(
             StatusCode::TOO_MANY_REQUESTS,
-            "too many wrong codes — wait a minute and try again",
+            "too many wrong codes, wait a minute and try again",
         ),
         // The only way this fails is the machine's random source, and a token
         // that is not random is worse than no pairing at all.

@@ -42,7 +42,7 @@ fn a_plain_league_says_nothing_about_keepers_trades_or_a_reversal() {
     // week and the injury tag a start/sit answer needs.
     assert_eq!(
         line(&context, "11."),
-        "11. Ladd McConkey WR — 214 pts, VORP 114, T4, ADP 11, survives 39%, bye 9"
+        "11. Ladd McConkey WR: 214 pts, VORP 114, T4, ADP 11, survives 39%, bye 9"
     );
 }
 
@@ -78,7 +78,7 @@ fn an_injury_tag_travels_with_the_player() {
     view.available[0].player.bye_week = None;
     assert_eq!(
         line(&draft_context(&view), "11."),
-        "11. Ladd McConkey WR — 214 pts, VORP 114, T4, ADP 11, survives 39%, bye - (Q)"
+        "11. Ladd McConkey WR: 214 pts, VORP 114, T4, ADP 11, survives 39%, bye - (Q)"
     );
 }
 
@@ -159,7 +159,7 @@ fn keepers_trades_and_a_reversal_each_get_their_line() {
     let context = draft_context(&view);
     assert_eq!(
         line(&context, "Keepers:"),
-        "Keepers: 2 picks league-wide are already spent — yours at 3."
+        "Keepers: 2 picks league-wide are already spent, yours at 3."
     );
     assert_eq!(
         line(&context, "Traded picks:"),
@@ -177,7 +177,7 @@ fn a_keeper_that_is_not_mine_is_counted_without_being_claimed() {
     view.draft.keeper_picks = vec![1];
     assert_eq!(
         line(&draft_context(&view), "Keepers:"),
-        "Keepers: 1 picks league-wide are already spent — none of them yours."
+        "Keepers: 1 picks league-wide are already spent, none of them yours."
     );
 }
 
@@ -275,7 +275,7 @@ fn the_lineup_block_separates_the_set_lineup_from_the_best_one() {
     );
     assert_eq!(
         line(&block, "Your lineup as set"),
-        "Your lineup as set projects 32.4 against a best of 38.6 — 6.2 left on the table."
+        "Your lineup as set projects 32.4 against a best of 38.6, 6.2 left on the table."
     );
     assert_eq!(
         line(&block, "Started but not"),
@@ -309,7 +309,7 @@ fn a_lineup_that_is_already_the_best_one_names_nothing_to_change() {
     assert!(!has_line_starting(&block, "Started but not"), "{block}");
     assert_eq!(
         line(&block, "Your lineup as set"),
-        "Your lineup as set projects 38.6 against a best of 38.6 — 0.0 left on the table."
+        "Your lineup as set projects 38.6 against a best of 38.6, 0.0 left on the table."
     );
 }
 
@@ -383,7 +383,7 @@ fn a_team_name_with_a_line_break_cannot_add_a_line_to_the_prompt() {
     );
     assert_eq!(
         line(&context, "11."),
-        "11. Ladd McConkey WR — 214 pts, VORP 114, T4, ADP 11, survives 39%, bye 9"
+        "11. Ladd McConkey WR: 214 pts, VORP 114, T4, ADP 11, survives 39%, bye 9"
     );
     assert!(context.contains("RB Bijan Robinson (R1)"), "{context}");
 }

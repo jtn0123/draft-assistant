@@ -127,7 +127,7 @@ pub async fn post_chat(
     if !srv.hub.allow_chat_post(&device.device_id) {
         return fail(
             StatusCode::TOO_MANY_REQUESTS,
-            "too many questions — wait a moment",
+            "too many questions, wait a moment",
         );
     }
     let asked_by = EntryDevice {
@@ -164,7 +164,7 @@ impl AskError {
     pub fn message(self) -> String {
         match self {
             AskError::Busy => {
-                "someone else is asking a question — try again in a moment".to_string()
+                "someone else is asking a question, try again in a moment".to_string()
             }
             AskError::HostBusy(e) | AskError::NoLeague(e) | AskError::BadText(e) => e,
         }

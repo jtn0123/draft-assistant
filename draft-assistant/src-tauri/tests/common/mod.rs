@@ -430,7 +430,7 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
         last_season: std::sync::Arc::new(vec![LastSeasonRow {
             place: 1,
             name: "User Two".into(),
-            record: "10\u{2013}4".into(),
+            record: "10-4".into(),
             points: 1500.5,
             tag: Some("Champ".into()),
             is_mine: false,

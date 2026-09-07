@@ -82,7 +82,7 @@ function Ranked({
                     : "trend-right trend-act"
               }
             >
-              {!showMovement ? "—" : flat ? "0.0" : signed(delta)}
+              {!showMovement ? "-" : flat ? "0.0" : signed(delta)}
             </span>
           </div>
         );
@@ -143,7 +143,7 @@ function Legend({
               <TeamAvatar avatar={avatars[String(s.roster_id)]} name={s.name} interactive={false} />
               <span className="ellipsis">{s.name}</span>
             </span>
-            <span className="trend-right mid">{last ? fmt(last.strength, 1) : "—"}</span>
+            <span className="trend-right mid">{last ? fmt(last.strength, 1) : "-"}</span>
             <span
               className={
                 !showMovement || delta === null || flat
@@ -153,7 +153,7 @@ function Legend({
                     : "trend-right trend-act"
               }
             >
-              {!showMovement || delta === null ? "—" : flat ? "0.0" : signed(delta)}
+              {!showMovement || delta === null ? "-" : flat ? "0.0" : signed(delta)}
             </span>
           </button>
         );
@@ -212,7 +212,7 @@ export function TrendsTab({
   const showMovement = snapshots >= 2;
 
   if (series.length === 0) {
-    return <Empty>Trends start with the first Season load — check back after the next one.</Empty>;
+    return <Empty>Trends start with the first Season load. Check back after the next one.</Empty>;
   }
 
   return (
@@ -221,7 +221,7 @@ export function TrendsTab({
         title="Projected strength"
         note={
           snapshots < 2
-            ? "first snapshot taken — the graph fills in over time"
+            ? "first snapshot taken, the graph fills in over time"
             : `${snapshots} snapshots`
         }
       />
@@ -250,7 +250,7 @@ export function TrendsTab({
           <>
             <p className="empty-note">
               {snapshots < 2
-                ? "One reading so far — here is where everyone stands. The line chart starts from the third."
+                ? "One reading so far, here is where everyone stands. The line chart starts from the third."
                 : `Where everyone stands, and how far they have moved across ${snapshots} readings. ${
                     snapshots < 3
                       ? "The line chart starts from the third."

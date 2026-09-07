@@ -160,7 +160,7 @@ describe("Board", () => {
       </>,
     );
     const search = screen.getByRole("textbox", { name: "Search players" });
-    expect(search).toHaveAttribute("placeholder", "Search players — press /");
+    expect(search).toHaveAttribute("placeholder", "Search players (press /)");
 
     await user.keyboard("/");
     expect(search).toHaveFocus();

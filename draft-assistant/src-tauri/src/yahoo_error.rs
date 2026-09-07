@@ -91,7 +91,7 @@ impl std::fmt::Display for YahooError {
             // "HTTP 999" is Yahoo's, and means nothing to anybody; the one
             // thing the user can do about it is wait, so say that instead.
             YahooError::Http { status, .. } if RATE_LIMITED.contains(status) => {
-                f.write_str("Yahoo is rate-limiting requests — try again in a minute")
+                f.write_str("Yahoo is rate-limiting requests, try again in a minute")
             }
             YahooError::Http { status, url } => write!(f, "HTTP {status} for {url}"),
             YahooError::Transport { url, detail } => write!(f, "request failed: {url}: {detail}"),

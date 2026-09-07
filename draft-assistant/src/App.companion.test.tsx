@@ -116,7 +116,7 @@ describe("following a host", () => {
     expect(screen.getByRole("group", { name: "Appearance" })).toBeInTheDocument();
   });
 
-  it("sends nobody to the league picker — the host chooses", async () => {
+  it("sends nobody to the league picker: the host chooses", async () => {
     await loaded();
     await settle(() => screen.getByTitle("Switch league").click());
     expect(screen.queryByRole("dialog")).toBeNull();

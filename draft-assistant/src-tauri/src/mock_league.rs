@@ -60,7 +60,7 @@ pub fn synthesize_league(draft: &Draft) -> (League, Option<String>) {
         None => (
             0.0,
             Some(format!(
-                "scoring type '{scoring_type}' not recognised — scored as standard; \
+                "scoring type '{scoring_type}' not recognised, scored as standard; \
                  check the board's points"
             )),
         ),

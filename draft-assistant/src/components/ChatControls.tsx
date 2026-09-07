@@ -9,7 +9,7 @@ const PROVIDERS: [id: "claude_code" | "api", name: string, title: string][] = [
   [
     "claude_code",
     "Claude Code",
-    "Runs the Claude Code CLI installed on this Mac, signed in with your Claude subscription — no API key needed",
+    "Runs the Claude Code CLI installed on this Mac, signed in with your Claude subscription, no API key needed",
   ],
   ["api", "API key", "Calls the Anthropic API directly with the key stored in this app"],
 ];
@@ -22,9 +22,9 @@ const EFFORT_LABEL: Record<string, string> = { xhigh: "X-High" };
 
 /** Model-button tooltips, from the design. */
 const MODEL_TITLE: Record<string, string> = {
-  "Opus 5": "Claude Opus 5 — adaptive thinking, supports all five effort levels",
+  "Opus 5": "Claude Opus 5: adaptive thinking, supports all five effort levels",
   "Fable 5":
-    "Claude Fable 5 — Mythos-class; thinking can't be turned off, effort is the only depth control",
+    "Claude Fable 5: Mythos-class. Thinking can't be turned off, effort is the only depth control",
 };
 
 export function ChatControls({

@@ -121,7 +121,13 @@ async fn remember(state: &AppState, port: Option<u16>, enabled: bool) {
         return;
     }
     config.companion_enabled = enabled;
-    if let Err(e) = state.engine.save_config(&config) {
+    let pending = state.engine.prepare_config_save(&config);
+    drop(config);
+    let wrote = match pending {
+        Ok(pending) => pending.write().await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = wrote {
         crate::applog::warn(format!("could not remember the phone connection: {e}"));
     }
 }
@@ -200,8 +206,13 @@ async fn set_device_name_inner(
         name.chars().take(60).collect()
     };
     let mut config = state.config.lock().await;
-    config.device_name = Some(name.clone());
-    state.engine.save_config(&config)?;
+    let mut next = config.clone();
+    next.device_name = Some(name.clone());
+    // Written first, so a failed save leaves the old name in place on both
+    // sides rather than only in the file.
+    state.engine.prepare_config_save(&next)?.write().await?;
+    *config = next;
+    drop(config);
     companion.hub.set_host_name(name.clone());
     Ok(name)
 }

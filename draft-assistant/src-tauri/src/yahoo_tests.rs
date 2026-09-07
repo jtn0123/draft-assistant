@@ -49,7 +49,7 @@ fn a_throttled_caller_is_told_to_wait_rather_than_shown_yahoos_own_status() {
         let said = error.to_string();
         assert_eq!(
             said,
-            "Yahoo is rate-limiting requests — try again in a minute"
+            "Yahoo is rate-limiting requests, try again in a minute"
         );
         assert!(!said.contains(&status.to_string()), "{said}");
     }

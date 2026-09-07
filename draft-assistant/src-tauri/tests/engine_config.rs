@@ -212,6 +212,111 @@ fn save_config_reports_disk_failures() {
     std::fs::remove_file(blocker).unwrap();
 }
 
+/// The off-thread form fails the same way: the caller hears about a
+/// directory that cannot be written to, not a save that pretended.
+#[tokio::test]
+async fn an_off_thread_save_reports_disk_failures() {
+    let blocker = test_dir("config-blocked-off-thread");
+    std::fs::write(&blocker, "occupied").unwrap();
+    let engine = Engine::new(blocker.clone());
+
+    let pending = engine
+        .prepare_config_save(&config_without_key())
+        .expect("encoding the config does not touch the disk");
+    let err = pending.write().await.unwrap_err();
+    assert!(err.contains("settings"), "unexpected error: {err}");
+    assert!(engine.load_config().leagues.is_empty(), "nothing was saved");
+
+    std::fs::remove_file(blocker).unwrap();
+}
+
+/// Two saves prepared in order, as two commands holding the config lock one
+/// after the other would, leave the later one on disk whichever write reaches
+/// the blocking pool first. Before the save left the lock this could not
+/// happen; now that it has, it must not be able to either.
+#[tokio::test]
+async fn saves_land_in_the_order_they_were_prepared_not_the_order_they_were_written() {
+    let dir = test_dir("save-order");
+    let engine = Engine::new(dir.clone());
+
+    let mut first = config_without_key();
+    first.my_user_id = Some("user-1".into());
+    let mut second = config_without_key();
+    second.my_user_id = Some("user-2".into());
+    let first = engine.prepare_config_save(&first).unwrap();
+    let second = engine.prepare_config_save(&second).unwrap();
+
+    second.write().await.expect("the newer save lands");
+    first
+        .write()
+        .await
+        .expect("the stale save steps aside without complaint");
+    assert_eq!(
+        engine.load_config().my_user_id.as_deref(),
+        Some("user-2"),
+        "the older content was written over the newer"
+    );
+
+    // And in the usual order, each one lands.
+    let mut third = config_without_key();
+    third.my_user_id = Some("user-3".into());
+    engine
+        .prepare_config_save(&third)
+        .unwrap()
+        .write()
+        .await
+        .unwrap();
+    assert_eq!(engine.load_config().my_user_id.as_deref(), Some("user-3"));
+    assert!(dir.join("config.json.bak").exists());
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The point of the split: while the bytes are going to the disk, another
+/// command can take the config. The write is parked on its thread and the
+/// lock is taken, with a timeout so a regression fails rather than hangs.
+#[tokio::test]
+async fn the_config_lock_is_free_while_a_save_is_writing() {
+    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let dir = test_dir("lock-free-write");
+    let engine = Engine::new(dir.clone());
+    let config = Arc::new(tokio::sync::Mutex::new(config_without_key()));
+
+    let (parked_tx, parked_rx) = mpsc::channel::<()>();
+    let (go_tx, go_rx) = mpsc::channel::<()>();
+    let pending = {
+        // The command's half: edit and encode under the lock, then let go.
+        let mut guard = config.lock().await;
+        guard.my_user_id = Some("user-2".into());
+        engine.prepare_config_save(&guard).unwrap()
+    }
+    .before_writing(move || {
+        parked_tx.send(()).unwrap();
+        go_rx.recv().unwrap();
+    });
+    let write = tokio::spawn(pending.write());
+
+    // Wait until the writer is on its thread with the file still untouched.
+    tokio::task::spawn_blocking(move || parked_rx.recv().unwrap())
+        .await
+        .unwrap();
+    let taken = tokio::time::timeout(Duration::from_secs(2), config.lock()).await;
+    assert!(
+        taken.is_ok(),
+        "the config lock was not free while the save was writing"
+    );
+    drop(taken);
+
+    go_tx.send(()).unwrap();
+    write.await.unwrap().expect("the parked save finishes");
+    assert_eq!(engine.load_config().my_user_id.as_deref(), Some("user-2"));
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// A config written before Yahoo existed has no `platform` on its leagues.
 /// It has to keep loading, and every league in it is a Sleeper one, because
 /// that is what it was.

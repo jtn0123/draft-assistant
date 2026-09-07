@@ -16,7 +16,7 @@ export interface SeasonHeader {
   /** 0..1. Only a forecast while `playoff_status` is null. */
   playoff_odds: number;
   /**
-   * "In the playoffs — seed 3" / "Missed the playoffs", once the regular
+   * "In the playoffs: seed 3" / "Missed the playoffs", once the regular
    * season is over and the percentage is a meaningless flat 1 or 0.
    */
   playoff_status?: string | null;

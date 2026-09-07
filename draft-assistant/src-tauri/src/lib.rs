@@ -185,7 +185,11 @@ pub fn run() {
             // off until the user turns it on in Settings. What it holds before
             // then is the pairing code, the shared chat threads, and a handle
             // onto the same state every command works through.
-            let companion = Arc::new(CompanionServer::new(host_name, data_dir)?);
+            let companion = Arc::new(CompanionServer::new_under(
+                host_name,
+                data_dir,
+                yahoo_secrets::Item::CompanionDevices,
+            )?);
             let handle = app.handle().clone();
             companion.attach(
                 Arc::new(state.share()),

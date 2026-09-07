@@ -101,10 +101,10 @@ fn rules_lines(rules: &LeagueRules) -> String {
             rules.keepers_total
         ));
         if rules.my_keeper_picks.is_empty() {
-            out.push_str(" — none of them yours.\n");
+            out.push_str(", none of them yours.\n");
         } else {
             out.push_str(&format!(
-                " — yours at {}.\n",
+                ", yours at {}.\n",
                 pick_list(&rules.my_keeper_picks)
             ));
         }
@@ -268,7 +268,7 @@ fn draft_board(view: &crate::view::DraftView) -> String {
         .take(40)
     {
         out.push_str(&format!(
-            "{}. {} {} — {:.0} pts, VORP {:.0}, T{}, ADP {}, survives {}, bye {}{}\n",
+            "{}. {} {}: {:.0} pts, VORP {:.0}, T{}, ADP {}, survives {}, bye {}{}\n",
             player.player.overall_rank,
             sanitise(&player.player.name),
             player.player.position,

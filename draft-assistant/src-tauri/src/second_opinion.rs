@@ -186,7 +186,7 @@ fn column(headers: &csv::StringRecord, wanted: &str) -> Option<usize> {
 fn required(headers: &csv::StringRecord, wanted: &str) -> Result<usize, String> {
     column(headers, wanted).ok_or_else(|| {
         format!(
-            "that file has no \"{wanted}\" column, so it is not a projections export — \
+            "that file has no \"{wanted}\" column, so it is not a projections export. \
              re-run the projections script and import the CSV it writes"
         )
     })
@@ -281,12 +281,12 @@ pub fn parse(text: &str, loaded_at: u64) -> Result<SecondOpinionTable, String> {
     if rows.is_empty() {
         if let Some(reason) = excluded.reason() {
             return Err(format!(
-                "every row in that file is one the app cannot rank ({reason}) — \
+                "every row in that file is one the app cannot rank ({reason}). \
                  re-run the projections script against live sources"
             ));
         }
         return Err(
-            "that file has a header but no player rows in it — nothing to import".to_string(),
+            "that file has a header but no player rows in it, nothing to import".to_string(),
         );
     }
     if source.is_empty() {

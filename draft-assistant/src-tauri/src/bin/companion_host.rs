@@ -181,7 +181,7 @@ async fn main() {
         }
     };
     eprintln!(
-        "serving on {} — pairing code {}",
+        "serving on {}, pairing code {}",
         companion.url().unwrap_or_else(|| format!("port {port}")),
         companion.hub.code()
     );

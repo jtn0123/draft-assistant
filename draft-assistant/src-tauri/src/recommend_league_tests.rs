@@ -90,7 +90,7 @@ fn a_superflex_league_wants_a_second_quarterback_and_does_not_dock_him() {
         "{reasons:?}"
     );
     assert!(
-        reasons.iter().any(|r| r.contains("SUPER_FLEX")),
+        reasons.iter().any(|r| r.contains("superflex")),
         "{reasons:?}"
     );
 
@@ -171,6 +171,43 @@ fn two_tight_end_leagues_get_the_same_treatment() {
         .unwrap_or_else(|| panic!("the second TE of two starters was refused: {recs:?}"));
     assert!(
         !reasons.iter().any(|r| r.contains("backup TE")),
+        "{reasons:?}"
+    );
+}
+
+#[test]
+fn a_second_quarterback_in_a_shallow_superflex_pool_is_still_a_starter() {
+    // No full board this time: the demand is allocated against the handful
+    // of players left, and with three big receivers and one quarterback in
+    // that pool the SUPER_FLEX lands on a receiver, so the league reads as
+    // starting one quarterback. The SUPER_FLEX slot is still open on this
+    // roster, and the man who fills it is a starter, not a backup.
+    let mut available = vec![player("qb2", "QB", 60.0)];
+    for i in 0..3 {
+        let mut wr = player(&format!("wr{i}"), "WR", 70.0);
+        wr.player.points = 320.0 - f64::from(i);
+        available.push(wr);
+    }
+    let mine = roster_with(&["QB", "RB", "WR", "TE"], &[("SUPER_FLEX", 1)]);
+    let have: HashMap<&str, u32> = HashMap::from([("QB", 1), ("RB", 1), ("WR", 1), ("TE", 1)]);
+    let superflex = rules(&superflex_slots());
+    let inputs = RecommendInputs::new(&available, Some(&mine), &superflex, 5, 15, 50, 12);
+    let ctx = context(&inputs, have);
+    assert!(
+        ctx.demand.get("QB").copied().unwrap_or(0.0) < 1.95,
+        "the shallow pool has to read as a one-quarterback league for this \
+         test to mean anything: {:?}",
+        ctx.demand
+    );
+    let reasons = score_candidate(&ctx, &available[0], Mode::Balanced)
+        .expect("a second QB in superflex is not disqualified")
+        .into_reasons();
+    assert!(
+        !reasons.iter().any(|r| r.contains("backup QB")),
+        "{reasons:?}"
+    );
+    assert!(
+        reasons.iter().any(|r| r.contains("superflex")),
         "{reasons:?}"
     );
 }

@@ -142,7 +142,7 @@ function failureNote(poll: PollHealth, now: number): string {
       ? "no scores have come through yet"
       : `the last new scores arrived ${spanLabel(Math.max(0, now - poll.last_success_at))} ago`;
   const why = poll.last_error === null ? "" : ` (${poll.last_error})`;
-  return `${tries} to get new scores failed — ${since}${why}`;
+  return `${tries} to get new scores failed: ${since}${why}`;
 }
 
 /**
@@ -285,10 +285,10 @@ export function SeasonScreen({
     header.opponent_name === null
       ? `Week ${view.week} · bye`
       : anyStarted
-        ? `vs ${header.opponent_name} · ${fmt(myLive, 1)} – ${fmt(oppLive, 1)}`
-        : `vs ${header.opponent_name} · ${fmt(myProjected, 1)} – ${fmt(header.opp_projected, 1)}`;
+        ? `vs ${header.opponent_name} · ${fmt(myLive, 1)} - ${fmt(oppLive, 1)}`
+        : `vs ${header.opponent_name} · ${fmt(myProjected, 1)} - ${fmt(header.opp_projected, 1)}`;
   const thisWeekSub = anyStarted
-    ? `live · projected ${fmt(myProjected, 1)} – ${fmt(header.opp_projected, 1)}`
+    ? `live · projected ${fmt(myProjected, 1)} - ${fmt(header.opp_projected, 1)}`
     : null;
 
   return (

@@ -30,14 +30,14 @@ describe("the odds", () => {
     render(<SeasonScreen view={view({ matchup: matchup() })} />);
 
     // Best: the projection and the percentage are both the best lineup's.
-    expect(screen.getByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
+    expect(screen.getByText("vs punt_god · 122.4 - 108.9")).toBeInTheDocument();
     expect(screen.getByText("62%")).toBeInTheDocument();
     expect(screen.getByText(/^best lineup · /)).toBeInTheDocument();
 
     // Switching the panel moves the header with it. The screen used to say
     // "62% to win" while the same screen said points were on the bench.
     fireEvent.click(screen.getByRole("button", { name: "Set" }));
-    expect(screen.getByText("vs punt_god · 118.1 – 108.9")).toBeInTheDocument();
+    expect(screen.getByText("vs punt_god · 118.1 - 108.9")).toBeInTheDocument();
     expect(screen.getByText("55%")).toBeInTheDocument();
     expect(screen.queryByText("62%")).not.toBeInTheDocument();
     expect(screen.getByText(/^lineup as set · /)).toBeInTheDocument();
@@ -177,7 +177,7 @@ describe("a failing live poll", () => {
       />,
     );
     expect(
-      screen.getByText("The last try to get new scores failed — no scores have come through yet"),
+      screen.getByText("The last try to get new scores failed: no scores have come through yet"),
     ).toBeInTheDocument();
   });
 
@@ -260,7 +260,7 @@ describe("SeasonScreen header", () => {
 
   it("leads with the projection while every game is still to come", () => {
     render(<SeasonScreen view={view({ live: liveSection("pre") })} pollHealth={null} />);
-    expect(screen.getByText("vs punt_god · 122.4 – 108.9")).toBeInTheDocument();
+    expect(screen.getByText("vs punt_god · 122.4 - 108.9")).toBeInTheDocument();
     expect(screen.getByText("This week")).toBeInTheDocument();
   });
 
@@ -268,17 +268,17 @@ describe("SeasonScreen header", () => {
    *  the score that had actually happened buried in another tab. */
   it("leads with the live score once anything has kicked off", () => {
     render(<SeasonScreen view={view({ live: liveSection("live") })} pollHealth={null} />);
-    expect(screen.getByText("vs punt_god · 71.5 – 64.2")).toBeInTheDocument();
+    expect(screen.getByText("vs punt_god · 71.5 - 64.2")).toBeInTheDocument();
     expect(screen.getByText("This week · live")).toBeInTheDocument();
     // The projection beside it is the lineup that is actually playing: with
     // every game under way and no call left, the best lineup is not a thing
     // anybody can still set.
-    expect(screen.getByText("live · projected 118.1 – 108.9")).toBeInTheDocument();
+    expect(screen.getByText("live · projected 118.1 - 108.9")).toBeInTheDocument();
   });
 
   it("keeps the live lead once the games are final", () => {
     render(<SeasonScreen view={view({ live: liveSection("final") })} pollHealth={null} />);
-    expect(screen.getByText("vs punt_god · 71.5 – 64.2")).toBeInTheDocument();
+    expect(screen.getByText("vs punt_god · 71.5 - 64.2")).toBeInTheDocument();
   });
 
   /** Past the last regular week the simulation short-circuits to a flat 100%
@@ -288,9 +288,9 @@ describe("SeasonScreen header", () => {
     expect(screen.getByText("88%")).toBeInTheDocument();
 
     const done = view();
-    done.header.playoff_status = "In the playoffs — seed 3";
+    done.header.playoff_status = "In the playoffs: seed 3";
     render(<SeasonScreen view={done} pollHealth={null} />);
-    expect(screen.getByText("In the playoffs — seed 3")).toBeInTheDocument();
+    expect(screen.getByText("In the playoffs: seed 3")).toBeInTheDocument();
   });
 });
 

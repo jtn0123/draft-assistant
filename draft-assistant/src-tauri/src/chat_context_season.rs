@@ -27,7 +27,7 @@ pub(crate) fn lineup_block(matchup: &crate::season::MatchupView, points_on_table
         ));
     }
     out.push_str(&format!(
-        "Your lineup as set projects {:.1} against a best of {:.1} — {:.1} left on the table.\n",
+        "Your lineup as set projects {:.1} against a best of {:.1}, {:.1} left on the table.\n",
         matchup.set_projected, matchup.my_projected, points_on_table
     ));
     let benched: Vec<String> = matchup
@@ -80,7 +80,7 @@ pub fn season_context(view: &crate::season::SeasonView) -> String {
 
 fn season_stable(view: &crate::season::SeasonView) -> String {
     format!(
-        "League: {} — week {} of season {}\n",
+        "League: {}, week {} of season {}\n",
         sanitise(&view.league.name),
         view.week,
         view.season
@@ -105,7 +105,7 @@ fn season_week(view: &crate::season::SeasonView) -> String {
         out.push_str("\nStart/sit calls available:\n");
         for call in &view.calls {
             out.push_str(&format!(
-                "{}: start {} over {} for {:+.1} — {}\n",
+                "{}: start {} over {} for {:+.1}, {}\n",
                 call.slot,
                 sanitise(&call.player_in),
                 sanitise(&call.player_out),

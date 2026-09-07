@@ -20,7 +20,7 @@ test("opens on the season screen with this week's matchup across the top", async
     "aria-pressed",
     "true",
   );
-  await expect(page.locator(".season-stat").first()).toContainText(/vs \S+.* · \d+\.\d – \d+\.\d/);
+  await expect(page.locator(".season-stat").first()).toContainText(/vs \S+.* · \d+\.\d - \d+\.\d/);
   await expect(page.getByText("Win odds")).toBeVisible();
   await expect(page.getByText("Playoffs")).toBeVisible();
   // The draft cockpit is not on this screen.

@@ -122,7 +122,7 @@ describe("untilLabel", () => {
     expect(from(0)).toBe("now");
     expect(from(-1)).toBe("now");
     expect(from(1)).toBe("0m");
-    expect(untilLabel(null)).toBe("–");
+    expect(untilLabel(null)).toBe("-");
   });
 });
 
@@ -141,7 +141,7 @@ describe("age", () => {
   it("never reads as a negative age when a clock runs ahead", () => {
     freeze();
     expect(age(Math.floor(NOW / 1000) + 30)).toBe("0s ago");
-    expect(age(null)).toBe("–");
+    expect(age(null)).toBe("-");
   });
 });
 

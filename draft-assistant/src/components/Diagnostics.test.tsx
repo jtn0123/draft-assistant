@@ -216,10 +216,30 @@ describe("verbose logging", () => {
     expect(box).not.toBeChecked();
   });
 
-  it("is not offered on a follower, which has no log of its own", async () => {
-    api.diagnostics.mockResolvedValue(diagnostics({ log_path: null, log_tail: [] }));
+  // A follower in a browser tab has no log file and no level to set; its
+  // diagnostics come back with `log_path: null` (see apiRemoteLog.ts).
+  it("is not offered on a browser follower, which has no log file of its own", async () => {
+    api.diagnostics.mockResolvedValue(
+      diagnostics({ platform: "following Justin's Mac", log_path: null, log_tail: [] }),
+    );
     render(<Diagnostics appVersion="0.2.0" onClose={() => undefined} />);
     await waitFor(() => expect(screen.getByText("Nothing in the log yet.")).toBeInTheDocument());
     expect(screen.queryByRole("checkbox", { name: /Verbose logging/ })).not.toBeInTheDocument();
+  });
+
+  // A follower inside Tauri is still the desktop app, with a backend and a
+  // log file of its own under it: apiRemoteLog.ts reports that file's path
+  // and routes setLogLevel to that backend, so the checkbox is offered.
+  it("is offered on a Tauri follower, whose own backend keeps a log", async () => {
+    api.diagnostics.mockResolvedValue(
+      diagnostics({
+        platform: "following Justin's Mac",
+        log_path: "/Users/me/Library/Logs/draft-assistant/draft-assistant.log",
+      }),
+    );
+    render(<Diagnostics appVersion="0.2.0" onClose={() => undefined} />);
+    const box = await screen.findByRole("checkbox", { name: /Verbose logging/ });
+    await userEvent.click(box);
+    expect(api.setLogLevel).toHaveBeenCalledWith("debug");
   });
 });

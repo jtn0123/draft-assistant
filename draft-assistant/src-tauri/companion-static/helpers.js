@@ -17,7 +17,7 @@
     "poll-health",
     "season-poll-health",
   ];
-  const NOTES = { 409: "The host is still answering.", 429: "Too many questions — slow down." };
+  const NOTES = { 409: "The host is still answering.", 429: "Too many questions. Slow down." };
   // ---------------------------------------------------------------- pure --
 
   /** A first guess at what to call this phone, from the user agent. */

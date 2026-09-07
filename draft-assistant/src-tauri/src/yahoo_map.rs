@@ -346,7 +346,7 @@ pub fn derived_budget_warning(league: &YahooLeague, results: &[YahooDraftPick]) 
     }
     let derived = derived_budget(results)?;
     Some(format!(
-        "Yahoo sent no auction budget for this league, so the board is using ${derived} — \
+        "Yahoo sent no auction budget for this league, so the board is using ${derived}: \
          the most any one team has spent so far. It is a floor, and it rises as the \
          bidding does."
     ))

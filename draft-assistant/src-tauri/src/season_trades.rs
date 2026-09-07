@@ -157,7 +157,7 @@ pub fn trade_ideas(
                     my_edge,
                     their_edge,
                     note: format!(
-                        "{} gains {:+.1}/wk too \u{2014} both sides start a better lineup",
+                        "{} gains {:+.1}/wk too, both sides start a better lineup",
                         partner.name, their_edge
                     ),
                 });

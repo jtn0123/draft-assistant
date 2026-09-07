@@ -33,9 +33,9 @@ function effortTag(level: string): string {
 
 /** What Claude can see, per screen, for the empty thread. */
 const EMPTY_NOTE: Record<Screen, string> = {
-  draft: "Claude sees your live board, your roster and the clock — ask anything about who to take.",
+  draft: "Claude sees your live board, your roster and the clock. Ask anything about who to take.",
   season:
-    "Claude sees this week's matchup, your roster and the waiver wire — ask anything about who to start.",
+    "Claude sees this week's matchup, your roster and the waiver wire. Ask anything about who to start.",
 };
 
 /** Thinking copy while a request is in flight, per effort level. */
@@ -313,7 +313,7 @@ export function Chat({
 
       {askingNew && !shared && (
         <div className="chat-newbar">
-          <span className="small">Start a new chat —</span>
+          <span className="small">Start a new chat:</span>
           <button type="button" className="btn-primary btn-row" onClick={startFresh}>
             Fresh start
           </button>
@@ -370,7 +370,7 @@ export function Chat({
             {nearingCap && (
               <div className="chat-stopped" role="status">
                 This screen&rsquo;s chats have spent {formatUsd(spentOnScreen)} of their{" "}
-                {formatUsd(budget)} budget — the next question may be refused. Raise the budget
+                {formatUsd(budget)} budget, so the next question may be refused. Raise the budget
                 above.
               </div>
             )}

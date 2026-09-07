@@ -297,13 +297,12 @@ fn an_open_superflex_slot_is_the_quarterbacks_hole_and_not_the_fourth_receivers(
     assert!(qb.total > wr.total, "QB {} vs WR {}", qb.total, wr.total);
     let said = qb.into_reasons();
     assert!(
-        said.iter()
-            .any(|r| r.contains("SUPER_FLEX slot is your QB")),
+        said.iter().any(|r| r.contains("superflex slot is your QB")),
         "{said:?}"
     );
     let heard = wr.into_reasons();
     assert!(
-        heard.iter().any(|r| r == "fills an open SUPER_FLEX slot"),
+        heard.iter().any(|r| r == "fills an open superflex slot"),
         "{heard:?}"
     );
 }

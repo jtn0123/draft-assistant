@@ -232,7 +232,7 @@ describe("the sign-in step", () => {
       redirect: "oob",
     });
     mocks.yahooFinishConnect.mockRejectedValueOnce(
-      new Error("Yahoo rejected that code — check it and try again"),
+      new Error("Yahoo rejected that code, check it and try again"),
     );
 
     await settle(() => screen.getByRole("button", { name: "Sign in to Yahoo" }).click());

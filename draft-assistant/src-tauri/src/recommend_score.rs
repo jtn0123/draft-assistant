@@ -17,7 +17,7 @@ mod injury;
 #[path = "recommend_strategy.rs"]
 mod strategy;
 
-use demand::dedicated_starters;
+use demand::{dedicated_starters, slot_label};
 pub(crate) use demand::{starters_phrase, starting_demand};
 
 /// A pick-count threshold fitted on a twelve-team league, restated in this
@@ -47,11 +47,13 @@ impl Score {
         }
     }
 
-    /// The line shown when every candidate was disqualified.
+    /// The line shown when every candidate was disqualified. Said the way
+    /// a drafter reads it: the old "best available (fallback)" put an
+    /// internal mode name in brackets on the card.
     pub fn fallback() -> Self {
         Score {
             total: 0.0,
-            reasons: vec![("best available (fallback)".into(), 0.0)],
+            reasons: vec![("best value left on the board".into(), 0.0)],
             in_stats: None,
         }
     }
@@ -197,13 +199,17 @@ fn need(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
         if ctx.flex_claimant(slot) == Some(p.position.as_str()) {
             score.add(
                 12.0 * ctx.need_pressure.min(2.0),
-                format!("the open {slot} slot is your {} hole", p.position),
+                format!(
+                    "the open {} slot is your {} hole",
+                    slot_label(slot),
+                    p.position
+                ),
             );
             return;
         }
         score.add(
             8.0 * ctx.need_pressure.min(2.0),
-            format!("fills an open {slot} slot"),
+            format!("fills an open {} slot", slot_label(slot)),
         );
         return;
     }
@@ -220,10 +226,12 @@ fn need(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
     if mode == Mode::Upside && ctx.rounds_left <= 5 {
         penalty *= 0.4;
     }
-    score.add(
-        -penalty,
-        format!("depth pick — {count} {} already rostered", p.position),
-    );
+    let reason = if count == 0 {
+        format!("adds depth: no {} rostered yet", p.position)
+    } else {
+        format!("adds depth: {count} {} already rostered", p.position)
+    };
+    score.add(-penalty, reason);
 }
 
 /// Positional discipline (fantasy-bot's documented failure modes, fixed):
@@ -237,11 +245,8 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
     // position. Three terms used to price the same empty slot — need, the
     // thin-room warning, and the early-depth term below — so one open
     // receiver slot was worth twelve, twenty and three all at once.
-    let already_paid = ctx
-        .inputs
-        .rules
-        .first_open_slot_for(&ctx.open, &p.position)
-        .is_some();
+    let open_slot = ctx.inputs.rules.first_open_slot_for(&ctx.open, &p.position);
+    let already_paid = open_slot.is_some();
     match p.position.as_str() {
         "DEF" | "K" => {
             if count >= 1 {
@@ -254,14 +259,14 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
                 score.add(
                     -60.0,
                     format!(
-                        "far too early for a {} — {} rounds still to draft",
+                        "far too early for a {}: {} rounds still to draft",
                         p.position, ctx.rounds_left
                     ),
                 );
             } else {
                 score.add(
                     15.0,
-                    format!("last rounds — lock in your one {}", p.position),
+                    format!("last rounds: lock in your one {}", p.position),
                 );
             }
         }
@@ -278,11 +283,25 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
             if count > starters {
                 return None;
             }
-            if count == starters {
+            // A second quarterback in a superflex or two-QB league is a
+            // starter while the slot he fills is still open, whatever the
+            // allocator made of a shallow pool: with only what is left on
+            // the board to allocate against, the SUPER_FLEX can land on a
+            // receiver, the demand read as one starter, and the man filling
+            // the biggest hole on the roster took the backup discount.
+            let fills_a_starter = if p.position == "QB" {
+                open_slot.is_some()
+            } else {
+                open_slot == Some(p.position.as_str())
+            };
+            if count == starters && !fills_a_starter {
                 let (penalty, reason) = if p.position == "QB" {
-                    (-25.0, "backup QB — only at extreme value")
+                    (
+                        -25.0,
+                        "would be a backup QB: only worth it at extreme value",
+                    )
                 } else {
-                    (-20.0, "backup TE — only at real value")
+                    (-20.0, "would be a backup TE: only worth it at real value")
                 };
                 score.add(penalty, reason);
             }
@@ -300,7 +319,7 @@ fn discipline(ctx: &Context, a: &AvailablePlayer, score: &mut Score) -> Option<(
                 score.add(
                     20.0,
                     format!(
-                        "only {count} {} rostered — one injury from an empty slot",
+                        "only {count} {} rostered: one injury from an empty slot",
                         p.position
                     ),
                 );
@@ -402,7 +421,7 @@ fn market(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
         if past_adp > falling {
             score.add(
                 (past_adp * 0.15).min(8.0),
-                format!("falling: {past_adp:.0} picks past ADP {adp:.0}"),
+                format!("falling: {past_adp:.0} picks past his ADP of {adp:.0}"),
             );
         } else if past_adp < -ahead {
             let early = -past_adp;
@@ -414,7 +433,7 @@ fn market(ctx: &Context, a: &AvailablePlayer, mode: Mode, score: &mut Score) {
             let weight = if mode == Mode::Safe { 2.0 } else { 1.0 };
             score.add(
                 -(early * 0.1 * weight).min(6.0 * weight),
-                format!("ahead of market: {early:.0} picks before ADP {adp:.0}"),
+                format!("ahead of market: {early:.0} picks before his ADP of {adp:.0}"),
             );
         }
     }

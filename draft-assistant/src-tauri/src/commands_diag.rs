@@ -114,10 +114,19 @@ async fn set_level_on(
     config.log_level = Some(level.to_string());
     // Saved rather than only held: chasing a problem usually means restarting,
     // and a verbose setting that resets on restart is no use for that. Saved
-    // before it is applied, too: a save that fails leaves the level where it
-    // was, so what the checkbox shows and what the file says never disagree.
-    if let Err(why) = engine.save_config(&config) {
-        config.log_level = previous;
+    // before it is applied, too: a save that fails puts the level back where
+    // it was, so what the checkbox shows and what the file says never
+    // disagree. Encoded under the lock, written with it released.
+    let pending = match engine.prepare_config_save(&config) {
+        Ok(pending) => pending,
+        Err(why) => {
+            config.log_level = previous;
+            return Err(why);
+        }
+    };
+    drop(config);
+    if let Err(why) = pending.write().await {
+        config_ref.lock().await.log_level = previous;
         return Err(why);
     }
     applog::set_level(level);

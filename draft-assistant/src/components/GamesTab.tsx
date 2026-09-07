@@ -160,7 +160,7 @@ export function GamesTab({
                   <span className="strong">{game.home}</span>
                   {game.away_score !== null && (
                     <span className={game.state === "live" ? "strong" : "mid strong"}>
-                      {game.away_score}–{game.home_score}
+                      {game.away_score}-{game.home_score}
                     </span>
                   )}
                 </div>

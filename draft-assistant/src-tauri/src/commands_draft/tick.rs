@@ -12,14 +12,14 @@ use crate::traded_picks::{self, TradedPick};
 /// parses as "no picks"; mid-draft that is a lost response rather than every
 /// pick being taken back, so the board is kept and the tick counts as failed.
 pub(super) const EMPTY_PICKS: &str =
-    "the pick list came back empty — keeping the picks already on the board";
+    "the pick list came back empty, keeping the picks already on the board";
 
 /// What a tick says when `/picks` answers without a pick the last answer
 /// had, while still carrying the picks made after it. Adopted, that answer
 /// moved the clock back to the hole, named a manager who had already picked
 /// and dropped every later pick off the feed; see `picks::rewound_to`.
 pub(super) fn picks_rewound(hole: u32) -> String {
-    format!("the pick list came back without pick {hole} — keeping the picks already on the board")
+    format!("the pick list came back without pick {hole}, keeping the picks already on the board")
 }
 
 /// The message for a refreshed draft that cannot be laid out, or `None` when
@@ -32,7 +32,7 @@ pub(super) fn unusable(draft: &Draft) -> Option<String> {
     let settings = &draft.settings;
     (settings.teams == 0 || settings.rounds == 0).then(|| {
         format!(
-            "the draft came back with {} teams and {} rounds — keeping the ones already on screen",
+            "the draft came back with {} teams and {} rounds, keeping the ones already on screen",
             settings.teams, settings.rounds
         )
     })

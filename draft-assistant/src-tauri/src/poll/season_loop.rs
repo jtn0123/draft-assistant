@@ -230,7 +230,7 @@ async fn refresh_players<E: SeasonEngine>(
 
 /// The warning a refused player refresh leaves on the health badge, until the
 /// next refresh that is worth applying.
-pub const INCOMPLETE_PLAYERS: &str = "the player list came back incomplete \u{2014} names and injury tags are the ones loaded with the league";
+pub const INCOMPLETE_PLAYERS: &str = "the player list came back incomplete, names and injury tags are the ones loaded with the league";
 
 /// One turn of the season poll loop: refresh the live slice, note whether that
 /// worked, and rebuild the view if the scores moved.
