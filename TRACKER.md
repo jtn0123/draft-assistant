@@ -256,7 +256,7 @@ All twelve items of the cheapest-first list. Verified on the combined tree: Rust
 - **Yahoo:** revoked/dead grant clears tokens and says "Yahoo signed you out. Connect again in Settings."; `IR+`/`IR2` non-draftable; load and tick build pick metadata from the same map; unreadable rows counted in resume; all-null `is_keeper` is `None`; nonce from the CSPRNG; every fixture relabelled `HandWritten`; `REDIRECT_FLOW` constant with the loopback path wired and tested (still `Oob` until L5).
 - **Chat:** streaming (SSE parser, `MAX_TOKENS` 64000, partial usage on failure); stable prefix = league/scoring/roster/rules only, board as a trailing system message, byte-identical across ticks (tested); spend recorded before return and on abandoned turns; shared timeout above the client's; names sanitised; `check_screen` first; refusal category shown; error bodies logged redacted and short.
 
-For the user: the updater private key was generated locally and never committed. Add it as the `TAURI_SIGNING_PRIVATE_KEY` repository secret to get signed updater artifacts from a tag; without it a tag still produces the dmg.
+Done 2026-09-07: secret set, first signed release is `v0.3.1` (see Grade 7 note below).
 
 ### Grade-7 prep batch (2026-09-06) — three Fable lanes, commit `0a121c5`, release `v0.3.0` at `2534563` (first tag at `620a5b6` failed its gate: the companion browser spec 404ed `pwa.js`; fixed, tag moved, dmg published)
 
@@ -302,4 +302,4 @@ Cheapest high-impact fixes, in order:
 11. Logging: follower routes log calls to its local backend; updater cause in the log; save before `set_level`; lockout `warn`; `Basic` redaction; report corrupt-state resets (Logging 1, 3-7).
 12. Tests: companion e2e serves `pwa.js`/manifest/worker and imports the CSP; poll-until in `https_tests` and `yahoo_auth_wire`; Playwright retries 0; fill the coverage placeholder; pass the device `Item` into `CompanionServer::new` (Tests 2-5).
 
-For the user: add the updater private key as `TAURI_SIGNING_PRIVATE_KEY` and tag `v0.3.1` to get the first release an installed copy can update to; every "Check for updates" says "No release feed yet" until then.
+Done 2026-09-07: `TAURI_SIGNING_PRIVATE_KEY` set by the user; `v0.3.1` at `a41c9e5` (run 34086367307) published the dmg, `Draft-Assistant-0.3.1-aarch64.app.tar.gz` with its `.sig`, and `latest.json`, so "Check for updates" now has a feed and 0.3.0 installs can update to it. Still open for the user: live tests L1–L10.
