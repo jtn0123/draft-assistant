@@ -362,7 +362,8 @@ files, 48 guard-script tests, clippy and every static check clean.
 
 ## Recovered from the abandoned branch (2026-09-07) — `0c9410a`
 
-`t3code/review-prior-grade-report` (last commit 2026-08-29) had 82 commits
+`t3code/review-prior-grade-report` (tip `2571b4f`, last commit 2026-08-29,
+deleted 2026-09-07 once the two items below had landed) had 82 commits
 never merged. It is a superseded layout of the same app: its `chat/cli.rs`,
 `engine_season.rs`, `log.rs`, `matchup.rs`, `lineup.rs` and `playoffs.rs` are
 main's `chat_cli.rs`, `season_engine.rs`, `applog.rs`, `season_view_matchup.rs`,
