@@ -226,6 +226,86 @@ fn an_auction_draft_is_modelled_as_a_snake_and_says_so() {
     );
 }
 
+#[test]
+fn an_auction_withholds_every_answer_that_depends_on_a_pick_order() {
+    // Nobody holds a pick number in an auction, so the queue of my upcoming
+    // picks, the manager on the clock and the pick timer are all answers to
+    // a question the format does not ask. Read against the same fixture as a
+    // snake first, so this pins the auction branch rather than a board that
+    // was empty either way.
+    let (mut loaded, config) = league();
+    loaded.draft.settings.pick_timer = Some(60);
+    loaded.draft.start_time = Some(1_700_000_000_000);
+
+    let snake = view(&loaded, &config);
+    assert!(!snake.draft.is_auction);
+    assert!(!snake.draft.my_next_picks.is_empty());
+    assert!(snake.draft.on_clock_name.is_some());
+    assert!(snake.draft.clock_deadline_ms.is_some());
+    assert!(snake.draft.is_my_pick, "slot 1 is mine and pick 1 is open");
+    assert!(
+        snake.available.iter().any(|a| a.survival_next.is_some()),
+        "the snake board judges survival at my next pick"
+    );
+
+    loaded.draft.draft_type = "auction".into();
+    let v = view(&loaded, &config);
+    assert!(v.draft.is_auction);
+    assert!(
+        v.draft.my_next_picks.is_empty(),
+        "{:?}",
+        v.draft.my_next_picks
+    );
+    assert_eq!(v.draft.on_clock_name, None);
+    assert_eq!(v.draft.clock_deadline_ms, None);
+    assert!(!v.draft.is_my_pick, "no seat is ever on the clock");
+    assert!(
+        v.available.iter().all(|a| a.survival_next.is_none()),
+        "survival counts picks between now and my next turn, and there is none"
+    );
+}
+
+#[test]
+fn a_practice_report_is_read_against_kickoff_not_against_the_drafts_status() {
+    // A "Doubtful" tag in August is about a Sunday that is six months away,
+    // so it costs a player nothing until the season starts. The flag that
+    // decides this is the league's own start week, not the draft's status:
+    // the fixture drafts week-one football while the draft reads "drafting",
+    // so a view that judged by status would price the tag as live.
+    let (mut loaded, config) = league();
+    for player in std::sync::Arc::make_mut(&mut loaded.board) {
+        player.injury_status = Some("Doubtful".into());
+    }
+
+    let v = view(&loaded, &config);
+    assert!(!v.recommendations.is_empty(), "nothing was recommended");
+    for rec in &v.recommendations {
+        assert!(
+            !rec.reasons.iter().any(|r| r.contains("injury flag")),
+            "a preseason practice report cost him points: {:?}",
+            rec.reasons
+        );
+    }
+
+    // The same board, in a league that starts scoring in week 15: the season
+    // is under way, the tag is about a game that is about to be played, and
+    // now it counts.
+    loaded.league.settings.start_week = Some(15);
+    let midseason = view(&loaded, &config);
+    assert!(
+        midseason
+            .recommendations
+            .iter()
+            .any(|rec| rec.reasons.iter().any(|r| r.contains("injury flag"))),
+        "a live practice report went unpriced: {:?}",
+        midseason
+            .recommendations
+            .iter()
+            .map(|r| &r.reasons)
+            .collect::<Vec<_>>()
+    );
+}
+
 /// The survival percentage the board and the rail show for one player.
 fn survival_of(v: &DraftView, player_id: &str) -> f64 {
     v.available

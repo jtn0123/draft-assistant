@@ -10,6 +10,7 @@ import "./test/warmScreens";
 import App from "./App";
 import { resetPrefs } from "./prefs";
 import { resetFollowStatus, setFollowStatus } from "./followStatus";
+import { resetHostSync, setHostSync } from "./hostSync";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
 import { querySettingsRow } from "./test/settingsRow";
@@ -50,6 +51,7 @@ const row = querySettingsRow;
 beforeEach(() => {
   h.reset();
   resetFollowStatus();
+  resetHostSync();
   fakeStorage({ "da.screen": "draft" });
   resetPrefs();
   resetThemePreference();
@@ -132,6 +134,22 @@ describe("following a host", () => {
   it("never asks the host's app whether it is serving phones", async () => {
     await loaded();
     expect(h.api.companionStatus).not.toHaveBeenCalled();
+  });
+
+  it("shows the host's sync in the pill, not this window's own", async () => {
+    // A follower's `startPolling` is a no-op that resolves, so this window's
+    // own flag comes back true whatever the host is doing. The pill has to
+    // read the host's heartbeat instead, or it goes green over a board whose
+    // host has switched live sync off.
+    await loaded();
+    expect(screen.getByText("Waiting for the host")).toBeInTheDocument();
+
+    await settle(() => setHostSync({ polling: false, hostName: "Justin's Mac" }));
+    expect(screen.getByText("Host's live sync is off")).toBeInTheDocument();
+
+    await settle(() => setHostSync({ polling: true, hostName: "Justin's Mac" }));
+    expect(screen.queryByText("Host's live sync is off")).toBeNull();
+    expect(screen.queryByText("Waiting for the host")).toBeNull();
   });
 });
 

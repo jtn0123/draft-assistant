@@ -280,7 +280,18 @@ async fn a_port_that_was_busy_is_tried_again_at_the_next_look_rather_than_in_an_
         "nothing to bind to"
     );
     assert!(capture.saw("WARN phone connection stays http only"));
+    // Pinned outright rather than read off the constant, which is what the
+    // rest of this test does: a port somebody else is holding comes free in
+    // seconds, and waiting the hour a failed mint is worth would leave the
+    // phone on http for the whole draft.
+    const { assert!(super::BIND_RETRY_AFTER_SECS == 30) };
+    const { assert!(super::BIND_RETRY_AFTER_SECS < super::RETRY_AFTER_SECS) };
     drop(held);
+    assert_eq!(
+        keeper.tick(Some(&on_tailnet()), now + super::BIND_RETRY_AFTER_SECS - 1),
+        None,
+        "the wait is a wait: the port is free but the retry is not due"
+    );
     let https = keeper
         .tick(Some(&on_tailnet()), now + super::BIND_RETRY_AFTER_SECS)
         .expect("the port came free and the next look took it");
