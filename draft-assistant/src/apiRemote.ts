@@ -11,7 +11,13 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { Api } from "./api";
 import { validateDraftView, validateSeasonView } from "./api";
-import { remoteFetcher } from "./apiRemoteFetch";
+import { hostFetch, remoteFetcher } from "./apiRemoteFetch";
+import {
+  followerLog,
+  followerLogDiagnostics,
+  followerOpenLogFolder,
+  followerSetLogLevel,
+} from "./apiRemoteLog";
 import { clearFollow } from "./companion";
 import { REVOKED_CLOSE_CODE, setFollowStatus } from "./followStatus";
 import type { ChatSettings } from "./chat-types";
@@ -33,7 +39,7 @@ export const REVOKED_KEY = "da.companion.revoked";
 
 // The read half lives in its own module; re-exported so callers and tests
 // keep one import for the follower's backend.
-export { HOST_TIMEOUT_MS, remoteFetcher } from "./apiRemoteFetch";
+export { HOST_TIMEOUT, HOST_TIMEOUT_MS, hostFetch, remoteFetcher } from "./apiRemoteFetch";
 
 /** How long to wait before each reconnection attempt, in ms; the last one
  *  repeats for as long as the host stays away. */
@@ -251,11 +257,11 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
     if (view === null) throw noSeasonOnHost(follow.host_name);
     return validateSeasonView(view);
   };
+  // A picture that never arrives is a blank, not an error: the timeout inside
+  // `hostFetch` is what stops a wedged host pinning every headshot request.
   const image = async (path: string): Promise<string | null> => {
     try {
-      const response = await fetch(`${follow.url}${path}`, {
-        headers: { authorization: `Bearer ${follow.token}` },
-      });
+      const response = await hostFetch(follow, path);
       if (!response.ok) return null;
       return dataUri(response.headers.get("content-type") ?? "", await response.arrayBuffer());
     } catch {
@@ -341,9 +347,9 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
       return thread ?? { league_id: "", screen, busy: false, entries: [] };
     },
     sharedChatSend: async (screen, text) => {
-      const response = await fetch(`${follow.url}/api/chat`, {
+      const response = await hostFetch(follow, "/api/chat", {
         method: "POST",
-        headers: { authorization: `Bearer ${follow.token}`, "content-type": "application/json" },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ screen, text }),
       });
       if (response.status === 401) {
@@ -356,9 +362,9 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
       if (!response.ok) throw new Error(`${follow.host_name} answered ${response.status}`);
     },
     sharedChatReset: async (screen) => {
-      const response = await fetch(`${follow.url}/api/chat/reset`, {
+      const response = await hostFetch(follow, "/api/chat/reset", {
         method: "POST",
-        headers: { authorization: `Bearer ${follow.token}`, "content-type": "application/json" },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ screen }),
       });
       if (response.status === 401) {
@@ -407,13 +413,15 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
     setDeviceName: refused,
 
     // ---------- diagnostics ----------
-    // A follower has no log of its own: the host writes one, and reading it
-    // over the wire would mean handing every paired phone the host's error
-    // history. So this reports what this window knows and says who to ask.
+    // The host's log is the host's: reading it over the wire would mean
+    // handing every paired phone the host's error history. What is reported
+    // here is what this window knows, plus this window's own log (the local
+    // backend's file inside Tauri, a ring buffer in a browser tab; see
+    // apiRemoteLog.ts).
     diagnostics: async () => {
-      const view = await state().catch(() => null);
+      const [view, log] = await Promise.all([state().catch(() => null), followerLogDiagnostics()]);
       return {
-        app_version: "",
+        ...log,
         platform: `following ${follow.host_name}`,
         league_id: view?.league.league_id ?? null,
         league_name: view?.league.name ?? null,
@@ -423,17 +431,14 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
         poll: null,
         companion_enabled: false,
         companion_devices: 0,
-        log_path: null,
-        log_level: "info",
-        log_tail: [],
       } satisfies Diagnostics;
     },
-    openLogFolder: refused,
-    // The host's log is the host's. Reporting into it from here would let any
-    // paired device write lines the host cannot account for.
-    logFrontendError: () => Promise.resolve(),
-    // The host's log level is the host's to set.
-    setLogLevel: refused,
+    // The follower's own log, never the host's: reporting into the host's
+    // would let any paired device write lines the host cannot account for,
+    // and a follower that crashed used to leave no line anywhere.
+    openLogFolder: followerOpenLogFolder,
+    logFrontendError: followerLog,
+    setLogLevel: followerSetLogLevel,
 
     // ---------- nothing to ask, nothing to fail ----------
     sleeperLeagues: () => Promise.resolve([]),

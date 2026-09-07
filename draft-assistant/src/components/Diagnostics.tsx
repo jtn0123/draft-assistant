@@ -151,7 +151,11 @@ export function Diagnostics({
 
         {report === null ? (
           <>
-            <span className="diag-empty">{error ?? "Reading…"}</span>
+            {/* Announced: the dialog opened on "Reading…" and the only thing
+                that changes is this one line. */}
+            <span className="diag-empty" role={error === null ? "status" : "alert"}>
+              {error ?? "Reading…"}
+            </span>
             {/* Escape and the scrim still worked, but a dialog whose only
                 visible content is an error and no button reads as stuck. */}
             {error !== null && (
@@ -225,8 +229,20 @@ export function Diagnostics({
                 Close
               </button>
             </div>
-            {note !== null && <span className="diag-empty">{note}</span>}
-            {error !== null && <span className="diag-empty">{error}</span>}
+            {/* "Copied" and "Log folder: …" are the whole answer to the button
+                just pressed, and they land below the buttons where a screen
+                reader is not looking. Polite for the outcome, assertive for
+                the failure. */}
+            {note !== null && (
+              <span className="diag-empty" role="status">
+                {note}
+              </span>
+            )}
+            {error !== null && (
+              <span className="diag-empty" role="alert">
+                {error}
+              </span>
+            )}
           </>
         )}
       </div>

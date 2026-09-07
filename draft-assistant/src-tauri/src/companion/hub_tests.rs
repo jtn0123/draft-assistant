@@ -99,6 +99,34 @@ fn five_wrong_codes_lock_that_address_out_and_the_right_one_is_refused_too() {
     ));
 }
 
+/// The failure this prevents: the lockout only ever said so at debug, so a
+/// phone that could not pair all evening left a log with nothing in it.
+#[test]
+fn an_address_being_locked_out_is_a_warning_in_the_log() {
+    let capture = crate::applog::Capture::start();
+    let hub = hub();
+    let code = hub.code();
+    let wrong = if code == "000000" { "111111" } else { "000000" };
+    for _ in 0..5 {
+        hub.pair(attempt(wrong, "Phone")).expect("runs");
+    }
+    assert!(
+        !capture.saw("locked out"),
+        "not before the lockout: {:?}",
+        capture.lines()
+    );
+    hub.pair(attempt(&code, "Phone")).expect("runs");
+    assert!(
+        capture.saw("WARN companion: pairing refused, address locked out peer="),
+        "{:?}",
+        capture.lines()
+    );
+    assert!(
+        !capture.lines().iter().any(|line| line.contains(&code)),
+        "the code itself never reaches the log"
+    );
+}
+
 #[test]
 fn one_address_guessing_does_not_lock_the_rest_of_the_house_out() {
     let hub = hub();

@@ -6,6 +6,7 @@ import type { Platform, PollHealth } from "../types";
 import { age } from "../format";
 import { setChime, useChime, type Screen } from "../prefs";
 import { followStatusMessage, type FollowStatus } from "../followStatus";
+import { MENU_ITEMS, SettingsMenuRow, type SettingsRow } from "./HeaderSettingsRow";
 
 import "../companion.css";
 
@@ -13,13 +14,7 @@ import "../companion.css";
  *  Sleeper's endpoints, so on a Yahoo key it could only fail, forever. */
 export const SEASON_SLEEPER_ONLY = "Season view is Sleeper-only for now";
 
-export interface SettingsRow {
-  label: string;
-  note: string;
-  value: string;
-  on: boolean;
-  onSelect: () => void;
-}
+export type { SettingsOption, SettingsRow, SettingsRowKind } from "./HeaderSettingsRow";
 
 function SyncPill({
   polling,
@@ -267,14 +262,15 @@ export function Header({
   // menu role already promises. Every item sits at tabIndex -1, so Tab leaves
   // the menu (and closes it) rather than crawling through six settings.
   const onMenuKey = (event: React.KeyboardEvent) => {
-    const items = [
-      ...(menuBox.current?.querySelectorAll<HTMLElement>(
-        '[role="menuitem"], [role="menuitemcheckbox"]',
-      ) ?? []),
-    ];
+    const items = [...(menuBox.current?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
     if (items.length === 0) return;
     const at = items.indexOf(document.activeElement as HTMLElement);
-    const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+    // Left and right move within a picker's choices; up and down do not
+    // distinguish, so a picker's choices are simply stops on the way through.
+    const sideways = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    const inPicker = items[at]?.getAttribute("role") === "menuitemradio";
+    const step =
+      event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : inPicker ? sideways : 0;
     let next = -1;
     if (step !== 0) {
       next =
@@ -427,28 +423,12 @@ export function Header({
               </button>
             </div>
             {settingsRows.map((row, index) => (
-              <button
-                key={row.label}
-                type="button"
-                className="settings-row"
-                // The row's setting is its state, not a word in its label: a
-                // screen reader should say "on", not read "On" as part of the
-                // name and leave the listener to guess it was a control.
-                role="menuitemcheckbox"
-                aria-checked={row.on}
-                tabIndex={-1}
-                ref={index === 0 ? firstRow : undefined}
-                onClick={row.onSelect}
+              <SettingsMenuRow
+                key={row.id}
+                row={row}
+                firstRef={index === 0 ? firstRow : undefined}
                 onKeyDown={onMenuKey}
-              >
-                <span className="settings-row-text">
-                  <span className="settings-row-label">{row.label}</span>
-                  <span className="muted settings-row-note">{row.note}</span>
-                </span>
-                <span className={row.on ? "settings-row-value is-on" : "settings-row-value"}>
-                  {row.value}
-                </span>
-              </button>
+              />
             ))}
             <span className="muted settings-footer" role="none">
               {footerNote}

@@ -41,6 +41,7 @@ export function Board({
   boardSize,
   replacementDemand,
   secondOpinionLoadedAt = null,
+  draftOver = false,
   onDraft,
 }: {
   players: AvailablePlayer[];
@@ -56,6 +57,11 @@ export function Board({
    *  Omitted where the caller has no data health to hand — the column reads
    *  "imported" without a date rather than not appearing. */
   secondOpinionLoadedAt?: number | null;
+  /** The draft is complete. Every row's Draft button is disabled: a pick
+   *  recorded after the last one is a manual pick into a board nobody is
+   *  drafting from, and it used to be one click away for the rest of the
+   *  night. Omitted where the caller does not know; the buttons stay live. */
+  draftOver?: boolean;
   onDraft: (id: string, name: string) => void;
 }) {
   const [pos, setPos] = useState<Position>("ALL");
@@ -266,6 +272,7 @@ export function Board({
             key={p.player_id}
             player={p}
             showSecondOpinion={showSecondOpinion}
+            disabled={draftOver}
             onDraft={onDraft}
           />
         ))

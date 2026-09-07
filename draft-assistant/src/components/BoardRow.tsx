@@ -13,13 +13,19 @@ import { SecondOpinionCell } from "./SecondOpinion";
  * store — 200 rows meant ~400 subscribers churning per tick for a list whose
  * contents usually did not change.
  */
+/** Why the button does nothing once the draft is over, in one hover. */
+export const DRAFT_OVER_TITLE = "The draft is complete; there is nothing left to record";
+
 export const BoardRow = memo(function BoardRow({
   player: p,
   showSecondOpinion,
+  disabled = false,
   onDraft,
 }: {
   player: AvailablePlayer;
   showSecondOpinion: boolean;
+  /** The draft is complete, so recording a pick is off. */
+  disabled?: boolean;
   onDraft: (id: string, name: string) => void;
 }) {
   return (
@@ -51,6 +57,8 @@ export const BoardRow = memo(function BoardRow({
         <button
           type="button"
           className="btn-ghost btn-row"
+          disabled={disabled}
+          title={disabled ? DRAFT_OVER_TITLE : undefined}
           onClick={() => onDraft(p.player_id, p.name)}
         >
           Draft

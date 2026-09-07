@@ -133,6 +133,41 @@ describe("switching leagues", () => {
     expect(mocks.startPolling).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves live sync off across a switch when the user had turned it off", async () => {
+    // Switching used to start the poller unconditionally: a user who had
+    // switched live sync off got it back with the new league, unasked.
+    const { said, showToast } = toasts();
+    const { result } = renderHook(() => useDraftSession(showToast));
+    await waitFor(() => expect(result.current.view).not.toBeNull());
+    await act(async () => {
+      await result.current.togglePolling();
+    });
+    expect(result.current.polling).toBe(false);
+
+    await act(async () => {
+      await result.current.switchLeague("other");
+    });
+
+    expect(result.current.polling).toBe(false);
+    // Once for the restore on launch, and never for the switch.
+    expect(mocks.startPolling).toHaveBeenCalledTimes(1);
+    expect(said.some((t) => /^Switched to .*Live sync is still off/.test(t))).toBe(true);
+  });
+
+  it("brings live sync along when it was on", async () => {
+    const { result } = renderHook(() => useDraftSession(() => undefined));
+    await waitFor(() => expect(result.current.view).not.toBeNull());
+    expect(result.current.polling).toBe(true);
+
+    await act(async () => {
+      await result.current.switchLeague("other");
+    });
+
+    expect(result.current.polling).toBe(true);
+    // The restore, and the new league.
+    expect(mocks.startPolling).toHaveBeenCalledTimes(2);
+  });
+
   it("says so when the whole switch went through", async () => {
     const { said, showToast } = toasts();
     const { result } = renderHook(() => useDraftSession(showToast));
@@ -265,5 +300,36 @@ describe("naming the service", () => {
     expect(said.some((t) => /polling Yahoo every 3s/.test(t))).toBe(true);
     expect(said.some((t) => /Picks re-pulled from Yahoo/.test(t))).toBe(true);
     expect(said.some((t) => /Sleeper/.test(t))).toBe(false);
+  });
+});
+
+describe("once the draft is complete", () => {
+  it("refuses to record or undo, with a toast, and hands the calls through until then", async () => {
+    const { useDraftEnd } = await import("./draftSession");
+    const { renderHook: hook } = await import("@testing-library/react");
+    const ask = vi.fn();
+    const undo = vi.fn();
+    const { said, showToast } = toasts();
+    const live = draftFixture();
+    const done = draftFixture();
+    done.draft.status = "complete";
+
+    const { result, rerender } = hook(({ v }) => useDraftEnd(v, ask, undo, showToast), {
+      initialProps: { v: live },
+    });
+    result.current.onDraft("p1", "Late Wideout");
+    result.current.onUndo();
+    expect(ask).toHaveBeenCalledWith("p1", "Late Wideout");
+    expect(undo).toHaveBeenCalledTimes(1);
+
+    rerender({ v: done });
+    result.current.onDraft("p1", "Late Wideout");
+    result.current.onUndo();
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(undo).toHaveBeenCalledTimes(1);
+    expect(said).toEqual([
+      "The draft is complete: Late Wideout cannot be recorded",
+      "The draft is complete: there is no recorded pick to undo",
+    ]);
   });
 });

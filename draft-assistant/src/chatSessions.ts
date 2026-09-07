@@ -11,6 +11,7 @@
 
 import type { ChatMessage, ThreadEntry } from "./chat-types";
 import { formatUsd } from "./chatCost";
+import { reportError } from "./errorReport";
 import { dateLabel } from "./format";
 
 /** A whole conversation as the panel shows it, plus what it cost. */
@@ -113,15 +114,41 @@ function isSavedChat(value: unknown): value is SavedChat {
   );
 }
 
+/** What is stored under a scope, minus anything that does not check out.
+ *
+ *  A conversation that is dropped is reported rather than dropped silently:
+ *  the panel opening on an empty list looked like the app forgetting, with
+ *  nothing in the log to say the history had been rejected. Once per scope
+ *  per session, by way of `reportError`'s own de-duplication. */
 function readAll(scope: string): SavedChat[] {
+  const where = `chatSessions ${keyFor(scope)}`;
+  let raw: string | null;
   try {
-    const raw = localStorage.getItem(keyFor(scope));
-    if (raw === null) return [];
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter(isSavedChat) : [];
+    raw = localStorage.getItem(keyFor(scope));
   } catch {
+    // Storage refused to answer: nothing was lost, there was nothing to read.
     return [];
   }
+  if (raw === null) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    reportError(`Stored chat history was not JSON (${raw.length} chars); reset`, where);
+    return [];
+  }
+  if (!Array.isArray(parsed)) {
+    reportError("Stored chat history was not a list; reset", where);
+    return [];
+  }
+  const kept = parsed.filter(isSavedChat);
+  if (kept.length !== parsed.length) {
+    reportError(
+      `Dropped ${parsed.length - kept.length} of ${parsed.length} stored chats that did not read back`,
+      where,
+    );
+  }
+  return kept;
 }
 
 function writeAll(scope: string, chats: SavedChat[]): void {

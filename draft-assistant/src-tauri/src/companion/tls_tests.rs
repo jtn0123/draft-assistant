@@ -3,7 +3,8 @@
 //! self-signed pair minted with rcgen.
 
 use super::{cert_paths, ensure, load, materials, mint_args, needs_mint, TlsSource};
-use super::{CertPaths, REMINT_WITHIN_SECS};
+use super::{cert_state, materials_with, state_at, CertPaths, CertState, REMINT_WITHIN_SECS};
+use crate::applog::Capture;
 use crate::companion::tls_x509::{days_from_civil, not_after_from_pem, not_after_unix};
 use std::path::{Path, PathBuf};
 
@@ -190,5 +191,112 @@ fn off_and_no_magic_dns_name_mean_no_https_at_all() {
         key: dir.join("none.key"),
     };
     assert!(materials(&missing, Some(NAME)).is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The failure this prevents: a renewal that failed inside the two-week
+/// window threw the still-valid certificate away, and every phone lost the
+/// padlock a fortnight before it had to.
+#[test]
+fn a_renewal_that_fails_keeps_the_certificate_that_is_still_good() {
+    let dir = scratch("renew-fail");
+    let now = midnight(2026, 9, 6);
+    let paths = cert_paths(&dir, NAME);
+    write_pair(&paths, &self_signed(NAME, (2026, 9, 15)));
+    assert_eq!(
+        cert_state(Some(&std::fs::read(&paths.cert).expect("cert")), true, now),
+        CertState::Renewable
+    );
+    let capture = Capture::start();
+    let mut runs = 0;
+    let kept = ensure(&dir, NAME, now, |_| {
+        runs += 1;
+        false
+    })
+    .expect("the nine-day certificate is still served");
+    assert_eq!(runs, 1, "the renewal was tried");
+    assert_eq!(kept, paths);
+    assert!(
+        capture.saw("WARN could not renew the phone connection's certificate for"),
+        "{:?}",
+        capture.lines()
+    );
+    // Actually run out: nothing left to keep, so the failure is an error.
+    let expired = midnight(2026, 9, 16);
+    assert_eq!(
+        cert_state(
+            Some(&std::fs::read(&paths.cert).expect("cert")),
+            true,
+            expired
+        ),
+        CertState::Expired
+    );
+    assert!(ensure(&dir, NAME, expired, |_| false).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_state_of_a_certificate_follows_its_expiry() {
+    let now = midnight(2026, 9, 6);
+    assert_eq!(state_at(None, now), CertState::Absent);
+    assert_eq!(state_at(Some(now), now), CertState::Expired);
+    assert_eq!(state_at(Some(now - 1), now), CertState::Expired);
+    assert_eq!(state_at(Some(now + 1), now), CertState::Renewable);
+    assert_eq!(
+        state_at(Some(now + REMINT_WITHIN_SECS - 1), now),
+        CertState::Renewable
+    );
+    assert_eq!(
+        state_at(Some(now + REMINT_WITHIN_SECS), now),
+        CertState::Good
+    );
+    assert!(needs_mint(None, true, now));
+}
+
+/// The failure this prevents: every reason HTTPS did not come up was a
+/// debug line, so a Mac on its tailnet with an `http://` QR code left a log
+/// that said nothing about why.
+#[test]
+fn every_reason_https_stays_down_is_a_warning_and_never_names_the_key() {
+    let dir = scratch("warn");
+    let now = midnight(2026, 9, 6);
+    let capture = Capture::start();
+    let source = TlsSource::Tailscale { dir: dir.clone() };
+    assert!(materials_with(&source, NAME, now, &|_| false).is_none());
+    assert!(
+        capture.saw("WARN phone connection stays http only: tailscale cert did not produce"),
+        "{:?}",
+        capture.lines()
+    );
+    // A pair that does not go together is refused with a reason, not a key.
+    let paths = cert_paths(&dir, NAME);
+    let (cert, _) = self_signed(NAME, (2027, 1, 1));
+    let (_, other_key) = self_signed(NAME, (2027, 1, 1));
+    write_pair(&paths, &(cert, other_key.clone()));
+    assert!(materials_with(&source, NAME, now, &|_| panic!("good files, no mint")).is_none());
+    assert!(
+        capture.saw("WARN phone connection stays http only: the certificate and key"),
+        "{:?}",
+        capture.lines()
+    );
+    let body = other_key
+        .lines()
+        .nth(1)
+        .expect("a key body line")
+        .to_string();
+    assert!(
+        !capture.lines().iter().any(|line| line.contains(&body)),
+        "the key reached the log"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn loaded_materials_carry_the_expiry_the_periodic_check_reads() {
+    let dir = scratch("expiry");
+    let paths = cert_paths(&dir, NAME);
+    write_pair(&paths, &self_signed(NAME, (2027, 3, 4)));
+    let loaded = load(NAME, &paths).expect("a config");
+    assert_eq!(loaded.not_after, Some(midnight(2027, 3, 4)));
     let _ = std::fs::remove_dir_all(dir);
 }

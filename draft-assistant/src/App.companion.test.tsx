@@ -12,6 +12,7 @@ import { resetPrefs } from "./prefs";
 import { resetFollowStatus, setFollowStatus } from "./followStatus";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
+import { querySettingsRow } from "./test/settingsRow";
 import {
   companionStatus,
   draftFixture,
@@ -44,7 +45,7 @@ async function openSettings() {
   });
 }
 
-const row = (label: RegExp) => screen.queryByRole("menuitemcheckbox", { name: label });
+const row = querySettingsRow;
 
 beforeEach(() => {
   h.reset();
@@ -112,7 +113,7 @@ describe("following a host", () => {
     expect(row(/Join another Draft Assistant/)).toBeNull();
     // The rows that are about this Mac stay.
     expect(row(/Pick chime/)).toBeInTheDocument();
-    expect(row(/Appearance/)).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Appearance" })).toBeInTheDocument();
   });
 
   it("sends nobody to the league picker — the host chooses", async () => {

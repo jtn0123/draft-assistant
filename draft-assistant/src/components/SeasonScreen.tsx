@@ -17,6 +17,7 @@ import { CallsToMake, LineupCompare, Waivers } from "./ThisWeek";
 import { GamesTab } from "./GamesTab";
 import { ODDS_NOTE } from "../odds";
 import { LastSeason, LeagueTab, Standings, TeamRoster } from "./SeasonTabs";
+import { SeasonRefresh } from "./SeasonRefresh";
 import { TrendsTab } from "./TrendsTab";
 
 // Ship with this chunk, not with the window. board.css is here because the
@@ -214,14 +215,26 @@ function lineupLocked(view: SeasonView): boolean {
   return view.live.lineup_locked;
 }
 
+/** A view the Refresh button brought back, and the pushed view it replaces. */
+interface Refreshed {
+  over: SeasonView;
+  view: SeasonView;
+}
+
 export function SeasonScreen({
-  view,
+  view: pushed,
   pollHealth = null,
 }: {
   view: SeasonView;
   /** The season poller's last report, or null before one has arrived. */
   pollHealth?: PollHealth | null;
 }) {
+  // What Refresh brought back stands in for the pushed view until the poller
+  // pushes a newer one: the answer is remembered against the view it
+  // replaced, so a later push from the backend wins without an effect to
+  // clear it.
+  const [refreshed, setRefreshed] = useState<Refreshed | null>(null);
+  const view = refreshed !== null && refreshed.over === pushed ? refreshed.view : pushed;
   const [tab, setTab] = useState<SeasonTab>("Standings");
   // Which lineup the whole screen is talking about. It lived inside
   // LineupCompare while the header quoted best-lineup odds regardless, so the
@@ -302,6 +315,7 @@ export function SeasonScreen({
         <div className="season-stat">
           <span className="eyebrow">Data</span>
           <LiveStatus health={view.data_health} poll={pollHealth} />
+          <SeasonRefresh onView={(next) => setRefreshed({ over: pushed, view: next })} />
         </div>
       </div>
 

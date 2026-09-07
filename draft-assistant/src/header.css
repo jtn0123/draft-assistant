@@ -262,6 +262,41 @@
   color: var(--pos);
 }
 
+/* A picker's row is not itself a button: its choices are. */
+.settings-row-radio {
+  cursor: default;
+}
+
+.settings-radio {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: 1px solid var(--rule2);
+}
+
+.settings-radio-option {
+  padding: 3px 8px;
+  border: none;
+  border-left: 1px solid var(--rule2);
+  background: transparent;
+  color: var(--mid);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.settings-radio-option:first-child {
+  border-left: none;
+}
+
+.settings-radio-option:hover {
+  background: var(--panel);
+}
+
+.settings-radio-option.is-on {
+  background: var(--ink);
+  color: var(--paper);
+}
+
 .settings-footer {
   padding: 10px 13px;
   font-size: 11px;

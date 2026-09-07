@@ -5,6 +5,7 @@
 //! apart from the commands themselves so the start/stop ordering rules can be
 //! tested without a running Tauri app.
 
+use super::watches::{SlowTickWatch, SourceWatch};
 use crate::applog::HealthWatch;
 use crate::commands_draft::tick::backoff_secs;
 use crate::poll::{season_tick, PollHealth, SeasonPollMemory};
@@ -98,6 +99,10 @@ pub(crate) fn spawn<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: &AppStat
         // no answer anywhere in the log. The draft loop has had this since it
         // was built; this is the same watch on the other loop.
         let mut watch = HealthWatch::default();
+        // The same rule for one failing source and for a slow tick: a line
+        // when it starts, a line when it stops, nothing in between.
+        let mut source_watch = SourceWatch::default();
+        let mut slow_watch = SlowTickWatch::default();
         loop {
             if !is_live(&season_generation, generation) {
                 break;
@@ -115,8 +120,10 @@ pub(crate) fn spawn<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: &AppStat
                 let season = season_ref.lock().await;
                 season.as_ref().map(|s| s.week)
             };
+            let started = std::time::Instant::now();
             let tick =
                 season_tick(&*engine, &loaded_ref, &season_ref, &config_ref, &mut memory).await;
+            let took = started.elapsed();
             // Health first: when a refresh fails there is no view to send, and
             // the screen still has to hear that the attempt was made and lost.
             let failures = tick.health.as_ref().map_or(0, |h| h.consecutive_failures);
@@ -144,6 +151,22 @@ pub(crate) fn spawn<R: tauri::Runtime>(app: tauri::AppHandle<R>, state: &AppStat
                 health_note(&mut watch, tick.health.as_ref(), wait, &league_id, week)
             {
                 crate::applog::warn(note);
+            }
+            // One source failing for minutes while the other two answer is
+            // a green badge and, until now, a silent log.
+            let context = crate::applog::context(&[
+                ("league", &league_id),
+                ("week", &week.map(|w| w.to_string()).unwrap_or_default()),
+            ]);
+            let sources = {
+                let season = season_ref.lock().await;
+                season.as_ref().map(|s| s.sources.clone())
+            };
+            for line in source_watch.observe(sources.as_ref(), crate::engine::now_secs()) {
+                crate::applog::warn(format!("season {line}{context}"));
+            }
+            if let Some(line) = slow_watch.observe(took, std::time::Duration::from_secs(interval)) {
+                crate::applog::warn(format!("{line}{context}"));
             }
             tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
         }

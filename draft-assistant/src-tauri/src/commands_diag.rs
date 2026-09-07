@@ -109,12 +109,18 @@ async fn set_level_on(
 ) -> Result<String, String> {
     let level = applog::parse_level(level)
         .ok_or_else(|| format!("{level:?} is not a log level this app writes"))?;
-    applog::set_level(level);
     let mut config = config_ref.lock().await;
+    let previous = config.log_level.take();
     config.log_level = Some(level.to_string());
     // Saved rather than only held: chasing a problem usually means restarting,
-    // and a verbose setting that resets on restart is no use for that.
-    engine.save_config(&config)?;
+    // and a verbose setting that resets on restart is no use for that. Saved
+    // before it is applied, too: a save that fails leaves the level where it
+    // was, so what the checkbox shows and what the file says never disagree.
+    if let Err(why) = engine.save_config(&config) {
+        config.log_level = previous;
+        return Err(why);
+    }
+    applog::set_level(level);
     applog::info(format!("log level set to {level}"));
     Ok(level.to_string())
 }
@@ -317,6 +323,27 @@ mod tests {
             let refused = set_level_on(&engine, &config, "trace").await;
             assert!(refused.is_err(), "a level that does nothing is not stored");
             assert_eq!(config.lock().await.log_level, None);
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The failure this prevents: the level was switched in memory before
+    /// the config was written, so a save that failed left the app verbose
+    /// with a file that still said quiet, and the next launch disagreed with
+    /// the checkbox the user had just ticked.
+    #[test]
+    fn a_level_whose_save_fails_is_not_applied_either() {
+        let dir = scratch("level-unsaved");
+        // A data directory that is a file: nothing under it can be written.
+        let blocked = dir.join("not-a-directory");
+        std::fs::write(&blocked, b"in the way").expect("a file where the dir would be");
+        with_level_gate(|| async {
+            let engine = Engine::new(blocked.clone());
+            let config = Mutex::new(AppConfig::default());
+            let refused = set_level_on(&engine, &config, "debug").await;
+            assert!(refused.is_err(), "the save cannot have succeeded");
+            assert_eq!(applog::level(), applog::LEVEL_INFO, "not applied");
+            assert_eq!(config.lock().await.log_level, None, "not held either");
         });
         let _ = std::fs::remove_dir_all(&dir);
     }

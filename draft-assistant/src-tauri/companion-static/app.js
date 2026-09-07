@@ -20,7 +20,8 @@
     positionClass,
     collapseAgreeing,
     backoffDelay,
-    formatCost,
+    HOST_TIMEOUT,
+    timedFetch,
     formatClock,
     parseMarkdown,
     initialState,
@@ -34,10 +35,13 @@
     wantsWakeLock,
     createWakeLock,
     registerServiceWorker,
+    identityFromAddress,
+    rememberIdentityInAddress,
+    linkManifest,
     el,
     clear,
     spans,
-    markdownNodes,
+    buildChatList,
   } = window.Companion;
 
   function boot() {
@@ -47,8 +51,11 @@
     let socket = null;
     let attempt = 0;
     // Held while a draft is live and the host is connected; see pwa.js.
-    const wakeLock = createWakeLock(navigator);
+    const wakeLock = createWakeLock(navigator, document);
     registerServiceWorker(window, navigator);
+    linkManifest(document, navigator);
+    // Every request to the host, with the deadline from helpers.js.
+    const request = (url, init) => timedFetch(window, (u, i) => fetch(u, i), url, init);
     // The one pending reconnect. Kept so a wake can cancel it: a timer left
     // running opened a second socket beside the one the wake had just made.
     let reconnectTimer = null;
@@ -95,7 +102,7 @@
     /** A read allowed to be absent: 404 only means "nothing loaded there". */
     const read = async (path) => {
       const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
-      const response = await fetch(path, { headers });
+      const response = await request(path, { headers });
       if (response.status === 401) dropToken();
       return response.ok ? await response.json() : null;
     };
@@ -122,6 +129,13 @@
       }
     }
     // ---- pairing -------------------------------------------------------
+    // An installed copy of the page (see pwa.js) starts with empty storage
+    // but an address that says which phone it is; that identity is taken up
+    // so the re-pair replaces the browser's entry on the host, and the form
+    // offers the name that was used before.
+    const carried = identityFromAddress(window.location.search);
+    if (carried.deviceId && !load(DEVICE_ID_KEY)) store(DEVICE_ID_KEY, carried.deviceId);
+    if (carried.name && !load(DEVICE_KEY)) store(DEVICE_KEY, carried.name);
     $("pair-device").value = load(DEVICE_KEY) || deviceGuess(navigator.userAgent);
     state.hostName = load(HOST_KEY);
     $("pair-form").addEventListener("submit", async (event) => {
@@ -130,7 +144,7 @@
       const device = $("pair-device").value.trim() || deviceGuess(navigator.userAgent);
       $("pair-submit").disabled = true;
       try {
-        const response = await fetch("/api/pair", {
+        const response = await request("/api/pair", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -153,6 +167,7 @@
         store(DEVICE_KEY, device);
         if (body.device_id) store(DEVICE_ID_KEY, body.device_id);
         if (body.host_name) store(HOST_KEY, body.host_name);
+        rememberIdentityInAddress(window, body.device_id, device);
         dispatch({ type: "paired", token: body.token, hostName: body.host_name });
         await loadEverything();
       } catch {
@@ -248,30 +263,47 @@
     // ---- chat ----------------------------------------------------------
     /** Which thread the chat block shows: the Week tab is always the season. */
     const chatScreen = () => (state.tab === "week" || !state.draft ? "season" : "draft");
+    // One question out at a time; the flag rather than the disabled button,
+    // because render() sets the button from the thread's own busy state.
+    let asking = false;
     $("chat-form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const screen = chatScreen();
-      const text = $("chat-input").value.trim();
-      if (!text) return;
-      $("chat-input").value = "";
+      const input = $("chat-input");
+      const text = input.value.trim();
+      if (!text || asking) return;
+      asking = true;
       dispatch({ type: "note", screen, message: null });
-      let response;
+      // The question stays in the box until the host has taken it. It used to
+      // be cleared first and put back only when the network failed, so a 409,
+      // a 500 or a host that never answered lost it with a note beside an
+      // empty box.
       try {
-        response = await fetch("/api/chat", {
+        const response = await request("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
           body: JSON.stringify({ screen, text }),
         });
-      } catch {
-        // The host did not answer: the question is put back so it is not
-        // lost, and the note says why nothing happened.
-        $("chat-input").value = text;
-        dispatch({ type: "note", screen, message: "The host did not answer." });
-        return;
-      }
-      if (response.status === 401) dropToken();
-      else if (!response.ok) {
-        dispatch({ type: "note", screen, message: NOTES[response.status] ?? "That did not send." });
+        if (response.status === 401) {
+          dropToken();
+          return;
+        }
+        if (!response.ok) {
+          dispatch({
+            type: "note",
+            screen,
+            message: NOTES[response.status] ?? "That did not send.",
+          });
+          return;
+        }
+        // Taken. Cleared only if nothing was typed over it meanwhile.
+        if (input.value.trim() === text) input.value = "";
+      } catch (error) {
+        const late = error?.name === HOST_TIMEOUT;
+        const message = late ? "The host did not answer in time." : "The host did not answer.";
+        dispatch({ type: "note", screen, message });
+      } finally {
+        asking = false;
       }
     });
     for (const button of $("tabbar").children) {
@@ -358,26 +390,6 @@
     // focus off the input while someone was typing on a phone.
     let chatShownIn = null;
     let chatBuiltFrom = { screen: null, thread: undefined, fresh: true };
-    function buildChatList(list, entries, now) {
-      clear(list);
-      for (const entry of entries) {
-        const item = list.appendChild(el("li", `entry ${entry.role}`));
-        const who = entry.device?.name ?? "Someone";
-        const meta = item.appendChild(el("div", "entry-meta"));
-        spans(
-          meta,
-          [null, entry.role === "assistant" ? `Answer for ${who}` : `${who} asked`],
-          ["kind", entry.device?.kind],
-        );
-        const when = meta.appendChild(el("span", null, relativeTime(entry.at_ms, now)));
-        when.dataset.at = String(entry.at_ms);
-        spans(meta, [null, formatCost(entry.cost_usd)]);
-        if (entry.error) item.appendChild(el("p", "error", entry.error));
-        else if (entry.role === "assistant") item.appendChild(markdownNodes(entry.text));
-        else item.appendChild(el("p", null, entry.text));
-      }
-      if (!entries.length) list.appendChild(el("li", "muted", "Nothing asked yet."));
-    }
     function renderChat() {
       const screen = chatScreen();
       const shownIn = state.tab === "week" ? "tab-week" : "tab-chat";
@@ -467,6 +479,9 @@
     const saved = load(TOKEN_KEY);
     if (saved) {
       state = { ...state, token: saved, screen: "app" };
+      // A phone paired before the address carried its identity gets it now,
+      // so an install made today still pairs as the same phone.
+      rememberIdentityInAddress(window, load(DEVICE_ID_KEY), load(DEVICE_KEY));
       void loadEverything();
     }
     render();

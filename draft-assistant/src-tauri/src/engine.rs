@@ -28,6 +28,14 @@ pub(crate) const WEEKS: u32 = 18;
 /// How many Sleeper requests to have in flight at once. Enough to hide the
 /// round trips, well short of anything that looks like hammering.
 pub(crate) const REQUEST_CONCURRENCY: usize = 6;
+/// The warning a real league carries while its member list has not loaded.
+///
+/// Without the member list there is no way to tell which seat is the user's,
+/// and the app used to guess: the draft creator's seat, framed green and
+/// chimed, for a commissioner who was not on the clock at all. The seat is
+/// left unknown instead, and the poll tick asks for the list again until it
+/// answers. See `commands_draft::seat`.
+pub const SEAT_UNCONFIRMED: &str = "could not confirm your seat: the league's member list did not load, retrying with the next poll";
 
 pub(crate) fn now_secs() -> u64 {
     SystemTime::now()
@@ -82,6 +90,22 @@ pub struct LoadedLeague {
     /// When the imported second-opinion CSV was read, epoch seconds. `None`
     /// when there is none to read.
     pub second_opinion_loaded_at: Option<u64>,
+}
+
+impl LoadedLeague {
+    /// A leagueless mock draft, loaded by draft id alone.
+    ///
+    /// `mock_league::synthesize_league` names the stand-in league after the
+    /// draft, and nothing else does: a real league's id is its own.
+    pub fn is_mock_draft(&self) -> bool {
+        self.league.league_id == self.draft.draft_id
+    }
+
+    /// A real league whose member list has not been read yet, so the
+    /// user's seat cannot be told from anyone else's.
+    pub fn seat_unconfirmed(&self) -> bool {
+        !self.is_mock_draft() && self.user_names.is_empty()
+    }
 }
 
 pub struct Engine {
@@ -173,6 +197,8 @@ impl Engine {
         self.data_dir.join(name)
     }
 
+    /// The synchronous read, kept for tests; production reads go off-thread.
+    #[cfg(test)]
     pub(crate) fn read_cache<T: serde::de::DeserializeOwned>(
         &self,
         name: &str,
@@ -231,6 +257,9 @@ impl Engine {
         fetched_at
     }
 
+    /// The synchronous write, kept for tests that seed a cache before the
+    /// engine under test reads it; production writes go off-thread.
+    #[cfg(test)]
     pub(crate) fn write_cache<T: Serialize>(&self, name: &str, data: &T) -> u64 {
         match self.write_cache_checked(name, data) {
             Ok(fetched_at) => fetched_at,
@@ -267,11 +296,24 @@ impl Engine {
             self.client.league_users(league_id)
         );
         let draft = draft.map_err(to_message)?;
-        let users = users.unwrap_or_default();
+        // A member list that did not load is a warning, not a failed load:
+        // the board is right without it, only the seat labels and "my seat"
+        // are missing. It is never a reason to guess the seat; see
+        // `SEAT_UNCONFIRMED`.
+        let (users, users_warning) = match users {
+            Ok(users) => (users, None),
+            Err(error) => (
+                Vec::new(),
+                Some(format!("{SEAT_UNCONFIRMED} ({})", to_message(error))),
+            ),
+        };
         let user_names = crate::sleeper::label_map(&users);
         let user_avatars = crate::sleeper::avatar_map(&users);
-        self.assemble(league, draft, user_names, user_avatars, force)
-            .await
+        let mut loaded = self
+            .assemble(league, draft, user_names, user_avatars, force)
+            .await?;
+        loaded.warnings.extend(users_warning);
+        Ok(loaded)
     }
 
     /// Load a bare draft ID (mock drafts have no league): synthesize the

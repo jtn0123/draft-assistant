@@ -4,6 +4,10 @@
 //! command layer so a test can drive a whole tick against a loader that fails,
 //! rolls the week over, or hands back a changed injury report on demand.
 
+mod rollover;
+
+pub use rollover::{refresh_or_roll, reload_for_week};
+
 use super::{AnalysisCache, LiveEmitGate, PollHealth, PollHealthMemory};
 use crate::engine::{now_secs, AppConfig, LoadedLeague};
 use crate::season_engine::week_watch::{Watch, CHECK_EVERY_SECS, PLAYERS_EVERY_SECS};
@@ -34,6 +38,8 @@ pub struct SeasonPollMemory {
     week: Watch,
     players: Watch,
     builds: u32,
+    /// The [`LoadedSeason::epoch`] of the season the last tick looked at.
+    epoch: Option<u64>,
 }
 
 /// The raw scoreboard-and-scoring signature the last tick saw.
@@ -111,7 +117,26 @@ impl SeasonPollMemory {
             week: Watch::every(CHECK_EVERY_SECS),
             players: Watch::every(PLAYERS_EVERY_SECS),
             builds: 0,
+            epoch: None,
         }
+    }
+
+    /// Note which season this tick is looking at.
+    ///
+    /// A season with an epoch the poller has not seen was put there by a
+    /// command: a forced reload from the screen, a league switch, a rollover.
+    /// Everything remembered here is about the season that was thrown away,
+    /// so it goes with it. It used to stay: the scoreboard signature had not
+    /// moved, the analysis was still inside its window, and the standings and
+    /// waiver targets of the old season were re-emitted for up to twenty
+    /// ticks over the new one.
+    fn adopt(&mut self, epoch: u64) {
+        if self.epoch == Some(epoch) {
+            return;
+        }
+        self.epoch = Some(epoch);
+        self.analysis.invalidate();
+        self.scoreboard = ScoreboardWatch::default();
     }
 
     /// How many season views this poller has actually built.
@@ -133,108 +158,6 @@ pub struct SeasonTick {
     /// league open yet, or the season not loaded. Neither is the feed failing,
     /// so neither should be reported as one.
     pub health: Option<PollHealth>,
-}
-
-/// Reload the whole season for a week that has just turned over, replacing
-/// what the poller was watching. `false` when the reload failed or the league
-/// changed underneath it — either way there is nothing to emit this tick.
-///
-/// The load runs with nothing locked, exactly like the live fetch: it is
-/// fifteen matchup requests and can take seconds, and holding the season
-/// across it would stall every command in the app.
-pub async fn reload_for_week<E: SeasonEngine>(
-    engine: &E,
-    loaded_ref: &Mutex<Option<LoadedLeague>>,
-    season_ref: &Mutex<Option<LoadedSeason>>,
-    config_ref: &Mutex<AppConfig>,
-    league_id: &str,
-) -> bool {
-    let league = {
-        let loaded = loaded_ref.lock().await;
-        match loaded.as_ref() {
-            Some(l) if l.league.league_id == league_id => l.league.clone(),
-            _ => return false,
-        }
-    };
-    let my_user_id = config_ref.lock().await.my_user_id.clone();
-    let Ok(mut fresh) = engine
-        .load_season(&league, my_user_id.as_deref(), false)
-        .await
-    else {
-        return false;
-    };
-    // Checked again on the way back in: the load ran unlocked, and writing
-    // this would otherwise file one league's rosters under another's.
-    //
-    // The league is copied out rather than held, because recording the Trends
-    // snapshot below reads that file, diffs it and writes it back.
-    let mine = {
-        let loaded = loaded_ref.lock().await;
-        match loaded.as_ref() {
-            Some(l) if l.league.league_id == league_id => l.clone(),
-            _ => return false,
-        }
-    };
-    // `Engine::load_season` hands back an empty history, because the file it
-    // lives in is the command layer's business. The user-driven load fills it
-    // in; the automatic rollover did not, so every Tuesday morning the Trends
-    // tab silently emptied itself and the week just finished was never
-    // recorded at all.
-    fresh.history = std::sync::Arc::new(engine.record_history(&mine, &fresh).await);
-    *season_ref.lock().await = Some(fresh);
-    true
-}
-
-/// Re-pull the live slice for the Refresh button, rolling the week over first
-/// when the NFL has moved on.
-///
-/// The rollover check is the same one the poller makes, on the same
-/// `current_week` call, because Refresh used to skip it entirely: the live
-/// slice is asked for by week, so from Tuesday morning the button re-fetched
-/// the finished week forever and the only way to see the new one was to close
-/// the league and open it again.
-pub async fn refresh_or_roll<E: SeasonEngine>(
-    engine: &E,
-    loaded_ref: &Mutex<Option<LoadedLeague>>,
-    season_ref: &Mutex<Option<LoadedSeason>>,
-    config_ref: &Mutex<AppConfig>,
-) -> Result<(), String> {
-    let league_id = {
-        let loaded = loaded_ref.lock().await;
-        loaded
-            .as_ref()
-            .ok_or("no league loaded")?
-            .league
-            .league_id
-            .clone()
-    };
-    let watching = {
-        let season = season_ref.lock().await;
-        let season = season.as_ref().ok_or("season data not loaded")?;
-        (season.season, season.week)
-    };
-    if let Ok(week) = engine.current_week().await {
-        if week != watching.1
-            && reload_for_week(engine, loaded_ref, season_ref, config_ref, &league_id).await
-        {
-            return Ok(());
-        }
-    }
-    // Fetched with nothing locked: three requests with retries behind them can
-    // run for tens of seconds, and everything else that needs the season would
-    // be waiting the whole time.
-    let fetched = engine.fetch_live(&league_id, watching.0, watching.1).await;
-    // Locks in the usual order, loaded then season. The league is checked
-    // again here because the fetch ran unlocked: folding this week's scoring
-    // into whatever season happens to be loaded now would show one league's
-    // live points on another league's screen.
-    let loaded = loaded_ref.lock().await;
-    if loaded.as_ref().map(|l| l.league.league_id.as_str()) != Some(league_id.as_str()) {
-        return Err("the league changed while this was loading \u{2014} try again".to_string());
-    }
-    let mut season = season_ref.lock().await;
-    let season = season.as_mut().ok_or("season data not loaded")?;
-    fetched.apply(season, now_secs())
 }
 
 /// Re-read the player dictionary and the weekly projections, and swap them
@@ -332,11 +255,12 @@ pub async fn season_tick<E: SeasonEngine>(
 
     let read_watching = || async {
         let season = season_ref.lock().await;
-        season.as_ref().map(|s| (s.season, s.week))
+        season.as_ref().map(|s| (s.season, s.week, s.epoch))
     };
     let Some(mut watching) = read_watching().await else {
         return SeasonTick::default();
     };
+    memory.adopt(watching.2);
 
     // Has the NFL moved on? Checked on a ten-minute clock of its own, because
     // the answer changes once a week and a poll tick is thirty seconds. A new
@@ -349,16 +273,28 @@ pub async fn season_tick<E: SeasonEngine>(
         if let Ok(week) = engine.current_week().await {
             if week != watching.1 {
                 memory.analysis.invalidate();
-                if !reload_for_week(engine, loaded_ref, season_ref, config_ref, &league_id).await {
-                    return SeasonTick::default();
+                match reload_for_week(engine, loaded_ref, season_ref, config_ref, &league_id).await
+                {
+                    Ok(true) => {
+                        // The live fetch below has to ask for the new week,
+                        // not the one this tick started on.
+                        let Some(now_watching) = read_watching().await else {
+                            return SeasonTick::default();
+                        };
+                        watching = now_watching;
+                        memory.adopt(watching.2);
+                        week_changed = true;
+                    }
+                    // The league changed under the load; nothing to say.
+                    Ok(false) => return SeasonTick::default(),
+                    // Said out loud, and then the week we do have carries on
+                    // being refreshed: the analysis was dropped above, so the
+                    // warning reaches the screen on this tick's rebuild.
+                    Err(error) => {
+                        rollover::note_failure(season_ref, &league_id, watching.1, week, &error)
+                            .await;
+                    }
                 }
-                // The live fetch below has to ask for the new week, not the
-                // one this tick started on.
-                let Some(now_watching) = read_watching().await else {
-                    return SeasonTick::default();
-                };
-                watching = now_watching;
-                week_changed = true;
             }
         }
     }

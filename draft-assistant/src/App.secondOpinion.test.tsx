@@ -13,6 +13,7 @@ import { setAvatarMode } from "./avatars";
 import { resetPrefs } from "./prefs";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
+import { settingsRow } from "./test/settingsRow";
 import { draftFixture, fakeStorage, harness, restoringConfig } from "./test/appHarness";
 import type { DraftView } from "./types";
 
@@ -31,7 +32,7 @@ async function chooseSetting(label: RegExp) {
     if (gear !== null && screen.queryByRole("menu") === null) gear.click();
   });
   await settle(() => {
-    screen.getByRole("menuitemcheckbox", { name: label }).click();
+    settingsRow(label).click();
   });
 }
 
@@ -62,9 +63,12 @@ describe("the import projections row", () => {
     await settle(() => {
       screen.queryByRole("button", { name: "Settings" })?.click();
     });
-    const row = screen.getByRole("menuitemcheckbox", { name: /Import projections CSV/ });
+    const row = settingsRow(/Import projections CSV/);
     expect(row).toHaveTextContent("Add a second opinion column to the board");
-    expect(row).toHaveAttribute("aria-checked", "false");
+    // An action, not a toggle: it opens a file picker, so it carries no
+    // checked state; whether something is loaded shows on the value.
+    expect(row).not.toHaveAttribute("aria-checked");
+    expect(row.querySelector(".settings-row-value")).not.toHaveClass("is-on");
   });
 
   it("names the source and the load date once something is loaded", async () => {
@@ -72,9 +76,9 @@ describe("the import projections row", () => {
     await settle(() => {
       screen.queryByRole("button", { name: "Settings" })?.click();
     });
-    const row = screen.getByRole("menuitemcheckbox", { name: /Import projections CSV/ });
+    const row = settingsRow(/Import projections CSV/);
     expect(row).toHaveTextContent(/Clay loaded/);
-    expect(row).toHaveAttribute("aria-checked", "true");
+    expect(row.querySelector(".settings-row-value")).toHaveClass("is-on");
   });
 
   it("imports the chosen file and reports the match counts", async () => {

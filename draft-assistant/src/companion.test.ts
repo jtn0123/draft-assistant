@@ -1,6 +1,7 @@
 // Pairing with a host, and the identity this device keeps between pairings.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HOST_TIMEOUT_MS } from "./apiRemoteFetch";
 import { clearFollow, pairWithHost, readFollow, saveFollow } from "./companion";
 
 const fetchMock = vi.fn();
@@ -29,6 +30,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("pairing", () => {
@@ -64,5 +66,32 @@ describe("pairing", () => {
     fetchMock.mockResolvedValue(paired({ token: "t3", host_name: "Host", device_id: "d9" }));
     await pairWithHost("http://h:7878", "418902", "This Mac", "desktop", readFollow()?.device_id);
     expect(sentBody().device_id).toBeUndefined();
+  });
+});
+
+describe("a host that takes the pairing request and never answers", () => {
+  it("gives the Join button back after the deadline, naming the address", async () => {
+    // The failure this prevents: the pairing was a bare fetch, so a host that
+    // accepted the connection and said nothing left Join spinning for ever.
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    );
+    const pairing = pairWithHost("http://192.168.1.5:7878", "418902", "This Mac");
+    const failed = expect(pairing).rejects.toThrow(
+      "http://192.168.1.5:7878 did not answer within 10 seconds",
+    );
+    await vi.advanceTimersByTimeAsync(HOST_TIMEOUT_MS);
+    await failed;
+  });
+
+  it("still says what a host that cannot be reached at all says", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(pairWithHost("http://192.168.1.5:7878", "418902", "This Mac")).rejects.toThrow(
+      /Could not reach http:\/\/192.168.1.5:7878/,
+    );
   });
 });

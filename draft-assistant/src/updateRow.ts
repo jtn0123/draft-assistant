@@ -93,9 +93,14 @@ export function started(state: UpdateState): UpdateState {
  *  shell wired to the row and is called in every state, since the pure
  *  `selection` above is what decides whether it does anything. */
 export function updateRow(current: string, state: UpdateState, onSelect: () => void): SettingsRow {
+  // One id through every state: the row is the same element to React whether
+  // it says "Check for updates" or "Update to 0.3.2", so the keyboard stays
+  // on it while the label changes under it.
+  const fixed = { id: "updates", kind: "action" } as const;
   switch (state.kind) {
     case "idle":
       return {
+        ...fixed,
         label: "Check for updates",
         note: `Ask the release feed for something newer than v${current}`,
         value: "Check",
@@ -104,6 +109,7 @@ export function updateRow(current: string, state: UpdateState, onSelect: () => v
       };
     case "checking":
       return {
+        ...fixed,
         label: "Check for updates",
         note: "Asking the release feed…",
         value: "…",
@@ -112,6 +118,7 @@ export function updateRow(current: string, state: UpdateState, onSelect: () => v
       };
     case "current":
       return {
+        ...fixed,
         label: "Up to date",
         note: `v${current} is the newest release. Select to check again`,
         value: `v${current}`,
@@ -120,6 +127,7 @@ export function updateRow(current: string, state: UpdateState, onSelect: () => v
       };
     case "available":
       return {
+        ...fixed,
         label: `Update to ${state.version}`,
         note: firstLine(state.notes) ?? "Select to download it. The app restarts on its own",
         value: "Install",
@@ -128,6 +136,7 @@ export function updateRow(current: string, state: UpdateState, onSelect: () => v
       };
     case "installing":
       return {
+        ...fixed,
         label: `Update to ${state.version}`,
         note: "Downloading and verifying. The app restarts on its own…",
         value: "…",
@@ -136,6 +145,7 @@ export function updateRow(current: string, state: UpdateState, onSelect: () => v
       };
     case "failed":
       return {
+        ...fixed,
         label: "Check for updates",
         note: state.message,
         value: "Retry",

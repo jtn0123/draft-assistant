@@ -17,6 +17,11 @@ use crate::weekly::WeeklyPoints;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+/// How old a cached dictionary or projection set may be before a refresh goes
+/// back to the network: the poller's own refresh interval, so every refresh
+/// that runs is a real one.
+pub const REFRESH_CEILING_SECS: u64 = crate::season_engine::week_watch::PLAYERS_EVERY_SECS;
+
 /// A refreshed dictionary and projection set, ready to be swapped in.
 ///
 /// Fetched with nothing locked and applied afterwards, because the dictionary
@@ -133,11 +138,18 @@ pub trait PlayerRefresh {
 
 impl PlayerRefresh for Engine {
     async fn refresh_players(&self, season: u32) -> Option<PlayerRefreshData> {
-        // `force` is off: both fetchers serve a fresh cache without a request,
-        // so a poller asking every half hour costs nothing until the cached
-        // copy ages past its own TTL.
-        let (players, weekly) =
-            tokio::join!(self.players(false), self.weekly_projections(season, false));
+        // Served from the cache while the copy on disk is younger than this
+        // poller's own clock, fetched otherwise. It used to ask with the
+        // fetchers' defaults, 24 hours for the dictionary and six for the
+        // projections, which made the half-hour refresh a no-op: the cache
+        // written at the morning's load was handed back all day, and a
+        // starter ruled Out at noon stayed in the optimal lineup until the
+        // league was reloaded by hand.
+        let ceiling = Some(REFRESH_CEILING_SECS);
+        let (players, weekly) = tokio::join!(
+            self.players_no_older_than(ceiling),
+            self.weekly_projections_no_older_than(season, ceiling)
+        );
         let (players_at, players, _) = players.ok()?;
         let (weekly_at, weekly, _) = weekly.ok()?;
         Some(PlayerRefreshData {

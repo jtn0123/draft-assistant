@@ -289,13 +289,19 @@ export function useDraftSession(
       } catch {
         listed = false;
       }
-      // Live sync failing has already had its own toast with its own retry, so
-      // it only decides whether there is anything left to say here.
-      if (!(await startLive())) return;
+      // Live sync comes back only if the user had it on. Switching used to
+      // turn it on regardless, so a user who had switched it off to stop the
+      // board moving under them got it back, unasked, with the new league.
+      // Its failing has already had its own toast with its own retry, so it
+      // only decides whether there is anything left to say here.
+      if (wasPolling && !(await startLive())) return;
+      const listing = listed
+        ? "The last league is still in the list"
+        : "The league list could not be re-read";
       showToast(
-        listed
-          ? `Switched to ${next.league.name}. The last league is still in the list`
-          : `Switched to ${next.league.name}. The league list could not be re-read`,
+        wasPolling
+          ? `Switched to ${next.league.name}. ${listing}`
+          : `Switched to ${next.league.name}. ${listing}. Live sync is still off`,
       );
     } finally {
       setBusy(false);
@@ -366,4 +372,42 @@ export function useDraftSession(
     refreshLeagues,
     refreshData,
   };
+}
+
+/** What the draft screen still lets the user do once the draft is complete:
+ *  `ask`, or `undo`, until then; a refusal toast after. */
+export interface DraftEndGate {
+  onDraft: (playerId: string, name: string) => void;
+  onUndo: () => void;
+}
+
+/**
+ * Nothing on the screen writes once the draft is complete.
+ *
+ * The board's own Draft buttons are disabled by `DraftScreen`; these are the
+ * two paths that reach the backend without them (the rec cards' "Mark
+ * drafted", and the header's Undo), and they say so rather than writing a
+ * manual pick into, or undoing one out of, a finished draft.
+ */
+export function useDraftEnd(
+  view: DraftView | null,
+  ask: (playerId: string, name: string) => void,
+  undo: () => void | Promise<void>,
+  showToast: (text: string) => void,
+): DraftEndGate {
+  const draftOver = view?.draft.status === "complete";
+  // Stable while nothing changes, so the memoised board rows are not
+  // invalidated by a fresh closure on every 3-second poll.
+  const onDraft = useCallback(
+    (playerId: string, name: string) => {
+      if (draftOver) showToast(`The draft is complete: ${name} cannot be recorded`);
+      else ask(playerId, name);
+    },
+    [draftOver, ask, showToast],
+  );
+  const onUndo = () => {
+    if (draftOver) showToast("The draft is complete: there is no recorded pick to undo");
+    else void undo();
+  };
+  return { onDraft, onUndo };
 }

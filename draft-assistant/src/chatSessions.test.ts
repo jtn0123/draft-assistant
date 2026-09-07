@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ThreadEntry } from "./chat-types";
+
+const reportError = vi.hoisted(() => vi.fn());
+vi.mock("./errorReport", () => ({ reportError }));
 import {
   deleteSession,
   describeSession,
@@ -139,5 +142,50 @@ describe("how a chat is named and listed", () => {
 
   it("gives every new chat its own id", () => {
     expect(new Set([newSessionId(), newSessionId(), newSessionId()]).size).toBeGreaterThan(1);
+  });
+});
+
+describe("a stored history that does not read back", () => {
+  const scope = "draft.L1";
+  const key = "da.chat.sessions.draft.L1";
+
+  beforeEach(() => {
+    reportError.mockReset();
+  });
+
+  it("is reset and said so when it is not JSON", () => {
+    // The failure this prevents: the panel opened on an empty list, with
+    // nothing anywhere to say the history had been thrown away.
+    localStorage.setItem(key, "{not json");
+    expect(listSessions(scope)).toEqual([]);
+    expect(reportError).toHaveBeenCalledWith(
+      "Stored chat history was not JSON (9 chars); reset",
+      `chatSessions ${key}`,
+    );
+  });
+
+  it("is reset and said so when it is not a list", () => {
+    localStorage.setItem(key, JSON.stringify({ id: "s1" }));
+    expect(listSessions(scope)).toEqual([]);
+    expect(reportError).toHaveBeenCalledWith(
+      "Stored chat history was not a list; reset",
+      `chatSessions ${key}`,
+    );
+  });
+
+  it("keeps the chats that check out and counts the ones dropped", () => {
+    localStorage.setItem(key, JSON.stringify([chat({ id: "s1" }), { id: "s2" }, 7]));
+    expect(listSessions(scope).map((s) => s.id)).toEqual(["s1"]);
+    expect(reportError).toHaveBeenCalledWith(
+      "Dropped 2 of 3 stored chats that did not read back",
+      `chatSessions ${key}`,
+    );
+  });
+
+  it("says nothing about a history that reads back whole, or one that is not there", () => {
+    expect(listSessions(scope)).toEqual([]);
+    saveSession(scope, chat({ id: "s1" }));
+    expect(listSessions(scope).map((s) => s.id)).toEqual(["s1"]);
+    expect(reportError).not.toHaveBeenCalled();
   });
 });

@@ -6,13 +6,15 @@
     <meta name="color-scheme" content="light dark" />
     <title>Draft Assistant companion</title>
     <meta name="theme-color" content="#f7f7f5" />
-    <!-- Installable as an app from the https tailnet address; ignored over http. -->
+    <!-- Installable as an app from the https tailnet address; ignored over http.
+         The manifest link is added by pwa.js, which leaves it out on iOS (see
+         there for why). iOS reads only a PNG touch icon; the SVG left the
+         installed app with a screenshot for an icon. -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Draft Assistant" />
-    <link rel="manifest" href="/static/manifest.webmanifest" />
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="/static/icon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
     <link rel="stylesheet" href="/static/app.css" />
   </head>
   <body>

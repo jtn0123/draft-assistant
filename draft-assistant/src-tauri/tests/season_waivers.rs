@@ -167,6 +167,7 @@ fn season() -> LoadedSeason {
         fetched_at: 0,
         warnings: Vec::new(),
         sources: Default::default(),
+        epoch: 0,
     }
 }
 

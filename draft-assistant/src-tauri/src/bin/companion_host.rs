@@ -11,6 +11,7 @@
 //! runs until interrupted. No poller runs here, so the board is a snapshot.
 
 use draft_assistant_lib::applog;
+use draft_assistant_lib::companion::tls::TlsSource;
 use draft_assistant_lib::companion::CompanionServer;
 use draft_assistant_lib::engine::{AppConfig, Engine};
 use draft_assistant_lib::state::{AppState, YahooState};
@@ -86,6 +87,27 @@ fn start_logging(data_dir: &Path) -> PathBuf {
     data_dir.join(applog::LOG_NAME)
 }
 
+/// The headless host's server, in the order that matters.
+///
+/// `select_headless_account` goes before the server builds its hub: the hub
+/// reads the device list as it is built, and it has to read the headless
+/// host's own, not the desktop app's, or the two overwrite each other's
+/// pairings on one Mac. And HTTPS is off: this host is for a browser on the
+/// developer's own machine, and a `tailscale cert` run from every throwaway
+/// start would count against Let's Encrypt's limits for the real app's name.
+/// `build` is the constructor, injected so the test can use the sandboxed one
+/// and never touch the Keychain.
+fn build_companion(
+    host_name: String,
+    data_dir: PathBuf,
+    build: impl FnOnce(String, PathBuf) -> Result<CompanionServer, String>,
+) -> Result<Arc<CompanionServer>, String> {
+    draft_assistant_lib::companion::store::select_headless_account();
+    let companion = build(host_name, data_dir)?;
+    companion.set_tls(TlsSource::Off);
+    Ok(Arc::new(companion))
+}
+
 fn parse_args() -> Args {
     match parse_args_from(std::env::args().skip(1)) {
         Some(args) => args,
@@ -140,16 +162,11 @@ async fn main() {
     });
 
     let host_name = draft_assistant_lib::commands_companion::default_host_name();
-    // Before the server builds its hub: the hub reads the device list as it
-    // is built, and it has to read the headless host's own, not the desktop
-    // app's, or the two overwrite each other's pairings on one Mac.
-    draft_assistant_lib::companion::store::select_headless_account();
-    let companion = Arc::new(
-        CompanionServer::new(host_name, args.data_dir.clone()).unwrap_or_else(|e| {
+    let companion = build_companion(host_name, args.data_dir.clone(), CompanionServer::new)
+        .unwrap_or_else(|e| {
             eprintln!("companion failed to build: {e}");
             std::process::exit(1);
-        }),
-    );
+        });
     // There is no webview here; what the app would show on its own screen
     // goes to stderr instead.
     companion.attach(
@@ -175,9 +192,36 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_data_dir, parse_args_from, start_logging};
+    use super::{build_companion, default_data_dir, parse_args_from, start_logging};
     use draft_assistant_lib::applog;
     use draft_assistant_lib::companion::net::DEFAULT_PORT;
+    use draft_assistant_lib::companion::store::{devices_item, devices_item_for};
+    use draft_assistant_lib::companion::tls::TlsSource;
+    use draft_assistant_lib::companion::CompanionServer;
+
+    /// The two things about the headless host's server that used to be
+    /// convention only: the account is switched before the hub reads it, and
+    /// HTTPS is off so no throwaway start runs `tailscale cert`.
+    #[test]
+    fn the_headless_account_is_selected_before_the_hub_is_built_and_https_is_off() {
+        let dir = std::env::temp_dir().join(format!(
+            "draft-assistant-companion-host-build-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let companion = build_companion("Justin's Mac".to_string(), dir.clone(), |name, data| {
+            assert_eq!(
+                devices_item(),
+                devices_item_for(true),
+                "the hub would read the desktop app's device list"
+            );
+            CompanionServer::sandboxed(name, data)
+        })
+        .expect("the companion builds");
+        assert_eq!(companion.tls_source(), TlsSource::Off);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// The headless host used to write no log at all. This is the only test in
     /// this binary that may call `start_logging`: the log directory is set

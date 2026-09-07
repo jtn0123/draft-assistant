@@ -6,7 +6,7 @@ use crate::keepers::{self, KeeperStore};
 use crate::league_ref::{extract_ref, Pasted};
 use crate::picks::{self, ManualPickStore};
 use crate::poll::record_poll_outcome;
-use crate::sleeper::{Draft, Pick};
+use crate::sleeper::{Draft, LeagueUser, Pick};
 use crate::sleeper_error::to_message;
 use crate::state::{view_from, AppState, YahooState};
 use crate::view::DraftView;
@@ -18,6 +18,9 @@ use tauri::State;
 mod edits;
 mod notes;
 mod poll_loop;
+mod rebuild;
+mod refusal;
+mod seat;
 pub(crate) mod tick;
 pub use edits::*;
 // The generated `__cmd__*` macros come with the commands: `generate_handler!`
@@ -27,9 +30,10 @@ pub use poll_loop::{
     __cmd__start_polling, __cmd__stop_polling, __tauri_command_name_start_polling,
     __tauri_command_name_stop_polling, start_polling, stop_polling,
 };
+use refusal::{refusal_for, Verdict};
 use tick::{
-    adopt_traded, draft_update, fetch_tick, picks_rewound, tick_target, traded_update, DraftUpdate,
-    EMPTY_PICKS,
+    adopt_traded, draft_update, fetch_tick, save_keepers_off_lock, save_picks_off_lock,
+    tick_target, traded_update, view_now, DraftUpdate, TickTarget,
 };
 
 /// What every command and tick says when the league moved on under it. The
@@ -242,91 +246,115 @@ pub async fn refresh_picks(state: State<'_, AppState>) -> Result<DraftView, Stri
 }
 
 async fn refresh_picks_inner(state: &AppState) -> Result<DraftView, String> {
-    let (draft_id, yahoo_ids) = {
+    let TickTarget {
+        draft_id,
+        yahoo_ids,
+        users_for,
+    } = {
         let loaded = state.loaded.lock().await;
         tick_target(loaded.as_ref().ok_or("no league loaded")?)
     };
-    let fetched = fetch_tick(&state.engine, &state.yahoo, &draft_id, &yahoo_ids).await;
+    let fetched = fetch_tick(
+        &state.engine,
+        &state.yahoo,
+        &draft_id,
+        &yahoo_ids,
+        users_for.as_deref(),
+    )
+    .await;
     let picks = fetched.picks?;
 
-    let mut loaded = state.loaded.lock().await;
-    let loaded = loaded.as_mut().ok_or("no league loaded")?;
-    // Both requests ran with nothing locked. If the user switched leagues in
-    // that window this answer belongs to the old draft, and writing it would
-    // put its picks, its manual-pick file and its keepers under the new one.
-    if loaded.draft.draft_id != draft_id {
-        return Err(LEAGUE_CHANGED.to_string());
-    }
     let mut errors = Vec::new();
     // Problems worth a log line that are nobody's failed tick: a disk write
     // that did not land, and an endpoint beside the picks that did not answer.
     let mut notes: Vec<String> = Vec::new();
-    let kept_previous = picks.is_empty() && !loaded.api_picks.is_empty();
-    // An answer missing a pick the last one had, with later picks still in
-    // it, is a partial answer rather than a shorter draft: adopted, it moved
-    // the clock back to the hole and named a manager who had already picked.
-    let rewound = (!kept_previous)
-        .then(|| {
-            let teams = loaded.draft.settings.teams.max(1);
-            let rounds = loaded.draft.settings.rounds.max(1);
-            let keepers = keepers::known_keepers(loaded, teams, rounds);
-            picks::rewound_to(&loaded.api_picks, &picks, teams, rounds, &keepers)
-        })
-        .flatten();
-    if kept_previous {
-        errors.push(EMPTY_PICKS.to_string());
-    } else if let Some(hole) = rewound {
-        errors.push(picks_rewound(hole));
-    } else {
-        loaded.api_picks = picks;
-        if picks::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
-            // A save that fails is a note. The board in memory is right
-            // either way and the next tick writes it again; counting it as a
-            // failed poll greyed the sync badge over a full disk.
-            notes.extend(
-                state
-                    .engine
-                    .save_manual_picks(&draft_id, &loaded.manual_picks)
-                    .err(),
-            );
+    // Everything under the lock is memory work. What has to reach the disk
+    // is cloned out and written once the lock is let go, exactly as the poll
+    // loop does it: a synchronous write here held every command, every view
+    // build and the poller itself behind the disk.
+    let (picks_to_save, keepers_to_save, refused) = {
+        let mut guard = state.loaded.lock().await;
+        let loaded = guard.as_mut().ok_or("no league loaded")?;
+        // The requests ran with nothing locked. If the user switched leagues
+        // in that window this answer belongs to the old draft, and writing it
+        // would put its picks, its manual-pick file and its keepers under the
+        // new one.
+        if loaded.draft.draft_id != draft_id {
+            return Err(LEAGUE_CHANGED.to_string());
         }
-        // A keeper is only recognisable while it sits ahead of the clock, so
-        // the judgement is made and written down on every refresh.
-        notes.extend(keepers::note_keepers(state.engine.as_ref(), loaded));
-    }
-    // Also refresh draft status/order — it flips to "drafting" at start time.
-    // A `/draft` that does not answer is logged rather than counted: the picks
-    // came through, so this refresh did not fail.
-    match draft_update(fetched.draft) {
-        DraftUpdate::Adopt(draft) => loaded.draft = *draft,
-        DraftUpdate::Logged(note) => notes.push(note),
-        DraftUpdate::Refused(reason) => errors.push(reason),
-        DraftUpdate::Nothing => {}
-    }
-    // Trades are agreed mid-draft, so the ownership map is re-read every tick
-    // rather than only at load.
-    match traded_update(fetched.traded) {
-        Ok(Some(traded)) => {
-            adopt_traded(loaded, traded);
+        let mut picks_to_save = None;
+        let mut keepers_to_save = None;
+        let mut refused = None;
+        // An empty list mid-draft, or one missing a pick the last answer had
+        // with later picks still in it, is a lost or partial answer rather
+        // than a shorter draft. Refused, up to a point: see `refusal`.
+        let verdict = refusal::shared().judge(&draft_id, refusal_for(loaded, &picks));
+        match verdict {
+            Verdict::Refuse(reason) => {
+                errors.push(reason.clone());
+                refused = Some(reason);
+            }
+            Verdict::Adopt(note) => {
+                notes.extend(note);
+                loaded.api_picks = picks;
+                if picks::reconcile_manual_picks(&loaded.api_picks, &mut loaded.manual_picks) {
+                    picks_to_save = Some(loaded.manual_picks.clone());
+                }
+                // A keeper is only recognisable while it sits ahead of the
+                // clock, so the judgement is made on every refresh.
+                keepers_to_save = keepers::merge_keepers(loaded);
+            }
         }
-        Ok(None) => {}
-        Err(note) => notes.push(note),
+        // Also refresh draft status/order: it flips to "drafting" at start
+        // time. A `/draft` that does not answer is logged rather than
+        // counted: the picks came through, so this refresh did not fail.
+        match draft_update(fetched.draft) {
+            DraftUpdate::Adopt(draft) => loaded.draft = *draft,
+            DraftUpdate::Logged(note) => notes.push(note),
+            DraftUpdate::Refused(reason) => errors.push(reason),
+            DraftUpdate::Nothing => {}
+        }
+        // Trades are agreed mid-draft, so the ownership map is re-read every
+        // tick rather than only at load.
+        match traded_update(fetched.traded) {
+            Ok(Some(traded)) => {
+                adopt_traded(loaded, traded);
+            }
+            Ok(None) => {}
+            Err(note) => notes.push(note),
+        }
+        // The member list the load could not get, if it was asked for.
+        match fetched.users {
+            Some(Ok(users)) => {
+                seat::adopt_users(loaded, &users);
+            }
+            Some(Err(error)) => notes.push(format!("member list still unavailable: {error}")),
+            None => {}
+        }
+        record_poll_outcome(loaded, &errors);
+        (picks_to_save, keepers_to_save, refused)
+    };
+    // A save that fails is a note. The board in memory is right either way
+    // and the next tick writes it again; counting it as a failed poll greyed
+    // the sync badge over a full disk.
+    if let Some(picks) = picks_to_save {
+        if let Err(error) = save_picks_off_lock(&state.engine, draft_id.clone(), picks).await {
+            notes.push(error);
+        }
     }
-    record_poll_outcome(loaded, &errors);
+    if let Some(keepers) = keepers_to_save {
+        notes.extend(save_keepers_off_lock(&state.engine, draft_id.clone(), keepers).await);
+    }
     for note in notes {
         crate::applog::warn(note);
     }
-    // The picks came back empty and the board on screen is the old one. This
+    // The answer was refused and the board on screen is the old one. This
     // used to answer Ok with an unchanged view, so the toast said "picks
-    // re-pulled — 84 in" over a pull that pulled nothing.
-    if kept_previous {
-        return Err(EMPTY_PICKS.to_string());
+    // re-pulled: 84 in" over a pull that pulled nothing.
+    if let Some(reason) = refused {
+        return Err(reason);
     }
-    if let Some(hole) = rewound {
-        return Err(picks_rewound(hole));
-    }
-    let config = state.config.lock().await;
-    Ok(view_from(loaded, &config))
+    view_now(state, &draft_id).await
 }
 
 /// Full data refresh (players + projections + board rebuild).
@@ -344,7 +372,7 @@ async fn refresh_data_inner(state: &AppState) -> Result<DraftView, String> {
         let config = state.config.lock().await;
         config.active_league_id.clone().ok_or("no active league")?
     };
-    let new_loaded = load_dispatched(state, &league_id, true).await?;
+    let mut new_loaded = load_dispatched(state, &league_id, true).await?;
     // The rebuild goes back to the wire for everything, which takes long
     // enough for the user to have picked a different league meanwhile. Both
     // locks are taken here, in the order the rest of the app takes them, so
@@ -353,6 +381,16 @@ async fn refresh_data_inner(state: &AppState) -> Result<DraftView, String> {
     let config = state.config.lock().await;
     if config.active_league_id.as_deref() != Some(league_id.as_str()) {
         return Err(LEAGUE_CHANGED.to_string());
+    }
+    // The keeper judgement was made when the league was loaded, from where
+    // the clock stood then. The rebuild's assembly made it again from where
+    // the clock stands now, which mid-draft is a different answer; the one
+    // already on screen carries over. See `rebuild`.
+    if let Some(previous) = loaded
+        .as_ref()
+        .filter(|previous| previous.draft.draft_id == new_loaded.draft.draft_id)
+    {
+        rebuild::carry_keepers(&previous.keeper_pick_nos, &mut new_loaded.keeper_pick_nos);
     }
     let view = view_from(&new_loaded, &config);
     *loaded = Some(new_loaded);

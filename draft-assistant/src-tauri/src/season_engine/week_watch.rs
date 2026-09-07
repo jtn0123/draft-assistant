@@ -23,6 +23,11 @@ pub const CHECK_EVERY_SECS: u64 = 600;
 /// that it costs nothing.
 pub const PLAYERS_EVERY_SECS: u64 = 1800;
 
+/// How the health badge starts the sentence about a rollover that failed:
+/// the week check found a new week and the load of it did not go through.
+/// The rest names the week still on screen and the reason.
+pub const ROLLOVER_FAILED: &str = "the new NFL week could not be loaded";
+
 /// Remembers when something was last checked, and refuses to check again
 /// until its interval has passed.
 #[derive(Debug)]

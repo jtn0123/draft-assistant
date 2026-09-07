@@ -31,9 +31,25 @@ pub fn live_section(
 ) -> LiveSection {
     let week = season.week;
     let projected = |id: &str| weekly.get_or_zero(id, week);
-    let lineup_locked = mine
-        .matchup
-        .is_some_and(|m| lineup_locked(season, lookup, weekly, m.roster_id, mine.lineup));
+    // Teams whose game has kicked off, final games included.
+    let started: HashSet<String> = season_live::remaining_by_team(&season.scores)
+        .into_keys()
+        .collect();
+    let has_started = |id: &str| {
+        lookup
+            .team(id)
+            .is_some_and(|team| started.contains(&team.to_ascii_uppercase()))
+    };
+    let lineup_locked = mine.matchup.is_some_and(|m| {
+        lineup_locked(
+            season,
+            lookup,
+            weekly,
+            m.roster_id,
+            mine.lineup,
+            &has_started,
+        )
+    });
     let mut tracked: Vec<TrackedPlayer> = Vec::new();
     for (side, is_mine) in [(mine, true), (theirs, false)] {
         let Some(matchup) = side.matchup else {
@@ -56,9 +72,19 @@ pub fn live_section(
                     .unwrap_or_default(),
                 name: lookup.name(player_id),
                 team: lookup.team(player_id),
-                points: matchup
-                    .points_for(player_id)
-                    .unwrap_or_else(|| projected(player_id)),
+                // Live points once he has kicked off, the projection until
+                // then. Sleeper leaves a player with nothing to his name out
+                // of `players_points` altogether, so a starter absent from it
+                // mid-game has scored nothing; he used to be shown his
+                // projection, which inflated the live total by exactly the
+                // points he had failed to score.
+                points: matchup.points_for(player_id).unwrap_or_else(|| {
+                    if has_started(player_id) {
+                        0.0
+                    } else {
+                        projected(player_id)
+                    }
+                }),
                 player_id: player_id.clone(),
                 is_mine,
             });
@@ -92,16 +118,8 @@ fn lineup_locked(
     weekly: &WeeklyPoints,
     my_roster_id: u32,
     lineup: &[LineupSlot],
+    has_started: &dyn Fn(&str) -> bool,
 ) -> bool {
-    // Teams whose game has kicked off, final games included.
-    let started: HashSet<String> = season_live::remaining_by_team(&season.scores)
-        .into_keys()
-        .collect();
-    let has_started = |id: &str| {
-        lookup
-            .team(id)
-            .is_some_and(|team| started.contains(&team.to_ascii_uppercase()))
-    };
     let starting: HashSet<&str> = lineup
         .iter()
         .filter_map(|s| s.player_id.as_deref())

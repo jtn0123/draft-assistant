@@ -5,33 +5,33 @@
 //! matchup sweep only changes when a week ends, and last season never changes
 //! at all. Each is cached with a TTL that matches.
 
+mod cache;
 mod last_season;
 mod rows;
+mod sweep;
 pub mod week_watch;
 
 use crate::cache::safe_key;
-use crate::engine::{now_secs, Engine, REQUEST_CONCURRENCY};
+use crate::engine::{now_secs, Engine};
 use crate::season::LastSeasonRow;
 use crate::season_api::{Matchup, NflState, Roster, ScoreGame, SeasonEndpoints, Transaction};
 use crate::season_history::History;
 use crate::season_sources::{LiveFetch, SourceHealth};
 use crate::sleeper::League;
 use crate::sleeper_error::to_message;
-use futures_util::StreamExt;
-use rows::{merge_transactions, pairs_from};
+use rows::merge_transactions;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// Live scoring windows move fast; everything else can lag a little.
 const LIVE_TTL_SECS: u64 = 30;
-const WEEK_SWEEP_TTL_SECS: u64 = 6 * 3600;
 /// Where the NFL is, cached on disk. Not a freshness window — the copy is only
 /// ever read when the live request fails — so the whole season is fair game:
 /// last week's answer beats no screen at all.
 const NFL_STATE_CACHE: &str = "nfl_state.json";
-/// What a matchup week says when Sleeper answered it with nothing.
-pub const EMPTY_WEEK: &str = "came back with no matchup rows";
+pub use sweep::EMPTY_WEEK;
 pub(crate) const LAST_SEASON_TTL_SECS: u64 = 30 * 24 * 3600;
 
 /// week -> the (home_roster_id, away_roster_id) pairings played that week.
@@ -67,12 +67,35 @@ pub struct LoadedSeason {
     pub warnings: Vec<String>,
     /// When each live source last answered, and why it last did not.
     pub sources: SourceHealth,
+    /// Which load this season came from. See [`next_season_epoch`]: the
+    /// poller compares it tick to tick, and a season put in place by a
+    /// command carries a number the poller has never seen.
+    pub epoch: u64,
 }
 
-/// The full-season matchup sweep, assembled from the per-week caches.
-struct WeekSweep {
-    schedule: WeekPairings,
-    season_points: HashMap<String, f64>,
+/// The last epoch handed out. Starts past zero so a `LoadedSeason::default()`
+/// (epoch 0) can never be mistaken for a loaded one.
+static SEASON_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// Claim a fresh epoch for a season that is about to replace the loaded one.
+///
+/// The season poller caches the expensive half of its view (standings,
+/// waivers, trade ideas, playoff odds) for twenty ticks and only rebuilds
+/// early when the scoreboard moves. A command replacing the whole season, a
+/// forced reload from the screen, or a week rollover, moved none of the
+/// scoreboard, so the poller went on re-emitting the analysis of the season
+/// that had just been thrown away, for up to ten minutes. The epoch is what
+/// tells it the ground moved.
+pub fn next_season_epoch() -> u64 {
+    SEASON_EPOCH.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+impl LoadedSeason {
+    /// Mark this season as a new one as far as the poller is concerned.
+    /// Called wherever a command puts a season in place of the loaded one.
+    pub fn restamp(&mut self) {
+        self.epoch = next_season_epoch();
+    }
 }
 
 /// Loading and refreshing a season, as distinct from loading a draft.
@@ -118,112 +141,6 @@ impl Engine {
         format!("season_{}_{suffix}.json", safe_key(league_id))
     }
 
-    /// One week's matchup rows, cached on their own.
-    ///
-    /// A week that is already over can never change again, so it is kept
-    /// forever; the current week and the ones still to come keep the old
-    /// six-hour TTL. That is what makes a weekly rollover cost one request
-    /// instead of fifteen — the sweep used to be a single blob stamped with
-    /// the week it was taken in, so the week ticking over threw all of it
-    /// away.
-    async fn week_matchups(
-        &self,
-        league_id: &str,
-        week: u32,
-        current_week: u32,
-        force: bool,
-    ) -> Result<Vec<Matchup>, String> {
-        let name = Self::season_cache_name(league_id, &format!("week{week}"));
-        let settled = week < current_week;
-        let ttl = if settled {
-            u64::MAX
-        } else {
-            WEEK_SWEEP_TTL_SECS
-        };
-        if !force {
-            if let Some((_, matchups)) = self.read_cache::<Vec<Matchup>>(&name, ttl) {
-                return Ok(matchups);
-            }
-        }
-        let matchups = self
-            .client
-            .matchups(league_id, week)
-            .await
-            .map_err(to_message)?;
-        // Sleeper answers `null` now and then, which parses as no rows. A
-        // finished week always has rows, so an empty answer for one is a lost
-        // response and is reported as such; an empty answer for the week
-        // being played or a later one is passed on but never written to
-        // disk. The settled-week cache is read back at `ttl = u64::MAX`, so
-        // one blank answer written there would have stood as that week's
-        // result for the rest of the season.
-        if matchups.is_empty() {
-            if settled {
-                return Err(format!("week {week} {EMPTY_WEEK}"));
-            }
-            return Ok(matchups);
-        }
-        self.write_cache(&name, &matchups);
-        Ok(matchups)
-    }
-
-    /// Sweep every regular-season week: pairings for the simulation and
-    /// season-to-date points per player. Weeks already on disk cost nothing.
-    async fn week_sweep(
-        &self,
-        league_id: &str,
-        week: u32,
-        last_regular_week: u32,
-        force: bool,
-        warnings: &mut Vec<String>,
-    ) -> WeekSweep {
-        let mut schedule = Vec::new();
-        let mut season_points: HashMap<String, f64> = HashMap::new();
-        let mut failed = Vec::new();
-
-        // Fifteen-odd weeks, six requests at a time rather than one after
-        // another; the results come back out of order, so sort before use.
-        let mut fetched: Vec<(u32, Result<Vec<Matchup>, String>)> =
-            futures_util::stream::iter(1..=last_regular_week.max(week))
-                .map(|w| async move { (w, self.week_matchups(league_id, w, week, force).await) })
-                .buffer_unordered(REQUEST_CONCURRENCY)
-                .collect()
-                .await;
-        fetched.sort_by_key(|(w, _)| *w);
-
-        for (w, result) in fetched {
-            match result {
-                Ok(matchups) => {
-                    schedule.push((w, pairs_from(&matchups)));
-                    // Only weeks already played contribute points.
-                    if w <= week {
-                        for m in &matchups {
-                            for (player_id, points) in m.players_points.iter().flatten() {
-                                *season_points.entry(player_id.clone()).or_insert(0.0) += points;
-                            }
-                        }
-                    }
-                }
-                Err(_) => failed.push(w),
-            }
-        }
-        if !failed.is_empty() {
-            warnings.push(format!(
-                "matchups unavailable for week{} {} \u{2014} playoff odds and season totals are approximate",
-                if failed.len() == 1 { "" } else { "s" },
-                failed
-                    .iter()
-                    .map(u32::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        WeekSweep {
-            schedule,
-            season_points,
-        }
-    }
-
     /// Load the whole in-season picture for a league.
     ///
     /// Individual panels degrade rather than failing the load: a transactions
@@ -253,7 +170,7 @@ impl Engine {
         let name = Self::season_cache_name(league_id, "rosters");
         match self.client.rosters(league_id).await {
             Ok(rosters) => {
-                self.write_cache_off_thread(&name, &rosters).await;
+                self.write_season_cache(&name, &rosters).await;
                 Ok((rosters, None))
             }
             Err(error) => {
@@ -285,7 +202,7 @@ impl Engine {
     pub(crate) async fn nfl_state_or_cached(&self) -> Result<(NflState, Option<String>), String> {
         match self.client.nfl_state().await {
             Ok(state) => {
-                self.write_cache_off_thread(NFL_STATE_CACHE, &state).await;
+                self.write_season_cache(NFL_STATE_CACHE, &state).await;
                 Ok((state, None))
             }
             Err(error) => {
@@ -423,6 +340,7 @@ impl SeasonLoader for Engine {
             fetched_at: loaded_at,
             warnings,
             sources,
+            epoch: next_season_epoch(),
         })
     }
 
@@ -443,41 +361,5 @@ impl SeasonLoader for Engine {
             scores: scores.map_err(to_message),
             rosters: rosters.map_err(to_message),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::projections::test_support::offline_engine;
-    use crate::season_engine::rows::matchup;
-
-    /// The rollover fix: a week that is over can never change, so its rows
-    /// stand however old the copy is. Only the week being played expires.
-    #[tokio::test]
-    async fn a_finished_week_is_never_refetched_but_the_current_one_expires() {
-        let engine = offline_engine("week-cache");
-        let stale = now_secs() - WEEK_SWEEP_TTL_SECS - 1;
-        for week in [3u32, 5] {
-            let name = Engine::season_cache_name("league-1", &format!("week{week}"));
-            crate::cache::write_atomic(
-                engine.data_dir.join(format!("{name}.tmp")),
-                engine.data_dir.join(&name),
-                stale,
-                &vec![matchup(1, Some(1))],
-            )
-            .unwrap();
-        }
-
-        let settled = engine
-            .week_matchups("league-1", 3, 5, false)
-            .await
-            .expect("a finished week is served from disk at any age");
-        assert_eq!(settled.len(), 1);
-
-        // Week 5 is being played, so a six-hour-old copy is refetched — and
-        // offline that fails rather than passing stale scoring off as live.
-        assert!(engine.week_matchups("league-1", 5, 5, false).await.is_err());
-        std::fs::remove_dir_all(engine.data_dir).unwrap();
     }
 }

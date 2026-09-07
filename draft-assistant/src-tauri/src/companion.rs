@@ -18,6 +18,7 @@ pub mod routes_chat;
 pub mod server;
 pub mod store;
 pub mod tls;
+pub mod tls_keeper;
 pub mod tls_serve;
 pub mod tls_x509;
 pub mod ws;

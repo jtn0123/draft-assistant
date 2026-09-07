@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Platform, PollHealth } from "../types";
@@ -9,15 +9,77 @@ import { settle } from "../test/settle";
 
 const rows = (onSelect = () => {}): SettingsRow[] => [
   {
+    id: "chime",
+    kind: "toggle",
     label: "Pick chime",
     note: "Sound when you're on the clock",
     value: "On",
     on: true,
     onSelect,
   },
-  { label: "Live sync", note: "Not polling Sleeper", value: "Off", on: false, onSelect },
-  { label: "Export state", note: "Full JSON dump", value: "JSON", on: false, onSelect },
+  {
+    id: "polling",
+    kind: "toggle",
+    label: "Live sync",
+    note: "Not polling Sleeper",
+    value: "Off",
+    on: false,
+    onSelect,
+  },
+  {
+    id: "appearance",
+    kind: "radio",
+    label: "Appearance",
+    note: "Following your system setting",
+    value: "System",
+    on: false,
+    onSelect,
+    options: [
+      { id: "system", label: "System", on: true, onSelect },
+      { id: "light", label: "Light", on: false, onSelect },
+      { id: "dark", label: "Dark", on: false, onSelect },
+    ],
+  },
+  {
+    id: "export",
+    kind: "action",
+    label: "Export state",
+    note: "Full JSON dump",
+    value: "JSON",
+    on: false,
+    onSelect,
+  },
 ];
+
+/** The header with the menu open and a given set of rows, for tests about
+ *  the rows themselves rather than the shell around them. */
+function menuWith(settingsRows: SettingsRow[]) {
+  return (
+    <Header
+      leagueName="Dynasty Warriors"
+      hostedBy={null}
+      followStatus={null}
+      onPairAgain={() => {}}
+      onSwitchLeague={() => {}}
+      subtitle="Week 3"
+      meta="14-team full-PPR"
+      screen="draft"
+      onScreen={() => {}}
+      platform="sleeper"
+      polling
+      pollHealth={null}
+      onRefreshPicks={() => {}}
+      refreshingPicks={false}
+      onUndo={() => {}}
+      chatOpen={false}
+      onToggleChat={() => {}}
+      settingsOpen
+      onToggleSettings={() => {}}
+      settingsRows={settingsRows}
+      footerNote="read-only connection"
+    />
+  );
+}
 
 /** The header with the settings menu wired up the way the app wires it. */
 function Harness({
@@ -159,13 +221,65 @@ describe("the settings menu", () => {
     const user = userEvent.setup();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitemcheckbox", { name: /Live sync/ })).toHaveFocus();
+    // A picker's choices are stops on the way through, left to right.
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitemradio", { name: "System" })).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("menuitemradio", { name: "Light" })).toHaveFocus();
     await user.keyboard("{End}");
-    expect(screen.getByRole("menuitemcheckbox", { name: /Export state/ })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: /Export state/ })).toHaveFocus();
     // Down from the last item comes back round to the top of the menu.
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Done" })).toHaveFocus();
     await user.keyboard("{ArrowUp}");
-    expect(screen.getByRole("menuitemcheckbox", { name: /Export state/ })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: /Export state/ })).toHaveFocus();
+  });
+
+  // Every row was a menuitemcheckbox, so a screen reader announced "Check
+  // for updates, not checked" and "Sign out, not checked": a state the row
+  // never had, on a control that reads as a toggle it is not.
+  it("calls only a toggle a checkbox, and an action a plain item", async () => {
+    await openMenu();
+    const chime = screen.getByRole("menuitemcheckbox", { name: /Pick chime/ });
+    expect(chime).toHaveAttribute("aria-checked", "true");
+    const exportRow = screen.getByRole("menuitem", { name: /Export state/ });
+    expect(exportRow).not.toHaveAttribute("aria-checked");
+    expect(screen.queryByRole("menuitemcheckbox", { name: /Export state/ })).toBeNull();
+  });
+
+  it("offers a picker's choices as radio items, one of them checked", async () => {
+    const onSelect = vi.fn();
+    await openMenu(onSelect);
+    const group = screen.getByRole("group", { name: "Appearance" });
+    const choices = within(group).getAllByRole("menuitemradio");
+    expect(choices.map((c) => c.textContent)).toEqual(["System", "Light", "Dark"]);
+    expect(choices[0]).toHaveAttribute("aria-checked", "true");
+    expect(choices[1]).toHaveAttribute("aria-checked", "false");
+    // The row around the choices is not itself a menu item.
+    expect(screen.queryByRole("menuitem", { name: /Appearance/ })).toBeNull();
+    await settle(() => {
+      choices[2].click();
+    });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the keyboard on a row whose label changes under it", async () => {
+    // "Check for updates" becomes "Checking…" becomes "Update to 0.3.2" while
+    // the user is sitting on it; keyed by label, each was a new element and
+    // focus fell to the body every time.
+    const relabel = (label: string): SettingsRow[] => [
+      ...rows(),
+      { id: "updates", kind: "action", label, note: "", value: "Check", on: false, onSelect() {} },
+    ];
+    const { rerender } = render(menuWith(relabel("Check for updates")));
+    const row = screen.getByRole("menuitem", { name: /Check for updates/ });
+    await settle(() => {
+      row.focus();
+    });
+    expect(row).toHaveFocus();
+
+    rerender(menuWith(relabel("Update to 0.3.2")));
+    expect(screen.getByRole("menuitem", { name: /Update to 0\.3\.2/ })).toHaveFocus();
   });
 
   it("still runs a setting when its row is chosen", async () => {

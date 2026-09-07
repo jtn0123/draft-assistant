@@ -35,11 +35,18 @@ pub enum TlsSource {
     },
 }
 
-/// A certificate ready to serve: the host it names and the rustls config.
+/// A certificate ready to serve: the host it names, the rustls config, and
+/// when it runs out (Unix seconds), which is what the periodic check reads
+/// instead of the file.
 pub struct Materials {
     pub host: String,
     pub config: Arc<rustls::ServerConfig>,
+    pub not_after: Option<i64>,
 }
+
+/// What runs the `tailscale` arguments and says whether it succeeded.
+/// Injected everywhere so no test ever spawns the CLI.
+pub type Mint = Arc<dyn Fn(&[String]) -> bool + Send + Sync>;
 
 /// The two files `tailscale cert` writes, for one name under one directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,20 +79,46 @@ pub fn mint_args(name: &str, paths: &CertPaths) -> Vec<String> {
     ]
 }
 
+/// What the files on disk say about the certificate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CertState {
+    /// A file is missing, or the certificate cannot be read.
+    Absent,
+    /// Its `notAfter` has passed.
+    Expired,
+    /// Inside [`REMINT_WITHIN_SECS`] of running out: still good to serve,
+    /// and time to ask for a new one.
+    Renewable,
+    Good,
+}
+
+/// The state of a certificate that runs out at `not_after`, at `now`.
+pub fn state_at(not_after: Option<i64>, now: i64) -> CertState {
+    match not_after {
+        None => CertState::Absent,
+        Some(end) if end <= now => CertState::Expired,
+        Some(end) if end - now < REMINT_WITHIN_SECS => CertState::Renewable,
+        Some(_) => CertState::Good,
+    }
+}
+
+/// The state of the files on disk: the certificate PEM if it could be read,
+/// whether the key is beside it, and `now` in Unix seconds.
+pub fn cert_state(cert_pem: Option<&[u8]>, key_present: bool, now: i64) -> CertState {
+    let Some(pem) = cert_pem else {
+        return CertState::Absent;
+    };
+    if !key_present {
+        return CertState::Absent;
+    }
+    state_at(tls_x509::not_after_from_pem(pem), now)
+}
+
 /// Whether the files on disk need `tailscale cert` run again: either is
 /// missing, the certificate cannot be read, or it runs out within
 /// [`REMINT_WITHIN_SECS`] of `now` (Unix seconds).
 pub fn needs_mint(cert_pem: Option<&[u8]>, key_present: bool, now: i64) -> bool {
-    let Some(pem) = cert_pem else {
-        return true;
-    };
-    if !key_present {
-        return true;
-    }
-    match tls_x509::not_after_from_pem(pem) {
-        Some(not_after) => not_after - now < REMINT_WITHIN_SECS,
-        None => true,
-    }
+    cert_state(cert_pem, key_present, now) != CertState::Good
 }
 
 /// Find or mint the certificate for `name` under `dir`, as the two paths.
@@ -94,6 +127,11 @@ pub fn needs_mint(cert_pem: Option<&[u8]>, key_present: bool, now: i64) -> bool 
 /// succeeded; injected so the tests can write files where the CLI would and
 /// never spawn it. The key file is made private however it got there:
 /// Tailscale writes it 0600 already, and a copy made by hand may not be.
+///
+/// A renewal that fails is not the end of HTTPS: the certificate on disk is
+/// still good for up to two weeks, so it is kept and the renewal is tried
+/// again later. Only a certificate that is missing or has actually run out
+/// turns a failed mint into an error.
 pub fn ensure<R>(dir: &Path, name: &str, now: i64, run: R) -> Result<CertPaths, String>
 where
     R: FnOnce(&[String]) -> bool,
@@ -101,21 +139,26 @@ where
     let paths = cert_paths(dir, name);
     let cert_pem = std::fs::read(&paths.cert).ok();
     let key_present = paths.key.is_file();
-    if needs_mint(cert_pem.as_deref(), key_present, now) {
+    let state = cert_state(cert_pem.as_deref(), key_present, now);
+    if state != CertState::Good {
         std::fs::create_dir_all(dir)
             .map_err(|e| format!("could not make the certificate folder: {e}"))?;
         restrict(dir, 0o700);
-        if !run(&mint_args(name, &paths)) {
-            return Err(format!(
-                "tailscale cert did not produce a certificate for {name}"
-            ));
+        let minted = run(&mint_args(name, &paths)) && paths.cert.is_file() && paths.key.is_file();
+        match (minted, state) {
+            (true, _) => crate::applog::info(format!(
+                "minted the phone connection's certificate for {name}"
+            )),
+            (false, CertState::Renewable) => crate::applog::warn(format!(
+                "could not renew the phone connection's certificate for {name}; \
+                 keeping the current one, which is good for a while yet, and trying again later"
+            )),
+            (false, _) => {
+                return Err(format!(
+                    "tailscale cert did not produce a certificate for {name}"
+                ))
+            }
         }
-        if !paths.cert.is_file() || !paths.key.is_file() {
-            return Err(format!("tailscale cert wrote nothing for {name}"));
-        }
-        crate::applog::info(format!(
-            "minted the phone connection's certificate for {name}"
-        ));
     }
     restrict(&paths.key, 0o600);
     Ok(paths)
@@ -137,13 +180,15 @@ fn restrict(path: &Path, mode: u32) {
 
 /// Run `tailscale <args>` from wherever the CLI is, as [`super::net_tailscale`]
 /// finds it. Its output is discarded: `tailscale cert` prints nothing on
-/// success and, on failure, a reason that never names the key.
-fn run_tailscale(args: &[String]) -> bool {
+/// success and, on failure, a reason that never names the key. Every way it
+/// fails is a warning: by the time this runs the machine has a MagicDNS name,
+/// so a missing CLI or a refused mint is the reason the phone has no padlock.
+pub fn run_tailscale(args: &[String]) -> bool {
     for path in CLI_PATHS {
         match std::process::Command::new(path).args(args).output() {
             Ok(output) if output.status.success() => return true,
             Ok(output) => {
-                crate::applog::debug(format!(
+                crate::applog::warn(format!(
                     "tailscale cert failed: {}",
                     String::from_utf8_lossy(&output.stderr).trim()
                 ));
@@ -152,7 +197,7 @@ fn run_tailscale(args: &[String]) -> bool {
             Err(_) => continue,
         }
     }
-    crate::applog::debug("no tailscale CLI, so the phone connection stays http only");
+    crate::applog::warn("no tailscale CLI found, so the phone connection stays http only");
     false
 }
 
@@ -166,6 +211,9 @@ pub fn load(host: &str, paths: &CertPaths) -> Result<Materials, String> {
     if certs.is_empty() {
         return Err("the certificate file holds no certificate".to_string());
     }
+    let not_after = std::fs::read(&paths.cert)
+        .ok()
+        .and_then(|pem| tls_x509::not_after_from_pem(&pem));
     let key = PrivateKeyDer::from_pem_file(&paths.key)
         .map_err(|_| "could not read the certificate's key".to_string())?;
     // The provider is named rather than left to the default: rustls picks a
@@ -182,43 +230,62 @@ pub fn load(host: &str, paths: &CertPaths) -> Result<Materials, String> {
     Ok(Materials {
         host: host.to_string(),
         config: Arc::new(config),
+        not_after,
     })
+}
+
+/// The current time in Unix seconds.
+pub fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// What the listener should serve, if anything. `dns_name` is this machine's
 /// MagicDNS name when Tailscale reported one. Spawns the CLI in the
 /// `Tailscale` case, so it belongs on a blocking thread.
-///
-/// `None` is the plain-HTTP companion of before, and every reason for it is
-/// a debug line at most: a machine with no Tailscale is the common case and
-/// not a fault.
 pub fn materials(source: &TlsSource, dns_name: Option<&str>) -> Option<Materials> {
-    match source {
-        TlsSource::Off => None,
+    let name = match source {
+        TlsSource::Off => return None,
+        TlsSource::Files { host, .. } => host.as_str(),
+        TlsSource::Tailscale { .. } => dns_name?,
+    };
+    materials_with(source, name, now_secs(), &run_tailscale)
+}
+
+/// The same over a name already chosen, a clock, and whatever stands in for
+/// the CLI. `None` is the plain-HTTP companion of before. A machine with no
+/// tailnet name never gets this far; a failure past that point is a warning
+/// that says why the phone has no padlock, with nothing secret in it.
+pub fn materials_with(
+    source: &TlsSource,
+    name: &str,
+    now: i64,
+    run: &(dyn Fn(&[String]) -> bool + Sync),
+) -> Option<Materials> {
+    let loaded = match source {
+        TlsSource::Off => return None,
         TlsSource::Files { host, cert, key } => {
             let paths = CertPaths {
                 cert: cert.clone(),
                 key: key.clone(),
             };
-            load(host, &paths).ok()
+            load(host, &paths)
         }
         TlsSource::Tailscale { dir } => {
-            let name = dns_name?;
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0);
-            match ensure(dir, name, now, run_tailscale).and_then(|paths| load(name, &paths)) {
-                Ok(materials) => Some(materials),
-                Err(why) => {
-                    crate::applog::debug(format!("phone connection stays http only: {why}"));
-                    None
-                }
-            }
+            ensure(dir, name, now, run).and_then(|paths| load(name, &paths))
+        }
+    };
+    match loaded {
+        Ok(materials) => Some(materials),
+        Err(why) => {
+            crate::applog::warn(format!("phone connection stays http only: {why}"));
+            None
         }
     }
 }
 
 #[cfg(test)]
 #[path = "tls_tests.rs"]
-mod tests;
+pub(crate) mod tests;

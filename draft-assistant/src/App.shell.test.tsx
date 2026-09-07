@@ -16,6 +16,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { resetPrefs } from "./prefs";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
+import { settingsRow } from "./test/settingsRow";
 import { draftFixture, fakeStorage, harness, restoringConfig } from "./test/appHarness";
 
 const h = harness();
@@ -36,12 +37,8 @@ async function chooseSetting(label: RegExp) {
     if (gear !== null && screen.queryByRole("menu") === null) gear.click();
   });
   await settle(() => {
-    screen.getByRole("menuitemcheckbox", { name: label }).click();
+    settingsRow(label).click();
   });
-}
-
-function settingsRow(label: RegExp): HTMLElement {
-  return screen.getByRole("menuitemcheckbox", { name: label });
 }
 
 beforeEach(() => {

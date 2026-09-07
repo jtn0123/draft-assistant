@@ -1,168 +1,24 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { createContext, runInContext } from "node:vm";
-import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  boot,
+  FakeSocket,
+  fakeWakeLock,
+  flush,
+  okJson,
+  type Booted,
+} from "./test/companionPageHarness";
 
 /**
  * The companion phone page's DOM and socket half, booted for real.
  *
  * `companionPage.test.ts` runs the shipped files against a document that owns
  * no page, which is the early return the bootstrap takes; nothing there ever
- * reaches `connect()` or the painters. This file gives the same files the real
- * `index.html` under jsdom, a `fetch` and a `WebSocket` of its own, and asks
- * about the failures only the live half can have: a host that is away when
- * the page wakes, a retry timer nobody cancelled, a chat list rebuilt under
- * the finger typing into it.
- *
- * Each boot gets a `window` of its own, the way `companionPage.test.ts` runs
- * the files in a bare context, over the shared jsdom `document`: the page
- * hangs listeners on `window` that no test can take down again, and a second
- * boot on the same window would wake the first page's closure too.
+ * reaches `connect()` or the painters. This file boots the same files over
+ * the real `index.html` (see `test/companionPageHarness.ts`) and asks about
+ * the failures only the live half can have: a host that is away when the
+ * page wakes, a retry timer nobody cancelled, a chat list rebuilt under the
+ * finger typing into it.
  */
-
-const asset = (file: string): string =>
-  readFileSync(resolve(`src-tauri/companion-static/${file}`), "utf8");
-const page = asset("index.html");
-const scripts = ["helpers.js", "clock.js", "pwa.js", "app.js"].map(asset);
-const TOKEN_KEY = "da.companion.token";
-
-/** A `WebSocket` the test opens, drops and feeds by hand. */
-class FakeSocket {
-  static instances: FakeSocket[] = [];
-  readyState = 0;
-  closed = false;
-  onopen: ((event: unknown) => void) | null = null;
-  onmessage: ((event: { data: string }) => void) | null = null;
-  onclose: ((event: { code: number }) => void) | null = null;
-  constructor(public url: string) {
-    FakeSocket.instances.push(this);
-  }
-  send(): void {}
-  close(): void {
-    this.closed = true;
-    this.readyState = 3;
-  }
-  open(): void {
-    this.readyState = 1;
-    this.onopen?.({});
-  }
-  /** The network took it: what the page sees is `onclose` with no revoke. */
-  drop(code = 1006): void {
-    this.readyState = 3;
-    this.onclose?.({ code });
-  }
-  frame(type: string, payload: unknown): void {
-    this.onmessage?.({ data: JSON.stringify({ type, payload }) });
-  }
-}
-
-const okJson = (body: unknown) =>
-  Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
-
-/** Let every pending promise settle; the page's reads are all microtasks. */
-async function flush(): Promise<void> {
-  for (let i = 0; i < 20; i += 1) await Promise.resolve();
-}
-
-/** A booted page: its window's hooks, and the timers it set, to fire by hand. */
-type Fetch = (path: string) => Promise<unknown>;
-interface Booted {
-  fetch: Mock<Fetch>;
-  /** The phone finds a network: what `window` hears as `online`. */
-  online: () => void;
-  /** Run every timeout the page has pending, as if the time had passed. */
-  fireTimers: () => void;
-  byId: (id: string) => HTMLElement;
-}
-
-/** What a phone's `navigator.wakeLock` hands back, and what it was asked. */
-interface FakeWakeLock {
-  request: Mock<(kind: string) => Promise<FakeSentinel>>;
-  sentinels: FakeSentinel[];
-}
-interface FakeSentinel {
-  released: boolean;
-  release: () => Promise<void>;
-  addEventListener: (type: string, fn: () => void) => void;
-}
-function fakeWakeLock(): FakeWakeLock {
-  const sentinels: FakeSentinel[] = [];
-  const request = vi.fn<(kind: string) => Promise<FakeSentinel>>(() => {
-    const sentinel: FakeSentinel = {
-      released: false,
-      release: () => {
-        sentinel.released = true;
-        return Promise.resolve();
-      },
-      addEventListener: () => undefined,
-    };
-    sentinels.push(sentinel);
-    return Promise.resolve(sentinel);
-  });
-  return { request, sentinels };
-}
-
-/** The real page, booted with a token already saved, over the given fetch. */
-function boot(fetch: Fetch, wakeLock?: FakeWakeLock): Booted {
-  document.body.innerHTML = page.slice(
-    page.indexOf('<div id="companion-root">'),
-    page.indexOf("<script"),
-  );
-  FakeSocket.instances = [];
-  const pending = new Map<number, () => void>();
-  let nextTimer = 1;
-  const fetchSpy: Mock<Fetch> = vi.fn(fetch);
-  const events = new EventTarget();
-  const saved = new Map<string, string>([[TOKEN_KEY, "tok-1"]]);
-  // The window the page sees: the address bar, the storage, its timers and
-  // its events. The timers are held rather than run, so a test says when the
-  // backoff has elapsed and nothing fires between its lines otherwise.
-  const window = {
-    location: { protocol: "http:", host: "192.168.1.20:7878" },
-    localStorage: {
-      getItem: (key: string) => saved.get(key) ?? null,
-      setItem: (key: string, value: string) => void saved.set(key, value),
-      removeItem: (key: string) => void saved.delete(key),
-    },
-    setTimeout: (fn: () => void) => {
-      const id = nextTimer;
-      nextTimer += 1;
-      pending.set(id, fn);
-      return id;
-    },
-    clearTimeout: (id: number) => void pending.delete(id),
-    setInterval: () => 0,
-    clearInterval: () => undefined,
-    addEventListener: (type: string, fn: () => void) => events.addEventListener(type, fn),
-  };
-  const sandbox = {
-    window,
-    document,
-    navigator: {
-      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)",
-      ...(wakeLock ? { wakeLock } : {}),
-    },
-    fetch: fetchSpy,
-    WebSocket: FakeSocket,
-  };
-  const context = createContext(sandbox);
-  for (const script of scripts) runInContext(script, context);
-  if (document.readyState === "loading") document.dispatchEvent(new Event("DOMContentLoaded"));
-  return {
-    fetch: fetchSpy,
-    online: () => void events.dispatchEvent(new Event("online")),
-    fireTimers: () => {
-      const due = [...pending.values()];
-      pending.clear();
-      for (const fn of due) fn();
-    },
-    byId: (id) => {
-      const node = document.getElementById(id);
-      if (!node) throw new Error(`no #${id} on the page`);
-      return node;
-    },
-  };
-}
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -289,7 +145,7 @@ describe("the screen during a draft", () => {
 
   it("is held awake while a draft is live and connected, and let go when the host drops", async () => {
     const wakeLock = fakeWakeLock();
-    boot(() => okJson(null), wakeLock);
+    boot(() => okJson(null), { wakeLock });
     await flush();
     const socket = FakeSocket.instances[0];
     if (!socket) throw new Error("no socket");

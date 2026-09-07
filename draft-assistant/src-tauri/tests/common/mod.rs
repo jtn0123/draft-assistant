@@ -462,6 +462,7 @@ pub fn fixture() -> (LoadedLeague, LoadedSeason, AppConfig) {
         fetched_at: SNAP_AT_2,
         warnings: vec!["fixture warning".into()],
         sources: Default::default(),
+        epoch: 0,
     };
 
     let config = AppConfig {

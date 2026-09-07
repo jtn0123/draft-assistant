@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { version as packageVersion } from "../package.json";
 
-/** What the browser preview shows: it has no Tauri shell to ask, so this is
- *  kept in step with package.json and tauri.conf.json by hand. */
-export const PREVIEW_VERSION = "0.2.0";
+/** What the browser preview shows: it has no Tauri shell to ask, so it reads
+ *  package.json at build time. It was a string kept in step by hand, and it
+ *  sat at 0.2.0 for two releases; scripts/check-version.mjs holds package.json
+ *  to the other two version files, so this cannot drift from any of them. */
+export const PREVIEW_VERSION: string = packageVersion;
 
 /** The running app's version, from the shell that knows it. */
 export function useAppVersion(): string {

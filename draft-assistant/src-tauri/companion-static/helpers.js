@@ -52,6 +52,38 @@
     const key = String(position ?? "").toLowerCase();
     return ["qb", "rb", "wr", "te", "k", "def"].includes(key) ? `pos pos-${key}` : "pos";
   };
+  /** How long one request to the host may take before the page gives up on
+   *  it. A host that took the connection and never answered left a question
+   *  hanging with no note and the Send button doing nothing. */
+  const HOST_TIMEOUT_MS = 10000;
+  /** The name on the error `timedFetch` rejects with when the deadline ran out. */
+  const HOST_TIMEOUT = "HostTimeout";
+  /** `fetch` with a deadline: rejects with a `HOST_TIMEOUT` error after `ms`
+   *  of silence, and with the network's own error for anything else. The
+   *  timer and the controller come off `win`, so a page booted over fake
+   *  timers can wind the clock; a window with no `AbortController` (there is
+   *  none in the test's bare context) gets the plain request. */
+  const timedFetch = (win, fetchFn, url, init = {}, ms = HOST_TIMEOUT_MS) => {
+    const Controller = win?.AbortController;
+    if (typeof Controller !== "function" || typeof win.setTimeout !== "function") {
+      return fetchFn(url, init);
+    }
+    const controller = new Controller();
+    const timer = win.setTimeout(() => controller.abort(), ms);
+    return fetchFn(url, { ...init, signal: controller.signal }).then(
+      (response) => {
+        win.clearTimeout(timer);
+        return response;
+      },
+      (error) => {
+        win.clearTimeout(timer);
+        if (!controller.signal.aborted) throw error;
+        const late = new Error("The host did not answer in time.");
+        late.name = HOST_TIMEOUT;
+        throw late;
+      },
+    );
+  };
   /** Reconnect delay: one second, doubling to a thirty second ceiling. */
   const backoffDelay = (attempt) => Math.min(30000, 1000 * 2 ** Math.max(0, attempt));
   const formatCost = (usd) =>
@@ -197,6 +229,29 @@
     }
     return wrap;
   };
+  /** The chat thread's list items, rebuilt whole: who asked or was answered,
+   *  when (stamped on the node so a tick can move it), what it cost, and the
+   *  answer as the markdown subset above. */
+  const buildChatList = (list, entries, now) => {
+    clear(list);
+    for (const entry of entries) {
+      const item = list.appendChild(el("li", `entry ${entry.role}`));
+      const who = entry.device?.name ?? "Someone";
+      const meta = item.appendChild(el("div", "entry-meta"));
+      spans(
+        meta,
+        [null, entry.role === "assistant" ? `Answer for ${who}` : `${who} asked`],
+        ["kind", entry.device?.kind],
+      );
+      const when = meta.appendChild(el("span", null, relativeTime(entry.at_ms, now)));
+      when.dataset.at = String(entry.at_ms);
+      spans(meta, [null, formatCost(entry.cost_usd)]);
+      if (entry.error) item.appendChild(el("p", "error", entry.error));
+      else if (entry.role === "assistant") item.appendChild(markdownNodes(entry.text));
+      else item.appendChild(el("p", null, entry.text));
+    }
+    if (!entries.length) list.appendChild(el("li", "muted", "Nothing asked yet."));
+  };
   window.Companion = {
     TOKEN_KEY,
     DEVICE_KEY,
@@ -212,6 +267,9 @@
     modeLabel,
     collapseAgreeing,
     backoffDelay,
+    HOST_TIMEOUT_MS,
+    HOST_TIMEOUT,
+    timedFetch,
     formatCost,
     formatClock,
     parseMarkdown,
@@ -221,5 +279,6 @@
     clear,
     spans,
     markdownNodes,
+    buildChatList,
   };
 })();

@@ -132,6 +132,7 @@ async fn refresh_live_reports_a_total_outage_instead_of_claiming_freshness() {
         fetched_at: stamped,
         warnings: Vec::new(),
         sources: Default::default(),
+        epoch: 0,
     };
 
     let err = engine

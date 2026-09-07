@@ -19,9 +19,11 @@ const MASK: &str = "····";
 
 /// Markers whose *value* is a secret. Longest first, so `api_key=` is matched
 /// before the `key=` inside it.
-const MARKERS: [&str; 11] = [
+const MARKERS: [&str; 13] = [
     "authorization: bearer ",
     "authorization:bearer ",
+    "authorization: basic ",
+    "authorization:basic ",
     "client_secret=",
     "refresh_token=",
     "access_token=",
@@ -67,6 +69,37 @@ fn key_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')
 }
 
+/// Characters a base64 credential is made of.
+fn base64_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=')
+}
+
+/// The length of the `Basic ` credential opening `low`, when there is one,
+/// or `None` when the word is plain English ("a basic thing").
+///
+/// A bare `Basic` cannot be a marker the way `Bearer` is: it is an ordinary
+/// word. So what follows has to look like base64 of `user:password`: eight
+/// or more base64 characters with a digit, a capital after the first letter,
+/// or padding somewhere in them. `basic understanding` has none of those;
+/// `Basic dXNlcjpwYXNz` has a capital in the middle.
+fn basic_credential_len(low: &str, rest: &str) -> Option<usize> {
+    const WORD: &str = "basic ";
+    if !low.starts_with(WORD) {
+        return None;
+    }
+    let value = &rest[WORD.len()..];
+    let len = value.find(|c| !base64_char(c)).unwrap_or(value.len());
+    let value = &value[..len];
+    if len < 8 {
+        return None;
+    }
+    let looks_encoded = value
+        .chars()
+        .any(|c| c.is_ascii_digit() || matches!(c, '+' | '/' | '='))
+        || value.chars().skip(1).any(|c| c.is_ascii_uppercase());
+    looks_encoded.then_some(WORD.len() + len)
+}
+
 /// Mask every secret-shaped run in `input`.
 ///
 /// Never fails and never panics: the worst case is a line that says less than
@@ -106,6 +139,13 @@ pub fn redact(input: &str) -> String {
             let step = marker.len() + value_len;
             rest = &rest[step..];
             low = &low[step..];
+            continue;
+        }
+        if let Some(len) = basic_credential_len(low, rest) {
+            out.push_str(&rest[.."basic ".len()]);
+            out.push_str(MASK);
+            rest = &rest[len..];
+            low = &low[len..];
             continue;
         }
         if low.starts_with("sk-") {
@@ -170,6 +210,38 @@ mod tests {
             redact("sent Bearer abc123 to the host"),
             "sent Bearer ···· to the host"
         );
+    }
+
+    /// The failure this prevents: `Bearer` was masked and `Basic` was not,
+    /// so a proxy or a projection source behind HTTP basic auth quoted
+    /// `user:password`, base64 and all, straight into the log.
+    #[test]
+    fn a_basic_credential_is_masked_in_a_header_and_in_a_sentence() {
+        assert_eq!(
+            redact("Authorization: Basic YWRtaW46aHVudGVyMg=="),
+            "Authorization: Basic ····",
+        );
+        assert_eq!(
+            redact("proxy sent authorization:Basic dXNlcjpwYXNz and got 407"),
+            "proxy sent authorization:Basic ···· and got 407",
+        );
+        // No header word, but the shape is unmistakable.
+        assert_eq!(
+            redact("retried with Basic dXNlcjpwYXNz on the second try"),
+            "retried with Basic ···· on the second try",
+        );
+    }
+
+    #[test]
+    fn the_english_word_basic_is_left_alone() {
+        for line in [
+            "a basic thing went wrong",
+            "basic understanding of the board",
+            "Basic Authentication was refused",
+            "the basic 2 step flow",
+        ] {
+            assert_eq!(redact(line), line);
+        }
     }
 
     #[test]

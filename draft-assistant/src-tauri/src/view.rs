@@ -74,11 +74,15 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
             .as_ref()
             .and_then(|order| order.get(uid).copied())
     });
-    // Mock drafts (no league members loaded) may be joined under a guest id:
-    // fall back to the draft creator's slot, then to the only joined human.
-    // Never applies to a real league, where user_names is populated.
+    // Mock drafts (no league, no member list) may be joined under a guest
+    // id: fall back to the draft creator's slot, then to the only joined
+    // human. Never applies to a real league, and that is judged by what the
+    // league is rather than by whether its member list loaded: judged by the
+    // list, a failed `/users` call made the commissioner's seat "mine" on a
+    // real league, green frame and chime included. A real league with no
+    // member list has no known seat, and says so (`SEAT_UNCONFIRMED`).
     let my_slot = my_slot.or_else(|| {
-        if !loaded.user_names.is_empty() {
+        if !loaded.is_mock_draft() {
             return None;
         }
         let order = draft.draft_order.as_ref()?;
@@ -354,3 +358,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         },
     }
 }
+
+#[cfg(test)]
+#[path = "view_seat_tests.rs"]
+mod seat_tests;

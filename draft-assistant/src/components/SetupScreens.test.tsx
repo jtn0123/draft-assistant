@@ -87,6 +87,31 @@ describe("changing the username with a league already on screen", () => {
     expect(addLeague).toHaveBeenCalledWith("1389710366300200960");
   });
 
+  // Save over an empty field reloaded the whole league: ten seconds of
+  // pulling to change nothing, with no word about why.
+  it("asks for a username rather than reloading the league when Save has nothing to save", async () => {
+    const { onReady, user } = setup("1389710366300200960");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const hint = screen.getByRole("alert");
+    expect(hint).toHaveTextContent("Type your Sleeper username to save it");
+    const field = screen.getByLabelText("Sleeper username");
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field).toHaveAccessibleDescription("Type your Sleeper username to save it");
+    expect(addLeague).not.toHaveBeenCalled();
+    expect(setMyUsername).not.toHaveBeenCalled();
+    expect(onReady).not.toHaveBeenCalled();
+    // The button never went to "Pulling…": the form is still ready to save.
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+
+    // Typing clears the hint; a blank made of spaces is still nothing to save.
+    await user.type(field, "   ");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(addLeague).not.toHaveBeenCalled();
+  });
+
   it("goes back to loading once the id is changed to another league", async () => {
     const { user } = setup("1389710366300200960");
     await user.clear(screen.getByLabelText("League ID"));
@@ -125,6 +150,24 @@ describe("the launch card on a follower", () => {
     expect(screen.queryByRole("button", { name: "Enter a different league" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Leave host" }));
     expect(onLeaveHost).toHaveBeenCalled();
+  });
+
+  // The last error was a clause on the end of the detail line; a screen
+  // reader sitting on "Try again" heard nothing when the retry failed too.
+  it("announces the attempt line politely and the last error assertively", () => {
+    launch();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Reconnecting to Justin's Mac, attempt 2 of 4",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Last error: Justin's Mac did not answer within 10 seconds",
+    );
+  });
+
+  it("has no error to announce while the first connection is still out", () => {
+    launch({ lastError: null });
+    expect(screen.getByRole("status")).toHaveTextContent("Connecting to Justin's Mac");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("still offers another league to a Mac running its own", () => {

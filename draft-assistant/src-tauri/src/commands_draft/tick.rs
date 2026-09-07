@@ -88,6 +88,9 @@ pub(super) struct TickFetch {
     pub draft: Option<Result<Draft, String>>,
     /// The trade list, where the platform has one.
     pub traded: Option<Result<Vec<TradedPick>, String>>,
+    /// The league's member list, asked for only while the load's own call
+    /// failed and the user's seat is still unconfirmed. See `seat`.
+    pub users: Option<Result<Vec<LeagueUser>, String>>,
 }
 
 /// What one tick should do with the `/traded_picks` list it asked for.
@@ -136,33 +139,60 @@ pub(super) async fn fetch_tick(
     yahoo: &YahooState,
     draft_id: &str,
     yahoo_ids: &HashMap<String, String>,
+    users_for: Option<&str>,
 ) -> TickFetch {
     if is_yahoo_key(draft_id) {
         return TickFetch {
             picks: yahoo_picks(engine, yahoo, draft_id, yahoo_ids).await,
             draft: None,
             traded: None,
+            users: None,
         };
     }
     // The picks get the full retry policy; the two beside them get one short
     // try. A failure of either of those is a note, and the tick used to wait
     // three tries of eight seconds on each — 25 seconds under a green badge
     // — for a resource it was going to keep the last copy of anyway.
-    let (picks, draft, traded) = tokio::join!(
+    let users = async {
+        match users_for {
+            Some(league_id) => Some(
+                engine
+                    .client
+                    .league_users(league_id)
+                    .await
+                    .map_err(to_message),
+            ),
+            None => None,
+        }
+    };
+    let (picks, draft, traded, users) = tokio::join!(
         engine.client.picks(draft_id),
         engine.client.draft_quick(draft_id),
-        engine.client.traded_picks_quick(draft_id)
+        engine.client.traded_picks_quick(draft_id),
+        users
     );
     TickFetch {
         picks: picks.map_err(to_message),
         draft: Some(draft.map_err(|error| error.to_string())),
         traded: Some(traded.map_err(to_message)),
+        users,
     }
 }
 
 /// What one tick needs to know about the league on screen before it goes out.
-pub(super) fn tick_target(loaded: &LoadedLeague) -> (String, HashMap<String, String>) {
-    (loaded.draft.draft_id.clone(), loaded.yahoo_ids.clone())
+pub(super) struct TickTarget {
+    pub draft_id: String,
+    pub yahoo_ids: HashMap<String, String>,
+    /// The league whose member list is still owed, if any. See `seat`.
+    pub users_for: Option<String>,
+}
+
+pub(super) fn tick_target(loaded: &LoadedLeague) -> TickTarget {
+    TickTarget {
+        draft_id: loaded.draft.draft_id.clone(),
+        yahoo_ids: loaded.yahoo_ids.clone(),
+        users_for: seat::users_to_retry(loaded),
+    }
 }
 
 /// Take one specific pick back out of memory after its write failed, leaving

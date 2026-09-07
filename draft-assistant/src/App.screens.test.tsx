@@ -13,6 +13,7 @@ import App from "./App";
 import { resetPrefs } from "./prefs";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
+import { settingsRow } from "./test/settingsRow";
 import {
   draftFixture,
   fakeStorage,
@@ -95,7 +96,7 @@ describe("the season screen before it has anything to show", () => {
       screen.getByRole("button", { name: "Settings" }).click();
     });
     await settle(() => {
-      screen.getByRole("menuitemcheckbox", { name: /Refresh data/ }).click();
+      settingsRow(/Refresh data/).click();
     });
 
     // The board was rebuilt from new projections, so the season screen is

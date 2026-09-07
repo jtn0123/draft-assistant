@@ -11,7 +11,11 @@ const NAME: &str = "justins-mac.tail1234.ts.net";
 
 /// A host serving HTTPS from a fresh self-signed certificate for [`NAME`].
 async fn secure_host(label: &str) -> Host {
-    let data_dir = scratch_dir(label);
+    secure_host_in(scratch_dir(label)).await
+}
+
+/// The same over a data directory the caller already has: a restart.
+async fn secure_host_in(data_dir: std::path::PathBuf) -> Host {
     let mut params = rcgen::CertificateParams::new(vec![NAME.to_string()]).expect("params");
     params.not_after = rcgen::date_time_ymd(2035, 1, 1);
     let key = rcgen::KeyPair::generate().expect("a key pair");
@@ -173,7 +177,46 @@ async fn the_manifest_and_service_worker_are_served_for_installing_the_page() {
             .and_then(|v| v.to_str().ok()),
         Some("image/svg+xml")
     );
+    // iOS ignores an SVG home-screen icon, so the page names a PNG too.
+    let touch_icon = get("/static/apple-touch-icon.png").await.expect("icon");
+    assert_eq!(
+        touch_icon
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("image/png")
+    );
+    assert!(touch_icon
+        .bytes()
+        .await
+        .expect("png")
+        .starts_with(b"\x89PNG"));
     let page = get("/").await.expect("page").text().await.expect("html");
-    assert!(page.contains(r#"<link rel="manifest" href="/static/manifest.webmanifest" />"#));
+    assert!(page.contains(
+        r#"<link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />"#
+    ));
     assert!(page.contains(r#"<script src="/static/pwa.js"></script>"#));
+    // The manifest link is added by pwa.js (it is left out on iOS, where a
+    // manifest start_url would override the installed page's own address).
+    let pwa = get("/static/pwa.js")
+        .await
+        .expect("pwa")
+        .text()
+        .await
+        .expect("js");
+    assert!(pwa.contains(r#"link.href = "/static/manifest.webmanifest""#));
+}
+
+/// The failure this prevents: the HTTPS port was whichever came after the
+/// plain one, so a page installed to the phone's home screen from one
+/// launch pointed at a port the next launch did not use.
+#[tokio::test]
+async fn the_https_port_survives_a_restart_so_an_installed_page_still_opens() {
+    let first = secure_host("https-restart").await;
+    let port = first.companion.https_port().expect("https up");
+    first.companion.stop();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let second = secure_host_in(first.data_dir.clone()).await;
+    assert_eq!(second.companion.https_port(), Some(port));
+    second.companion.stop();
 }

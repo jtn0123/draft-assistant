@@ -77,6 +77,9 @@ export function DraftScreen({
           boardSize={view.data_health.board_size}
           replacementDemand={view.replacement_demand}
           secondOpinionLoadedAt={view.data_health.second_opinion_loaded_at}
+          // Complete, and the row buttons are off: a pick recorded after the
+          // last one is a manual pick into a board nobody is drafting from.
+          draftOver={view.draft.status === "complete"}
           onDraft={onDraft}
         />
       </div>

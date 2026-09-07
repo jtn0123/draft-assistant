@@ -35,9 +35,25 @@ export function Setup({
   const [leagueId, setLeagueId] = useState(activeLeagueId ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** What is wrong with the username field, when Save was pressed over it
+   *  empty. Cleared as soon as the field changes. */
+  const [hint, setHint] = useState<string | null>(null);
+
+  const canSubmit = leagueId.trim() !== "" && busy === null;
+  // Re-loading the league on screen is how a new username takes effect, but
+  // "Load league" over a field that already names it reads as a second copy.
+  const saving = activeLeagueId !== null && leagueId.trim() === activeLeagueId;
 
   const submit = async () => {
     setError(null);
+    // Save with nothing typed used to reload the whole league, ten seconds of
+    // "Pulling league, players, and projections…" to change nothing. There is
+    // nothing to save; say so and stay put. First launch is different: the
+    // username is optional there, and Load league is loading a league.
+    if (saving && username.trim() === "") {
+      setHint("Type your Sleeper username to save it");
+      return;
+    }
     try {
       if (username.trim()) {
         setBusy("Looking up your Sleeper account…");
@@ -53,11 +69,6 @@ export function Setup({
       setBusy(null);
     }
   };
-
-  const canSubmit = leagueId.trim() !== "" && busy === null;
-  // Re-loading the league on screen is how a new username takes effect, but
-  // "Load league" over a field that already names it reads as a second copy.
-  const saving = activeLeagueId !== null && leagueId.trim() === activeLeagueId;
 
   return (
     // A form, so Enter in either field loads the league. Two text inputs and
@@ -82,10 +93,22 @@ export function Setup({
         <input
           className="text-input"
           value={username}
-          onChange={(e) => setUsername(e.target.value)}
+          onChange={(e) => {
+            setUsername(e.target.value);
+            setHint(null);
+          }}
           placeholder="mcsleeper26"
+          aria-invalid={hint !== null}
+          aria-describedby={hint === null ? undefined : "username-hint"}
         />
       </label>
+      {/* Outside the label, so the hint describes the field without being
+          read as part of its name. */}
+      {hint !== null && (
+        <span className="error small" id="username-hint" role="alert">
+          {hint}
+        </span>
+      )}
       <label className="field">
         League ID
         <input
@@ -162,7 +185,9 @@ export function LaunchScreen({
   return (
     <div className="card-screen">
       <h1>Draft Assistant</h1>
-      <div className="launch-status">
+      {/* Polite: each attempt rewrites this line, and nothing else on the
+          card moves. */}
+      <div className="launch-status" role="status">
         <span className="launch-dot" />
         <span>
           {reconnecting
@@ -183,8 +208,14 @@ export function LaunchScreen({
             {leagueId !== null && ` (${leagueId})`}.
           </>
         )}
-        {lastError !== null && ` Last error: ${lastError}`}
       </span>
+      {/* Announced: it used to be a clause on the end of the line above, and
+          a screen reader on the button heard nothing when a retry failed. */}
+      {lastError !== null && (
+        <span className="muted small launch-detail" role="alert">
+          Last error: {lastError}
+        </span>
+      )}
       {!reconnecting && (
         <div className="launch-actions">
           <button type="button" className="btn-primary" onClick={onRetry}>

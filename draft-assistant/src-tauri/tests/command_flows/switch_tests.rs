@@ -60,6 +60,29 @@ fn become_league(loaded: &Mutex<Option<LoadedLeague>>, league_id: &str, draft_id
     loaded.draft.draft_id = draft_id.to_string();
     loaded.api_picks.clear();
     loaded.keeper_pick_nos.clear();
+    // No tick has been recorded against the new league yet. The first one
+    // that is says the poller has moved on to it, which is what the poll
+    // test below waits for.
+    loaded.poll_last_success_at = None;
+}
+
+/// Wait until a poll tick has been recorded against the loaded league, or
+/// give up after `timeout`. Answers whether one was.
+fn wait_for_a_tick(loaded: &Mutex<Option<LoadedLeague>>, timeout: Duration) -> bool {
+    let started = std::time::Instant::now();
+    while started.elapsed() < timeout {
+        {
+            let guard = tauri::async_runtime::block_on(loaded.lock());
+            if guard
+                .as_ref()
+                .is_some_and(|now| now.poll_last_success_at.is_some())
+            {
+                return true;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
 }
 
 fn keepers_file(s: &super::Session, draft_id: &str) -> std::path::PathBuf {
@@ -116,13 +139,20 @@ fn a_poll_tick_that_lands_after_a_league_switch_is_thrown_away() {
     let switcher = switch_while_in_flight(&TICK_PICKS, before, move || {
         become_league(&watched, LEAGUE_ID, DRAFT_ID);
     });
-    s.ok("start_polling", json!({"intervalSecs": 60}));
+    // The shortest interval there is, so the tick after the discarded one
+    // comes round within the wait below.
+    s.ok("start_polling", json!({"intervalSecs": 2}));
     switcher.join().expect("the switching thread finished");
 
-    // The answer was let through the moment the switch landed; give the tick
-    // its chance to apply it before deciding that it did not.
-    std::thread::sleep(Duration::from_millis(500));
+    // The answer was let through the moment the switch landed, and the tick
+    // that carried it records nothing on the new league. The tick after it
+    // polls the new league's own draft and does record, so its arrival is
+    // the proof that the discarded one has been and gone. Had the old picks
+    // been written, that second tick's empty list would be refused against
+    // them and never recorded, and this wait would run out.
+    let ticked = wait_for_a_tick(&loaded, Duration::from_secs(15));
     s.ok("stop_polling", json!({}));
+    assert!(ticked, "no tick was recorded against the new league");
 
     let guard = tauri::async_runtime::block_on(loaded.lock());
     let now = guard.as_ref().expect("a league is loaded");

@@ -62,6 +62,17 @@ pub fn describe(error: &UpdaterError) -> String {
     }
 }
 
+/// The plugin's own words, to the log, then the plain sentence for the row.
+///
+/// The failure this prevents: `describe` folded every transport error into
+/// "Could not reach the update server", and `logged!` only ever saw that
+/// sentence, so the log could not say whether it was DNS, a timeout or a
+/// certificate. The cause goes through the log's redaction like every line.
+pub fn report(step: &str, error: &UpdaterError) -> String {
+    applog::warn(format!("update {step} failed: {error}"));
+    describe(error)
+}
+
 /// The outcome shape, from what the plugin's `check` handed back.
 pub fn outcome(current: &str, found: Option<(&str, Option<&str>)>) -> UpdateCheck {
     UpdateCheck {
@@ -108,14 +119,17 @@ async fn install_on<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     update
         .download_and_install(|_, _| {}, || {})
         .await
-        .map_err(|error| describe(&error))?;
+        .map_err(|error| report("install", &error))?;
     applog::info(format!("update {} installed, restarting", update.version));
     app.restart()
 }
 
 async fn fetch<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Update>, String> {
-    let updater = app.updater().map_err(|error| describe(&error))?;
-    updater.check().await.map_err(|error| describe(&error))
+    let updater = app.updater().map_err(|error| report("check", &error))?;
+    updater
+        .check()
+        .await
+        .map_err(|error| report("check", &error))
 }
 
 #[cfg(test)]

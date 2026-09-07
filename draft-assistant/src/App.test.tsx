@@ -9,6 +9,7 @@ import "./test/warmScreens";
 import App from "./App";
 import { resetPrefs } from "./prefs";
 import { settle } from "./test/settle";
+import { settingsRow } from "./test/settingsRow";
 import {
   draftFixture,
   fakeStorage,
@@ -180,7 +181,7 @@ describe("App live workflow", () => {
     await user.click(screen.getByRole("button", { name: "Settings" }));
     // The settings rows are menu items with their own on/off state, not plain
     // buttons — see Header.test.tsx.
-    await user.click(screen.getByRole("menuitemcheckbox", { name: /Refresh data/ }));
+    await user.click(settingsRow(/Refresh data/));
     expect(
       await screen.findByText("Projections refreshed: board rebuilt from 312 players"),
     ).toBeInTheDocument();
@@ -337,7 +338,7 @@ describe("when an action fails", () => {
       screen.getByRole("button", { name: "Settings" }).click();
     });
     await settle(() => {
-      screen.getByRole("menuitemcheckbox", { name: /Refresh data/ }).click();
+      settingsRow(/Refresh data/).click();
     });
 
     const note = "Projections refreshed: board rebuilt from 312 players";
@@ -397,7 +398,7 @@ describe("the way back off the setup screen", () => {
     await settle(() => {});
 
     await settle(() => screen.getByRole("button", { name: "Settings" }).click());
-    await settle(() => screen.getByRole("menuitemcheckbox", { name: /Sleeper username/ }).click());
+    await settle(() => settingsRow(/Sleeper username/).click());
 
     expect(
       await screen.findByRole("button", { name: `Back to ${initial.league.name}` }),

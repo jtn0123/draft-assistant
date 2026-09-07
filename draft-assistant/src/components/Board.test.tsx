@@ -42,6 +42,43 @@ describe("Board", () => {
     expect(document.querySelector(".tag")).toBeNull();
   });
 
+  it("stops recording picks once the draft is complete", async () => {
+    // The Draft button on every row stayed live after the final pick, so a
+    // stray click recorded a manual pick into a finished draft.
+    const user = userEvent.setup();
+    const onDraft = vi.fn();
+    const { rerender } = render(
+      <Board
+        players={[player("wr", "Late Wideout", "WR")]}
+        positions={["WR"]}
+        loading={false}
+        boardSize={1}
+        draftOver={true}
+        onDraft={onDraft}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "Draft" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", expect.stringMatching(/draft is complete/i));
+    await user.click(button);
+    expect(onDraft).not.toHaveBeenCalled();
+
+    // And a draft still running is untouched: the same row, live.
+    rerender(
+      <Board
+        players={[player("wr", "Late Wideout", "WR")]}
+        positions={["WR"]}
+        loading={false}
+        boardSize={1}
+        draftOver={false}
+        onDraft={onDraft}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Draft" }));
+    expect(onDraft).toHaveBeenCalledWith("wr", "Late Wideout");
+  });
+
   it("builds position filters from league data, including kicker", async () => {
     const user = userEvent.setup();
     render(

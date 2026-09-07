@@ -138,6 +138,7 @@ fn season(week: u32, rosters: Vec<Roster>, fetched_at: u64) -> LoadedSeason {
         fetched_at,
         warnings: Vec::new(),
         sources: Default::default(),
+        epoch: 0,
     }
 }
 
@@ -337,4 +338,40 @@ fn the_last_regular_week_is_still_played_rather_than_already_decided() {
     let settled = standings_rows(&loaded, &season, &lookup, None, &|id| format!("Team {id}"));
     assert!(settled.iter().any(|r| r.playoff_odds == 1.0), "{settled:?}");
     assert!(settled.iter().any(|r| r.playoff_odds == 0.0), "{settled:?}");
+}
+
+/// The bug: `record_history` was a read, a diff and a write back with nothing
+/// holding the file, and the user-driven load and the poller's rollover can
+/// call it in the same second. Both read the same file, both appended, and
+/// whichever wrote second overwrote the first.
+#[tokio::test]
+async fn two_snapshots_recorded_at_once_both_reach_the_file() {
+    let dir = std::env::temp_dir().join(format!(
+        "draft-assistant-history-race-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = Engine::new(dir.clone());
+    let loaded = loaded_league();
+    // Three different rosters, so every one of these is a snapshot worth
+    // recording whatever order they land in.
+    let first = season(1, vec![roster(&["qb1", "wr1"])], 0);
+    let second = season(1, vec![roster(&["qb1"])], 0);
+    let third = season(1, vec![roster(&["wr1"])], 0);
+
+    tokio::join!(
+        engine.record_history(&loaded, &first),
+        engine.record_history(&loaded, &second)
+    );
+    let on_file = engine.record_history(&loaded, &third).await;
+    assert_eq!(
+        on_file.snapshots.len(),
+        3,
+        "one of two concurrent snapshots was overwritten by the other"
+    );
+
+    std::fs::remove_dir_all(dir).unwrap();
 }

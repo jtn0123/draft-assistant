@@ -4,7 +4,7 @@
 use super::hub::{now_ms, CompanionHub, Emit};
 use super::net;
 use super::tls::{self, TlsSource};
-use super::tls_serve;
+use super::tls_keeper::Keeper;
 use crate::shared_chat::SharedChat;
 use crate::state::AppState;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -26,14 +26,18 @@ pub struct CompanionServer {
     /// Where the HTTPS listener's certificate comes from. The desktop asks
     /// Tailscale; the tests and the headless host run with it off.
     tls: Mutex<TlsSource>,
+    /// Where the HTTPS port is kept between launches, so the address a phone
+    /// installed the page from is the address it finds tomorrow.
+    https_port_file: std::path::PathBuf,
 }
 
 struct Running {
     port: u16,
     /// Dropped or fired to bring the listener down.
     shutdown: oneshot::Sender<()>,
-    /// The HTTPS listener beside it, when a certificate was there to serve.
-    https: Option<tls_serve::Listener>,
+    /// The HTTPS listener beside it, and what brings it up when the tailnet
+    /// appears later or renews its certificate.
+    keeper: Arc<Keeper>,
     /// The code rotation and the origin refresh. Aborted on stop: both used
     /// to end on their own by noticing the port was gone, and a toggle off
     /// and on inside one tick left the old pair running beside the new one.
@@ -58,6 +62,7 @@ impl CompanionServer {
             tls: Mutex::new(TlsSource::Tailscale {
                 dir: data_dir.join("companion-tls"),
             }),
+            https_port_file: https_port_file(&data_dir),
         })
     }
 
@@ -75,13 +80,14 @@ impl CompanionServer {
                 data_dir.clone(),
                 secrets,
             )?),
-            chat: Arc::new(SharedChat::new(data_dir)),
+            chat: Arc::new(SharedChat::new(data_dir.clone())),
             srv: OnceLock::new(),
             running: Mutex::new(None),
             // Never the real Tailscale from a test: `tailscale cert` on the
             // developer's machine would mint a real certificate into a
             // scratch directory and count against Let's Encrypt's limits.
             tls: Mutex::new(TlsSource::Off),
+            https_port_file: https_port_file(&data_dir),
         })
     }
 
@@ -91,7 +97,8 @@ impl CompanionServer {
         *self.tls.lock().unwrap_or_else(|e| e.into_inner()) = source;
     }
 
-    fn tls_source(&self) -> TlsSource {
+    /// Where the listener's certificate comes from, as last set.
+    pub fn tls_source(&self) -> TlsSource {
         self.tls.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
@@ -126,10 +133,8 @@ impl CompanionServer {
 
     /// The port the HTTPS listener took, while there is one.
     pub fn https_port(&self) -> Option<u16> {
-        self.running()
-            .as_ref()
-            .and_then(|r| r.https.as_ref())
-            .map(|l| l.https.port)
+        let keeper = self.running().as_ref().map(|r| r.keeper.clone());
+        keeper.and_then(|k| k.https()).map(|h| h.port)
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -151,17 +156,24 @@ impl CompanionServer {
         // Who this machine is on its tailnet, and the certificate for that
         // name if there is one to serve. Both shell out (the Tailscale CLI,
         // and `tailscale cert` on a first mint can take a few seconds), so
-        // neither runs on the runtime's own threads.
-        let source = self.tls_source();
-        let (this, materials) = tokio::task::spawn_blocking(move || {
+        // neither runs on the runtime's own threads. The keeper is asked
+        // again on every origin refresh, so a tailnet joined after this, or
+        // a certificate that runs out, is caught without a toggle.
+        let keeper = Arc::new(Keeper::new(
+            self.tls_source(),
+            port,
+            self.https_port_file.clone(),
+            router.clone(),
+            Arc::new(tls::run_tailscale),
+        ));
+        let looked = keeper.clone();
+        let (this, secure) = tokio::task::spawn_blocking(move || {
             let this = net::tailscale_self();
-            let name = this.as_ref().and_then(|t| t.dns_name.as_deref());
-            let materials = tls::materials(&source, name);
-            (this, materials)
+            let secure = looked.tick(this.as_ref(), tls::now_secs());
+            (this, secure)
         })
         .await
         .map_err(|e| format!("could not start the phone connection: {e}"))?;
-        let https = materials.and_then(|m| tls_serve::start(port, m, router.clone()));
         let (shutdown, wait) = oneshot::channel();
         tokio::spawn(async move {
             // With the peer's address attached to every request: the pairing
@@ -184,23 +196,25 @@ impl CompanionServer {
         // tailnet name shells out to `ifconfig` and the Tailscale CLI, and
         // doing that per request or per status read would put a process
         // spawn in front of every page load and every devices event.
-        let secure = https.as_ref().map(|l| l.https.clone());
         self.hub.set_reach(net::reach_from(
             port,
             &net::lan_ip(),
             this.as_ref(),
             secure.as_ref(),
         ));
+        let looked = keeper.clone();
         let tasks = vec![
             spawn_rotation(self.hub.clone(), ROTATE_EVERY, now_ms),
             spawn_origin_refresh(self.hub.clone(), REFRESH_ORIGINS_EVERY, move |port| {
-                net::reach_with(port, secure.as_ref())
+                let this = net::tailscale_self();
+                let secure = looked.tick(this.as_ref(), tls::now_secs());
+                net::reach_from(port, &net::lan_ip(), this.as_ref(), secure.as_ref())
             }),
         ];
         *self.running() = Some(Running {
             port,
             shutdown,
-            https,
+            keeper,
             tasks,
         });
         Ok(port)
@@ -224,9 +238,7 @@ impl CompanionServer {
                 task.abort();
             }
             let _ = running.shutdown.send(());
-            if let Some(https) = running.https {
-                let _ = https.shutdown.send(());
-            }
+            running.keeper.stop();
         }
     }
 
@@ -268,6 +280,11 @@ impl CompanionServer {
             self.hub.publish("shared-chat", &thread);
         }
     }
+}
+
+/// Where the HTTPS port is remembered, under the app's data directory.
+fn https_port_file(data_dir: &std::path::Path) -> std::path::PathBuf {
+    data_dir.join("companion-tls").join("port")
 }
 
 /// How often an idle pairing code is looked at.
@@ -317,15 +334,17 @@ pub const REFRESH_ORIGINS_EVERY: Duration = Duration::from_secs(30);
 /// reading, injected so a test can move the machine without moving it.
 ///
 /// Nothing is written when nothing changed, and the task ends with the
-/// server, the same as the rotation.
+/// server, the same as the rotation. `read` shells out, and may run
+/// `tailscale cert`, so it goes on a blocking thread each time.
 pub fn spawn_origin_refresh<R>(
     hub: Arc<CompanionHub>,
     every: Duration,
     read: R,
 ) -> tokio::task::JoinHandle<()>
 where
-    R: Fn(u16) -> net::Reach + Send + 'static,
+    R: Fn(u16) -> net::Reach + Send + Sync + 'static,
 {
+    let read = Arc::new(read);
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(every);
         ticker.tick().await;
@@ -337,7 +356,10 @@ where
             if hub.port() != Some(port) {
                 break;
             }
-            let fresh = read(port);
+            let look = read.clone();
+            let Ok(fresh) = tokio::task::spawn_blocking(move || look(port)).await else {
+                break;
+            };
             let same = fresh.origins == hub.origins() && fresh.tailscale_url == hub.tailscale_url();
             if !same {
                 crate::applog::info(format!(
@@ -377,22 +399,25 @@ pub const PWA_JS: &str = include_str!("../../companion-static/pwa.js");
 pub const SW_JS: &str = include_str!("../../companion-static/sw.js");
 pub const MANIFEST: &str = include_str!("../../companion-static/manifest.webmanifest");
 pub const ICON_SVG: &str = include_str!("../../companion-static/icon.svg");
+/// The 180x180 PNG iOS wants for a home-screen icon; it ignores the SVG.
+pub const TOUCH_ICON_PNG: &[u8] = include_bytes!("../../companion-static/apple-touch-icon.png");
 
 /// The static file behind a `/static/{file}` path, with its content type.
 ///
 /// An allow-list of names rather than a directory read: there is no path
 /// to traverse, so no request can ask this for anything the page is not.
-pub fn static_file(name: &str) -> Option<(&'static str, &'static str)> {
+pub fn static_file(name: &str) -> Option<(&'static str, &'static [u8])> {
     match name {
-        "index.html" => Some(("text/html; charset=utf-8", INDEX_HTML)),
-        "helpers.js" => Some(("text/javascript; charset=utf-8", HELPERS_JS)),
-        "clock.js" => Some(("text/javascript; charset=utf-8", CLOCK_JS)),
-        "app.js" => Some(("text/javascript; charset=utf-8", APP_JS)),
-        "app.css" => Some(("text/css; charset=utf-8", APP_CSS)),
-        "pwa.js" => Some(("text/javascript; charset=utf-8", PWA_JS)),
-        "sw.js" => Some(("text/javascript; charset=utf-8", SW_JS)),
-        "manifest.webmanifest" => Some(("application/manifest+json", MANIFEST)),
-        "icon.svg" => Some(("image/svg+xml", ICON_SVG)),
+        "index.html" => Some(("text/html; charset=utf-8", INDEX_HTML.as_bytes())),
+        "helpers.js" => Some(("text/javascript; charset=utf-8", HELPERS_JS.as_bytes())),
+        "clock.js" => Some(("text/javascript; charset=utf-8", CLOCK_JS.as_bytes())),
+        "app.js" => Some(("text/javascript; charset=utf-8", APP_JS.as_bytes())),
+        "app.css" => Some(("text/css; charset=utf-8", APP_CSS.as_bytes())),
+        "pwa.js" => Some(("text/javascript; charset=utf-8", PWA_JS.as_bytes())),
+        "sw.js" => Some(("text/javascript; charset=utf-8", SW_JS.as_bytes())),
+        "manifest.webmanifest" => Some(("application/manifest+json", MANIFEST.as_bytes())),
+        "icon.svg" => Some(("image/svg+xml", ICON_SVG.as_bytes())),
+        "apple-touch-icon.png" => Some(("image/png", TOUCH_ICON_PNG)),
         _ => None,
     }
 }
@@ -413,6 +438,7 @@ mod tests {
             "sw.js",
             "manifest.webmanifest",
             "icon.svg",
+            "apple-touch-icon.png",
         ] {
             let (mime, body) = static_file(name).expect("{name} is served");
             assert!(!mime.is_empty());

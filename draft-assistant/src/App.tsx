@@ -3,7 +3,7 @@ import { api } from "./api";
 import { headerSubtitle } from "./appSubtitle";
 import { useUpdateRow } from "./useUpdateRow";
 import { setAvatarMode, useAvatarMode } from "./avatars";
-import { MAX_RECONNECT_ATTEMPTS, useDraftSession } from "./draftSession";
+import { MAX_RECONNECT_ATTEMPTS, useDraftEnd, useDraftSession } from "./draftSession";
 import { useMarkDrafted } from "./markDrafted";
 import { usePickChime } from "./pickChime";
 import { setChime, setScreen, useChime, useScreen, type Screen } from "./prefs";
@@ -134,6 +134,7 @@ export default function App() {
 
   // ---------- actions ----------
 
+  const { onDraft, onUndo } = useDraftEnd(view, askToDraft, undoLastPick, showToast);
   // Forget what the app decided about this draft's keepers and judge them
   // again. A league branded from one bad pick list stayed branded for ever.
   const clearKeepers = async () => {
@@ -371,7 +372,7 @@ export default function App() {
             pollHealth={pollHealth}
             onRefreshPicks={() => void refreshPicks()}
             refreshingPicks={pullingPicks}
-            onUndo={() => void undoLastPick()}
+            onUndo={onUndo}
             chatOpen={chatOpen}
             onToggleChat={() => setChatOpen((c) => !c)}
             settingsOpen={settingsOpen}
@@ -401,7 +402,7 @@ export default function App() {
           {screen === "draft" ? (
             <ErrorBoundary key="draft">
               <Suspense fallback={<ScreenFallback />}>
-                <DraftScreen view={view} busy={busy} onDraft={askToDraft} />
+                <DraftScreen view={view} busy={busy} onDraft={onDraft} />
               </Suspense>
             </ErrorBoundary>
           ) : season !== null ? (

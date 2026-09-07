@@ -82,3 +82,59 @@ it("cannot be emptied while an answer is on its way", async () => {
   render(<SharedChat screen="draft" compact={false} />);
   await waitFor(() => expect(screen.getByRole("button", { name: "New thread" })).toBeDisabled());
 });
+
+/** The failure this prevents: the box was emptied before the send and put
+ *  back only on failure, so a slow host showed an empty box for a question
+ *  that had not gone anywhere, and a send that failed overwrote whatever had
+ *  been typed in the meantime. */
+it("keeps the question in the box until the host has taken it", async () => {
+  const user = userEvent.setup();
+  let settle: (() => void) | undefined;
+  let fail: ((e: Error) => void) | undefined;
+  mocks.sharedChatSend.mockImplementation(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        settle = resolve;
+        fail = reject;
+      }),
+  );
+  render(<SharedChat screen="draft" compact={false} />);
+  const input = await screen.findByLabelText("Ask on the shared thread");
+  await user.type(input, "who should I take?{Enter}");
+  await waitFor(() =>
+    expect(mocks.sharedChatSend).toHaveBeenCalledWith("draft", "who should I take?"),
+  );
+  // Still on its way: the question is where it was typed, and cannot go twice.
+  expect(input).toHaveValue("who should I take?");
+  expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+
+  // The host refuses: the question is still there, with the reason under it.
+  fail?.(new Error("Justin's Mac did not answer within 10 seconds"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("did not answer");
+  expect(input).toHaveValue("who should I take?");
+
+  // Sent again and taken: only now does the box empty.
+  await user.click(screen.getByRole("button", { name: "Send" }));
+  settle?.();
+  await waitFor(() => expect(input).toHaveValue(""));
+});
+
+it("does not clear what was typed over a question while it was on its way", async () => {
+  const user = userEvent.setup();
+  let settle: (() => void) | undefined;
+  mocks.sharedChatSend.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        settle = resolve;
+      }),
+  );
+  render(<SharedChat screen="draft" compact={false} />);
+  const input = await screen.findByLabelText("Ask on the shared thread");
+  await user.type(input, "who should I take?{Enter}");
+  await waitFor(() => expect(mocks.sharedChatSend).toHaveBeenCalled());
+  await user.clear(input);
+  await user.type(input, "actually, a different question");
+  settle?.();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeEnabled());
+  expect(input).toHaveValue("actually, a different question");
+});

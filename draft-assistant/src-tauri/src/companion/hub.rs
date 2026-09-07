@@ -291,7 +291,10 @@ impl CompanionHub {
         let outcome = {
             let mut inner = self.lock();
             if inner.lockout.locked(attempt.peer, now) {
-                crate::applog::debug(format!(
+                // A warning, not debug: an address being shut out is either
+                // somebody guessing at the code or the owner's own phone with
+                // a stale one, and both are worth seeing in the log.
+                crate::applog::warn(format!(
                     "companion: pairing refused, address locked out peer={}",
                     attempt.peer
                 ));

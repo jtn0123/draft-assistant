@@ -5,7 +5,7 @@
 // biggest thing in that file. It is a pure function of the state it is handed,
 // so what a row says can be read (and tested) without rendering anything.
 
-import type { SettingsRow } from "./components/Header";
+import type { SettingsOption, SettingsRow } from "./components/Header";
 import type { AvatarMode } from "./avatars";
 import type { DraftView, YahooStatus } from "./types";
 import type { ThemePreference } from "./theme";
@@ -73,10 +73,39 @@ export function headshotNote(platform: string): string {
   return "Headshots from Sleeper, saved on this Mac after the first look";
 }
 
+/** The order the shell's `onAppearance` steps through, from theme.ts. */
+const APPEARANCES: { preference: ThemePreference; label: string }[] = [
+  { preference: "system", label: "System" },
+  { preference: "light", label: "Light" },
+  { preference: "dark", label: "Dark" },
+];
+
+/** The Appearance picker's three choices.
+ *
+ * The shell hands the menu one action, the step system -> light -> dark ->
+ * system that the row used to cycle on every click. A choice is reached by
+ * taking as many of those steps as it is away, which is none when it is the
+ * one already showing, so each choice can be a radio button in its own right
+ * without asking the shell for a second wire. */
+export function appearanceOptions(input: SettingsRowInput): SettingsOption[] {
+  const at = APPEARANCES.findIndex((a) => a.preference === input.preference);
+  return APPEARANCES.map((choice, index) => ({
+    id: choice.preference,
+    label: choice.label,
+    on: index === at,
+    onSelect: () => {
+      const steps = (index - at + APPEARANCES.length) % APPEARANCES.length;
+      for (let taken = 0; taken < steps; taken += 1) input.onAppearance();
+    },
+  }));
+}
+
 export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
   const follower = input.hostName !== null;
   const rows: SettingsRow[] = [
     {
+      id: "chime",
+      kind: "toggle",
       label: "Pick chime",
       note: "Sound when you're on the clock",
       value: input.chime ? "On" : "Off",
@@ -88,6 +117,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
   if (!follower) {
     rows.push(
       {
+        id: "polling",
+        kind: "toggle",
         label: "Live sync",
         note: input.polling
           ? `Last sync ${age(input.lastSyncAt)}`
@@ -97,6 +128,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
         onSelect: input.onTogglePolling,
       },
       {
+        id: "league",
+        kind: "action",
         label: "League",
         note:
           input.leagueCount > 1 ? `${input.leagueCount} leagues loaded` : "Switch or add a league",
@@ -105,6 +138,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
         onSelect: input.onLeaguePicker,
       },
       {
+        id: "yahoo",
+        kind: "action",
         label: "Yahoo",
         note: yahooNote(input.yahoo),
         value: input.yahooConnected ? "Connected" : "Connect",
@@ -120,6 +155,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
     // Sleeper's alone.
     if (input.view.league.platform === "sleeper" && input.onSetUsername !== undefined) {
       rows.push({
+        id: "username",
+        kind: "action",
         label: "Sleeper username…",
         note:
           input.view.my_roster === null
@@ -132,7 +169,11 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
     }
   }
 
+  // Opens the companion dialog rather than flipping the server, so it is an
+  // action; the value still says whether the phones are being served.
   rows.push({
+    id: "companion",
+    kind: "action",
     label: "Phone & second screen",
     note: follower
       ? "Hosted elsewhere. The host serves the phones"
@@ -144,6 +185,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
 
   if (follower) {
     rows.push({
+      id: "leave-host",
+      kind: "action",
       label: "Leave host",
       note: `Following ${input.hostName ?? ""}. Go back to this Mac's own leagues`,
       value: "Leave",
@@ -152,6 +195,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
     });
   } else {
     rows.push({
+      id: "join-host",
+      kind: "action",
       label: "Join another Draft Assistant…",
       note: "Watch someone else's league on this Mac",
       value: "Join",
@@ -163,6 +208,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
   if (!follower) {
     rows.push(
       {
+        id: "refresh",
+        kind: "action",
         label: "Refresh data",
         note: "Re-fetch projections and rebuild the board",
         value: input.busy ? "…" : "Sync",
@@ -170,6 +217,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
         onSelect: input.onRefreshData,
       },
       {
+        id: "export",
+        kind: "action",
         label: "Export state",
         note: "Full JSON dump of everything on screen",
         value: "JSON",
@@ -177,6 +226,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
         onSelect: input.onExport,
       },
       {
+        id: "clear-keepers",
+        kind: "action",
         label: "Clear detected keepers",
         note:
           input.view.draft.keeper_picks.length === 0
@@ -187,6 +238,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
         onSelect: input.onClearKeepers,
       },
       {
+        id: "import-csv",
+        kind: "action",
         label: "Import projections CSV…",
         note: importNote(
           input.view.data_health.second_opinion_loaded_at,
@@ -202,6 +255,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
 
   rows.push(
     {
+      id: "avatars",
+      kind: "toggle",
       label: "Player pictures",
       note:
         input.avatars === "headshots"
@@ -212,21 +267,21 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
       onSelect: () => input.onAvatars(input.avatars === "headshots" ? "logos" : "headshots"),
     },
     {
+      id: "appearance",
+      kind: "radio",
       label: "Appearance",
       note:
         input.preference === "system"
-          ? "Following your system setting"
+          ? `Following your system setting, ${input.theme} right now`
           : "Overriding your system setting",
-      value:
-        input.preference === "system"
-          ? `System (${input.theme})`
-          : input.theme === "dark"
-            ? "Dark"
-            : "Light",
+      value: input.preference === "system" ? `System (${input.theme})` : input.theme,
       on: input.theme === "dark",
       onSelect: input.onAppearance,
+      options: appearanceOptions(input),
     },
     {
+      id: "diagnostics",
+      kind: "action",
       label: "Diagnostics…",
       note: "What this app knows about itself, and the log",
       value: "Show",
@@ -243,6 +298,8 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
   }
 
   rows.push({
+    id: "version",
+    kind: "action",
     label: "Version",
     note: "Draft Assistant",
     value: `v${input.updates.current}`,

@@ -28,6 +28,15 @@ const LEAGUE_TORN: &str = r#"{
     "draft_id": "draft-torn"
 }"#;
 
+/// A league whose member list will not load.
+const LEAGUE_NOSEAT: &str = r#"{
+    "league_id": "league-noseat", "name": "Unseated League", "season": "2026",
+    "status": "drafting", "total_rosters": 2,
+    "roster_positions": ["QB", "RB", "WR", "TE", "FLEX", "BN"],
+    "scoring_settings": {"rec": 1.0},
+    "draft_id": "draft-noseat"
+}"#;
+
 /// A league whose draft has never been configured: no teams, no rounds.
 const LEAGUE_UNSET: &str = r#"{
     "league_id": "league-unset", "name": "Unset League", "season": "2026",
@@ -123,6 +132,19 @@ fn route(path: &str) -> Option<stub::Reply> {
         "/v1/league/league-1" => ok(LEAGUE.to_string()),
         "/v1/league/league-torn" => ok(LEAGUE_TORN.to_string()),
         "/v1/league/league-unset" => ok(LEAGUE_UNSET.to_string()),
+        "/v1/league/league-noseat" => ok(LEAGUE_NOSEAT.to_string()),
+        // The member list is what ties a user id to a seat, and it is down.
+        "/v1/league/league-noseat/users" => Some((503, "\"unavailable\"".to_string())),
+        // Created by the manager in seat 1, which the creator fallback used
+        // to read as "mine" whenever the member list was missing.
+        "/v1/draft/draft-noseat" => ok(draft_json("draft-noseat").replacen(
+            "\"draft_order\"",
+            "\"creators\": [\"user-a\"], \"draft_order\"",
+            1,
+        )),
+        "/v1/draft/draft-noseat/picks" | "/v1/draft/draft-noseat/traded_picks" => {
+            ok("[]".to_string())
+        }
         "/v1/league/league-1/users" | "/v1/league/league-torn/users" => ok(USERS.to_string()),
         "/v1/league/league-unset/users" => ok("[]".to_string()),
         "/v1/draft/draft-1" | "/v1/draft/draft-torn" => {
@@ -239,6 +261,45 @@ async fn a_trade_list_outage_costs_the_trades_not_the_draft() {
         "{:?}",
         loaded.warnings
     );
+    cleanup(engine);
+}
+
+/// A failed `/users` call used to make the draft creator's seat "mine": the
+/// commissioner's seat came up green, the chime fired for pick one, and the
+/// user was told they were on the clock in a league where they were not.
+#[tokio::test]
+async fn a_league_whose_member_list_is_down_has_no_known_seat_and_says_so() {
+    let engine = engine("noseat");
+    let loaded = engine
+        .load_league("league-noseat", true)
+        .await
+        .expect("the league loads without its member list");
+    assert!(loaded.user_names.is_empty());
+    assert!(!loaded.is_mock_draft());
+    assert!(loaded.seat_unconfirmed());
+    assert!(
+        loaded
+            .warnings
+            .iter()
+            .any(|w| w.starts_with(draft_assistant_lib::engine::SEAT_UNCONFIRMED)),
+        "{:?}",
+        loaded.warnings
+    );
+
+    let view = draft_assistant_lib::state::view_from(
+        &loaded,
+        &draft_assistant_lib::engine::AppConfig::default(),
+    );
+    assert_eq!(view.draft.my_slot, None, "the creator's seat was guessed");
+    assert!(
+        !view.draft.is_my_pick,
+        "pick one chimed for the commissioner"
+    );
+    assert!(view
+        .data_health
+        .warnings
+        .iter()
+        .any(|w| w.contains("could not confirm your seat")));
     cleanup(engine);
 }
 

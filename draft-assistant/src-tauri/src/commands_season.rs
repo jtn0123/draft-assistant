@@ -1,6 +1,7 @@
 //! Tauri commands for the in-season screen.
 
 mod poller;
+mod watches;
 
 use crate::engine::{Engine, LoadedLeague};
 use crate::headshots::ImageCache;
@@ -88,6 +89,9 @@ async fn load_season_inner(state: &AppState, force: Option<bool>) -> Result<Seas
     let mine = league_snapshot(&state.loaded, &league.league_id).await?;
     adopt_load(&state.engine, Some(&mine), &league.league_id, &mut fresh).await?;
     let week = fresh.week;
+    // A season put in place by a command is a new one as far as the poller's
+    // caches are concerned; see `LoadedSeason::restamp`.
+    fresh.restamp();
     *state.season.lock().await = Some(fresh);
     // So the log tells the story of a session rather than only its failures:
     // reading back a week later, this is the line that says which league was
@@ -323,6 +327,7 @@ mod tests {
             fetched_at: 0,
             warnings: Vec::new(),
             sources: Default::default(),
+            epoch: 0,
         }
     }
 

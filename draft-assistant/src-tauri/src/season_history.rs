@@ -179,9 +179,21 @@ impl Engine {
     }
 }
 
+/// One writer at a time on the Trends file.
+///
+/// `record_history` is a read, a diff and a write back, and it is called from
+/// the user-driven load and from the poller's rollover, which can land in the
+/// same second on a Tuesday morning. Unlocked, both read the same file, both
+/// appended their own snapshot, and whichever wrote second overwrote the
+/// first: a snapshot lost for good. Process-wide rather than per engine
+/// because the file is per league on one disk, and the engine is one per
+/// process.
+static HISTORY_WRITE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 impl HistoryStore for Engine {
     async fn record_history(&self, loaded: &LoadedLeague, season: &LoadedSeason) -> History {
         let name = Self::history_name(&loaded.league.league_id);
+        let _one_writer = HISTORY_WRITE.lock().await;
         let mut history: History = self
             .read_cache_any_off_thread(&name)
             .await
@@ -191,7 +203,7 @@ impl HistoryStore for Engine {
         let snapshot = take_snapshot(loaded, season, &lookup, now_secs());
         if should_record(&history, &snapshot) {
             push(&mut history, snapshot);
-            self.write_cache_off_thread(&name, &history).await;
+            self.write_season_cache(&name, &history).await;
         }
         history
     }

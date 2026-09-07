@@ -125,6 +125,29 @@ describe("the diagnostics dialog", () => {
     expect(screen.queryByText("Copied")).toBeNull();
   });
 
+  // "Copied" and "no such folder" land under the buttons, where a screen
+  // reader on the button it just pressed hears nothing unless they are live.
+  it("announces the outcome of a button politely, and a failure assertively", async () => {
+    stubClipboard();
+    api.openLogFolder.mockRejectedValue(new Error("no such folder"));
+    render(<Diagnostics appVersion="0.2.0" onClose={() => undefined} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Copy diagnostics" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Copied");
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Open log folder" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("no such folder");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("announces a backend that will not answer, in place of the reading line", async () => {
+    api.diagnostics.mockRejectedValue(new Error("no league loaded"));
+    render(<Diagnostics appVersion="0.2.0" onClose={() => undefined} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Reading…");
+    expect(await screen.findByRole("alert")).toHaveTextContent("no league loaded");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("closes on Escape", async () => {
     const onClose = vi.fn();
     render(<Diagnostics appVersion="0.2.0" onClose={onClose} />);

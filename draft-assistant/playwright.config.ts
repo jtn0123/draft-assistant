@@ -29,7 +29,9 @@ export default defineConfig({
   testDir: "./e2e-browser",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // Never retried, in CI least of all: a test that passes on its second run
+  // is a flaky test, and a retry is how one stays that way.
+  retries: 0,
   reporter: process.env.CI ? "list" : [["list"], ["html", { open: "never" }]],
   outputDir: "./e2e-browser/.results",
   use: {

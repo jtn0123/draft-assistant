@@ -1,14 +1,13 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { expect, test } from "@playwright/test";
+import { answer, ask, backend, emit, pair, serve, thread } from "./companionServer";
 import { dump } from "./fixtures";
 
 /**
  * The phone companion page, driven by a real browser.
  *
- * The page is four static files that the Rust host serves at `/` and
- * `/static/*`; nothing builds them, so the test serves them itself out of
- * `src-tauri/companion-static/` with the same Content-Security-Policy the
+ * The page is a handful of static files that the Rust host serves at `/` and
+ * `/static/*`; nothing builds them, so `companionServer.ts` serves them out
+ * of `src-tauri/companion-static/` with the same Content-Security-Policy the
  * host sets. That policy is the point of serving them rather than pasting
  * markup into the test: if anything inline ever creeps into the page, the
  * browser refuses to run it here exactly as it would on a phone.
@@ -16,178 +15,6 @@ import { dump } from "./fixtures";
  * The host's WebSocket is replaced by a controllable fake, so a test can push
  * a `draft-updated` or `shared-chat` frame at the exact moment it wants one.
  */
-
-// The exact policy `companion/routes.rs` sets, so anything inline that ever
-// crept into the page fails here the way it would fail on a phone. The socket
-// origin is spelled out because a browser reads `connect-src 'self'` as the
-// page's own scheme, and `ws://` is not `http://`.
-const CSP =
-  "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
-  "connect-src 'self' ws://127.0.0.1:7878 ws://localhost:7878; manifest-src 'self'; " +
-  "worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-/** The static files the shipped page loads, with the content type each is
- *  served as; mirrors the list `routes.rs` serves. */
-const STATIC_TYPES: Record<string, string> = {
-  "helpers.js": "text/javascript",
-  "clock.js": "text/javascript",
-  "pwa.js": "text/javascript",
-  "app.js": "text/javascript",
-  "app.css": "text/css",
-  "sw.js": "text/javascript",
-  "manifest.webmanifest": "application/manifest+json",
-  "icon.svg": "image/svg+xml",
-};
-const staticDir = new URL("../src-tauri/companion-static/", import.meta.url);
-const asset = (name: string) => readFileSync(fileURLToPath(new URL(name, staticDir)), "utf8");
-
-interface Backend {
-  code: string;
-  draft: Record<string, unknown> | null;
-  season: Record<string, unknown> | null;
-  chat: Record<string, unknown>;
-  /** What the next `POST /api/chat` answers with. */
-  postStatus: number;
-  /** Flipped to false to make the host forget this device. */
-  authorised: boolean;
-}
-
-function backend(overrides: Partial<Backend> = {}): Backend {
-  return {
-    code: "424242",
-    draft: dump("dev-fixture.json"),
-    season: null,
-    chat: {},
-    postStatus: 202,
-    authorised: true,
-    ...overrides,
-  };
-}
-
-const json = (route: Route, status: number, body: unknown) =>
-  route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-
-/** Serve the three files and a host that answers the companion API. */
-async function serve(page: Page, host: Backend): Promise<void> {
-  await page.route("**/*", async (route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    if (path === "/") {
-      return route.fulfill({
-        body: asset("index.html"),
-        headers: { "content-type": "text/html", "content-security-policy": CSP },
-      });
-    }
-    // Every file index.html asks for. A file missing here is a 404 the page
-    // never sees in production, and app.js dies on load when pwa.js is one.
-    if (path.startsWith("/static/") && STATIC_TYPES[path.slice("/static/".length)]) {
-      const name = path.slice("/static/".length);
-      const body = asset(name);
-      return route.fulfill({ body, headers: { "content-type": STATIC_TYPES[name] } });
-    }
-    if (path === "/api/pair") {
-      const sent = route.request().postDataJSON() as { code: string; device_name: string };
-      return sent.code === host.code
-        ? json(route, 200, { token: "tok-1", host_name: "Justin's Mac", device_id: "dev-1" })
-        : json(route, 403, { error: "wrong code" });
-    }
-    if (!host.authorised) return json(route, 401, { error: "not paired" });
-    if (path === "/api/state") {
-      return host.draft ? json(route, 200, host.draft) : json(route, 404, { error: "no league" });
-    }
-    if (path === "/api/season") {
-      return host.season ? json(route, 200, host.season) : json(route, 404, { error: "no league" });
-    }
-    if (path === "/api/chat") {
-      if (route.request().method() === "POST") {
-        return json(route, host.postStatus, host.postStatus === 202 ? { entry_id: "e9" } : {});
-      }
-      const screen = url.searchParams.get("screen") ?? "draft";
-      const thread = host.chat[screen];
-      return thread ? json(route, 200, thread) : json(route, 404, { error: "no thread" });
-    }
-    return route.fulfill({ status: 404, body: "" });
-  });
-
-  // A WebSocket the test drives by hand. The page only ever uses `onopen`,
-  // `onmessage`, `onclose`, `send` and `readyState`.
-  await page.addInitScript(() => {
-    const store = window as unknown as {
-      __sent: string[];
-      __emit: (frame: unknown) => void;
-      __socketUrl: string;
-      __stayDown: boolean;
-      __drop: (code?: number) => void;
-    };
-    store.__sent = [];
-    store.__stayDown = false;
-    class FakeSocket {
-      readyState = 0;
-      onopen: (() => void) | null = null;
-      onclose: ((event: { code: number }) => void) | null = null;
-      onmessage: ((event: { data: string }) => void) | null = null;
-      constructor(url: string) {
-        store.__socketUrl = url;
-        store.__emit = (frame) => this.onmessage?.({ data: JSON.stringify(frame) });
-        store.__drop = (code?: number) => this.close(code);
-        if (store.__stayDown) return;
-        setTimeout(() => {
-          this.readyState = 1;
-          this.onopen?.();
-        }, 0);
-      }
-      send(data: string) {
-        store.__sent.push(data);
-      }
-      close(code = 1006) {
-        this.readyState = 3;
-        this.onclose?.({ code });
-      }
-    }
-    (window as unknown as { WebSocket: unknown }).WebSocket = FakeSocket;
-  });
-}
-
-/** Push one server frame down the fake socket, once the page has opened it. */
-async function emit(page: Page, frame: unknown): Promise<void> {
-  await page.waitForFunction(
-    () => typeof (window as unknown as { __emit?: unknown }).__emit === "function",
-  );
-  await page.evaluate(
-    (sent) => (window as unknown as { __emit: (f: unknown) => void }).__emit(sent),
-    frame,
-  );
-}
-
-/** Enter the code and land on Now. */
-async function pair(page: Page, code = "424242"): Promise<void> {
-  await page.goto("/");
-  await page.getByLabel("Pairing code").fill(code);
-  await page.getByRole("button", { name: "Connect" }).click();
-}
-
-function thread(screen: string, entries: unknown[], busy = false) {
-  return { league_id: "L1", screen, busy, entries };
-}
-
-const ask = (text: string, name = "Rob's iPhone") => ({
-  id: "e1",
-  at_ms: Date.now() - 120_000,
-  device: { name, kind: "phone" },
-  role: "user",
-  text,
-  cost_usd: null,
-  error: null,
-});
-
-const answer = (text: string, name = "Rob's iPhone") => ({
-  id: "e2",
-  at_ms: Date.now() - 60_000,
-  device: { name, kind: "phone" },
-  role: "assistant",
-  text,
-  cost_usd: 0.0184,
-  error: null,
-});
 
 test("refuses the wrong code and opens the draft on the right one", async ({ page }) => {
   const host = backend();
@@ -308,6 +135,9 @@ test("a busy host answers 409 and the page says so inline", async ({ page }) => 
   await page.getByLabel("Ask the assistant").fill("who should I take?");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.locator("#chat-note")).toHaveText("The host is still answering.");
+  // The question the host did not take is still in the box, not gone with
+  // the note beside an empty one.
+  await expect(page.getByLabel("Ask the assistant")).toHaveValue("who should I take?");
 
   host.postStatus = 429;
   await page.getByLabel("Ask the assistant").fill("and now?");
@@ -470,6 +300,79 @@ test("a poll-health frame updates the sync line", async ({ page }) => {
     payload: { last_success_at: null, consecutive_failures: 3, last_error: "timeout" },
   });
   await expect(page.locator("#health")).toContainText("3 failed syncs");
+});
+
+test("serves every file the page loads, the touch icon and manifest included", async ({ page }) => {
+  const missing: string[] = [];
+  // Only the page's own files: the host answers 404 for a season or a thread
+  // it has not loaded, and the page reads that as "nothing there".
+  page.on("response", (response) => {
+    const { pathname } = new URL(response.url());
+    if (response.status() >= 400 && (pathname === "/" || pathname.startsWith("/static/"))) {
+      missing.push(`${response.status()} ${pathname}`);
+    }
+  });
+  await serve(page, backend());
+  await pair(page);
+  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  // The two files the browser fetches only on install, asked for by hand.
+  const touchIcon = page.locator('link[rel="apple-touch-icon"]');
+  await expect(touchIcon).toHaveAttribute("href", /\.png$/);
+  const manifest = page.locator('link[rel="manifest"]');
+  await expect(manifest).toHaveAttribute("href", /manifest\.webmanifest$/);
+  const hrefs = [
+    (await touchIcon.getAttribute("href")) ?? "",
+    (await manifest.getAttribute("href")) ?? "",
+    "/static/sw.js",
+  ];
+  const fetched = await page.evaluate(async (paths: string[]) => {
+    const out: Record<string, string> = {};
+    for (const href of paths) {
+      const response = await fetch(href);
+      out[href] = `${response.status} ${response.headers.get("content-type") ?? ""}`;
+    }
+    return out;
+  }, hrefs);
+  expect(fetched).toEqual({
+    "/static/apple-touch-icon.png": "200 image/png",
+    "/static/manifest.webmanifest": "200 application/manifest+json",
+    "/static/sw.js": "200 text/javascript",
+  });
+  expect(missing).toEqual([]);
+});
+
+test("after pairing, the address carries the identity an installed copy pairs with", async ({
+  page,
+}) => {
+  // iOS gives a home-screen web app its own storage, so the token, id and
+  // name Safari saved never reach it. The id and name travel in the address
+  // that Add to Home Screen bookmarks; the token stays out of it.
+  await serve(page, backend());
+  await page.goto("/");
+  await page.getByLabel("This device").fill("Rob's iPhone");
+  await page.getByLabel("Pairing code").fill("424242");
+  await page.getByRole("button", { name: "Connect" }).click();
+  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  const url = new URL(page.url());
+  expect(url.searchParams.get("device")).toBe("dev-1");
+  expect(url.searchParams.get("name")).toBe("Rob's iPhone");
+  expect(url.href).not.toContain("tok-1");
+
+  // The installed copy: same address, empty storage. The form offers the
+  // same name, and the pair request names the same device.
+  await page.evaluate(() => window.localStorage.clear());
+  const sentIds: unknown[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/pair")) {
+      sentIds.push((request.postDataJSON() as { device_id?: unknown }).device_id);
+    }
+  });
+  await page.goto(url.href);
+  await expect(page.getByLabel("This device")).toHaveValue("Rob's iPhone");
+  await page.getByLabel("Pairing code").fill("424242");
+  await page.getByRole("button", { name: "Connect" }).click();
+  await expect(page.locator("#clock-strip")).toContainText("Pick");
+  expect(sentIds).toEqual(["dev-1"]);
 });
 
 test("works at 360px without the page scrolling sideways", async ({ page }) => {

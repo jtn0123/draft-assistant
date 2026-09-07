@@ -1,8 +1,30 @@
 //! The pure half of Settings -> "Check for updates": what the row says for
 //! each way the updater can fail, and the outcome shape a check produces.
 
-use super::{describe, outcome, UpdateCheck};
+use super::{describe, outcome, report, UpdateCheck};
+use crate::applog::Capture;
 use tauri_plugin_updater::Error;
+
+/// The failure this prevents: the row's plain sentence was all the log ever
+/// saw, so "Could not reach the update server" in the file could have been
+/// DNS, a timeout or a bad certificate, and nobody could tell which.
+#[test]
+fn the_plugins_own_words_reach_the_log_before_the_sentence_replaces_them() {
+    let capture = Capture::start();
+    let shown = report(
+        "check",
+        &Error::Network("dns error: no such host github.com".into()),
+    );
+    assert!(
+        shown.starts_with("Could not reach the update server"),
+        "{shown}"
+    );
+    assert!(
+        capture.saw("WARN update check failed: ") && capture.saw("no such host github.com"),
+        "{:?}",
+        capture.lines()
+    );
+}
 
 /// A fresh install checks before the first signed release exists, so
 /// `latest.json` is a 404 and the plugin says "Could not fetch a valid

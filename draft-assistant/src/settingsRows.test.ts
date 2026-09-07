@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import fixtureJson from "../public/dev-fixture.json";
 import type { DraftView } from "./types";
-import { buildSettingsRows, type SettingsRowInput } from "./settingsRows";
+import { appearanceOptions, buildSettingsRows, type SettingsRowInput } from "./settingsRows";
 import { IDLE } from "./updateRow";
 
 function view(): DraftView {
@@ -196,5 +196,91 @@ describe("checking for updates from the menu", () => {
   it("sits just above the version line, the last two things on the menu", () => {
     const labels = buildSettingsRows(input()).map((r) => r.label);
     expect(labels.slice(-2)).toEqual(["Check for updates", "Version"]);
+  });
+});
+
+// A screen reader names a toggle, an action and a picker differently, and the
+// menu can only tell them apart if every row says which it is.
+describe("what kind of thing each row is", () => {
+  it("marks the settings with a state as toggles and the rest as actions", () => {
+    const rows = buildSettingsRows(input({ onSetUsername: vi.fn() }));
+    const kind = (label: string) => row(rows, label)?.kind;
+    expect(kind("Pick chime")).toBe("toggle");
+    expect(kind("Live sync")).toBe("toggle");
+    expect(kind("Player pictures")).toBe("toggle");
+    for (const label of [
+      "League",
+      "Yahoo",
+      "Sleeper username…",
+      "Phone & second screen",
+      "Join another Draft Assistant…",
+      "Refresh data",
+      "Export state",
+      "Clear detected keepers",
+      "Import projections CSV…",
+      "Diagnostics…",
+      "Check for updates",
+      "Version",
+    ]) {
+      expect(kind(label), label).toBe("action");
+    }
+    expect(kind("Appearance")).toBe("radio");
+  });
+
+  it("gives every row an id of its own, so React never keys on a label", () => {
+    const ids = buildSettingsRows(input({ onSetUsername: vi.fn() })).map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.every((id) => id !== "")).toBe(true);
+  });
+
+  it("keeps the updater row's id while its label moves", () => {
+    const at = (state: SettingsRowInput["updates"]["state"]) =>
+      buildSettingsRows(
+        input({ updates: { current: "0.2.0", state, supported: true, select: vi.fn() } }),
+      )
+        .filter((r) => /Check for updates|Up to date|Update to/.test(r.label))
+        .map((r) => r.id);
+    expect(at(IDLE)).toEqual(["updates"]);
+    expect(at({ kind: "checking" })).toEqual(["updates"]);
+    expect(at({ kind: "available", version: "0.3.2", notes: null })).toEqual(["updates"]);
+  });
+});
+
+describe("the appearance picker", () => {
+  it("offers system, light and dark, with the current one checked", () => {
+    const options = appearanceOptions(input({ preference: "light", theme: "light" }));
+    expect(options.map((o) => o.label)).toEqual(["System", "Light", "Dark"]);
+    expect(options.map((o) => o.on)).toEqual([false, true, false]);
+    const onRow = row(buildSettingsRows(input({ preference: "light" })), "Appearance")?.options;
+    expect(onRow?.map((o) => [o.id, o.on])).toEqual(options.map((o) => [o.id, o.on]));
+  });
+
+  it("reaches a choice by stepping the shell's one action as far as it is away", () => {
+    // The shell wires system -> light -> dark -> system; dark from system is
+    // two steps, system from dark is one, and the one already showing is none.
+    const fromSystem = input({ preference: "system" });
+    appearanceOptions(fromSystem)[2].onSelect();
+    expect(fromSystem.onAppearance).toHaveBeenCalledTimes(2);
+
+    const fromDark = input({ preference: "dark", theme: "dark" });
+    appearanceOptions(fromDark)[0].onSelect();
+    expect(fromDark.onAppearance).toHaveBeenCalledTimes(1);
+
+    const already = input({ preference: "dark", theme: "dark" });
+    appearanceOptions(already)[2].onSelect();
+    expect(already.onAppearance).not.toHaveBeenCalled();
+  });
+
+  it("says what the system setting resolves to while following it", () => {
+    const following = row(
+      buildSettingsRows(input({ preference: "system", theme: "dark" })),
+      "Appearance",
+    );
+    expect(following?.note).toBe("Following your system setting, dark right now");
+    const overriding = row(
+      buildSettingsRows(input({ preference: "dark", theme: "dark" })),
+      "Appearance",
+    );
+    expect(overriding?.note).toBe("Overriding your system setting");
   });
 });

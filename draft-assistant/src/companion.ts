@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
+import { HOST_TIMEOUT, timedFetch } from "./apiRemoteFetch";
 import { describeError } from "./errorText";
 // The follower's connection state lives in its own module so `apiRemote` can
 // set it without pulling in this file's dependency on `api`, and it is
@@ -124,30 +125,37 @@ export async function pairWithHost(
 ): Promise<FollowRecord> {
   // The failure is handled as a value rather than caught: a fetch that cannot
   // connect says only "Failed to fetch", and the useful half of the sentence
-  // is the address we were trying, which is already here.
-  const response = await fetch(`${origin}/api/pair`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      code: code.trim(),
-      device_name: deviceName.trim(),
-      kind,
-      // Omitted rather than sent as null on a first pairing: the host reads
-      // any id it does not know as a new device anyway, and there is nothing
-      // to say yet.
-      ...(previousDeviceId === undefined || previousDeviceId === ""
-        ? {}
-        : { device_id: previousDeviceId }),
-    }),
-  }).then(
+  // is the address we were trying, which is already here. A host that takes
+  // the connection and never answers is the other way this hung the Join
+  // button; `timedFetch` turns that into its own error, which is kept.
+  const response = await timedFetch(
+    `${origin}/api/pair`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        code: code.trim(),
+        device_name: deviceName.trim(),
+        kind,
+        // Omitted rather than sent as null on a first pairing: the host reads
+        // any id it does not know as a new device anyway, and there is nothing
+        // to say yet.
+        ...(previousDeviceId === undefined || previousDeviceId === ""
+          ? {}
+          : { device_id: previousDeviceId }),
+      }),
+    },
+    origin,
+  ).then(
     (answer) => answer,
-    () => null,
+    (e: unknown) => (e instanceof Error && e.name === HOST_TIMEOUT ? e : null),
   );
   if (response === null) {
     throw new Error(
       `Could not reach ${origin}. Check the address and that both are on the same Wi-Fi.`,
     );
   }
+  if (response instanceof Error) throw response;
   if (!response.ok) throw new Error(pairProblem(response.status));
   const body = (await response.json()) as {
     token?: string;

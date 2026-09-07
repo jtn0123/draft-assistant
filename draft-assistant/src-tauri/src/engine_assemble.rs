@@ -70,9 +70,14 @@ impl Engine {
             mut warnings,
         } = parts;
 
-        let mut manual_picks = self.load_manual_picks(&draft.draft_id);
+        // The four file touches in this tail, the manual picks, the second
+        // opinion, the keepers and the write-back of reconciled picks, step
+        // off the async pool: this runs inside the load command, and a slow
+        // disk here used to hold the poll tick and every other command for
+        // the length of each read.
+        let mut manual_picks = off_runtime(|| self.load_manual_picks(&draft.draft_id));
         if reconcile_manual_picks(&api_picks, &mut manual_picks) {
-            self.save_manual_picks(&draft.draft_id, &manual_picks)?;
+            off_runtime(|| self.save_manual_picks(&draft.draft_id, &manual_picks))?;
         }
         // Every pick calculation divides by the team count and counts up to
         // teams * rounds, so a draft that reports neither is refused here
@@ -113,24 +118,25 @@ impl Engine {
         // The imported second opinion, if the user has ever chosen one. A file
         // that has stopped parsing becomes a warning rather than a failed
         // load: it is a nice-to-have column, not the board.
-        let second_opinion_loaded_at = match crate::second_opinion::load(&self.data_dir) {
-            Ok(Some(table)) => {
-                let report = crate::second_opinion::apply(&table, &mut board);
-                if report.matched == 0 {
-                    warnings.push(
-                        "imported projections matched nobody on this board — \
+        let second_opinion_loaded_at =
+            match off_runtime(|| crate::second_opinion::load(&self.data_dir)) {
+                Ok(Some(table)) => {
+                    let report = crate::second_opinion::apply(&table, &mut board);
+                    if report.matched == 0 {
+                        warnings.push(
+                            "imported projections matched nobody on this board — \
                          check it is the right season"
-                            .into(),
-                    );
+                                .into(),
+                        );
+                    }
+                    Some(table.loaded_at)
                 }
-                Some(table.loaded_at)
-            }
-            Ok(None) => None,
-            Err(error) => {
-                warnings.push(format!("imported projections could not be read: {error}"));
-                None
-            }
-        };
+                Ok(None) => None,
+                Err(error) => {
+                    warnings.push(format!("imported projections could not be read: {error}"));
+                    None
+                }
+            };
         if board.len() < 200 {
             warnings.push(format!(
                 "board unusually small ({} players) — projections may be incomplete",
@@ -153,7 +159,7 @@ impl Engine {
         // is judged against it, so one `/picks` answer that drops a pick
         // cannot brand the rest of the board. See `keepers::evidence`.
         let keeper_pick_nos = crate::keepers::KeeperMemory {
-            picks: self.load_keepers(&draft.draft_id),
+            picks: off_runtime(|| self.load_keepers(&draft.draft_id)),
             floor: crate::picks::next_open_pick(
                 &api_picks,
                 draft.settings.teams,
@@ -190,5 +196,21 @@ impl Engine {
             player_meta: std::sync::Arc::new(player_meta),
             second_opinion_loaded_at,
         })
+    }
+}
+
+/// Run a small piece of disk work without stalling the async runtime.
+///
+/// `finish_assembly` is synchronous and called from inside an async load, so
+/// its file reads cannot be awaited; `block_in_place` moves the calling
+/// thread out of the async pool for the duration instead, the same way
+/// `cache::envelope_json_off_runtime` does for the big encode. A
+/// current-thread runtime has no pool and `block_in_place` panics there, so
+/// tests and the `dump_*` binaries run the work inline.
+fn off_runtime<T>(work: impl FnOnce() -> T) -> T {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current().map(|handle| handle.runtime_flavor()) {
+        Ok(RuntimeFlavor::MultiThread) => tokio::task::block_in_place(work),
+        _ => work(),
     }
 }

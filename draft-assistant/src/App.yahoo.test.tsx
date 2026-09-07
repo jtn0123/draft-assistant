@@ -12,6 +12,7 @@ import App from "./App";
 import { resetPrefs } from "./prefs";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
+import { settingsRow } from "./test/settingsRow";
 import { draftFixture, fakeStorage, harness, restoringConfig } from "./test/appHarness";
 import type { DraftView } from "./types";
 
@@ -33,10 +34,6 @@ async function openSettings() {
   });
 }
 
-function settingsRow(label: RegExp): HTMLElement {
-  return screen.getByRole("menuitemcheckbox", { name: label });
-}
-
 beforeEach(() => {
   h.reset();
   fakeStorage({ "da.screen": "draft" });
@@ -51,7 +48,10 @@ describe("the Yahoo settings row", () => {
     const row = settingsRow(/Yahoo/);
     expect(row).toHaveTextContent("Not connected");
     expect(row).toHaveTextContent("Connect");
-    expect(row).toHaveAttribute("aria-checked", "false");
+    // An action that opens the connect dialog, so no checked state to
+    // announce; connected or not shows on the value.
+    expect(row).not.toHaveAttribute("aria-checked");
+    expect(row.querySelector(".settings-row-value")).not.toHaveClass("is-on");
   });
 
   it("names the account once Yahoo is connected", async () => {
@@ -65,7 +65,7 @@ describe("the Yahoo settings row", () => {
     await openSettings();
     const row = settingsRow(/Yahoo/);
     expect(row).toHaveTextContent("Connected as jtn0123");
-    expect(row).toHaveAttribute("aria-checked", "true");
+    expect(row.querySelector(".settings-row-value")).toHaveClass("is-on");
   });
 
   it("says nothing is connected when the status could not be read at all", async () => {

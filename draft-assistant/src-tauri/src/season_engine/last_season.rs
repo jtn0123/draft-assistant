@@ -25,8 +25,9 @@ impl Engine {
         }
         let name = Self::season_cache_name(previous_id, "final");
         if !force {
-            if let Some((_, rows)) =
-                self.read_cache::<Vec<LastSeasonRow>>(&name, LAST_SEASON_TTL_SECS)
+            if let Some((_, rows)) = self
+                .read_cache_off_thread::<Vec<LastSeasonRow>>(&name, LAST_SEASON_TTL_SECS)
+                .await
             {
                 return rows;
             }
@@ -98,7 +99,7 @@ impl Engine {
                 }
             })
             .collect();
-        self.write_cache(&name, &rows);
+        self.write_season_cache(&name, &rows).await;
         rows
     }
 }

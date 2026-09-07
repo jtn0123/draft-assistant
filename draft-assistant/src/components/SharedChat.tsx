@@ -50,6 +50,10 @@ export function SharedChat({ screen, compact }: { screen: string; compact: boole
   const [thread, setThread] = useState<SharedChatThread>({ ...EMPTY, screen });
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // A question on its way to the host. The input keeps its text until the
+  // host has taken it, so a send that fails or times out leaves the question
+  // where it was typed rather than in a toast; this only stops it going twice.
+  const [sending, setSending] = useState(false);
   // Emptying the thread empties it for every device, so it takes two clicks:
   // the first asks, the second does it.
   const [confirming, setConfirming] = useState(false);
@@ -85,14 +89,21 @@ export function SharedChat({ screen, compact }: { screen: string; compact: boole
 
   const send = async () => {
     const text = draft.trim();
-    if (text === "" || thread.busy) return;
-    setDraft("");
+    if (text === "" || thread.busy || sending) return;
     setError(null);
+    setSending(true);
     try {
       await api.sharedChatSend(screen, text);
+      // Cleared only once the host has it, and only if nothing was typed
+      // over it while the send was out: the draft was cleared before the
+      // await and then put back on failure, which lost whatever had been
+      // typed in between and flashed an empty box at a question that never
+      // went anywhere.
+      setDraft((now) => (now === draft ? "" : now));
     } catch (e) {
       setError(describeError(e));
-      setDraft(text);
+    } finally {
+      setSending(false);
     }
   };
 
@@ -154,10 +165,10 @@ export function SharedChat({ screen, compact }: { screen: string; compact: boole
           <button
             type="button"
             className="btn-primary"
-            disabled={thread.busy || draft.trim() === ""}
+            disabled={thread.busy || sending || draft.trim() === ""}
             onClick={() => void send()}
           >
-            Send
+            {sending ? "Sending…" : "Send"}
           </button>
         </div>
         <span className="muted chat-foot">

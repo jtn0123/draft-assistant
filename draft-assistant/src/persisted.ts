@@ -6,6 +6,7 @@
 // component can subscribe to it instead of having it threaded down as a prop.
 
 import { useSyncExternalStore } from "react";
+import { reportError } from "./errorReport";
 
 export interface Persisted<T extends string> {
   /** The value in force right now. */
@@ -41,7 +42,18 @@ export function persisted<T extends string>(
   const stored = (): T => {
     try {
       const raw = localStorage.getItem(key);
-      return raw === null ? fallback : (parse(raw) ?? fallback);
+      if (raw === null) return fallback;
+      const value = parse(raw);
+      if (value !== null) return value;
+      // Reset to the fallback, and said so: a silent reset read as the app
+      // forgetting a choice for no reason, with nothing in the log to say a
+      // stored value had been rejected. The value itself stays out of the
+      // line; its length says whether it was garbage or an old spelling.
+      reportError(
+        `Stored ${key} was not a value this app writes (${raw.length} chars); reset to "${fallback}"`,
+        "persisted",
+      );
+      return fallback;
     } catch {
       return fallback;
     }

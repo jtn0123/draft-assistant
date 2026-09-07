@@ -6,10 +6,12 @@
 //! same `HealthWatch`.
 
 use super::notes::{NoteWatch, SlowTickWatch};
+use super::refusal::{self, refusal_for, Verdict};
+use super::seat;
 use super::tick::{
-    adopt_traded, backoff_secs, build_view_off_lock, draft_update, fetch_tick, picks_rewound,
+    adopt_traded, backoff_secs, build_view_off_lock, draft_update, fetch_tick,
     save_keepers_off_lock, save_picks_off_lock, tick_target, traded_update, DraftUpdate, TickFetch,
-    EMPTY_PICKS,
+    TickTarget,
 };
 use crate::keepers;
 use crate::picks;
@@ -61,14 +63,20 @@ pub async fn start_polling<R: tauri::Runtime>(
                 let loaded = loaded_ref.lock().await;
                 loaded.as_ref().map(tick_target)
             };
-            if let Some((draft_id, yahoo_ids)) = target {
+            if let Some(TickTarget {
+                draft_id,
+                yahoo_ids,
+                users_for,
+            }) = target
+            {
                 let started = Instant::now();
                 let fetch_started = std::time::Instant::now();
                 let TickFetch {
                     picks,
                     draft,
                     traded,
-                } = fetch_tick(&engine, &yahoo, &draft_id, &yahoo_ids).await;
+                    users,
+                } = fetch_tick(&engine, &yahoo, &draft_id, &yahoo_ids, users_for.as_deref()).await;
                 // The tick boundary at the verbose level: which draft, how
                 // many picks came back or what the request said instead, and
                 // how long the round trip took.
@@ -102,27 +110,39 @@ pub async fn start_polling<R: tauri::Runtime>(
                         match picks {
                             Ok(picks) => {
                                 // An empty list mid-draft is a lost response,
-                                // not a cleared board.
-                                if picks.is_empty() && !loaded.api_picks.is_empty() {
-                                    errors.push(EMPTY_PICKS.to_string());
-                                } else if let Some(hole) = rewound_to(loaded, &picks) {
-                                    // And an answer with a hole behind the
-                                    // clock is a partial one, not a draft
-                                    // that went backwards.
-                                    errors.push(picks_rewound(hole));
-                                } else {
-                                    changed |= memory.picks_changed(&picks);
-                                    loaded.api_picks = picks;
-                                    if picks::reconcile_manual_picks(
-                                        &loaded.api_picks,
-                                        &mut loaded.manual_picks,
-                                    ) {
-                                        picks_to_save = Some(loaded.manual_picks.clone());
+                                // not a cleared board, and an answer with a
+                                // hole behind the clock is a partial one, not
+                                // a draft that went backwards. Either is
+                                // refused, but not forever: see `refusal`.
+                                let verdict =
+                                    refusal::shared().judge(&draft_id, refusal_for(loaded, &picks));
+                                match verdict {
+                                    Verdict::Refuse(reason) => errors.push(reason),
+                                    Verdict::Adopt(note) => {
+                                        notes.extend(note);
+                                        changed |= memory.picks_changed(&picks);
+                                        loaded.api_picks = picks;
+                                        if picks::reconcile_manual_picks(
+                                            &loaded.api_picks,
+                                            &mut loaded.manual_picks,
+                                        ) {
+                                            picks_to_save = Some(loaded.manual_picks.clone());
+                                        }
+                                        keepers_to_save = keepers::merge_keepers(loaded);
                                     }
-                                    keepers_to_save = keepers::merge_keepers(loaded);
                                 }
                             }
                             Err(error) => errors.push(error),
+                        }
+                        // The member list the load could not get. Kept out
+                        // of `errors` like the two below: the seat labels
+                        // are not the picks.
+                        match users {
+                            Some(Ok(users)) => changed |= seat::adopt_users(loaded, &users),
+                            Some(Err(error)) => {
+                                notes.push(format!("member list still unavailable: {error}"))
+                            }
+                            None => {}
                         }
                         // Kept out of `errors` on purpose: only the picks
                         // decide whether this tick failed, so one sulking
@@ -242,15 +262,6 @@ pub async fn start_polling<R: tauri::Runtime>(
         }
     });
     Ok(())
-}
-
-/// The hole a partial `/picks` answer would move the clock back to, judged
-/// against the picks on screen and the keepers known to sit ahead of them.
-fn rewound_to(loaded: &crate::engine::LoadedLeague, picks: &[crate::sleeper::Pick]) -> Option<u32> {
-    let teams = loaded.draft.settings.teams.max(1);
-    let rounds = loaded.draft.settings.rounds.max(1);
-    let keepers = keepers::known_keepers(loaded, teams, rounds);
-    picks::rewound_to(&loaded.api_picks, picks, teams, rounds, &keepers)
 }
 
 #[tauri::command]

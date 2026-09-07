@@ -46,7 +46,10 @@ fn live_section_joins_both_lineups_to_their_nfl_games() {
     // not on the scoreboard, so it is neither playing nor pregame.
     assert_eq!(v.live.totals.my_playing, 3);
     assert_eq!(v.live.totals.my_pre, 0);
-    assert!((v.live.totals.my_live_points - 48.5).abs() < 1e-9);
+    // Only q1 has an entry in `players_points`. The other two starters in
+    // the live game have scored nothing yet, and nothing is what they count
+    // for: their projections used to be added here instead.
+    assert!((v.live.totals.my_live_points - 21.5).abs() < 1e-9);
     assert_eq!(v.live.totals.opp_live_points, 0.0, "their game is pregame");
     assert_eq!(v.live.windows.len(), 2);
     assert_eq!(v.live.next_kickoff_ms, season.scores[1].start_time);
