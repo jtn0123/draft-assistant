@@ -14,10 +14,15 @@ use tokio::sync::Mutex;
 #[path = "commands_chat_budget.rs"]
 mod budget;
 
+/// The books one turn is written into, and the task that writes them.
+#[path = "commands_chat_settle.rs"]
+mod settle;
+
 use budget::{billed_model, charged_league, check_budget, check_screen, checked_budget, window};
 pub use budget::{budget_of, spend_key, DEFAULT_BUDGET_USD};
 #[cfg(test)]
 use budget::{MAX_THREAD_BYTES, MAX_TURNS};
+pub(crate) use settle::{settle, Books};
 
 const PROVIDER_API: &str = "api";
 const PROVIDER_CLI: &str = "claude_code";
@@ -198,7 +203,7 @@ async fn chat_settings_inner(state: &AppState) -> Result<ChatSettings, String> {
         key_hint: key.map(chat_copy::mask_key),
         cli_available,
         provider: resolve_provider(&config, key.is_some(), cli_available),
-        key_store: if crate::secrets::available() {
+        key_store: if state.engine.secret_store().is_some() {
             "keychain"
         } else {
             "file"
@@ -246,6 +251,49 @@ pub async fn ask_claude(
     )
 }
 
+/// The key one screen's questions are claimed and charged under right now:
+/// the screen, and the league whose board is open.
+async fn current_key(state: &AppState, screen: &str) -> String {
+    let loaded_league = {
+        let loaded = state.loaded.lock().await;
+        loaded.as_ref().map(|l| l.league.league_id.clone())
+    };
+    let active = state.config.lock().await.active_league_id.clone();
+    spend_key(
+        screen,
+        charged_league(loaded_league.as_deref(), active.as_deref()),
+    )
+}
+
+/// Claim this screen's one in-flight slot before anything else is done with
+/// a question, or say why not.
+///
+/// The shared thread used to post a phone's question first and claim second,
+/// so a question asked while the desktop panel was mid-answer was accepted
+/// with a 202 and then failed in the thread as "already being answered". The
+/// claim now comes first on both paths, and a refusal is a refusal up front.
+pub(crate) async fn claim(state: &AppState, screen: &str) -> Result<chat_client::InFlight, String> {
+    check_screen(screen)?;
+    state.chat_claims.reserve(&current_key(state, screen).await)
+}
+
+/// Stop the answer this screen is waiting on, if there is one. True when a
+/// question was in flight to stop; its reply comes back through the call that
+/// asked it, marked cut short, with the text that had arrived.
+#[tauri::command]
+pub async fn cancel_claude(state: State<'_, AppState>, screen: String) -> Result<bool, String> {
+    crate::applog::logged!(
+        "cancel_claude",
+        ids(&state, &screen).await,
+        cancel_claude_inner(&state, &screen).await
+    )
+}
+
+async fn cancel_claude_inner(state: &AppState, screen: &str) -> Result<bool, String> {
+    check_screen(screen)?;
+    Ok(state.chat_claims.cancel(&current_key(state, screen).await))
+}
+
 /// One answered turn, provider choice, budget and all.
 ///
 /// Split out of [`ask_claude`] so the shared chat the companion server runs
@@ -262,6 +310,20 @@ pub(crate) async fn answer(
     // The screen is checked before anything is done with the thread: it keys
     // the spend, and a name that is not a screen must not get as far as
     // reading the conversation, let alone opening a tally under itself.
+    let held = claim(state, screen).await?;
+    answer_holding(state, screen, model, effort, messages, held).await
+}
+
+/// [`answer`] with the in-flight claim already made by the caller: the shared
+/// thread claims before it posts the question, and hands the claim on here.
+pub(crate) async fn answer_holding(
+    state: &AppState,
+    screen: &str,
+    model: &str,
+    effort: &str,
+    messages: Vec<ChatMessage>,
+    held: chat_client::InFlight,
+) -> Result<ChatReply, String> {
     check_screen(screen)?;
     // The whole thread is forwarded to Anthropic or written to the CLI's
     // stdin, so it is bounded here rather than discovered as a bill or a
@@ -271,23 +333,21 @@ pub(crate) async fn answer(
     let config = state.config.lock().await.clone();
     let api_key = state.engine.api_key(&config).await;
     let provider = resolve_provider(&config, api_key.is_some(), cli.is_some());
-    let loaded_league = {
-        let loaded = state.loaded.lock().await;
-        loaded.as_ref().map(|l| l.league.league_id.clone())
-    };
     // The cap is enforced here rather than in the panel, which cannot be the
     // authority on money: it knows only the conversation in front of it, and
     // it prices turns it did not pay for.
-    let key = spend_key(
-        screen,
-        charged_league(loaded_league.as_deref(), config.active_league_id.as_deref()),
-    );
+    let key = current_key(state, screen).await;
+    // The claim travels with the model call and is released when it ends. One
+    // made under a key that has since changed (the league switched between
+    // the claim and the call) is let go for one under the key being charged.
+    let in_flight = if held.key() == key {
+        held
+    } else {
+        drop(held);
+        state.chat_claims.reserve(&key)?
+    };
     let spent = config.chat_spend_usd.get(&key).copied().unwrap_or(0.0);
     check_budget(spent, budget_of(&config), screen)?;
-    // The cap above is read before the turn and written after it, so two
-    // questions asked at once both saw the spend from before either of them.
-    // The claim travels with the model call and is released when it ends.
-    let in_flight = chat_client::reserve(&key)?;
 
     // Building a season view is seconds of arithmetic. It must not happen with
     // the pollers' mutexes held, so the season screen's own view is reused and
@@ -317,6 +377,7 @@ pub(crate) async fn answer(
         model,
         provider,
     };
+    let cancel = in_flight.signal();
     let call = async move {
         if provider == PROVIDER_CLI {
             let cli = cli.ok_or_else(|| {
@@ -337,89 +398,12 @@ pub(crate) async fn answer(
                 effort,
                 &context,
                 &messages,
+                cancel,
             )
             .await
         }
     };
     settle(books, in_flight, call).await
-}
-
-/// Where one turn's money is written down.
-pub(crate) struct Books {
-    pub(crate) config: std::sync::Arc<Mutex<AppConfig>>,
-    pub(crate) engine: std::sync::Arc<crate::engine::Engine>,
-    pub(crate) key: String,
-    pub(crate) model: ChatModel,
-    pub(crate) provider: &'static str,
-}
-
-impl Books {
-    /// What a reply — or the billed part of a failed one — cost.
-    ///
-    /// The CLI route is paid for by a subscription, not by the token:
-    /// charging it list rates would stop the panel over money nobody spent.
-    fn cost_of(&self, reply: &ChatReply) -> f64 {
-        if self.provider == PROVIDER_CLI {
-            0.0
-        } else {
-            chat::turn_cost_of(billed_model(self.model, &reply.model), reply)
-        }
-    }
-
-    /// Add `cost` to the running spend and return the new total.
-    async fn record(&self, cost: f64) -> f64 {
-        let mut config = self.config.lock().await;
-        let running = config.chat_spend_usd.entry(self.key.clone()).or_insert(0.0);
-        *running += cost;
-        let running = *running;
-        // A failure to write it down is not a reason to withhold the answer
-        // the user already paid for; the next turn re-reads whatever did land.
-        if let Err(e) = self.engine.save_config(&config) {
-            crate::applog::warn(format!("could not record what Ask Claude spent: {e}"));
-        }
-        running
-    }
-}
-
-/// Run the model call to its end and write down what it cost, whatever
-/// becomes of the caller.
-///
-/// The call runs on a task of its own, so a caller that stops waiting — the
-/// shared thread's answer limit, or a webview that went away — does not
-/// cancel it. That matters because cancelling the future does not cancel the
-/// bill: the API charges from the moment it accepts the request, and a turn
-/// that was aborted at the await used to be billed, discarded, and never
-/// counted against the cap. Here the spend is recorded by the same task that
-/// made the call, before anything is handed back, and a call that fails after
-/// the API started answering records the usage that did arrive.
-pub(crate) async fn settle<F>(
-    books: Books,
-    in_flight: chat_client::InFlight,
-    call: F,
-) -> Result<ChatReply, String>
-where
-    F: std::future::Future<Output = Result<ChatReply, chat::ChatError>> + Send + 'static,
-{
-    let task = tokio::spawn(async move {
-        // Released when the call ends, not when the caller stops waiting.
-        let _in_flight = in_flight;
-        match call.await {
-            Ok(mut reply) => {
-                reply.cost_usd = books.cost_of(&reply);
-                reply.provider = books.provider.to_string();
-                reply.screen_spend_usd = books.record(reply.cost_usd).await;
-                Ok(reply)
-            }
-            Err(error) => {
-                if let Some(partial) = &error.partial {
-                    books.record(books.cost_of(partial)).await;
-                }
-                Err(error.message)
-            }
-        }
-    });
-    task.await
-        .map_err(|_| "The answer stopped unexpectedly".to_string())?
 }
 
 /// Suggested prompts for the current screen.
@@ -431,3 +415,7 @@ pub fn chat_suggestions(screen: String) -> Vec<String> {
 #[cfg(test)]
 #[path = "commands_chat_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "commands_chat_cancel_tests.rs"]
+mod cancel_tests;

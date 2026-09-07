@@ -20,6 +20,11 @@ export interface ChatReply {
   thinking: string | null;
   model: string;
   refused: boolean;
+  /** The answer hit the length limit; the note is already in `text`. */
+  truncated: boolean;
+  /** The answer was stopped with Cancel. `text` is what had arrived, which
+   * can be nothing. */
+  cancelled: boolean;
   input_tokens: number;
   output_tokens: number;
   /** Which route answered this turn. */

@@ -3,7 +3,9 @@
 //! self-signed for a made-up MagicDNS name, which is why the client below
 //! is told not to check it.
 
-use crate::harness::{fixture_state, host, host_over_tls, scratch_dir, Host};
+use crate::harness::{
+    fixture_state, host, host_over_tls, port_is_open, scratch_dir, wait_for_port_closed, Host,
+};
 use draft_assistant_lib::companion::tls::TlsSource;
 use std::sync::Arc;
 
@@ -98,12 +100,13 @@ async fn https_origin_is_accepted_once_the_cert_listener_is_up() {
         .expect("the pair request goes through");
     assert_eq!(paired.status(), 200);
 
-    // Off takes both listeners down.
+    // Off takes both listeners down. The port is read at once: it is cleared
+    // by `stop` itself, not by the listener winding down after it.
     host.companion.stop();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert_eq!(host.companion.https_port(), None);
+    wait_for_port_closed(https_port).await;
     assert!(
-        std::net::TcpStream::connect(("127.0.0.1", https_port)).is_err(),
+        !port_is_open(https_port),
         "the https port is still answering after stop"
     );
 }
@@ -215,7 +218,9 @@ async fn the_https_port_survives_a_restart_so_an_installed_page_still_opens() {
     let first = secure_host("https-restart").await;
     let port = first.companion.https_port().expect("https up");
     first.companion.stop();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    // The second host binds the same port, so the first has to have let go
+    // of it, which the graceful shutdown does a moment after `stop` returns.
+    wait_for_port_closed(port).await;
     let second = secure_host_in(first.data_dir.clone()).await;
     assert_eq!(second.companion.https_port(), Some(port));
     second.companion.stop();

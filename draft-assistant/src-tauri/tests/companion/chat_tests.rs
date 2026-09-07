@@ -1,6 +1,6 @@
 //! The shared chat over HTTP: accepted, refused, and remembered.
 
-use crate::harness::{host, host_over, Host};
+use crate::harness::{host, host_over, Host, DEADLINE};
 use draft_assistant_lib::shared_chat::EntryDevice;
 
 /// Put the fixture over its budget, so a question that reaches the model layer
@@ -57,14 +57,18 @@ async fn a_posted_question_is_accepted_at_once_and_answered_later() {
 /// Poll the thread until the answer has landed. The answer runs off the
 /// request, so there is nothing to await on the HTTP side.
 async fn wait_for_answer(host: &Host, token: &str) -> serde_json::Value {
-    for _ in 0..100 {
+    let started = std::time::Instant::now();
+    loop {
         let (_, thread) = host.get("/api/chat?screen=draft", token).await;
         if thread["entries"].as_array().map(Vec::len).unwrap_or(0) >= 2 {
             return thread;
         }
+        assert!(
+            started.elapsed() < DEADLINE,
+            "the answer never arrived: {thread}"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    panic!("the answer never arrived");
 }
 
 #[tokio::test]
@@ -101,6 +105,73 @@ async fn a_second_question_is_refused_while_the_first_is_being_answered() {
             "/api/chat",
             &paired.token,
             serde_json::json!({ "screen": "season", "text": "and the week?" }),
+        )
+        .await;
+    assert_eq!(status, 202);
+}
+
+/// The desktop panel's own question holds the board's one in-flight claim,
+/// and the shared thread did not look at it: a phone's question was taken
+/// with a 202, filed, and then failed in the thread as "already being
+/// answered". The claim is checked first now, and the phone gets a 409 with
+/// the reason while it is still looking.
+#[tokio::test]
+async fn a_phone_question_is_refused_up_front_while_the_desktop_panel_is_mid_answer() {
+    let host = host("chat-desktop-claim").await;
+    // Its own league, so the claim under test is unmistakably this one.
+    host.state
+        .loaded
+        .lock()
+        .await
+        .as_mut()
+        .expect("the fixture league is loaded")
+        .league
+        .league_id = "league-desktop-claim".to_string();
+    let paired = host.pair_ok("Rob's iPhone", "phone").await;
+    let desktop_turn = host
+        .state
+        .chat_claims
+        .reserve("draft.league-desktop-claim")
+        .expect("the desktop panel's question is claimed");
+
+    let (status, body) = host
+        .post(
+            "/api/chat",
+            &paired.token,
+            serde_json::json!({ "screen": "draft", "text": "me too" }),
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(
+        body["error"],
+        draft_assistant_lib::chat_client::BUSY_MESSAGE,
+        "{body}"
+    );
+    // Refused means not filed: the thread has nothing in it to fail later.
+    let (_, thread) = host.get("/api/chat?screen=draft", &paired.token).await;
+    assert_eq!(
+        thread["entries"].as_array().map(Vec::len),
+        Some(0),
+        "{thread}"
+    );
+    assert_eq!(thread["busy"], false);
+
+    // The desktop's answer lands and the claim goes with it; the phone is
+    // taken next time. Over budget under this league's own key, so the answer
+    // fails without a key, a CLI or a socket being involved.
+    drop(desktop_turn);
+    {
+        let mut config = host.state.config.lock().await;
+        config.chat_budget_usd = Some(1.0);
+        config
+            .chat_spend_usd
+            .insert("draft.league-desktop-claim".to_string(), 99.0);
+    }
+    let (status, _) = host
+        .post(
+            "/api/chat",
+            &paired.token,
+            serde_json::json!({ "screen": "draft", "text": "me too" }),
         )
         .await;
     assert_eq!(status, 202);
@@ -289,6 +360,7 @@ fn good_reply(text: &str) -> draft_assistant_lib::chat::ChatReply {
         model: "claude-opus-5".to_string(),
         refused: false,
         truncated: false,
+        cancelled: false,
         input_tokens: 10,
         output_tokens: 20,
         cache_creation_input_tokens: 0,

@@ -1,6 +1,6 @@
 import { Suspense, useState } from "react";
 import { api } from "./api";
-import { headerSubtitle } from "./appSubtitle";
+import { footerNote, headerMeta, headerSubtitle } from "./appSubtitle";
 import { useUpdateRow } from "./useUpdateRow";
 import { setAvatarMode, useAvatarMode } from "./avatars";
 import { MAX_RECONNECT_ATTEMPTS, useDraftEnd, useDraftSession } from "./draftSession";
@@ -19,12 +19,12 @@ import { LaunchScreen, Setup } from "./components/Panels";
 import { HostWaiting } from "./components/SetupScreens";
 import { LeaguePicker } from "./components/LeaguePicker";
 import { YahooConnect } from "./components/YahooConnect";
-import { ConfirmDialog, Toast } from "./components/Overlays";
+import { ConfirmDialog, ToastStrip } from "./components/Overlays";
 import { CompanionPanel } from "./components/CompanionPanel";
 import { Diagnostics } from "./components/Diagnostics";
 import { JoinHost } from "./components/JoinHost";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { pickLabel, problem, scoringFormat } from "./format";
+import { pickLabel, problem } from "./format";
 import { cycleThemePreference, useAppliedTheme } from "./theme";
 import { useYahooStatus } from "./yahoo";
 // Only the sheets the shell itself paints with. The screen-specific ones are
@@ -121,9 +121,10 @@ export default function App() {
     follow?.host_name ?? null,
     view?.league.league_id ?? null,
   );
-  // Asked once for the settings row and the picker's Yahoo lookup; the
-  // connect dialog hands back every newer answer it is given.
-  const yahoo = useYahooStatus();
+  // For the settings row and the picker's Yahoo lookup; the connect dialog
+  // hands back every newer answer it is given, and the shell asks again as
+  // the dialog closes and when the poller says Yahoo signed the user out.
+  const yahoo = useYahooStatus(yahooOpen, pollHealth?.last_error ?? null);
   const updates = useUpdateRow();
   // Only the host has a server to ask about, and the answer is re-read as the
   // dialog closes so the row never contradicts what was just switched.
@@ -219,15 +220,7 @@ export default function App() {
           onConnectYahoo={() => setYahooOpen(true)}
           onJoinHost={() => setJoinOpen(true)}
         />
-        {toast !== null && (
-          <Toast
-            message={toast.text}
-            action={
-              toast.retry === undefined ? undefined : { label: "Try again", onClick: toast.retry }
-            }
-            onDismiss={dismissToast}
-          />
-        )}
+        <ToastStrip toast={toast} onDismiss={dismissToast} />
         {joinOpen && <JoinHost onClose={() => setJoinOpen(false)} />}
         {yahooOpen && (
           // The same dialog the settings menu opens, which already knows how
@@ -364,7 +357,7 @@ export default function App() {
               setLeaguePicker(true);
             }}
             subtitle={subtitle}
-            meta={`${d.teams}-team ${scoringFormat(view.league.scoring_settings.rec)} · ${d.rounds} rounds${d.manual_picks_active ? " · manual picks active" : ""}`}
+            meta={headerMeta(view)}
             screen={screen}
             onScreen={setScreen}
             platform={view.league.platform}
@@ -378,24 +371,10 @@ export default function App() {
             settingsOpen={settingsOpen}
             onToggleSettings={() => setSettingsOpen((s) => !s)}
             settingsRows={settingsRows}
-            footerNote={
-              // Yahoo's terms ask for the attribution wherever their data is
-              // shown; this is the line every screen carries under the menu.
-              view.league.platform === "yahoo"
-                ? "Fantasy data provided by Yahoo Fantasy · read-only connection"
-                : `${view.league.name} · league ${view.league.league_id} · read-only connection`
-            }
+            footerNote={footerNote(view)}
           />
 
-          {toast !== null && (
-            <Toast
-              message={toast.text}
-              action={
-                toast.retry === undefined ? undefined : { label: "Try again", onClick: toast.retry }
-              }
-              onDismiss={dismissToast}
-            />
-          )}
+          <ToastStrip toast={toast} onDismiss={dismissToast} />
 
           {/* Keyed per screen: one reused instance kept the season screen's
               crash on screen after switching to the draft, and back. */}

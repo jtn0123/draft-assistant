@@ -5,9 +5,10 @@
 //! Both live here rather than in `commands_chat.rs` because that file is at
 //! the line cap.
 
-use std::collections::HashSet;
-use std::sync::{Mutex, OnceLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
+use tokio::sync::watch;
 
 /// How long to wait for a socket to api.anthropic.com.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -42,40 +43,137 @@ pub fn client() -> reqwest::Client {
         .clone()
 }
 
-fn in_flight() -> &'static Mutex<HashSet<String>> {
-    static IN_FLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()))
+/// The one way to stop a question that is being answered.
+///
+/// The model call holds a clone and races the stream against it; the Cancel
+/// button reaches the same signal through [`cancel`], by the key the claim
+/// was made under. A question that was never claimed, or one that has already
+/// finished, has no signal to reach, so cancelling it is a no-op that says so.
+#[derive(Debug)]
+pub struct CancelSignal {
+    cancelled: watch::Sender<bool>,
+}
+
+impl CancelSignal {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            cancelled: watch::Sender::new(false),
+        })
+    }
+
+    /// A signal nobody can pull: for the paths, and the tests, with no button.
+    pub fn never() -> Arc<Self> {
+        Self::new()
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.send_replace(true);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        *self.cancelled.borrow()
+    }
+
+    /// Resolves once [`CancelSignal::cancel`] has been called, at once if it
+    /// already was. Never resolves otherwise, which is what a `select!` arm
+    /// that should lose to the answer needs.
+    pub async fn cancelled(&self) {
+        let mut seen = self.cancelled.subscribe();
+        // The sender lives as long as `self`, so waiting cannot fail.
+        let _ = seen.wait_for(|cancelled| *cancelled).await;
+    }
 }
 
 /// A question in flight. Dropping it lets the next one through, so every
 /// early return, every `?`, and every panic releases the claim.
 #[derive(Debug)]
-pub struct InFlight(String);
+pub struct InFlight {
+    key: String,
+    signal: Arc<CancelSignal>,
+    /// The registry the claim was made in, so dropping releases it there.
+    claims: Arc<Mutex<Claims>>,
+}
 
-impl Drop for InFlight {
-    fn drop(&mut self) {
-        in_flight()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&self.0);
+impl InFlight {
+    /// The key this claim was made under.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// The signal the model call should race against.
+    pub fn signal(&self) -> Arc<CancelSignal> {
+        self.signal.clone()
     }
 }
 
-/// Claim `key` for one question, or refuse because one is already running.
-///
-/// The budget cap is read before a turn and written after it. Two questions
-/// asked at the same moment therefore both read the spend from before either
-/// of them, and both passed a cap with room for only one — the second one was
-/// free. One question at a time per key closes that window.
-pub fn reserve(key: &str) -> Result<InFlight, String> {
-    let mut held = in_flight().lock().unwrap_or_else(|e| e.into_inner());
-    if !held.insert(key.to_string()) {
-        return Err(
-            "another question is already being answered for this league — wait for it to finish"
-                .to_string(),
-        );
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.claims
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.key);
     }
-    Ok(InFlight(key.to_string()))
+}
+
+/// The sentence a second asker gets while a question about the same board is
+/// still being answered. One sentence, whichever side asked: the desktop panel
+/// shows it as an error turn, and the phone gets it as the reason on its 409.
+pub const BUSY_MESSAGE: &str =
+    "a question about this board is already being answered, wait for it to finish";
+
+type Claims = HashMap<String, Arc<CancelSignal>>;
+
+/// The questions in flight, one slot per spend key, and the signal that
+/// stops each of them.
+///
+/// Owned by the app state rather than kept in a static: the desktop commands
+/// and the companion server reach the same registry through the state they
+/// share, and two servers built in one process (every test builds its own)
+/// never see each other's claims.
+#[derive(Debug, Default)]
+pub struct InFlightClaims {
+    held: Arc<Mutex<Claims>>,
+}
+
+impl InFlightClaims {
+    /// Claim `key` for one question, or refuse because one is already running.
+    ///
+    /// The budget cap is read before a turn and written after it. Two
+    /// questions asked at the same moment therefore both read the spend from
+    /// before either of them, and both passed a cap with room for only one —
+    /// the second one was free. One question at a time per key closes that
+    /// window.
+    pub fn reserve(&self, key: &str) -> Result<InFlight, String> {
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        if held.contains_key(key) {
+            return Err(BUSY_MESSAGE.to_string());
+        }
+        let signal = CancelSignal::new();
+        held.insert(key.to_string(), signal.clone());
+        Ok(InFlight {
+            key: key.to_string(),
+            signal,
+            claims: self.held.clone(),
+        })
+    }
+
+    /// Stop the question claimed under `key`, if one is. True when there was
+    /// one to stop; the answer itself reports back through its own call.
+    pub fn cancel(&self, key: &str) -> bool {
+        let signal = self
+            .held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .cloned();
+        match signal {
+            Some(signal) => {
+                signal.cancel();
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -140,12 +238,78 @@ mod tests {
 
     #[test]
     fn a_second_question_about_the_same_league_is_refused_while_one_is_running() {
-        let held = reserve("draft.reserve-test").expect("the first question is accepted");
-        let error = reserve("draft.reserve-test").expect_err("the second is refused");
-        assert!(error.contains("already being answered"), "{error}");
+        let claims = InFlightClaims::default();
+        let held = claims
+            .reserve("draft.reserve-test")
+            .expect("the first question is accepted");
+        let error = claims
+            .reserve("draft.reserve-test")
+            .expect_err("the second is refused");
+        assert_eq!(error, BUSY_MESSAGE);
         // Another league is its own claim and is not blocked by it.
-        let _other = reserve("draft.reserve-other").expect("a different league is free");
+        let _other = claims
+            .reserve("draft.reserve-other")
+            .expect("a different league is free");
         drop(held);
-        reserve("draft.reserve-test").expect("the claim was released");
+        claims
+            .reserve("draft.reserve-test")
+            .expect("the claim was released");
+    }
+
+    /// Two registries are two registries: a claim in one is not a claim in
+    /// the other. This is what lets two servers share one process.
+    #[test]
+    fn a_claim_in_one_registry_does_not_block_another() {
+        let one = InFlightClaims::default();
+        let two = InFlightClaims::default();
+        let _held = one.reserve("draft.league").expect("free in one");
+        two.reserve("draft.league").expect("and still free in two");
+        assert!(!two.cancel("draft.league"), "two never saw one's claim");
+    }
+
+    /// The Cancel button reaches the call through the claim's key. Nothing to
+    /// cancel is a plain `false`, not an error: the answer may have landed a
+    /// moment before the click.
+    #[tokio::test]
+    async fn cancelling_by_key_pulls_the_signal_the_claim_handed_out() {
+        let claims = InFlightClaims::default();
+        assert!(
+            !claims.cancel("draft.cancel-test"),
+            "nothing is in flight yet"
+        );
+        let held = claims.reserve("draft.cancel-test").expect("claimed");
+        let signal = held.signal();
+        assert!(!signal.is_cancelled());
+        let waiting = tokio::spawn({
+            let signal = signal.clone();
+            async move { signal.cancelled().await }
+        });
+        assert!(claims.cancel("draft.cancel-test"), "the claim was found");
+        assert!(signal.is_cancelled());
+        tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .expect("the waiter woke")
+            .expect("and did not panic");
+        // Already cancelled: resolves at once rather than waiting for a
+        // second pull that is never coming.
+        tokio::time::timeout(Duration::from_millis(200), signal.cancelled())
+            .await
+            .expect("a cancelled signal resolves immediately");
+        drop(held);
+        assert!(
+            !claims.cancel("draft.cancel-test"),
+            "the claim is gone with the turn"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_signal_nobody_pulls_never_resolves() {
+        let signal = CancelSignal::never();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), signal.cancelled())
+                .await
+                .is_err(),
+            "resolved without being cancelled"
+        );
     }
 }

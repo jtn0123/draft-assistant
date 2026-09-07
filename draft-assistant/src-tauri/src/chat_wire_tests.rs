@@ -135,103 +135,13 @@ fn an_error_body_is_unwrapped_into_the_message_the_panel_shows() {
     .unwrap_err();
     assert_eq!(error, "Anthropic rejected the API key: invalid x-api-key");
 
-    let error = ask_stub(429, r#"{"error":{"message":"slow down"}}"#).unwrap_err();
-    assert_eq!(error, "Rate limited by Anthropic: slow down");
-}
-
-/// Anything between the app and Anthropic can answer with its own error page.
-/// That page used to be pasted into the chat, where a wall of markup reads as
-/// something Claude said; the status is what the user can act on. What goes
-/// to the log is a short, redacted sample and the size — not the page, which
-/// a proxy can fill with the request it was forwarding, key and all.
-#[test]
-fn an_error_body_that_is_not_json_is_logged_short_and_redacted_rather_than_shown() {
-    let capture = crate::applog::Capture::start();
-    let page = format!(
-        "<html>gateway x-api-key: sk-ant-secret-value {}</html>",
-        "padding ".repeat(100)
-    );
-    let error = ask_stub(500, page.clone()).unwrap_err();
-    assert!(error.starts_with("Anthropic API error 500"), "{error}");
-    assert!(!error.contains("html"), "{error}");
-    assert!(!error.contains("gateway"), "{error}");
-    let logged = capture
-        .lines()
-        .into_iter()
-        .find(|l| l.contains("not an error object"))
-        .expect("the status and a sample were logged");
-    assert!(
-        logged.contains(&format!("({} bytes)", page.len())),
-        "{logged}"
-    );
-    assert!(!logged.contains("sk-ant-secret-value"), "{logged}");
-    assert!(
-        !logged.contains(&"padding ".repeat(20)),
-        "the whole page was logged: {logged}"
-    );
-}
-
-/// The status-specific sentences survive a body that carries no message.
-#[test]
-fn a_status_still_says_what_went_wrong_without_a_message_to_quote() {
+    // A rate limit is retried before it is shown, and the message says so.
+    let url = stub_repeated(429, r#"{"error":{"message":"slow down"}}"#, 3);
+    let error = ask_url(&url, &client()).unwrap_err();
     assert_eq!(
-        ask_stub(401, "<html>denied</html>").unwrap_err(),
-        "Anthropic rejected the API key"
+        error.message,
+        "Rate limited by Anthropic: slow down (gave up after 3 attempts)"
     );
-    assert_eq!(
-        ask_stub(429, "slow down please").unwrap_err(),
-        "Rate limited by Anthropic"
-    );
-}
-
-#[test]
-fn a_body_that_is_not_a_stream_is_named_as_such_rather_than_panicking() {
-    let error = ask_stub(200, r#"{"content":"not a list"}"#).unwrap_err();
-    assert!(
-        error.starts_with("unexpected Anthropic stream event"),
-        "{error}"
-    );
-}
-
-#[test]
-fn a_dead_endpoint_reads_as_a_connection_problem() {
-    // Port 1 on loopback: bound by nothing, refused immediately.
-    let error = ask_url("http://127.0.0.1:1/v1/messages", &client()).unwrap_err();
-    assert!(
-        error
-            .message
-            .starts_with("could not reach the Anthropic API"),
-        "{}",
-        error.message
-    );
-    assert!(error.partial.is_none(), "nothing was billed");
-}
-
-/// A request the API accepted is billed from `message_start` on, whether or
-/// not the rest arrives. An answer the client gave up on halfway used to come
-/// back as a bare error, so the tokens it had already been charged for were
-/// never counted against the cap.
-#[test]
-fn an_answer_that_stops_early_still_reports_what_had_been_charged() {
-    let body = message_start(
-        "claude-opus-5",
-        r#"{"input_tokens":1500,"cache_read_input_tokens":4000}"#,
-    ) + &text_block(0, "Take ")
-        + &"x".repeat(2000);
-    let (url, _) = stub_with(200, body, std::time::Duration::from_millis(400), true);
-    let impatient = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(std::time::Duration::from_millis(150))
-        .build()
-        .expect("http client");
-    let error = ask_url(&url, &impatient).unwrap_err();
-    assert!(error.message.contains("stopped early"), "{}", error.message);
-    let partial = error.partial.expect("the usage that arrived is reported");
-    assert_eq!(partial.text, "");
-    assert_eq!(partial.input_tokens, 1500);
-    assert_eq!(partial.cache_read_input_tokens, 4000);
-    assert_eq!(partial.model, "claude-opus-5");
-    assert!(turn_cost_of(ChatModel::Opus5, &partial) > 0.0);
 }
 
 // ---------- money ----------

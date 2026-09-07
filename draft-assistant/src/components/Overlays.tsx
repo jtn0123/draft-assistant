@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { platformName } from "../leagues";
+import type { ToastMessage } from "../toast";
 import type { Platform } from "../types";
 import { useFocusTrap } from "./useFocusTrap";
 
@@ -136,5 +137,27 @@ export function Toast({
         Dismiss
       </button>
     </div>
+  );
+}
+
+/**
+ * The shell's toast, as `useToast` hands it over: nothing when there is no
+ * message, and a "Try again" action when the message came with a retry. Both
+ * of App's layouts paint the same strip, so the mapping lives here once.
+ */
+export function ToastStrip({
+  toast,
+  onDismiss,
+}: {
+  toast: ToastMessage | null;
+  onDismiss: () => void;
+}) {
+  if (toast === null) return null;
+  return (
+    <Toast
+      message={toast.text}
+      action={toast.retry === undefined ? undefined : { label: "Try again", onClick: toast.retry }}
+      onDismiss={onDismiss}
+    />
   );
 }

@@ -86,7 +86,10 @@ fn session(label: &str) -> Session {
         season_polling: Arc::new(AtomicBool::new(false)),
         season_generation: Arc::new(AtomicU64::new(0)),
         last_season_view: Arc::new(Mutex::new(None)),
-        yahoo: Arc::new(YahooState::default()),
+        // Never the default state: that is the machine's Keychain, and a
+        // command sweep over a scratch directory must not be able to reach it.
+        yahoo: Arc::new(YahooState::sandboxed(Default::default())),
+        chat_claims: Arc::new(Default::default()),
     });
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()

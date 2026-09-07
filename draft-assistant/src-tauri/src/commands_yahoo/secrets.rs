@@ -124,6 +124,20 @@ pub async fn persist_tokens_for(engine: &Engine, yahoo: &YahooState, client: &Ya
     let Ok(store) = store_for(engine.data_dir.clone(), yahoo.keychain).await else {
         return;
     };
+    persist_tokens_into(store, yahoo, client).await;
+}
+
+/// [`persist_tokens_for`] against a store the caller already holds.
+///
+/// Nothing is written when the pair is the one the store already has. The
+/// draft poller persists after every tick, and each write is a `security`
+/// subprocess against the login Keychain: three seconds apart, all evening,
+/// for a pair that changes once an hour.
+pub async fn persist_tokens_into(
+    store: Arc<dyn SecretStore>,
+    yahoo: &YahooState,
+    client: &YahooClient,
+) {
     // A client Yahoo has signed out is holding a pair that will never work
     // again. Writing it back would keep Settings saying "Connected" and send
     // every later call through the same refusal; clearing it is what makes
@@ -137,11 +151,17 @@ pub async fn persist_tokens_for(engine: &Engine, yahoo: &YahooState, client: &Ya
         }
         return;
     }
-    let tokens = client.tokens().await;
+    let Some(tokens) = client.unsaved_tokens().await else {
+        return;
+    };
+    let saving = tokens.clone();
     let stored =
-        tokio::task::spawn_blocking(move || yahoo_secrets::save_tokens(store.as_ref(), &tokens))
+        tokio::task::spawn_blocking(move || yahoo_secrets::save_tokens(store.as_ref(), &saving))
             .await;
-    if let Err(error) = stored.map_err(|e| e.to_string()).and_then(|r| r) {
-        crate::applog::warn(format!("yahoo: refreshed token not saved: {error}"));
+    match stored.map_err(|e| e.to_string()).and_then(|r| r) {
+        // Remembered only once it is really there: a failed write is tried
+        // again on the next call rather than believed.
+        Ok(()) => client.mark_persisted(&tokens).await,
+        Err(error) => crate::applog::warn(format!("yahoo: refreshed token not saved: {error}")),
     }
 }

@@ -15,6 +15,7 @@ use draft_assistant_lib::companion::tls::TlsSource;
 use draft_assistant_lib::companion::CompanionServer;
 use draft_assistant_lib::engine::{AppConfig, Engine};
 use draft_assistant_lib::state::{AppState, YahooState};
+use draft_assistant_lib::yahoo_secrets::Item;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
@@ -87,23 +88,21 @@ fn start_logging(data_dir: &Path) -> PathBuf {
     data_dir.join(applog::LOG_NAME)
 }
 
-/// The headless host's server, in the order that matters.
+/// The headless host's server.
 ///
-/// `select_headless_account` goes before the server builds its hub: the hub
-/// reads the device list as it is built, and it has to read the headless
-/// host's own, not the desktop app's, or the two overwrite each other's
-/// pairings on one Mac. And HTTPS is off: this host is for a browser on the
-/// developer's own machine, and a `tailscale cert` run from every throwaway
-/// start would count against Let's Encrypt's limits for the real app's name.
-/// `build` is the constructor, injected so the test can use the sandboxed one
-/// and never touch the Keychain.
+/// Its pairings go under [`Item::CompanionDevicesHeadless`], the headless
+/// host's own account, not the desktop app's: the two used to share one on
+/// a single Mac and overwrite each other's phones. And HTTPS is off: this
+/// host is for a browser on the developer's own machine, and a `tailscale
+/// cert` run from every throwaway start would count against Let's Encrypt's
+/// limits for the real app's name. `build` is the constructor, injected so
+/// the test can use the sandboxed one and never touch the Keychain.
 fn build_companion(
     host_name: String,
     data_dir: PathBuf,
-    build: impl FnOnce(String, PathBuf) -> Result<CompanionServer, String>,
+    build: impl FnOnce(String, PathBuf, Item) -> Result<CompanionServer, String>,
 ) -> Result<Arc<CompanionServer>, String> {
-    draft_assistant_lib::companion::store::select_headless_account();
-    let companion = build(host_name, data_dir)?;
+    let companion = build(host_name, data_dir, Item::CompanionDevicesHeadless)?;
     companion.set_tls(TlsSource::Off);
     Ok(Arc::new(companion))
 }
@@ -120,7 +119,7 @@ async fn main() {
     let args = parse_args();
     let log = start_logging(&args.data_dir);
     eprintln!("log: {}", log.display());
-    let engine = Arc::new(Engine::new(args.data_dir.clone()));
+    let engine = Arc::new(Engine::for_app(args.data_dir.clone()));
 
     let mut config = AppConfig::default();
     if let Some(username) = &args.username {
@@ -159,10 +158,11 @@ async fn main() {
         season_generation: Arc::new(AtomicU64::new(0)),
         last_season_view: Arc::new(Mutex::new(None)),
         yahoo: Arc::new(YahooState::new(Default::default())),
+        chat_claims: Arc::new(Default::default()),
     });
 
     let host_name = draft_assistant_lib::commands_companion::default_host_name();
-    let companion = build_companion(host_name, args.data_dir.clone(), CompanionServer::new)
+    let companion = build_companion(host_name, args.data_dir.clone(), CompanionServer::new_under)
         .unwrap_or_else(|e| {
             eprintln!("companion failed to build: {e}");
             std::process::exit(1);
@@ -195,29 +195,34 @@ mod tests {
     use super::{build_companion, default_data_dir, parse_args_from, start_logging};
     use draft_assistant_lib::applog;
     use draft_assistant_lib::companion::net::DEFAULT_PORT;
-    use draft_assistant_lib::companion::store::{devices_item, devices_item_for};
     use draft_assistant_lib::companion::tls::TlsSource;
     use draft_assistant_lib::companion::CompanionServer;
+    use draft_assistant_lib::yahoo_secrets::Item;
 
     /// The two things about the headless host's server that used to be
-    /// convention only: the account is switched before the hub reads it, and
-    /// HTTPS is off so no throwaway start runs `tailscale cert`.
+    /// convention only: its pairings go under the headless account, handed
+    /// to the constructor rather than switched on through a process-wide
+    /// flag, and HTTPS is off so no throwaway start runs `tailscale cert`.
     #[test]
-    fn the_headless_account_is_selected_before_the_hub_is_built_and_https_is_off() {
+    fn the_headless_account_is_handed_to_the_constructor_and_https_is_off() {
         let dir = std::env::temp_dir().join(format!(
             "draft-assistant-companion-host-build-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("scratch dir");
-        let companion = build_companion("Justin's Mac".to_string(), dir.clone(), |name, data| {
-            assert_eq!(
-                devices_item(),
-                devices_item_for(true),
-                "the hub would read the desktop app's device list"
-            );
-            CompanionServer::sandboxed(name, data)
-        })
+        let companion = build_companion(
+            "Justin's Mac".to_string(),
+            dir.clone(),
+            |name, data, item| {
+                assert_eq!(
+                    item,
+                    Item::CompanionDevicesHeadless,
+                    "the hub would read the desktop app's device list"
+                );
+                CompanionServer::sandboxed_under(name, data, item)
+            },
+        )
         .expect("the companion builds");
         assert_eq!(companion.tls_source(), TlsSource::Off);
         let _ = std::fs::remove_dir_all(&dir);

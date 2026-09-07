@@ -70,6 +70,33 @@ pub(super) fn answer(text: &str, stop: &str, usage_in: &str, output_tokens: u32)
 
 // ---------- the stub server ----------
 
+/// One canned answer the stub serves to one request.
+pub(super) struct Canned {
+    pub(super) status: u16,
+    pub(super) body: String,
+    /// Extra response headers, `retry-after` being the one that matters.
+    pub(super) headers: Vec<(&'static str, String)>,
+    /// Send only the first half of the body, wait this long, and drop the
+    /// connection.
+    pub(super) stall: Option<std::time::Duration>,
+}
+
+impl Canned {
+    pub(super) fn new(status: u16, body: impl Into<String>) -> Self {
+        Canned {
+            status,
+            body: body.into(),
+            headers: Vec::new(),
+            stall: None,
+        }
+    }
+
+    pub(super) fn header(mut self, name: &'static str, value: impl Into<String>) -> Self {
+        self.headers.push((name, value.into()));
+        self
+    }
+}
+
 /// Serve `body` with `status` to exactly one request, and return the URL to
 /// send it to. The thread ends with the response.
 pub(super) fn stub_server(status: u16, body: String) -> String {
@@ -77,15 +104,35 @@ pub(super) fn stub_server(status: u16, body: String) -> String {
     url
 }
 
-/// The general stub: capture the request, answer with `status` and `body`,
-/// and — when `stall` is set — send only the first half of the body, wait
-/// `pause`, and drop the connection. The receiver hands back what the client
-/// sent as `(head, body)`.
+/// The same answer to `times` requests in a row: what a rate limit that does
+/// not lift looks like to a client that retries.
+pub(super) fn stub_repeated(status: u16, body: &str, times: usize) -> String {
+    let (url, _) = stub_sequence((0..times).map(|_| Canned::new(status, body)).collect());
+    url
+}
+
+/// Capture the request, answer with `status` and `body`, and — when `stall`
+/// is set — send only the first half of the body, wait `pause`, and drop the
+/// connection. The receiver hands back what the client sent as `(head, body)`.
 pub(super) fn stub_with(
     status: u16,
     body: String,
     pause: std::time::Duration,
     stall: bool,
+) -> (String, std::sync::mpsc::Receiver<(String, String)>) {
+    stub_sequence(vec![Canned {
+        status,
+        body,
+        headers: Vec::new(),
+        stall: stall.then_some(pause),
+    }])
+}
+
+/// The general stub: one connection per canned answer, in order, each request
+/// captured and sent back as `(head, body)`. The thread ends with the last
+/// answer, so a request past the end is refused at the socket.
+pub(super) fn stub_sequence(
+    answers: Vec<Canned>,
 ) -> (String, std::sync::mpsc::Receiver<(String, String)>) {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -95,47 +142,55 @@ pub(super) fn stub_with(
     );
     let (send, recv) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let (mut socket, _) = listener.accept().expect("accept");
-        // Drain the whole request before answering. Closing a socket with
-        // unread bytes on it makes the kernel send a reset instead of a FIN,
-        // and a client still writing its body then sees "connection reset"
-        // in place of the status and body this stub meant to serve.
-        let mut request = Vec::new();
-        let mut chunk = [0u8; 8192];
-        loop {
-            match socket.read(&mut chunk) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => request.extend_from_slice(&chunk[..n]),
+        for canned in answers {
+            let (mut socket, _) = listener.accept().expect("accept");
+            // Drain the whole request before answering. Closing a socket with
+            // unread bytes on it makes the kernel send a reset instead of a
+            // FIN, and a client still writing its body then sees "connection
+            // reset" in place of the status and body this stub meant to serve.
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 8192];
+            loop {
+                match socket.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => request.extend_from_slice(&chunk[..n]),
+                }
+                if request_is_complete(&request) {
+                    break;
+                }
             }
-            if request_is_complete(&request) {
-                break;
+            let whole = String::from_utf8_lossy(&request).into_owned();
+            let (head, sent) = whole.split_once("\r\n\r\n").unwrap_or((whole.as_str(), ""));
+            let _ = send.send((head.to_string(), sent.to_string()));
+            let content_type = if canned.status == 200 {
+                "text/event-stream"
+            } else {
+                "application/json"
+            };
+            let extra: String = canned
+                .headers
+                .iter()
+                .map(|(name, value)| format!("{name}: {value}\r\n"))
+                .collect();
+            let head = format!(
+                "HTTP/1.1 {} X\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
+                canned.status,
+                canned.body.len()
+            );
+            let _ = socket.write_all(head.as_bytes());
+            if let Some(pause) = canned.stall {
+                let half = canned.body.len() / 2;
+                let _ = socket.write_all(&canned.body.as_bytes()[..half]);
+                let _ = socket.flush();
+                std::thread::sleep(pause);
+                // Dropped short: the client never gets the rest.
+                continue;
             }
-        }
-        let whole = String::from_utf8_lossy(&request).into_owned();
-        let (head, sent) = whole.split_once("\r\n\r\n").unwrap_or((whole.as_str(), ""));
-        let _ = send.send((head.to_string(), sent.to_string()));
-        let content_type = if status == 200 {
-            "text/event-stream"
-        } else {
-            "application/json"
-        };
-        let head = format!(
-            "HTTP/1.1 {status} X\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        );
-        let _ = socket.write_all(head.as_bytes());
-        if stall {
-            let half = body.len() / 2;
-            let _ = socket.write_all(&body.as_bytes()[..half]);
+            let _ = socket.write_all(canned.body.as_bytes());
             let _ = socket.flush();
-            std::thread::sleep(pause);
-            // Dropped short: the client never gets the rest.
-            return;
+            // Half-close: the client reads a clean end of stream, not a reset.
+            let _ = socket.shutdown(std::net::Shutdown::Write);
         }
-        let _ = socket.write_all(body.as_bytes());
-        let _ = socket.flush();
-        // Half-close: the client reads a clean end of stream, not a reset.
-        let _ = socket.shutdown(std::net::Shutdown::Write);
     });
     (url, recv)
 }
@@ -179,16 +234,32 @@ pub(super) fn question() -> Vec<ChatMessage> {
     }]
 }
 
+/// The pause the wire tests retry with: long enough to be a pause, short
+/// enough that three attempts are still a fast test.
+pub(super) const TEST_BACKOFF: std::time::Duration = std::time::Duration::from_millis(10);
+
 pub(super) fn ask_url(url: &str, http: &reqwest::Client) -> Result<ChatReply, ChatError> {
-    tokio_test_block(ask_at(
-        url,
-        http,
-        "sk-ant-test",
-        ChatModel::Opus5,
-        Effort::High,
-        &context(),
-        &question(),
-    ))
+    ask_url_with(url, http, CancelSignal::never())
+}
+
+/// The same, racing a cancel signal the test holds the other end of.
+pub(super) fn ask_url_with(
+    url: &str,
+    http: &reqwest::Client,
+    cancel: Arc<CancelSignal>,
+) -> Result<ChatReply, ChatError> {
+    tokio_test_block(async {
+        let call = Call {
+            endpoint: url,
+            http,
+            api_key: "sk-ant-test",
+            model: ChatModel::Opus5,
+            effort: Effort::High,
+            context: &context(),
+            messages: &question(),
+        };
+        ask_at(call, cancel, TEST_BACKOFF).await
+    })
 }
 
 pub(super) fn ask_stub(status: u16, body: impl Into<String>) -> Result<ChatReply, String> {

@@ -257,3 +257,128 @@ fn a_platform_survives_a_save_and_a_load() {
     assert_eq!(back.leagues[1].league_id, "449.l.12345");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// A key left in the config file from before Keychain storage is moved out
+/// on load. Into *this engine's* store: an engine over a scratch directory
+/// has a file store in that directory, and the migration must land there
+/// rather than in the login Keychain of whoever runs the tests. Before the
+/// store was fixed at construction, exactly this test would have overwritten
+/// the developer's real key.
+#[test]
+fn a_key_in_a_test_engines_config_migrates_into_its_file_store_not_the_keychain() {
+    use draft_assistant_lib::secrets::load_from;
+    use draft_assistant_lib::yahoo_secrets::FileStore;
+
+    let dir = test_dir("key-migration");
+    std::fs::create_dir_all(&dir).unwrap();
+    const KEY: &str = "sk-ant-api03-test-key-that-must-stay-in-the-scratch-dir";
+    std::fs::write(
+        dir.join("config.json"),
+        format!(r#"{{"my_user_id": "user-1", "anthropic_api_key": "{KEY}"}}"#),
+    )
+    .unwrap();
+
+    let engine = Engine::new(dir.clone());
+    let config = engine.load_config();
+    assert!(
+        config.anthropic_api_key.is_none(),
+        "the key should have left the config"
+    );
+    assert_eq!(config.my_user_id.as_deref(), Some("user-1"));
+
+    // It went into the file store in the scratch directory...
+    let store = FileStore::in_dir(&dir);
+    assert_eq!(load_from(&store).as_deref(), Some(KEY));
+    assert_eq!(
+        engine.secret_store().and_then(load_from).as_deref(),
+        Some(KEY),
+        "the engine's own store is that file"
+    );
+    // ...and the rewritten config file no longer carries it.
+    let on_disk = std::fs::read_to_string(dir.join("config.json")).unwrap();
+    assert!(!on_disk.contains(KEY), "the key is still in config.json");
+    assert!(
+        std::fs::read_to_string(dir.join("yahoo-secrets.json"))
+            .unwrap()
+            .contains(KEY),
+        "the key should be in the scratch directory's secrets file"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A machine with no Keychain has no store but the config file, and the
+/// key stays there rather than vanishing.
+#[test]
+fn with_no_secret_store_the_key_stays_in_the_config_file() {
+    use draft_assistant_lib::sleeper::SleeperClient;
+
+    let dir = test_dir("key-no-store");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("config.json"),
+        r#"{"anthropic_api_key": "sk-ant-api03-stays-put"}"#,
+    )
+    .unwrap();
+    let engine = Engine::with_secrets(dir.clone(), SleeperClient::new(), None);
+    assert!(engine.secret_store().is_none());
+    let config = engine.load_config();
+    assert_eq!(
+        config.anthropic_api_key.as_deref(),
+        Some("sk-ant-api03-stays-put")
+    );
+    assert!(!dir.join("yahoo-secrets.json").exists());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `Engine::for_app` and the default `YahooState` are the two constructors
+/// that can reach the machine's Keychain. Neither belongs in a test: this
+/// reads every test file in the crate so one cannot quietly come back. The
+/// needles are assembled at runtime so this test's own text does not trip it.
+#[test]
+fn no_test_builds_an_engine_or_yahoo_state_over_the_real_keychain() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    collect_rust_files(&root.join("tests"), &mut files);
+    collect_rust_files(&root.join("src"), &mut files);
+    let needles = [
+        format!("Engine::{}(", "for_app"),
+        format!("YahooState::{}()", "default"),
+        format!("YahooState::{}(", "new"),
+    ];
+    let mut offenders = Vec::new();
+    for file in files {
+        let under_tests = file.starts_with(root.join("tests"));
+        let is_test_module = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with("_tests.rs"));
+        if !under_tests && !is_test_module {
+            continue;
+        }
+        let text = std::fs::read_to_string(&file).expect("read a test source file");
+        for needle in &needles {
+            if text.contains(needle.as_str()) {
+                offenders.push(format!("{}: {needle}", file.display()));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "these tests can reach the real Keychain; use Engine::new / YahooState::sandboxed:\n{}",
+        offenders.join("\n")
+    );
+}
+
+fn collect_rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rust_files(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            out.push(path);
+        }
+    }
+}

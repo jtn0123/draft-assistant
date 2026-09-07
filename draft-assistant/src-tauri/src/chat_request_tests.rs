@@ -98,6 +98,7 @@ fn an_empty_key_fails_before_any_request_is_made() {
         Effort::High,
         &crate::chat_context::draft_split(&crate::chat_fixtures::draft_fixture()),
         &one_question("hi"),
+        CancelSignal::never(),
     ));
     let error = result.unwrap_err();
     assert!(error.message.contains("no Anthropic API key"));
@@ -120,16 +121,18 @@ fn a_thread_ending_on_the_assistants_turn_is_refused_before_it_is_sent() {
             content: "Bowers.".into(),
         },
     ];
-    let error = tokio_test_block(ask_at(
-        "http://127.0.0.1:1/v1/messages",
-        &reqwest::Client::new(),
-        "sk-ant-test",
-        ChatModel::Opus5,
-        Effort::High,
-        &crate::chat_context::draft_split(&crate::chat_fixtures::draft_fixture()),
-        &messages,
-    ))
-    .unwrap_err();
+    let http = reqwest::Client::new();
+    let context = crate::chat_context::draft_split(&crate::chat_fixtures::draft_fixture());
+    let call = Call {
+        endpoint: "http://127.0.0.1:1/v1/messages",
+        http: &http,
+        api_key: "sk-ant-test",
+        model: ChatModel::Opus5,
+        effort: Effort::High,
+        context: &context,
+        messages: &messages,
+    };
+    let error = tokio_test_block(ask_at(call, CancelSignal::never(), Duration::ZERO)).unwrap_err();
     assert_eq!(error.message, "the last turn must be a question");
 }
 

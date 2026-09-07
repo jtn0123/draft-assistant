@@ -54,6 +54,19 @@ fn answers(port: u16) -> bool {
     std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
 }
 
+/// Wait for the listener on `port` to go away. The accept loop closes on
+/// its own task, so a fixed pause after `stop()` raced it under load.
+async fn stopped_answering(port: u16) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while answers(port) {
+        if std::time::Instant::now() > deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    true
+}
+
 /// The failure this prevents: HTTPS was decided once at start, so a Mac
 /// that joined its tailnet afterwards showed an http QR until toggled.
 #[tokio::test]
@@ -83,8 +96,7 @@ async fn https_comes_up_when_the_tailnet_appears_after_the_server_started() {
     );
     assert_eq!(keeper.tick(None, now + 90), Some(https.clone()));
     keeper.stop();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    assert!(!answers(https.port));
+    assert!(stopped_answering(https.port).await);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -99,7 +111,10 @@ async fn the_https_port_is_the_same_on_the_next_launch_and_moves_only_when_taken
     let first = keeper(&dir, |_| false);
     let port = first.tick(Some(&on_tailnet()), now).expect("up").port;
     first.stop();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(
+        stopped_answering(port).await,
+        "the first listener let go of the port"
+    );
     let second = keeper(&dir, |_| false);
     assert_eq!(
         second
@@ -213,9 +228,8 @@ async fn an_expired_certificate_that_cannot_be_replaced_drops_https_with_a_warni
         "{:?}",
         capture.lines()
     );
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert!(
-        !answers(https.port),
+        stopped_answering(https.port).await,
         "the listener is gone with the certificate"
     );
     assert_eq!(keeper.https(), None);

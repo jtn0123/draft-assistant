@@ -132,6 +132,7 @@ fn parse_result(stdout: &str, requested: ChatModel) -> Result<ChatReply, String>
         model,
         refused,
         truncated,
+        cancelled: false,
         input_tokens: parsed.usage.input_tokens,
         output_tokens: parsed.usage.output_tokens,
         // The CLI route reports no cache tiers, and is not billed by the

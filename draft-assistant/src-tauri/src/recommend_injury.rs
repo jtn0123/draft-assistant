@@ -27,7 +27,19 @@ enum Tag {
     Weekly(f64),
 }
 
-fn classify(status: &str, weeks_left: u32) -> Option<Tag> {
+fn classify(status: &str, weeks_left: u32, pre_draft: bool) -> Option<Tag> {
+    // A PUP or NFI tag in a draft room is camp news: the player has not been
+    // ruled out of anything, and one who stays on the list misses the first
+    // four games, not the year. The table prices those lists as
+    // season-ending because in season they are; before it starts the same
+    // tag cost a first-round back his whole card over a training-camp
+    // hamstring.
+    if pre_draft && injury_class::is_camp_reserve(status) {
+        return Some(Tag::Missing(
+            0.25,
+            format!("on {status} in camp: may miss the early weeks"),
+        ));
+    }
     // The spellings are the shared table's business. This file used to keep
     // its own, which knew "SUS" and not "Suspended", so a suspended player was
     // priced as an unfamiliar weekly tag: six points for missing weeks.
@@ -80,7 +92,7 @@ pub(crate) fn injury(a: &AvailablePlayer, inputs: &RecommendInputs, mode: Mode, 
     if inputs.pre_draft && is_practice_report(status) {
         return;
     }
-    let Some(tag) = classify(status, inputs.weeks_left) else {
+    let Some(tag) = classify(status, inputs.weeks_left, inputs.pre_draft) else {
         return;
     };
     // Safe mode buys the games it can count on, so it reads every tag harder.

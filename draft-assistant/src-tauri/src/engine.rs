@@ -14,12 +14,16 @@ use crate::sleeper_error::to_message;
 use crate::traded_picks::TradedPick;
 use crate::valuation::ReplacementModel;
 use crate::weekly::WeeklyPoints;
+use crate::yahoo_secrets::{Keychain, SecretStore};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod cache_failures;
 mod config;
+pub(crate) use cache_failures::CacheFailures;
 pub use config::{AppConfig, StoredLeague};
 
 pub(crate) const PLAYERS_TTL_SECS: u64 = 24 * 3600;
@@ -108,6 +112,12 @@ impl LoadedLeague {
     }
 }
 
+/// Where the shipped app keeps the Anthropic key: the Keychain on a Mac that
+/// has the `security` tool, nowhere but the config file anywhere else.
+fn machine_secret_store() -> Option<Arc<dyn SecretStore>> {
+    crate::yahoo_secrets::available().then(|| Arc::new(Keychain) as Arc<dyn SecretStore>)
+}
+
 pub struct Engine {
     pub client: SleeperClient,
     pub data_dir: PathBuf,
@@ -118,7 +128,20 @@ pub struct Engine {
     /// went back to the wire for 15 MB of players on every launch. The
     /// failures are collected here and drained into the loaded league's
     /// warnings, next to the mock-scoring one.
-    pub(crate) cache_warnings: std::sync::Mutex<Vec<(String, String)>>,
+    pub(crate) cache_warnings: std::sync::Mutex<CacheFailures>,
+    /// Where the Anthropic key is kept, apart from the config file.
+    ///
+    /// Decided when the engine is built and never looked up again, so what a
+    /// given engine can write to is a fact about how it was constructed:
+    /// [`Engine::for_app`] hands the shipped app the machine's Keychain, and
+    /// [`Engine::new`] hands everything else a file inside `data_dir`. A test
+    /// engine over a scratch directory therefore cannot reach the developer's
+    /// login Keychain, whatever its config file holds. `None` means there is
+    /// no store apart from the config file, which then keeps the key itself.
+    ///
+    /// Shared rather than owned outright because the Keychain is a subprocess
+    /// and is asked on the blocking pool, which needs a handle of its own.
+    pub(crate) secrets: Option<Arc<dyn SecretStore>>,
     /// The Keychain's answer, remembered.
     ///
     /// Reading it shells out to `/usr/bin/security`: tens of milliseconds on a
@@ -142,6 +165,17 @@ pub struct Engine {
 /// - [`crate::picks::ManualPickStore`] — picks the user typed in by hand
 /// - [`crate::keepers::KeeperStore`] — which picks this league keeps
 impl Engine {
+    /// The shipped app's engine: the Anthropic key goes to the machine's
+    /// Keychain where there is one, and stays in the config file where there
+    /// is not. The only constructor that can reach a Keychain, which is why
+    /// `lib.rs` and the headless companion host are its only callers.
+    pub fn for_app(data_dir: PathBuf) -> Self {
+        Self::with_secrets(data_dir, SleeperClient::new(), machine_secret_store())
+    }
+
+    /// An engine that touches nothing outside `data_dir`: the Anthropic key
+    /// goes to a file in there. For tests, and for the command-line tools
+    /// that run over a scratch directory.
     pub fn new(data_dir: PathBuf) -> Self {
         Self::with_client(data_dir, SleeperClient::new())
     }
@@ -149,7 +183,20 @@ impl Engine {
     /// An engine over a client the caller built. The offline tests use it to
     /// point one engine at a dead port without setting proxy variables the
     /// whole process — every other test thread included — would then share.
+    /// Secrets go to a file in `data_dir`, as with [`Engine::new`].
     pub fn with_client(data_dir: PathBuf, client: SleeperClient) -> Self {
+        let store = crate::yahoo_secrets::FileStore::in_dir(&data_dir);
+        Self::with_secrets(data_dir, client, Some(Arc::new(store)))
+    }
+
+    /// An engine over a client and a secret store the caller chose. `None`
+    /// means no store but the config file, which is what a machine with no
+    /// Keychain gets from [`Engine::for_app`].
+    pub fn with_secrets(
+        data_dir: PathBuf,
+        client: SleeperClient,
+        secrets: Option<Arc<dyn SecretStore>>,
+    ) -> Self {
         std::fs::create_dir_all(&data_dir).ok();
         // Everything under here — rosters, league member names, Sleeper user
         // ids, the players dictionary — is the user's alone to read.
@@ -161,36 +208,16 @@ impl Engine {
         Self {
             client,
             data_dir,
-            cache_warnings: std::sync::Mutex::new(Vec::new()),
+            cache_warnings: std::sync::Mutex::new(CacheFailures::default()),
+            secrets,
             key_cache: tokio::sync::Mutex::new(None),
         }
     }
 
-    /// Remember that a cache write failed, at most once per cache file.
-    ///
-    /// Deduplicated by name rather than by message: the detail carries the
-    /// temp file's own unique name, so a poll tick failing to write the same
-    /// key every three seconds would otherwise stack up one warning per tick.
-    pub(crate) fn note_cache_failure(&self, name: &str, detail: &str) {
-        if let Ok(mut warnings) = self.cache_warnings.lock() {
-            if warnings.iter().all(|(seen, _)| seen != name) {
-                warnings.push((name.to_string(), format!("{name} was not cached: {detail}")));
-            }
-        }
-    }
-
-    /// Take the cache-write failures collected since the last load, so one
-    /// load reports each of them once.
-    pub(crate) fn take_cache_warnings(&self) -> Vec<String> {
-        self.cache_warnings
-            .lock()
-            .map(|mut w| {
-                std::mem::take(&mut *w)
-                    .into_iter()
-                    .map(|(_, m)| m)
-                    .collect()
-            })
-            .unwrap_or_default()
+    /// The store the Anthropic key is kept in, when it is kept anywhere but
+    /// the config file.
+    pub fn secret_store(&self) -> Option<&dyn SecretStore> {
+        self.secrets.as_deref()
     }
 
     fn cache_path(&self, name: &str) -> PathBuf {

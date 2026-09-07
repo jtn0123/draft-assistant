@@ -16,7 +16,7 @@
 //! into argv and decodes it on the way back, whatever its length.
 
 use crate::engine::AppConfig;
-use crate::yahoo_secrets::{Item, Keychain, SecretStore};
+use crate::yahoo_secrets::{Item, SecretStore};
 
 pub use crate::yahoo_secrets::Op;
 
@@ -45,23 +45,17 @@ pub fn clear_in(store: &dyn SecretStore) -> Result<(), String> {
     store.clear(Item::AnthropicKey)
 }
 
-pub fn store(key: &str) -> Result<(), String> {
-    store_in(&Keychain, key)
-}
-
-pub fn load() -> Option<String> {
-    load_from(&Keychain)
-}
-
-pub fn clear() -> Result<(), String> {
-    clear_in(&Keychain)
-}
-
 /// How the rest of the app gets at the key.
 ///
 /// These sit here rather than on `Engine` itself because everything they
-/// decide — which copy of the key wins, when the Keychain is worth asking,
-/// how long the answer is good for — is this module's business.
+/// decide — which copy of the key wins, when the store is worth asking, how
+/// long the answer is good for — is this module's business. The store itself
+/// is whatever the engine was built with ([`Engine::secret_store`]): the
+/// machine's Keychain in the shipped app, a file in the data directory for
+/// everything built over a scratch directory, so nothing here can reach a
+/// Keychain the engine was not handed.
+///
+/// [`Engine::secret_store`]: crate::engine::Engine::secret_store
 impl crate::engine::Engine {
     /// The Anthropic key, wherever it is kept.
     ///
@@ -69,14 +63,17 @@ impl crate::engine::Engine {
     /// rather than on a runtime thread, and its answer is cached: a chat
     /// question used to spawn `security` every time it was asked.
     pub async fn api_key(&self, config: &AppConfig) -> Option<String> {
-        if !available() {
+        let Some(store) = self.secrets.clone() else {
             return config.anthropic_api_key.clone();
-        }
+        };
         let mut cache = self.key_cache.lock().await;
         let stored = match cache.as_ref() {
             Some(known) => known.clone(),
             None => {
-                let loaded = tokio::task::spawn_blocking(load).await.ok().flatten();
+                let loaded = tokio::task::spawn_blocking(move || load_from(store.as_ref()))
+                    .await
+                    .ok()
+                    .flatten();
                 *cache = Some(loaded.clone());
                 loaded
             }
@@ -84,8 +81,8 @@ impl crate::engine::Engine {
         chosen_key(stored, config)
     }
 
-    /// Store (or, with `None`, clear) the key: Keychain when there is one,
-    /// the config file otherwise.
+    /// Store (or, with `None`, clear) the key: the engine's store when it has
+    /// one, the config file otherwise.
     ///
     /// Nothing is written to `config.json` here, and no `AppConfig` is taken.
     /// This used to be handed a clone of the live config and save the whole
@@ -96,21 +93,21 @@ impl crate::engine::Engine {
     /// instead is the one field that changed: it re-reads the live config,
     /// sets that field, and saves under the lock.
     pub async fn store_api_key(&self, key: Option<String>) -> Result<Option<String>, String> {
-        if !available() {
-            // No Keychain: the key itself is what belongs in the config file.
+        let Some(store) = self.secrets.clone() else {
+            // No store: the key itself is what belongs in the config file.
             return Ok(key);
-        }
+        };
         let writing = key.clone();
         tokio::task::spawn_blocking(move || match &writing {
-            Some(k) => store(k),
-            None => clear(),
+            Some(k) => store_in(store.as_ref(), k),
+            None => clear_in(store.as_ref()),
         })
         .await
-        .map_err(|e| format!("could not reach the Keychain: {e}"))??;
+        .map_err(|e| format!("could not reach the key store: {e}"))??;
         // The remembered answer is now the one we just wrote, so the next
         // question does not have to go and ask again.
         *self.key_cache.lock().await = Some(key);
-        // The Keychain holds it; the config file must not also hold a copy.
+        // The store holds it; the config file must not also hold a copy.
         Ok(None)
     }
 }
@@ -237,6 +234,64 @@ mod tests {
         assert_eq!(load_from(&store).as_deref(), Some(long.as_str()));
         clear_in(&store).expect("clear");
         assert!(load_from(&store).is_none());
+    }
+
+    /// A test-built engine has a file store in its own directory and no
+    /// other, so the round trip is provably a file write: nothing here can
+    /// spawn `/usr/bin/security`, whatever machine runs it.
+    #[tokio::test]
+    async fn an_engine_stores_the_key_in_the_store_it_was_built_with() {
+        let scratch = Scratch::new("engine-store");
+        let engine = crate::engine::Engine::new(scratch.0.clone());
+        let config = config_with(None);
+        assert!(engine.api_key(&config).await.is_none());
+
+        let left_for_config = engine
+            .store_api_key(Some(KEY.to_string()))
+            .await
+            .expect("stored");
+        assert!(
+            left_for_config.is_none(),
+            "the store holds it, so the config file must not"
+        );
+        let on_disk =
+            std::fs::read_to_string(scratch.0.join("yahoo-secrets.json")).expect("the file store");
+        assert!(on_disk.contains(KEY), "the key is not in the scratch store");
+        assert_eq!(
+            load_from(&FileStore::in_dir(&scratch.0)).as_deref(),
+            Some(KEY)
+        );
+        assert_eq!(engine.api_key(&config).await.as_deref(), Some(KEY));
+
+        // Clearing goes to the same place and empties the cache with it.
+        assert!(engine.store_api_key(None).await.expect("cleared").is_none());
+        assert!(load_from(&FileStore::in_dir(&scratch.0)).is_none());
+        assert!(engine.api_key(&config).await.is_none());
+    }
+
+    /// No store at all (a machine with no Keychain): the key is handed back
+    /// for the config file to keep, and read from there.
+    #[tokio::test]
+    async fn with_no_store_the_key_is_left_to_the_config_file() {
+        let scratch = Scratch::new("engine-no-store");
+        let engine = crate::engine::Engine::with_secrets(
+            scratch.0.clone(),
+            crate::sleeper::SleeperClient::new(),
+            None,
+        );
+        assert_eq!(
+            engine
+                .store_api_key(Some(KEY.to_string()))
+                .await
+                .expect("nothing to fail")
+                .as_deref(),
+            Some(KEY)
+        );
+        assert!(!scratch.0.join("yahoo-secrets.json").exists());
+        assert_eq!(
+            engine.api_key(&config_with(Some(KEY))).await.as_deref(),
+            Some(KEY)
+        );
     }
 
     /// A key an older build wrote went into the Keychain as its own text, and

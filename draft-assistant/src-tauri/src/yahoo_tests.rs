@@ -107,3 +107,70 @@ fn a_revoked_grant_reads_as_sign_in_again_rather_than_as_an_http_status() {
         "a Yahoo outage is not a sign-out"
     );
 }
+
+fn creds() -> YahooCredentials {
+    YahooCredentials {
+        client_id: "dj0yJmk9unit".into(),
+        client_secret: "unit-secret".into(),
+    }
+}
+
+/// Hosts nobody answers on: port 1 refuses every connection, so a request
+/// that does go out fails in a way these tests would notice.
+fn dead_hosts() -> YahooHosts {
+    YahooHosts {
+        api_base: "http://127.0.0.1:1/fantasy/v2".into(),
+        login_base: "http://127.0.0.1:1".into(),
+        redirect_uri: "oob".into(),
+    }
+}
+
+#[tokio::test]
+async fn a_stored_pair_with_no_refresh_token_is_a_sign_out_not_a_permanent_error() {
+    // The failure this prevents: a pair whose refresh token was empty came
+    // back as "no refresh token is stored", an auth error that is neither
+    // retryable nor a sign-out. The pair stayed in the Keychain, Settings
+    // said "Connected", and every call failed the same way until the user
+    // guessed that Disconnect was the fix.
+    let stale = TokenSet {
+        access_token: "access-stale".into(),
+        refresh_token: String::new(),
+        expires_at: 0,
+    };
+    let client = YahooClient::with_hosts(creds(), stale, dead_hosts());
+    let error = client
+        .league_teams("449.l.1")
+        .await
+        .expect_err("nothing to renew with");
+    assert_eq!(error, YahooError::SignedOut, "{error:?}");
+    assert!(
+        client.signed_out(),
+        "whoever persists the pair has to be told to clear it"
+    );
+}
+
+#[tokio::test]
+async fn the_pair_counts_as_unsaved_only_once_a_refresh_has_changed_it() {
+    let first = TokenSet {
+        access_token: "access-1".into(),
+        refresh_token: "refresh-1".into(),
+        expires_at: u64::MAX,
+    };
+    let client = YahooClient::with_hosts(creds(), first.clone(), dead_hosts());
+    // Built from what the store holds: nothing to write.
+    assert!(client.unsaved_tokens().await.is_none());
+    let renewed = TokenSet {
+        access_token: "access-2".into(),
+        ..first.clone()
+    };
+    *client.tokens.lock().await = renewed.clone();
+    assert_eq!(client.unsaved_tokens().await, Some(renewed.clone()));
+    // Still unsaved until the caller says the write landed.
+    assert_eq!(client.unsaved_tokens().await, Some(renewed.clone()));
+    client.mark_persisted(&renewed).await;
+    assert!(client.unsaved_tokens().await.is_none());
+    // A stale acknowledgement does not cover a newer pair.
+    *client.tokens.lock().await = first.clone();
+    client.mark_persisted(&renewed).await;
+    assert_eq!(client.unsaved_tokens().await, Some(first));
+}

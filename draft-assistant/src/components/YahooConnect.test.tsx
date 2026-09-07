@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   yahooSaveCredentials: vi.fn(),
   yahooBeginConnect: vi.fn(),
   yahooFinishConnect: vi.fn(),
+  yahooCancelConnect: vi.fn(),
   yahooDisconnect: vi.fn(),
   yahooLeagues: vi.fn(),
 }));
@@ -50,6 +51,7 @@ async function open(first: YahooStatus = status()) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.yahooCancelConnect.mockResolvedValue(undefined);
 });
 
 describe("the credentials step", () => {
@@ -370,6 +372,58 @@ describe("the dialog itself", () => {
 
     await settle(() => screen.getByRole("dialog").parentElement?.click());
     expect(onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it("hands the loopback port back when it closes mid sign-in", async () => {
+    // "Sign in" bound the loopback listener and parked a state for the
+    // browser to come back with. Closing the dialog used to leave both where
+    // they were, so the next "Sign in" was told the port was busy.
+    const user = userEvent.setup();
+    await open(status({ configured: true, redirect: "http://localhost:8731/" }));
+    mocks.yahooBeginConnect.mockResolvedValue({
+      authorize_url: "https://yahoo.example/auth",
+      state: "s-loop",
+      redirect: "http://localhost:8731/",
+    });
+    await settle(() => screen.getByRole("button", { name: "Sign in to Yahoo" }).click());
+    expect(mocks.yahooCancelConnect).not.toHaveBeenCalled();
+
+    await settle(() => screen.getByRole("button", { name: "Close" }).click());
+    expect(mocks.yahooCancelConnect).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // Escape and the scrim are closes too.
+    await user.keyboard("{Escape}");
+    await settle(() => screen.getByRole("dialog").parentElement?.click());
+    expect(mocks.yahooCancelConnect).toHaveBeenCalledTimes(3);
+    expect(onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it("asks the backend for nothing on a close with no sign-in pending", async () => {
+    const user = userEvent.setup();
+    await open(status({ configured: true }));
+    // Nothing begun.
+    await settle(() => screen.getByRole("button", { name: "Close" }).click());
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(mocks.yahooCancelConnect).not.toHaveBeenCalled();
+
+    // Begun and finished: the backend already let the port go.
+    mocks.yahooBeginConnect.mockResolvedValue({
+      authorize_url: "https://yahoo.example/auth",
+      state: "s-1",
+      redirect: "oob",
+    });
+    mocks.yahooFinishConnect.mockResolvedValue(
+      status({ configured: true, connected: true, account: "jtn0123" }),
+    );
+    await settle(() => screen.getByRole("button", { name: "Sign in to Yahoo" }).click());
+    await user.type(screen.getByLabelText("Code from Yahoo"), "xy7q9{Enter}");
+    expect(screen.getByText("jtn0123")).toBeInTheDocument();
+
+    await settle(() => screen.getByRole("button", { name: "Close" }).click());
+    expect(onClose).toHaveBeenCalledTimes(3);
+    expect(mocks.yahooCancelConnect).not.toHaveBeenCalled();
   });
 });
 

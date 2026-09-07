@@ -63,7 +63,17 @@ export function YahooConnect({
     };
   }, []);
 
-  useFocusTrap(dialog, onClose);
+  /** Close the dialog. A sign-in that was begun and not finished still holds
+   *  the loopback port and the state it was waiting on; hand both back on the
+   *  way out, or the next "Sign in" is told the port is busy. A plain close
+   *  with nothing pending asks the backend for nothing. The cancel cannot
+   *  fail, and the dialog is gone before an answer could be shown anyway. */
+  const close = () => {
+    if (start !== null) void api.yahooCancelConnect().catch(() => undefined);
+    onClose();
+  };
+
+  useFocusTrap(dialog, close);
 
   // The first control of whichever step is showing, as soon as the status says
   // which step that is. This dialog can be opened from the first-launch screen,
@@ -160,7 +170,7 @@ export function YahooConnect({
       className="scrim"
       role="presentation"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) close();
       }}
     >
       <div
@@ -218,7 +228,7 @@ export function YahooConnect({
         )}
 
         <div className="dialog-actions">
-          <button type="button" className="btn-ghost" onClick={onClose}>
+          <button type="button" className="btn-ghost" onClick={close}>
             Close
           </button>
         </div>

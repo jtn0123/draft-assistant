@@ -3,10 +3,12 @@
 
 use super::hub::{now_ms, CompanionHub, Emit};
 use super::net;
+use super::store::DevicesUnder;
 use super::tls::{self, TlsSource};
 use super::tls_keeper::Keeper;
 use crate::shared_chat::SharedChat;
 use crate::state::AppState;
+use crate::yahoo_secrets::{Item, SecretStore};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -53,17 +55,31 @@ pub struct Srv {
 }
 
 impl CompanionServer {
+    /// The desktop app's server: pairings in the machine's Keychain under
+    /// [`Item::CompanionDevices`], HTTPS from Tailscale when it is there.
     pub fn new(host_name: String, data_dir: std::path::PathBuf) -> Result<Self, String> {
-        Ok(Self {
-            hub: Arc::new(CompanionHub::new(host_name, data_dir.clone())?),
-            chat: Arc::new(SharedChat::new(data_dir.clone())),
-            srv: OnceLock::new(),
-            running: Mutex::new(None),
-            tls: Mutex::new(TlsSource::Tailscale {
+        Self::new_under(host_name, data_dir, Item::CompanionDevices)
+    }
+
+    /// The same, with the pairings filed under `devices`. The headless
+    /// `companion_host` passes [`Item::CompanionDevicesHeadless`] so that it
+    /// and the desktop app on one Mac never overwrite each other's phones;
+    /// see [`crate::companion::store::DevicesUnder`].
+    pub fn new_under(
+        host_name: String,
+        data_dir: std::path::PathBuf,
+        devices: Item,
+    ) -> Result<Self, String> {
+        let secrets = crate::yahoo_secrets::store_for(&data_dir);
+        Self::with_secrets(
+            host_name,
+            data_dir.clone(),
+            secrets,
+            devices,
+            TlsSource::Tailscale {
                 dir: data_dir.join("companion-tls"),
-            }),
-            https_port_file: https_port_file(&data_dir),
-        })
+            },
+        )
     }
 
     /// The same, but with the paired devices kept in a file inside the given
@@ -71,9 +87,33 @@ impl CompanionServer {
     /// tests build: a test run must never write a device token to the
     /// developer's real login Keychain.
     pub fn sandboxed(host_name: String, data_dir: std::path::PathBuf) -> Result<Self, String> {
+        Self::sandboxed_under(host_name, data_dir, Item::CompanionDevices)
+    }
+
+    /// [`CompanionServer::sandboxed`] with the pairings filed under `devices`,
+    /// so a test can build the headless host's server without a Keychain.
+    pub fn sandboxed_under(
+        host_name: String,
+        data_dir: std::path::PathBuf,
+        devices: Item,
+    ) -> Result<Self, String> {
         let secrets = Box::new(crate::yahoo_secrets::FileStore::in_dir(
             data_dir.join("secrets"),
         ));
+        // Never the real Tailscale from a test: `tailscale cert` on the
+        // developer's machine would mint a real certificate into a
+        // scratch directory and count against Let's Encrypt's limits.
+        Self::with_secrets(host_name, data_dir, secrets, devices, TlsSource::Off)
+    }
+
+    fn with_secrets(
+        host_name: String,
+        data_dir: std::path::PathBuf,
+        secrets: Box<dyn SecretStore>,
+        devices: Item,
+        tls: TlsSource,
+    ) -> Result<Self, String> {
+        let secrets = Box::new(DevicesUnder::new(secrets, devices)?);
         Ok(Self {
             hub: Arc::new(CompanionHub::with_secrets(
                 host_name,
@@ -83,10 +123,7 @@ impl CompanionServer {
             chat: Arc::new(SharedChat::new(data_dir.clone())),
             srv: OnceLock::new(),
             running: Mutex::new(None),
-            // Never the real Tailscale from a test: `tailscale cert` on the
-            // developer's machine would mint a real certificate into a
-            // scratch directory and count against Let's Encrypt's limits.
-            tls: Mutex::new(TlsSource::Off),
+            tls: Mutex::new(tls),
             https_port_file: https_port_file(&data_dir),
         })
     }

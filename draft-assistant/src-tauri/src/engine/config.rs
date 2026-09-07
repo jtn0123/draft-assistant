@@ -157,9 +157,16 @@ impl Engine {
             }
         };
         if let Some(key) = config.anthropic_api_key.take() {
-            if crate::secrets::available() && crate::secrets::store(&key).is_ok() {
-                // The key is safely in the Keychain either way; if rewriting
-                // the file to drop it fails, the next save tries again.
+            // Only ever into this engine's own store, never a Keychain the
+            // engine was not built with: an engine over a scratch directory
+            // moves the key into a file in that directory.
+            let moved = self
+                .secrets
+                .as_deref()
+                .is_some_and(|store| crate::secrets::store_in(store, &key).is_ok());
+            if moved {
+                // The key is safely in the store either way; if rewriting the
+                // file to drop it fails, the next save tries again.
                 let _ = self.save_config(&config);
             } else {
                 config.anthropic_api_key = Some(key);

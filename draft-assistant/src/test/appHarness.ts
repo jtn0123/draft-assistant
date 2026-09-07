@@ -39,6 +39,7 @@ const METHODS: Record<keyof Api, true> = {
   yahooSaveCredentials: true,
   yahooBeginConnect: true,
   yahooFinishConnect: true,
+  yahooCancelConnect: true,
   yahooDisconnect: true,
   yahooLeagues: true,
   getState: true,

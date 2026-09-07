@@ -18,7 +18,7 @@ fn src_dir() -> PathBuf {
 /// The failure this prevents: `logged!` coverage was a convention, and a
 /// command added without it failed into a toast that was dismissed, leaving
 /// no record it had been called. Now the omission fails `cargo test`.
-const INFALLIBLE: [(&str, &str); 5] = [
+const INFALLIBLE: [(&str, &str); 6] = [
     (
         "diagnostics",
         "reads state that is already in memory; the Result is Tauri's async signature, never Err",
@@ -28,6 +28,10 @@ const INFALLIBLE: [(&str, &str); 5] = [
         "the page's own reporter; a reporter that can fail reports its own failure in a loop",
     ),
     ("chat_suggestions", "returns a Vec, not a Result"),
+    (
+        "yahoo_cancel_connect",
+        "drops the pending sign-in and its listener; nothing in it can fail, the Result is Tauri's async signature",
+    ),
     (
         "start_polling",
         "flips a flag and spawns the loop; every failure inside the loop is logged there",
@@ -106,9 +110,26 @@ fn can_fail(body: &str) -> bool {
     }
     code.match_indices("Err(").any(|(start, _)| {
         let after = &code[start + "Err(".len()..];
-        let close = after.find(')').map_or(after.len(), |i| i + 1);
-        let next = after[close..].trim_start();
-        !(next.starts_with("=>") || next.starts_with("= "))
+        // Walk to the parenthesis that closes this `Err(`, then past any
+        // enclosing ones (`Some(Err(e))` is a pattern, not a return), and
+        // look at what follows: a match arm or a binding is not a failure.
+        let mut depth = 1usize;
+        let mut close = after.len();
+        for (i, c) in after.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let next = after[close..].trim_start_matches(|c: char| c == ')' || c.is_whitespace());
+        !(next.starts_with("=>") || next.starts_with("= ") || next.starts_with('|'))
     })
 }
 

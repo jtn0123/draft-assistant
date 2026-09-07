@@ -33,12 +33,11 @@ export default defineConfig({
       // change that quietly drops a screen's worth of tests trips the floor
       // while ordinary movement does not.
       //
-      // Re-baselined when `include` was added (2026-09-05). Measured on the
-      // imported set the suite read 94.0 lines / 94.0 statements / 89.9
-      // functions / 88.8 branches; measured on every file under src/ it read
-      // COVERAGE_AFTER_PLACEHOLDER. The floors below sit five points under
-      // the second set of numbers.
-      thresholds: { lines: 89, statements: 87, functions: 84, branches: 83 },
+      // Re-baselined when `include` was added (2026-09-05) and measured again
+      // on every file under src/ on 2026-09-07: 94.9 lines / 93.05 statements
+      // / 89.92 functions / 88.99 branches (`npm run test:coverage`, the
+      // "All files" row). The floors below sit five points under those.
+      thresholds: { lines: 89, statements: 88, functions: 84, branches: 83 },
     },
   },
 });

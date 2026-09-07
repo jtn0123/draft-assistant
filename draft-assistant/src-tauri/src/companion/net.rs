@@ -420,7 +420,11 @@ mod tests {
         let (held, port) = bind_from(0).expect("an ephemeral port is free");
         let (next, taken) = bind_from(port).expect("the next port is free");
         assert_ne!(taken, port, "the held port was handed out twice");
-        assert!(taken > port && taken < port + super::PORT_ATTEMPTS);
+        // u32 so a kernel-picked port near the top of the range cannot
+        // overflow the bound.
+        assert!(
+            taken > port && u32::from(taken) < u32::from(port) + u32::from(super::PORT_ATTEMPTS)
+        );
         drop(next);
         drop(held);
     }

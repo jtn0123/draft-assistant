@@ -17,40 +17,62 @@ use super::hub::Device;
 use crate::yahoo_secrets::{Item, SecretStore};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Whether this process is the headless `companion_host` rather than the
-/// desktop app. Set once, before the hub is built, and never cleared.
+/// The store the hub keeps its pairings in, filed under one named item.
 ///
-/// The choice lives here rather than in the server's constructor because the
-/// server builds its hub, and the hub its store, without a parameter for it;
-/// what differs between the two is only which Keychain account the device
-/// list goes under, and this module is the one place that names it.
-static HEADLESS: AtomicBool = AtomicBool::new(false);
-
-/// Keep this process's pairings apart from the desktop app's. The headless
-/// host and the desktop app on one Mac used to share `companion-devices`:
-/// pairing a phone against the host overwrote every phone paired to the
-/// desktop, and the desktop's next save overwrote the host's. Called by
-/// `companion_host` before it builds its server.
-pub fn select_headless_account() {
-    HEADLESS.store(true, Ordering::SeqCst);
+/// The desktop app and the headless `companion_host` on one Mac used to
+/// share `companion-devices`: pairing a phone against the host overwrote
+/// every phone paired to the desktop, and the desktop's next save overwrote
+/// the host's. Each process now says which item is its own when it builds
+/// its server, and this wrapper files every device-list read and write
+/// under that item, so the hub itself never has to know which process it is
+/// in. Any other item passes straight through.
+pub struct DevicesUnder {
+    inner: Box<dyn SecretStore>,
+    item: Item,
 }
 
-/// The item the device list of this process goes under.
-pub fn devices_item() -> Item {
-    devices_item_for(HEADLESS.load(Ordering::SeqCst))
-}
+impl DevicesUnder {
+    /// `inner`, with the device list filed under `item`. Anything but
+    /// [`Item::CompanionDevices`] or [`Item::CompanionDevicesHeadless`] is
+    /// refused: the list has to go under one of the two companion accounts,
+    /// never over the Yahoo tokens or the API key.
+    pub fn new(inner: Box<dyn SecretStore>, item: Item) -> Result<Self, String> {
+        match item {
+            Item::CompanionDevices | Item::CompanionDevicesHeadless => Ok(Self { inner, item }),
+            other => Err(format!(
+                "the paired devices cannot be filed under {}",
+                other.account()
+            )),
+        }
+    }
 
-/// The pure half of [`devices_item`]: which item a headless or a desktop
-/// process keeps its pairings in.
-pub fn devices_item_for(headless: bool) -> Item {
-    if headless {
-        Item::CompanionDevicesHeadless
-    } else {
-        Item::CompanionDevices
+    fn map(&self, item: Item) -> Item {
+        if item == DEVICES {
+            self.item
+        } else {
+            item
+        }
     }
 }
+
+impl SecretStore for DevicesUnder {
+    fn read(&self, item: Item) -> Option<String> {
+        self.inner.read(self.map(item))
+    }
+
+    fn write(&self, item: Item, value: &str) -> Result<(), String> {
+        self.inner.write(self.map(item), value)
+    }
+
+    fn clear(&self, item: Item) -> Result<(), String> {
+        self.inner.clear(self.map(item))
+    }
+}
+
+/// The item [`load`] and [`save`] name. A [`DevicesUnder`] around the store
+/// is what turns it into the headless host's account when that is wanted.
+const DEVICES: Item = Item::CompanionDevices;
 
 /// One paired device as it survives a restart: the device the contract
 /// describes, plus the token that device authenticates with.
@@ -83,7 +105,7 @@ pub fn legacy_path_in(data_dir: &Path) -> PathBuf {
 /// the cost is re-pairing, and refusing to start the app over it would be
 /// worse.
 pub fn load(store: &dyn SecretStore, data_dir: &Path) -> Option<StoredHub> {
-    load_item(store, data_dir, devices_item())
+    load_item(store, data_dir, DEVICES)
 }
 
 /// [`load`] against a named item, so a test can show the desktop's and the
@@ -125,7 +147,7 @@ fn migrate_legacy_file(store: &dyn SecretStore, data_dir: &Path, item: Item) -> 
 /// the pairing the user just made is already live in memory, and losing it at
 /// the next restart is not a reason to refuse it now.
 pub fn save(store: &dyn SecretStore, stored: &StoredHub) {
-    save_item(store, stored, devices_item());
+    save_item(store, stored, DEVICES);
 }
 
 /// [`save`] against a named item.

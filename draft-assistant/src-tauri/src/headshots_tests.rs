@@ -233,14 +233,14 @@ fn a_photo_that_arrives_replaces_the_miss_that_was_remembered() {
 
     // No photo: the miss is written down so the next render does not
     // fetch it all over again.
-    store_on_disk(&image, &miss, b"<html>404</html>", false);
+    store_on_disk(&image, &miss, &Fetched::NoPicture);
     assert!(miss.exists());
     assert!(!image.exists());
 
     // The rookie's photo lands. The miss has to go with it, or he stays
     // faceless until it expires.
     let png = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
-    store_on_disk(&image, &miss, &png, true);
+    store_on_disk(&image, &miss, &Fetched::Picture(png.to_vec()));
     assert_eq!(std::fs::read(&image).unwrap(), png);
     assert!(!miss.exists());
     // Written through a temp file, so a crash mid-write cannot leave half
@@ -278,9 +278,10 @@ fn two_writers_of_one_headshot_leave_a_whole_image() {
         .into_iter()
         .map(|bytes| {
             let (image, miss) = (image.clone(), miss.clone());
+            let fetched = Fetched::Picture(bytes);
             std::thread::spawn(move || {
                 for _ in 0..10 {
-                    store_on_disk(&image, &miss, &bytes, true);
+                    store_on_disk(&image, &miss, &fetched);
                 }
             })
         })
@@ -292,5 +293,110 @@ fn two_writers_of_one_headshot_leave_a_whole_image() {
     let written = std::fs::read(&image).expect("an image is in place");
     assert!(written == png_a || written == png_b, "torn image");
     assert!(temp_files_in(&heads).is_empty());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Only the CDN's own "no such picture" is a miss. A 500, a 429 or a 503
+/// says nothing about the player, and used to be filed as "no photo" for
+/// three days.
+#[test]
+fn only_a_404_or_a_410_means_there_is_no_picture() {
+    let png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    assert!(matches!(classify(200, png.clone()), Fetched::Picture(_)));
+    // A 200 whose body is the CDN's HTML "not found" page is still no picture.
+    assert!(matches!(
+        classify(200, b"<html>not found</html>".to_vec()),
+        Fetched::NoPicture
+    ));
+    assert!(matches!(classify(404, Vec::new()), Fetched::NoPicture));
+    assert!(matches!(classify(410, Vec::new()), Fetched::NoPicture));
+    for transient in [403, 429, 500, 502, 503, 504] {
+        assert!(
+            matches!(classify(transient, Vec::new()), Fetched::Unavailable(s) if s == transient),
+            "{transient} was not treated as transient"
+        );
+    }
+}
+
+#[test]
+fn a_transient_failure_writes_nothing_to_disk() {
+    let dir = image_dir("transient-store");
+    let heads = dir.join("headshots");
+    let image = heads.join("11560.img");
+    let miss = heads.join("11560.none");
+    std::fs::create_dir_all(&heads).unwrap();
+
+    store_on_disk(&image, &miss, &Fetched::Unavailable(503));
+    assert!(!miss.exists(), "a 503 was remembered as a missing photo");
+    assert!(!image.exists());
+    assert!(temp_files_in(&heads).is_empty());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A one-shot HTTP server on localhost that answers every request with
+/// `status` and `body`, for driving the fetch path end to end. Returns the
+/// URL to ask.
+fn serve_status(status: u16, body: &'static [u8]) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    std::thread::spawn(move || {
+        for mut socket in listener.incoming().flatten() {
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 4096];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                match socket.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => request.extend_from_slice(&chunk[..n]),
+                }
+            }
+            let head = format!(
+                "HTTP/1.1 {status} X\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = socket.write_all(head.as_bytes());
+            let _ = socket.write_all(body);
+            let _ = socket.flush();
+        }
+    });
+    format!("http://{addr}/11560.jpg")
+}
+
+/// The whole path: a CDN that is having a bad minute must not leave a
+/// `.none` behind, so the next render asks again and gets the photo.
+#[tokio::test]
+async fn a_cdn_error_is_retried_next_time_rather_than_remembered_as_no_photo() {
+    let dir = image_dir("transient-fetch");
+    let engine = Engine::with_client(
+        dir.clone(),
+        crate::sleeper::SleeperClient::with_host("http://127.0.0.1:9"),
+    );
+    let heads = dir.join("headshots");
+
+    let broken = serve_status(503, b"");
+    assert_eq!(engine.cached_image("11560", &broken).await.unwrap(), None);
+    assert!(
+        !heads.join("11560.none").exists(),
+        "a 503 from the CDN was written down as a three-day miss"
+    );
+
+    // The CDN is back: the same key fetches the photo straight away.
+    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    let working = serve_status(200, PNG);
+    let served = engine
+        .cached_image("11560", &working)
+        .await
+        .unwrap()
+        .expect("the photo, now that the CDN answers");
+    assert!(served.starts_with("data:image/png;base64,"), "{served}");
+    assert_eq!(engine.headshot_count(), 1);
+
+    // Whereas a 404 is the CDN's word, and is remembered.
+    let missing = serve_status(404, b"");
+    assert_eq!(engine.cached_image("99999", &missing).await.unwrap(), None);
+    assert!(
+        heads.join("99999.none").exists(),
+        "a 404 should be remembered"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }

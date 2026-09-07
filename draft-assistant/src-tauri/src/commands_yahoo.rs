@@ -26,7 +26,9 @@ use crate::yahoo_secrets;
 use serde::Serialize;
 use tauri::State;
 
-pub use secrets::{client_for, client_from, persist_tokens, persist_tokens_for};
+pub use secrets::{
+    client_for, client_from, persist_tokens, persist_tokens_for, persist_tokens_into,
+};
 use secrets::{read_secrets, status_now, store_for};
 
 /// What the Settings panel renders itself from.
@@ -167,7 +169,7 @@ async fn yahoo_begin_connect_inner(state: &AppState) -> Result<YahooConnectStart
     state.yahoo.expect_state(&nonce).await;
     // A loopback redirect has to be listened for before the browser is sent
     // off, or the one request it makes on the way back finds nobody home.
-    loopback::listen_if_loopback(&redirect, state.engine.clone(), state.yahoo.clone())?;
+    loopback::listen_if_loopback(&redirect, state.engine.clone(), state.yahoo.clone()).await?;
     if state.yahoo.open_browser {
         open_in_browser(&authorize_url);
     }
@@ -289,8 +291,25 @@ async fn yahoo_disconnect_inner(
     .await
     .map_err(|e| format!("Yahoo credentials: {e}"))??;
     state.yahoo.set_client(None).await;
-    let _ = state.yahoo.take_state().await;
+    cancel_connect(&state.yahoo).await;
     status_now(state).await
+}
+
+/// Abandon a sign-in that is part-way through: the user closed the Connect
+/// dialog. The pending `state` goes, and so does the loopback listener, so
+/// the port is free the moment they try again rather than five minutes
+/// later. Nothing stored is touched; a connected account stays connected.
+#[tauri::command]
+pub async fn yahoo_cancel_connect(state: State<'_, AppState>) -> Result<(), String> {
+    // Nothing here can fail, so there is no error line for the wrapper the
+    // other commands use to write.
+    cancel_connect(&state.yahoo).await;
+    Ok(())
+}
+
+pub(crate) async fn cancel_connect(yahoo: &YahooState) {
+    let _ = yahoo.take_state().await;
+    loopback::cancel_for(&yahoo.hosts.redirect_uri).await;
 }
 
 /// The NFL leagues on the connected account, for the league picker.

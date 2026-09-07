@@ -442,6 +442,8 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
 
     // ---------- nothing to ask, nothing to fail ----------
     sleeperLeagues: () => Promise.resolve([]),
+    // A follower can never begin a Yahoo sign-in, so there is none to cancel.
+    yahooCancelConnect: () => Promise.resolve(),
     yahooStatus: () =>
       Promise.resolve({ configured: false, connected: false, redirect: "oob", account: null }),
     chatSuggestions: () => Promise.resolve([]),

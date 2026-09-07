@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   setApiKey: vi.fn(),
   // Typed so the assertions below read a real ChatRequest, not `any`.
   askClaude: vi.fn<(args: ChatRequest) => Promise<ChatReply>>(),
+  // The panel listens for the shared thread's answers to refresh the screen
+  // spend; what that does is covered in Chat.inflight.test.tsx.
+  onSharedChat: vi.fn(() => Promise.resolve(() => undefined)),
 }));
 
 vi.mock("../api", () => ({ api: mocks }));
@@ -43,6 +46,8 @@ function reply(overrides: Partial<ChatReply>): ChatReply {
     thinking: null,
     model: "Opus 5",
     refused: false,
+    truncated: false,
+    cancelled: false,
     input_tokens: 0,
     output_tokens: 0,
     provider: "api",

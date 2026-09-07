@@ -254,12 +254,124 @@ fn the_listener_takes_the_code_and_tells_the_user_to_close_the_tab() {
 }
 
 #[test]
-fn a_redirect_without_a_code_still_answers_the_browser_but_fails_the_flow() {
+fn a_redirect_yahoo_refused_still_answers_the_browser_but_fails_the_flow() {
     let (caught, page) = browser_get("/?error=access_denied");
     assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
     assert!(page.contains("No authorization code"), "{page}");
-    let error = caught.expect_err("no code means no flow");
+    let error = caught.expect_err("Yahoo's refusal ends the flow");
     assert!(matches!(error, AuthError::Invalid(_)), "{error:?}");
+    assert!(error.to_string().contains("access_denied"), "{error}");
+}
+
+/// Send one request the way a browser would and read the page back, against
+/// a listener some other thread is running.
+fn browser_get_on(port: u16, target: &str) -> String {
+    let mut socket = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    socket
+        .write_all(format!("GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes())
+        .expect("write");
+    let mut page = String::new();
+    let _ = socket.read_to_string(&mut page);
+    page
+}
+
+#[test]
+fn a_stray_connection_before_the_redirect_does_not_use_up_the_listener() {
+    // The failure this prevents: the listener took exactly one connection.
+    // Browsers open a speculative connection to a host they are about to
+    // navigate to and fetch /favicon.ico on their own, so the one `accept`
+    // regularly went to something that was not the redirect, and the real
+    // one, a moment behind, found the port closed.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let caught = std::thread::spawn(move || {
+        catch_redirect_on_within(listener, std::time::Duration::from_secs(10))
+    });
+    // A connection that says nothing and goes away.
+    drop(std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect"));
+    // A request with no code on it.
+    let page = browser_get_on(port, "/favicon.ico");
+    assert!(page.contains("No authorization code"), "{page}");
+    // Then the redirect itself.
+    let page = browser_get_on(port, "/?code=live-code&state=nonce-1");
+    assert!(page.contains("close this tab"), "{page}");
+    let redirect = caught
+        .join()
+        .expect("listener thread")
+        .expect("the redirect arrived after the strays");
+    assert_eq!(redirect.code, "live-code");
+    assert_eq!(redirect.state, "nonce-1");
+}
+
+#[test]
+fn a_cancelled_listener_stops_and_lets_go_of_the_port() {
+    // The failure this prevents: nothing could stop the listener, so a
+    // Connect the user abandoned held the port for five minutes and a second
+    // Connect inside that time failed with "port in use".
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = cancel.clone();
+    let caught = std::thread::spawn(move || {
+        catch_redirect_on_within_unless(listener, std::time::Duration::from_secs(60), &flag)
+    });
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    let started = std::time::Instant::now();
+    let error = caught
+        .join()
+        .expect("listener thread")
+        .expect_err("a cancelled listener catches nothing");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "the cancel took {:?}",
+        started.elapsed()
+    );
+    assert!(matches!(error, AuthError::Invalid(_)), "{error:?}");
+    assert!(error.to_string().contains("cancelled"), "{error}");
+    // And the port is free again: the whole point.
+    TcpListener::bind(("127.0.0.1", port)).expect("the cancelled listener released the port");
+}
+
+#[test]
+fn a_cancel_reaches_a_listener_that_is_reading_a_silent_connection() {
+    // A browser that connects and then says nothing must not hold the
+    // listener past a cancel either.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = cancel.clone();
+    let caught = std::thread::spawn(move || {
+        catch_redirect_on_within_unless(listener, std::time::Duration::from_secs(60), &flag)
+    });
+    let _silent = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    let started = std::time::Instant::now();
+    let error = caught
+        .join()
+        .expect("listener thread")
+        .expect_err("cancelled");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "the cancel took {:?}",
+        started.elapsed()
+    );
+    assert!(error.to_string().contains("cancelled"), "{error}");
+}
+
+#[test]
+fn a_percent_sign_before_a_multibyte_character_does_not_panic_the_listener() {
+    // The failure this prevents: the decoder sliced the string two characters
+    // past each `%`, which is a panic when the second of them is the middle
+    // of a multi-byte character. Anybody can send the listener a query, so
+    // this took the whole sign-in down.
+    let redirect = parse_redirect("/?code=%aé&state=%é%2");
+    assert_eq!(redirect.code, "%aé");
+    assert_eq!(redirect.state, "%é%2");
+    // A trailing, well-formed escape still decodes.
+    assert_eq!(parse_redirect("/?code=x%41").code, "xA");
+    assert_eq!(parse_redirect("/?code=%C3%A9").code, "é");
 }
 
 #[test]

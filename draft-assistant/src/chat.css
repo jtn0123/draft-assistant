@@ -194,6 +194,12 @@
   color: var(--faint);
 }
 
+/* The Cancel beside the thinking line, pushed to the far end of it. */
+.chat-cancel {
+  margin-left: auto;
+  font-size: 12px;
+}
+
 .chat-suggestions {
   display: flex;
   gap: 8px;

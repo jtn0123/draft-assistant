@@ -1,7 +1,7 @@
 //! The Yahoo commands driven the way the frontend drives them.
 //!
 //! `tests/yahoo_wire.rs` proves the client speaks Yahoo's dialect and
-//! `tests/yahoo_auth_wire.rs` proves the token dance; this goes the last step
+//! `tests/yahoo_auth_wire/` proves the token dance; this goes the last step
 //! and runs whole sessions through the IPC on Tauri's mock runtime — save the
 //! credentials, connect, list the leagues, add one by key and by URL, build
 //! the board, take a tick's worth of new picks, disconnect.

@@ -1,7 +1,7 @@
 //! The event socket, driven with a real WebSocket client.
 
 use crate::chat_tests::make_answers_fail;
-use crate::harness::host;
+use crate::harness::{host, wait_until};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio_tungstenite::tungstenite::Message;
@@ -124,21 +124,15 @@ async fn a_connected_device_is_shown_as_connected() {
     let paired = host.pair_ok("Rob's iPhone", "phone").await;
     let mut socket = open(&host.base, &paired.token).await;
     // The socket's own arrival re-broadcasts the device list.
-    for _ in 0..20 {
-        if host.companion.hub.devices()[0].connected {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    assert!(host.companion.hub.devices()[0].connected);
+    wait_until("the device shows as connected", || {
+        host.companion.hub.devices()[0].connected
+    })
+    .await;
     socket.close(None).await.expect("the socket closes");
-    for _ in 0..50 {
-        if !host.companion.hub.devices()[0].connected {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    assert!(!host.companion.hub.devices()[0].connected);
+    wait_until("the device shows as disconnected", || {
+        !host.companion.hub.devices()[0].connected
+    })
+    .await;
 }
 
 #[tokio::test]

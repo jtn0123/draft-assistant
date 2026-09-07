@@ -25,6 +25,10 @@ pub struct AppState {
     pub last_season_view: Arc<Mutex<Option<CachedSeasonView>>>,
     /// Everything the Yahoo side needs to keep between commands.
     pub yahoo: Arc<YahooState>,
+    /// The questions being answered right now, one per screen and league.
+    /// Shared with the companion server, so a phone's question and the
+    /// desktop panel's contest the same slot.
+    pub chat_claims: Arc<crate::chat_client::InFlightClaims>,
 }
 
 impl AppState {
@@ -49,6 +53,7 @@ impl AppState {
             season_generation: self.season_generation.clone(),
             last_season_view: self.last_season_view.clone(),
             yahoo: self.yahoo.clone(),
+            chat_claims: self.chat_claims.clone(),
         }
     }
 
@@ -76,7 +81,11 @@ impl AppState {
             season_polling: Arc::new(AtomicBool::new(false)),
             season_generation: Arc::new(AtomicU64::new(0)),
             last_season_view: Arc::new(Mutex::new(None)),
-            yahoo: Arc::new(YahooState::default()),
+            // Sandboxed, like the engine above: a test's secrets go to a
+            // file in the scratch directory, never to the developer's login
+            // Keychain.
+            yahoo: Arc::new(YahooState::sandboxed(YahooHosts::default())),
+            chat_claims: Arc::new(Default::default()),
         };
         (state, dir)
     }

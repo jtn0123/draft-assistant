@@ -28,8 +28,8 @@ use std::time::Duration;
 pub mod redirect;
 
 pub use redirect::{
-    catch_redirect, catch_redirect_on, catch_redirect_on_within, catch_redirect_within,
-    parse_redirect, Redirect, REDIRECT_WAIT,
+    catch_redirect, catch_redirect_on, catch_redirect_on_within, catch_redirect_on_within_unless,
+    catch_redirect_within, parse_redirect, Redirect, REDIRECT_WAIT,
 };
 
 /// Yahoo's login host. Both OAuth endpoints hang off it.

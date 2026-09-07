@@ -20,6 +20,12 @@ import { defineConfig, devices } from "@playwright/test";
 // chunk that only breaks once built used to pass here and fail in the window.
 const productionBundle = !!process.env.CI || process.env.PW_WEB_SERVER === "preview";
 
+// PW_PREBUILT says `dist/` was built by an earlier step of the same run, so
+// the server starts from it instead of building again. The CI gate sets it:
+// its "Production build" step had already run `vite build`, and the webServer
+// command then ran it a second time on the same tree.
+const prebuilt = productionBundle && !!process.env.PW_PREBUILT;
+
 // 1420 is the port the Tauri dev server owns. PW_PORT moves the run when that
 // port is busy (a `tauri dev` left running), read by `preview:e2e` too so the
 // server and the tests agree.
@@ -41,12 +47,15 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: productionBundle
-      ? "npm run build && npm run preview:e2e"
-      : `npm run dev -- --port ${port}`,
+    command: prebuilt
+      ? "npm run preview:e2e"
+      : productionBundle
+        ? "npm run build && npm run preview:e2e"
+        : `npm run dev -- --port ${port}`,
     url: `http://localhost:${port}`,
     reuseExistingServer: !process.env.CI,
-    // The production path pays for a build before the server answers.
-    timeout: productionBundle ? 180_000 : 60_000,
+    // The production path pays for a build before the server answers,
+    // unless the build is already there.
+    timeout: productionBundle && !prebuilt ? 180_000 : 60_000,
   },
 });

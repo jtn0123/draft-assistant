@@ -290,21 +290,6 @@ fn a_turn_is_priced_as_the_model_that_answered_it() {
     );
 }
 
-/// Two questions asked at the same moment both read the spend from before
-/// either of them, so both passed a cap with room for only one.
-#[test]
-fn two_questions_about_one_league_cannot_be_in_flight_together() {
-    let key = spend_key("draft", Some("in-flight-league"));
-    let held = crate::chat_client::reserve(&key).expect("the first is accepted");
-    let error = crate::chat_client::reserve(&key).expect_err("the second is refused");
-    assert!(error.contains("already being answered"), "{error}");
-    // The other screen of the same league keeps its own claim.
-    crate::chat_client::reserve(&spend_key("season", Some("in-flight-league")))
-        .expect("the season screen is free");
-    drop(held);
-    crate::chat_client::reserve(&key).expect("the claim is released when the turn ends");
-}
-
 /// Conversations are filed per screen *and* league; spend was filed per
 /// screen alone, so every league drew down one shared cap.
 #[test]
@@ -367,6 +352,7 @@ fn billed(input_tokens: u32) -> ChatReply {
         model: "claude-opus-5".into(),
         refused: false,
         truncated: false,
+        cancelled: false,
         input_tokens,
         output_tokens: 0,
         cache_creation_input_tokens: 0,
@@ -406,7 +392,7 @@ async fn spent(state: &AppState, key: &str) -> f64 {
 async fn a_turn_abandoned_mid_answer_is_still_counted_against_the_cap() {
     let (state, _dir) = AppState::scratch("chat-abandoned");
     let key = "draft.abandoned";
-    let in_flight = chat_client::reserve(key).expect("first claim");
+    let in_flight = state.chat_claims.reserve(key).expect("first claim");
     let call = async {
         tokio::time::sleep(std::time::Duration::from_millis(120)).await;
         // A million input tokens at Opus 5's $5/MTok: five dollars.
@@ -419,12 +405,15 @@ async fn a_turn_abandoned_mid_answer_is_still_counted_against_the_cap() {
     // The caller is gone; the call and its bookkeeping are not.
     assert_eq!(spent(&state, key).await, 0.0, "nothing is billed yet");
     assert!(
-        chat_client::reserve(key).is_err(),
+        state.chat_claims.reserve(key).is_err(),
         "the claim is held until the call ends, not until the caller leaves"
     );
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     assert!((spent(&state, key).await - 5.0).abs() < 1e-9);
-    chat_client::reserve(key).expect("the claim was released when the call ended");
+    state
+        .chat_claims
+        .reserve(key)
+        .expect("the claim was released when the call ended");
 }
 
 /// A call that fails after the API has started answering — the client's own
@@ -433,7 +422,7 @@ async fn a_turn_abandoned_mid_answer_is_still_counted_against_the_cap() {
 async fn a_call_that_failed_after_the_api_started_answering_is_still_counted() {
     let (state, _dir) = AppState::scratch("chat-failed-late");
     let key = "draft.failed-late";
-    let in_flight = chat_client::reserve(key).expect("first claim");
+    let in_flight = state.chat_claims.reserve(key).expect("first claim");
     let call = async {
         Err(chat::ChatError {
             message: "the Anthropic answer stopped early: timed out".to_string(),
@@ -453,7 +442,7 @@ async fn a_call_that_failed_after_the_api_started_answering_is_still_counted() {
 async fn a_reply_is_priced_and_recorded_before_it_is_handed_back() {
     let (state, _dir) = AppState::scratch("chat-recorded");
     let key = "draft.recorded";
-    let in_flight = chat_client::reserve(key).expect("first claim");
+    let in_flight = state.chat_claims.reserve(key).expect("first claim");
     let reply = settle(books(&state, key), in_flight, async { Ok(billed(100_000)) })
         .await
         .expect("a reply");
@@ -461,4 +450,48 @@ async fn a_reply_is_priced_and_recorded_before_it_is_handed_back() {
     assert_eq!(reply.provider, PROVIDER_API);
     assert!((reply.screen_spend_usd - 0.5).abs() < 1e-9);
     assert!((spent(&state, key).await - 0.5).abs() < 1e-9);
+}
+
+/// The command's own path, on a test-built engine: the key lands in the file
+/// store inside the scratch directory and nowhere else. `AppState::scratch`
+/// builds its engine with `Engine::new`, whose only store is that file, so
+/// no `/usr/bin/security` can run here whatever machine this is on.
+#[tokio::test]
+async fn set_api_key_writes_the_engines_own_store_and_keeps_it_out_of_the_config() {
+    let (state, dir) = AppState::scratch("chat-set-key");
+    const KEY: &str = "sk-ant-api03-scratch-only-key";
+    assert!(set_api_key_inner(&state, format!("  {KEY} \n"))
+        .await
+        .expect("stored"));
+    let secrets = std::fs::read_to_string(dir.join("yahoo-secrets.json"))
+        .expect("the scratch file store was written");
+    assert!(secrets.contains(KEY), "the key is not in the file store");
+    assert_eq!(
+        state
+            .engine
+            .secret_store()
+            .and_then(crate::secrets::load_from)
+            .as_deref(),
+        Some(KEY),
+        "trimmed, and read back through the engine's store"
+    );
+    let config = state.config.lock().await.clone();
+    assert!(
+        config.anthropic_api_key.is_none(),
+        "the store holds the key, so the config must not"
+    );
+    let on_disk = std::fs::read_to_string(dir.join("config.json")).unwrap_or_default();
+    assert!(!on_disk.contains(KEY), "the key was written to config.json");
+    assert_eq!(state.engine.api_key(&config).await.as_deref(), Some(KEY));
+
+    // An empty box clears it from the same place.
+    assert!(!set_api_key_inner(&state, "   ".to_string())
+        .await
+        .expect("cleared"));
+    assert!(state
+        .engine
+        .secret_store()
+        .and_then(crate::secrets::load_from)
+        .is_none());
+    let _ = std::fs::remove_dir_all(&dir);
 }

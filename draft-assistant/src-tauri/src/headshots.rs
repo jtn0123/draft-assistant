@@ -134,13 +134,43 @@ fn look_on_disk(dir: &Path, image: &Path, miss: &Path) -> Result<Cached, String>
     Ok(Cached::Nothing)
 }
 
-/// Write down what the CDN gave us: the picture, or the fact that there is
-/// none. Blocking, and run on the blocking pool for the same reason.
-fn store_on_disk(image: &Path, miss: &Path, bytes: &[u8], usable: bool) {
-    if !usable {
-        std::fs::write(miss, b"").ok();
-        return;
+/// What one trip to the CDN found out.
+enum Fetched {
+    /// A picture, decodable as one.
+    Picture(Vec<u8>),
+    /// The CDN's own word that there is no picture: a 404 or a 410, or a
+    /// success whose body is not an image (the HTML page it serves for a
+    /// player it has never heard of). Worth remembering for a while.
+    NoPicture,
+    /// The CDN could not answer just now: a 5xx, a rate limit, a redirect
+    /// that went nowhere. Says nothing about the picture, so nothing is
+    /// remembered and the next render asks again.
+    Unavailable(u16),
+}
+
+/// Read the CDN's answer. A miss is only a miss when the CDN says so; every
+/// other failure used to be written down as "no photo" and kept for three
+/// days, so one bad minute at the CDN left a roster faceless until Thursday.
+fn classify(status: u16, body: Vec<u8>) -> Fetched {
+    match status {
+        200..=299 if mime_of(&body).is_some() => Fetched::Picture(body),
+        200..=299 | 404 | 410 => Fetched::NoPicture,
+        other => Fetched::Unavailable(other),
     }
+}
+
+/// Write down what the CDN gave us: the picture, or the fact that there is
+/// none. An answer that was neither leaves the disk as it was. Blocking, and
+/// run on the blocking pool for the same reason.
+fn store_on_disk(image: &Path, miss: &Path, fetched: &Fetched) {
+    let bytes = match fetched {
+        Fetched::Picture(bytes) => bytes,
+        Fetched::NoPicture => {
+            std::fs::write(miss, b"").ok();
+            return;
+        }
+        Fetched::Unavailable(_) => return,
+    };
     // One temp name per writer, the same way the JSON cache does it. With a
     // name derived only from the image, two fetches of the same headshot --
     // the board and the roster panel asking at once, or two windows of the app
@@ -201,7 +231,8 @@ impl Engine {
             .send()
             .await
             .map_err(|e| format!("headshot fetch: {e}"))?;
-        let bytes = if response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = if response.status().is_success() {
             response
                 .bytes()
                 .await
@@ -211,9 +242,17 @@ impl Engine {
             Vec::new()
         };
 
-        let served = data_url(&bytes);
-        let usable = served.is_some();
-        tokio::task::spawn_blocking(move || store_on_disk(&image, &miss, &bytes, usable))
+        let fetched = classify(status, body);
+        if let Fetched::Unavailable(status) = fetched {
+            crate::applog::debug(format!(
+                "headshot {key}: CDN answered {status}, will ask again next time"
+            ));
+        }
+        let served = match &fetched {
+            Fetched::Picture(bytes) => data_url(bytes),
+            Fetched::NoPicture | Fetched::Unavailable(_) => None,
+        };
+        tokio::task::spawn_blocking(move || store_on_disk(&image, &miss, &fetched))
             .await
             .ok();
         Ok(served)

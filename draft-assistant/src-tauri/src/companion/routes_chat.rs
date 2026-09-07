@@ -141,13 +141,19 @@ pub async fn post_chat(
         )
             .into_response(),
         Err(AskError::Busy) => fail(StatusCode::CONFLICT, "busy"),
+        Err(AskError::HostBusy(reason)) => fail(StatusCode::CONFLICT, &reason),
         Err(AskError::NoLeague(e)) => fail(StatusCode::NOT_FOUND, &e),
         Err(AskError::BadText(e)) => fail(StatusCode::BAD_REQUEST, &e),
     }
 }
 
 pub enum AskError {
+    /// The shared thread itself is mid-answer.
     Busy,
+    /// The thread is free, but the board's one in-flight slot is taken: the
+    /// desktop panel is asking its own question about it. The reason is the
+    /// plain sentence to show.
+    HostBusy(String),
     NoLeague(String),
     BadText(String),
 }
@@ -160,7 +166,7 @@ impl AskError {
             AskError::Busy => {
                 "someone else is asking a question — try again in a moment".to_string()
             }
-            AskError::NoLeague(e) | AskError::BadText(e) => e,
+            AskError::HostBusy(e) | AskError::NoLeague(e) | AskError::BadText(e) => e,
         }
     }
 }
@@ -178,6 +184,13 @@ pub async fn ask(
     text: String,
 ) -> Result<String, AskError> {
     let league_id = active_league(&srv).await.map_err(AskError::NoLeague)?;
+    // The board's in-flight slot is claimed before the question is filed.
+    // Claiming after used to accept the question with a 202 while the desktop
+    // panel held the slot, and the refusal then landed in the thread as a
+    // failed answer, a minute after the phone had stopped looking.
+    let held = crate::commands_chat::claim(&srv.state, screen)
+        .await
+        .map_err(AskError::HostBusy)?;
     let (entry_id, thread) = srv
         .chat
         .post(&league_id, screen, device.clone(), &text)
@@ -195,17 +208,20 @@ pub async fn ask(
         league_id,
         device,
         ANSWER_TIMEOUT,
+        held,
     ));
     Ok(entry_id)
 }
 
-/// Ask the model and file the result in the thread.
+/// Ask the model and file the result in the thread. `held` is the in-flight
+/// claim [`ask`] made before filing the question; it travels with the call.
 pub async fn answer_and_finish(
     srv: Arc<Srv>,
     screen: &'static str,
     league_id: String,
     device: EntryDevice,
     limit: Duration,
+    held: crate::chat_client::InFlight,
 ) {
     let work = {
         let srv = srv.clone();
@@ -217,7 +233,7 @@ pub async fn answer_and_finish(
             // setting to inherit. Everything that *is* host-side — provider,
             // key, budget cap and the spend it is checked against — comes
             // from `answer`.
-            crate::commands_chat::answer(&srv.state, screen, "", "", messages).await
+            crate::commands_chat::answer_holding(&srv.state, screen, "", "", messages, held).await
         }
     };
     finish_within(srv, screen, league_id, device, limit, work).await;

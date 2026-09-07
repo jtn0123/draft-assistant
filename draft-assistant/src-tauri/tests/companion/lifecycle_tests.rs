@@ -1,6 +1,6 @@
 //! Turning the companion on and off, and what keeps running while it is up.
 
-use crate::harness::{self, host};
+use crate::harness::{self, host, wait_until};
 
 /// The whole failure: the Mac crashes mid-draft, comes back, and every phone
 /// in the room stays dark until somebody walks over and opens Settings.
@@ -21,22 +21,18 @@ async fn a_server_the_user_left_on_comes_back_up_by_itself() {
     );
 
     let mut config = draft_assistant_lib::engine::AppConfig::default();
-    // Off is off: a launch must not open a port nobody asked for.
+    // Off is off: a launch must not open a port nobody asked for. With the
+    // port `None` nothing is spawned at all, so there is nothing to wait for
+    // before looking.
+    assert_eq!(autostart_port(&config), None);
     autostart(&companion, autostart_port(&config));
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert!(!companion.is_enabled());
 
     config.companion_enabled = true;
     // Port 0 so the kernel picks one and the test never collides.
     config.companion_port = Some(0);
     autostart(&companion, autostart_port(&config));
-    for _ in 0..100 {
-        if companion.is_enabled() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    assert!(companion.is_enabled(), "the phone connection stayed off");
+    wait_until("the phone connection is on", || companion.is_enabled()).await;
     assert!(companion.url().is_some());
     companion.stop();
 }
@@ -60,13 +56,10 @@ async fn an_idle_code_rotates_with_nobody_looking_at_it() {
         std::time::Duration::from_millis(10),
         || draft_assistant_lib::companion::hub::now_ms() + CODE_MAX_AGE_MS + 1,
     );
-    for _ in 0..100 {
-        if host.companion.hub.code() != before {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    assert_ne!(host.companion.hub.code(), before, "the code never rotated");
+    wait_until("the code has rotated", || {
+        host.companion.hub.code() != before
+    })
+    .await;
     // The host's own panel is told, so the digits on screen are the live ones.
     assert!(host
         .emitted_kinds()
@@ -86,7 +79,7 @@ async fn an_idle_code_rotates_with_nobody_looking_at_it() {
 async fn origins_and_the_tailnet_url_follow_the_machine_onto_a_tailnet() {
     use draft_assistant_lib::companion::net::Reach;
     use draft_assistant_lib::companion::server::spawn_origin_refresh;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
     let host = host("refresh").await;
     let before = host.companion.hub.origins();
@@ -95,12 +88,17 @@ async fn origins_and_the_tailnet_url_follow_the_machine_onto_a_tailnet() {
     // Tailscale comes up after the server did: the machine grows an address.
     let on_tailnet = std::sync::Arc::new(AtomicBool::new(false));
     let seen = on_tailnet.clone();
+    // How many times the refresh has looked, so the "nothing changed" half
+    // below waits on looks having happened rather than on a clock.
+    let looks = std::sync::Arc::new(AtomicU32::new(0));
+    let counted = looks.clone();
     let same = before.clone();
     let same_url = url_before.clone();
     let task = spawn_origin_refresh(
         host.companion.hub.clone(),
         std::time::Duration::from_millis(10),
         move |port| {
+            counted.fetch_add(1, Ordering::SeqCst);
             let mut reach = Reach {
                 origins: same.clone(),
                 tailscale_url: same_url.clone(),
@@ -112,23 +110,20 @@ async fn origins_and_the_tailnet_url_follow_the_machine_onto_a_tailnet() {
             reach
         },
     );
-    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    wait_until("the refresh has looked a few times", || {
+        looks.load(Ordering::SeqCst) >= 3
+    })
+    .await;
     // Nothing changed, so nothing was written.
     assert_eq!(host.companion.hub.origins(), before);
     assert_eq!(host.companion.tailscale_url(), url_before);
     on_tailnet.store(true, Ordering::SeqCst);
     let port = host.companion.port().expect("running");
     let want = format!("http://100.101.102.103:{port}");
-    for _ in 0..100 {
-        if host.companion.hub.origins().contains(&want) {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    assert!(
-        host.companion.hub.origins().contains(&want),
-        "the tailnet address never made it into the origins"
-    );
+    wait_until("the tailnet address is in the origins", || {
+        host.companion.hub.origins().contains(&want)
+    })
+    .await;
     // The status the Settings panel shows reads the same cache; no CLI runs.
     assert_eq!(
         host.companion.tailscale_url().as_deref(),
@@ -158,4 +153,63 @@ async fn origins_and_the_tailnet_url_follow_the_machine_onto_a_tailnet() {
         .await
         .expect("the refresh task stops with the server")
         .expect("the refresh task did not panic");
+}
+
+/// The failure this prevents: the headless `companion_host` and the desktop
+/// app on one Mac kept their pairings under one account, so pairing a phone
+/// against the host replaced every phone paired to the desktop. Each server
+/// is now told which account is its own when it is built, and a restart under
+/// the other account sees nothing of the first.
+#[tokio::test]
+async fn a_server_built_under_the_headless_account_keeps_its_pairings_apart() {
+    use draft_assistant_lib::companion::pairing::PairAttempt;
+    use draft_assistant_lib::companion::CompanionServer;
+    use draft_assistant_lib::yahoo_secrets::Item;
+
+    let data_dir = harness::scratch_dir("headless-account");
+    let build = |item: Item| {
+        let state = std::sync::Arc::new(harness::fixture_state(&data_dir));
+        let companion = std::sync::Arc::new(
+            CompanionServer::sandboxed_under("Justin's Mac".to_string(), data_dir.clone(), item)
+                .expect("the companion builds"),
+        );
+        companion.attach(
+            state,
+            std::sync::Arc::new(|_: &str, _: serde_json::Value| {}),
+        );
+        companion
+    };
+
+    let headless = build(Item::CompanionDevicesHeadless);
+    let code = headless.hub.code();
+    headless
+        .hub
+        .pair(PairAttempt {
+            code: &code,
+            name: "Rob's iPhone",
+            kind: "phone",
+            peer: std::net::IpAddr::from([192, 168, 1, 10]),
+            previous_device_id: None,
+        })
+        .expect("pairs");
+    assert_eq!(headless.hub.devices().len(), 1);
+    // A used code is spent, so what a restart has to bring back is the one
+    // that replaced it.
+    let code = headless.hub.code();
+    drop(headless);
+
+    // The desktop app, over the same secret store: no phone, and its own code.
+    let desktop = build(Item::CompanionDevices);
+    assert!(
+        desktop.hub.devices().is_empty(),
+        "the desktop read the headless host's pairings"
+    );
+    assert_ne!(desktop.hub.code(), code);
+    drop(desktop);
+
+    // The headless host again: the phone is still paired.
+    let again = build(Item::CompanionDevicesHeadless);
+    assert_eq!(again.hub.devices().len(), 1);
+    assert_eq!(again.hub.devices()[0].name, "Rob's iPhone");
+    assert_eq!(again.hub.code(), code);
 }

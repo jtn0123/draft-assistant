@@ -200,6 +200,7 @@ pub(crate) fn session_with_redirect(label: &str, redirect_uri: &str) -> Session 
             yahoo::yahoo_begin_connect,
             yahoo::yahoo_finish_connect,
             yahoo::yahoo_disconnect,
+            yahoo::yahoo_cancel_connect,
             yahoo::yahoo_leagues,
             yahoo::yahoo_auction,
         ])
@@ -216,6 +217,7 @@ pub(crate) fn session_with_redirect(label: &str, redirect_uri: &str) -> Session 
         season_generation: Arc::new(AtomicU64::new(0)),
         last_season_view: Arc::new(Mutex::new(None)),
         yahoo: Arc::new(YahooState::sandboxed(hosts)),
+        chat_claims: Arc::new(Default::default()),
     });
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()

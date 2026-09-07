@@ -54,6 +54,7 @@ pub fn fixture_state(data_dir: &std::path::Path) -> AppState {
         season_generation: Arc::new(AtomicU64::new(0)),
         last_season_view: Arc::new(AsyncMutex::new(None)),
         yahoo: Arc::new(YahooState::sandboxed(Default::default())),
+        chat_claims: Arc::new(Default::default()),
     }
 }
 
@@ -188,4 +189,41 @@ pub struct Paired {
     pub token: String,
     pub device_id: String,
     pub host_name: String,
+}
+
+/// How long a poll below may take before it is a failure rather than a slow
+/// machine. Generous on purpose: a test that waits on a condition finishes
+/// as soon as it holds, so the deadline only ever costs anything when the
+/// condition is never going to.
+pub const DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Poll `holds` until it is true, or panic with `what` after [`DEADLINE`].
+///
+/// Every wait in these tests goes through here rather than a fixed sleep: a
+/// sleep long enough for a loaded CI runner is a sleep too long for the
+/// laptop, and one short enough for the laptop is a flake on the runner.
+pub async fn wait_until(what: &str, mut holds: impl FnMut() -> bool) {
+    let started = std::time::Instant::now();
+    while !holds() {
+        assert!(
+            started.elapsed() < DEADLINE,
+            "gave up after {DEADLINE:?} waiting until {what}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// Whether something is listening on 127.0.0.1 at `port` right now.
+pub fn port_is_open(port: u16) -> bool {
+    std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        std::time::Duration::from_millis(200),
+    )
+    .is_ok()
+}
+
+/// Wait for a stopped listener to have actually let go of its port, which
+/// is what has to be true before the same port can be bound again.
+pub async fn wait_for_port_closed(port: u16) {
+    wait_until(&format!("port {port} has closed"), || !port_is_open(port)).await;
 }

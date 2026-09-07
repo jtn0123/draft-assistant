@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import type { ChatMessage, ChatSettings, ThreadEntry } from "../chat-types";
+import type { ChatSettings } from "../chat-types";
 import { formatUsd, overBudget, setChatBudget, useChatBudget } from "../chatCost";
 import { chatScope } from "../chatSessions";
 import { describeError } from "../errorText";
@@ -12,9 +12,10 @@ import type { Screen } from "../prefs";
 import { ChatControls } from "./ChatControls";
 import { ChatKeyForm } from "./ChatKeyForm";
 import { ChatSessionBar } from "./ChatSessionBar";
-import { Markdown } from "./Markdown";
+import { ChatThread } from "./ChatThread";
 import { SharedChat } from "./SharedChat";
-import { beginChat, useChatSessions } from "./useChatSessions";
+import { useChatSessions, type ChatSnapshot } from "./useChatSessions";
+import { resumeOrBegin, useChatThread } from "./useChatThread";
 import { useRevealOnMount } from "./useRevealOnMount";
 
 // Ship with this chunk, not with the window. live.css owns the pulsing dot
@@ -47,6 +48,16 @@ const THINKING_NOTE: Record<string, string> = {
   Max: "Simulating the rest of the round…",
 };
 
+/** When the session a question belongs to began; a session that has not
+ *  been filed yet starts now. Kept outside the component because it reads
+ *  the clock, which render must not. */
+function sessionStartedAt(
+  sessions: ReadonlyArray<{ id: string; startedAt: number }>,
+  sessionId: string,
+): number {
+  return sessions.find((s) => s.id === sessionId)?.startedAt ?? Date.now();
+}
+
 export function Chat({
   screen,
   leagueId,
@@ -72,52 +83,38 @@ export function Chat({
   // Whether the pinned shared thread is the one on screen rather than one of
   // this Mac's saved conversations.
   const [shared, setShared] = useState(sharedOnly);
-  // The conversation this panel opens with: the newest one stored for this
-  // screen and league, or a fresh one. Read while the state below is
-  // initialised, so a reopened thread paints once rather than appearing after
-  // an empty one.
-  const [opening] = useState(() => beginChat(scope));
-  const [entries, setEntries] = useState<ThreadEntry[]>(() => opening.reopened?.entries ?? []);
-  const [history, setHistory] = useState<ChatMessage[]>(() => opening.reopened?.history ?? []);
+  // The conversation this panel opens with: the one whose question is still
+  // out, the newest one stored for this screen and league, or a fresh one.
+  // Read while the state below is initialised, so a reopened thread paints
+  // once rather than appearing after an empty one.
+  const [{ opening, pending }] = useState(() => resumeOrBegin(scope));
+  // How a finished turn is filed. Filled in below, once the saved-chats hook
+  // exists; it needs the thread's own `show` and `clear` first.
+  const file = useRef<(snapshot: ChatSnapshot) => void>(() => undefined);
+  const thread = useChatThread(scope, opening, pending, file);
+  const { setScreenSpend } = thread;
   const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
   const [askingNew, setAskingNew] = useState(false);
   const [showKeyForm, setShowKeyForm] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  /// What this conversation has asked and cost, restored with a saved one.
-  const [spend, setSpend] = useState(() => ({
-    questions: opening.reopened?.questions ?? 0,
-    costUsd: opening.reopened?.costUsd ?? 0,
-  }));
   /// Bumped after the key is saved, to re-read whether one is stored.
   const [settingsToken, setSettingsToken] = useState(0);
-  /// What every conversation on this screen has cost together — the total the
-  /// backend's cap is actually checked against, which this one chat's is not.
-  const [screenSpend, setScreenSpend] = useState(0);
-  const nextId = useRef(Math.max(1, ...(opening.reopened?.entries ?? []).map((e) => e.id + 1)));
-  const threadRef = useRef<HTMLDivElement>(null);
   const budget = useChatBudget();
-
-  const clearThread = () => {
-    setEntries([]);
-    setHistory([]);
-    setSpend({ questions: 0, costUsd: 0 });
-  };
 
   const sessions = useChatSessions({
     scope,
     opening,
     onOpen: (chat) => {
-      // Ids come back with the conversation, so a new turn cannot collide
-      // with one that was stored.
-      nextId.current = Math.max(1, ...chat.entries.map((e) => e.id + 1));
-      setEntries(chat.entries);
-      setHistory(chat.history);
-      setSpend({ questions: chat.questions, costUsd: chat.costUsd });
+      thread.show(chat);
       setAskingNew(false);
     },
-    onClear: clearThread,
+    onClear: thread.clear,
   });
+  // A finished turn is filed the way a saved conversation is, whichever
+  // render it lands in.
+  useEffect(() => {
+    file.current = sessions.save;
+  }, [sessions.save]);
 
   // Reloaded on mount and after the key changes; state is set from the
   // promise callback so the effect body stays synchronous-free.
@@ -144,7 +141,30 @@ export function Chat({
     return () => {
       cancelled = true;
     };
-  }, [settingsToken, scope, sharedOnly]);
+  }, [settingsToken, scope, sharedOnly, setScreenSpend]);
+
+  // A phone's question is answered on this machine's budget and written to
+  // the same tally, but it never passes through this panel, so the screen
+  // figure here stood still while the phones spent. Every answer on the
+  // shared thread re-reads the tally.
+  useEffect(() => {
+    let live = true;
+    const pending = api.onSharedChat((next) => {
+      if (!live || next.screen !== screen || next.busy) return;
+      api
+        .chatSettings()
+        .then((settings) => {
+          if (live) setScreenSpend(settings.spend_usd[scope] ?? 0);
+        })
+        .catch(() => {
+          // The figure stays as it was until the next answer.
+        });
+    });
+    return () => {
+      live = false;
+      void pending.then((off) => off());
+    };
+  }, [screen, scope, setScreenSpend]);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,11 +181,6 @@ export function Chat({
     };
   }, [screen]);
 
-  // Keep the newest turn in view as the thread grows.
-  useEffect(() => {
-    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
-  }, [entries, sending]);
-
   // Fable 5 cannot turn thinking off, so the picked level may not be legal for
   // the picked model. Derive the effective one rather than correcting state
   // after render — switching model must never send a level the API rejects.
@@ -174,6 +189,7 @@ export function Chat({
     [settings, model],
   );
   const activeEffort = allowedEfforts.includes(effort) ? effort : DEFAULT_EFFORT;
+  const { entries, spend, sending, screenSpend } = thread;
   // What the cap is actually measured against: everything this screen's chats
   // have cost together. This conversation's own total is the floor, because
   // the screen figure is only as fresh as the last answer — a turn charged
@@ -195,62 +211,16 @@ export function Chat({
     });
   };
 
-  const add = (entry: Omit<ThreadEntry, "id">) => {
-    const id = nextId.current++;
-    setEntries((prev) => [...prev, { ...entry, id }]);
-  };
-
-  const send = async (text: string) => {
+  const send = (text: string) => {
     const question = text.trim();
     if (!question || sending || showKeyForm) return;
     setDraft("");
-    // The turns are built here rather than only in state, so the conversation
-    // can be filed the moment it stops moving without waiting for a render.
-    const asked = [...entries, { id: nextId.current++, kind: "me" as const, lines: [question] }];
-    setEntries(asked);
-    const outgoing: ChatMessage[] = [...history, { role: "user", content: question }];
-    setHistory(outgoing);
-    setSending(true);
-    try {
-      const reply = await api.askClaude({
-        screen,
-        model,
-        effort: activeEffort,
-        messages: outgoing,
-      });
-      const answered = [
-        ...asked,
-        {
-          id: nextId.current++,
-          kind: "claude" as const,
-          label: reply.refused ? "Declined" : undefined,
-          lines: reply.text.split("\n\n").filter((l) => l.trim() !== ""),
-        },
-      ];
-      const thread = [...outgoing, { role: "assistant", content: reply.text }];
-      // The backend prices the turn, so a Claude Code answer adds nothing and
-      // the panel's total is the one the cap is actually checked against.
-      const spent = {
-        questions: spend.questions + 1,
-        costUsd: spend.costUsd + reply.cost_usd,
-      };
-      setEntries(answered);
-      setHistory(thread);
-      setSpend(spent);
-      setScreenSpend(reply.screen_spend_usd);
-      sessions.save({ entries: answered, history: thread, ...spent });
-    } catch (e) {
-      // The failed turn must not stay in history, or every retry resends it.
-      const failed = [
-        ...asked,
-        { id: nextId.current++, kind: "error" as const, lines: [describeError(e)] },
-      ];
-      setHistory(history);
-      setEntries(failed);
-      sessions.save({ entries: failed, history, ...spend });
-    } finally {
-      setSending(false);
-    }
+    const startedAt = sessionStartedAt(sessions.sessions, sessions.sessionId);
+    thread.send(
+      question,
+      { screen, model, effort: activeEffort },
+      { id: sessions.sessionId, startedAt },
+    );
   };
 
   // Switching route re-reads settings, which also decides whether the key
@@ -259,11 +229,11 @@ export function Chat({
     api
       .setChatProvider(id)
       .then(() => setSettingsToken((n) => n + 1))
-      .catch((e: unknown) => add({ kind: "error", lines: [describeError(e)] }));
+      .catch((e: unknown) => thread.add({ kind: "error", lines: [describeError(e)] }));
   };
 
   const startFresh = () => {
-    clearThread();
+    thread.clear();
     sessions.startNew();
     setAskingNew(false);
   };
@@ -271,7 +241,7 @@ export function Chat({
   const carryThread = () => {
     // A separate file from here on; the turns above it stay in both.
     sessions.startNew();
-    add({ kind: "divider", lines: ["New chat · carried the thread above as context"] });
+    thread.add({ kind: "divider", lines: ["New chat · carried the thread above as context"] });
     setAskingNew(false);
   };
 
@@ -364,41 +334,37 @@ export function Chat({
         <SharedChat screen={screen} compact={compact} />
       ) : (
         <>
-          <div className={compact ? "chat-thread is-compact" : "chat-thread"} ref={threadRef}>
-            {showKeyForm ? (
-              <ChatKeyForm
-                hint={settings?.key_hint ?? null}
-                store={settings?.key_store ?? null}
-                onSaved={() => setSettingsToken((n) => n + 1)}
-              />
-            ) : entries.length === 0 ? (
-              <div className="chat-empty">
-                <span className="chat-empty-title">New chat</span>
-                <span className="mid small">{EMPTY_NOTE[screen]}</span>
-              </div>
-            ) : (
-              entries.map((entry) => (
-                <div className={`msg is-${entry.kind}`} key={entry.id}>
-                  {entry.label && <span className="msg-label">{entry.label}</span>}
-                  {entry.kind === "claude" ? (
-                    <Markdown text={entry.lines.join("\n\n")} />
-                  ) : (
-                    entry.lines.map((line, i) => (
-                      <span className="msg-line" key={i}>
-                        {line}
-                      </span>
-                    ))
-                  )}
-                </div>
-              ))
-            )}
-          </div>
+          <ChatThread
+            entries={entries}
+            compact={compact}
+            sending={sending}
+            keyForm={
+              showKeyForm ? (
+                <ChatKeyForm
+                  hint={settings?.key_hint ?? null}
+                  store={settings?.key_store ?? null}
+                  onSaved={() => setSettingsToken((n) => n + 1)}
+                />
+              ) : null
+            }
+            emptyTitle="New chat"
+            emptyNote={EMPTY_NOTE[screen]}
+          />
 
           <div className="chat-composer">
             {sending && (
               <div className="chat-thinking">
                 <span className="live-dot" />
                 {THINKING_NOTE[activeEffort] ?? "Thinking…"}
+                <button
+                  type="button"
+                  className="link-btn chat-cancel"
+                  aria-label="Cancel the answer"
+                  title="Stop this answer. What has arrived so far is kept."
+                  onClick={() => thread.cancel(screen)}
+                >
+                  Cancel
+                </button>
               </div>
             )}
             {nearingCap && (
@@ -416,7 +382,7 @@ export function Chat({
                     type="button"
                     className="chat-suggestion"
                     disabled={composerOff}
-                    onClick={() => void send(text)}
+                    onClick={() => send(text)}
                   >
                     {text}
                   </button>
@@ -433,7 +399,7 @@ export function Chat({
                 disabled={composerOff}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void send(draft);
+                  if (e.key === "Enter") send(draft);
                 }}
                 aria-label="Ask Claude"
               />
@@ -441,7 +407,7 @@ export function Chat({
                 type="button"
                 className="btn-primary"
                 disabled={composerOff || draft.trim() === ""}
-                onClick={() => void send(draft)}
+                onClick={() => send(draft)}
               >
                 Send
               </button>

@@ -87,7 +87,7 @@ describe("the Yahoo settings row", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("follows the dialog's own answer without asking the backend again", async () => {
+  it("follows the dialog's own answer while it is open", async () => {
     await loaded();
     expect(h.api.yahooStatus).toHaveBeenCalledTimes(1);
     // The dialog asks again as it opens, and hands what it hears back up.
@@ -99,9 +99,71 @@ describe("the Yahoo settings row", () => {
     });
     await openSettings();
     await settle(() => settingsRow(/Yahoo/).click());
+    expect(h.api.yahooStatus).toHaveBeenCalledTimes(2);
     await settle(() => screen.getByRole("button", { name: "Close" }).click());
     await openSettings();
     expect(settingsRow(/Yahoo/)).toHaveTextContent("Connected as jtn0123");
+  });
+
+  it("asks again as the dialog closes, so a sign-in the browser finished reaches the row", async () => {
+    // The failure this prevents: with a loopback redirect the backend
+    // finishes the sign-in after the browser comes back, with nothing in
+    // the dialog to hand a status up. The user closed the dialog as told
+    // and the row went on saying "Not connected" over a connected account.
+    await loaded();
+    await openSettings();
+    await settle(() => settingsRow(/Yahoo/).click());
+    expect(screen.getByRole("dialog", { name: "Connect Yahoo Fantasy" })).toBeInTheDocument();
+    // The sign-in finishes in the backend while the dialog is open.
+    h.api.yahooStatus.mockResolvedValue({
+      configured: true,
+      connected: true,
+      redirect: "http://localhost:8731/",
+      account: "jtn0123",
+    });
+    await settle(() => screen.getByRole("button", { name: "Close" }).click());
+    await openSettings();
+    expect(settingsRow(/Yahoo/)).toHaveTextContent("Connected as jtn0123");
+  });
+
+  it("asks again when the poller says Yahoo signed the user out", async () => {
+    // The failure this prevents: the backend cleared a pair Yahoo refused
+    // mid-draft, and with no dialog open to notice, the row went on saying
+    // "Connected as ..." until the app was restarted.
+    h.api.yahooStatus.mockResolvedValue({
+      configured: true,
+      connected: true,
+      redirect: "oob",
+      account: "jtn0123",
+    });
+    await loaded();
+    await openSettings();
+    expect(settingsRow(/Yahoo/)).toHaveTextContent("Connected as jtn0123");
+
+    h.api.yahooStatus.mockResolvedValue({
+      configured: true,
+      connected: false,
+      redirect: "oob",
+      account: null,
+    });
+    await settle(() =>
+      h.push.health?.({
+        last_success_at: 1788452521,
+        consecutive_failures: 1,
+        last_error: "Yahoo signed you out. Connect again in Settings.",
+      }),
+    );
+    expect(settingsRow(/Yahoo/)).toHaveTextContent("Not connected");
+    // Any other poll failure is not a reason to ask.
+    const asked = h.api.yahooStatus.mock.calls.length;
+    await settle(() =>
+      h.push.health?.({
+        last_success_at: 1788452521,
+        consecutive_failures: 2,
+        last_error: "request failed: timed out",
+      }),
+    );
+    expect(h.api.yahooStatus).toHaveBeenCalledTimes(asked);
   });
 });
 

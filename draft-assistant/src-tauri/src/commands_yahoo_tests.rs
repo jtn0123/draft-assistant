@@ -97,3 +97,62 @@ fn a_sign_in_state_cannot_be_guessed_from_the_clock_and_the_process_id() {
         "{first} and {second} share {shared} leading characters"
     );
 }
+
+/// A file store that counts its writes. Nothing here goes near the login
+/// Keychain: the file lives in a scratch directory of the test's own.
+struct CountingStore {
+    inner: crate::yahoo_secrets::FileStore,
+    writes: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::yahoo_secrets::SecretStore for CountingStore {
+    fn read(&self, item: crate::yahoo_secrets::Item) -> Option<String> {
+        self.inner.read(item)
+    }
+    fn write(&self, item: crate::yahoo_secrets::Item, value: &str) -> Result<(), String> {
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.write(item, value)
+    }
+    fn clear(&self, item: crate::yahoo_secrets::Item) -> Result<(), String> {
+        self.inner.clear(item)
+    }
+}
+
+#[tokio::test]
+async fn an_unchanged_token_pair_is_not_written_back_on_every_tick() {
+    // The failure this prevents: the draft poller persisted the pair after
+    // every tick, and every persist was a `security` subprocess against the
+    // login Keychain, three seconds apart, all evening, for a pair that
+    // changes once an hour.
+    let (state, dir) = AppState::scratch("yahoo-persist-unchanged");
+    let yahoo = YahooState::sandboxed(YahooHosts::default());
+    let store = Arc::new(CountingStore {
+        inner: crate::yahoo_secrets::FileStore::in_dir(&dir),
+        writes: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let tokens = crate::yahoo_oauth::TokenSet {
+        access_token: "access-1".into(),
+        refresh_token: "refresh-1".into(),
+        expires_at: u64::MAX,
+    };
+    crate::yahoo_secrets::save_tokens(store.as_ref(), &tokens).expect("the pair is stored");
+    let client = crate::yahoo::YahooClient::with_hosts(
+        crate::yahoo_oauth::YahooCredentials {
+            client_id: "dj0yJmk9unit".into(),
+            client_secret: "unit-secret".into(),
+        },
+        tokens,
+        yahoo.hosts.clone(),
+    );
+    for _ in 0..3 {
+        super::persist_tokens_into(store.clone(), &yahoo, &client).await;
+    }
+    assert_eq!(
+        store.writes.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "only the write that stored the pair in the first place"
+    );
+    drop(state);
+    let _ = std::fs::remove_dir_all(&dir);
+}

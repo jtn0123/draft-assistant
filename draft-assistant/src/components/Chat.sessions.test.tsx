@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   setApiKey: vi.fn(),
   setChatBudget: vi.fn(),
   askClaude: vi.fn<(args: ChatRequest) => Promise<ChatReply>>(),
+  onSharedChat: vi.fn(() => Promise.resolve(() => undefined)),
 }));
 
 vi.mock("../api", () => ({ api: mocks }));
@@ -42,6 +43,8 @@ function reply(overrides: Partial<ChatReply>): ChatReply {
     thinking: null,
     model: "Opus 5",
     refused: false,
+    truncated: false,
+    cancelled: false,
     input_tokens: 0,
     output_tokens: 0,
     provider: "api",

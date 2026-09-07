@@ -105,3 +105,37 @@ fn an_engine_sweeps_temp_files_an_earlier_run_left_behind() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// The warning reached the loaded league's list, but never the log: a user
+/// whose disk was full sent a log that said nothing about it. The line is
+/// written once per file, however many writes fail and however many loads
+/// drain the pending list in between.
+#[test]
+fn a_cache_write_that_fails_is_logged_once_per_file() {
+    // A data directory that is a file, so no cache write under it can work.
+    let blocker = test_dir("cache-log-blocked");
+    std::fs::write(&blocker, "occupied").unwrap();
+    let engine = Engine::new(blocker.clone());
+
+    let capture = crate::applog::Capture::start();
+    engine.write_cache("players.json", &vec![1u32]);
+    engine.write_cache("players.json", &vec![2u32]);
+    engine.write_cache("projections_2026.json", &vec![3u32]);
+    let _ = engine.take_cache_warnings();
+    engine.write_cache("players.json", &vec![4u32]);
+    let lines = capture.lines();
+    drop(capture);
+
+    let players: Vec<&String> = lines
+        .iter()
+        .filter(|line| line.contains(" WARN players.json was not cached"))
+        .collect();
+    assert_eq!(players.len(), 1, "once per file: {lines:?}");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains(" WARN projections_2026.json was not cached")),
+        "{lines:?}"
+    );
+    std::fs::remove_file(blocker).unwrap();
+}

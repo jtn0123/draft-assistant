@@ -170,6 +170,12 @@ impl Stream {
         Ok(())
     }
 
+    /// The text blocks that have arrived, joined the way a finished answer's
+    /// are. What a cancelled answer hands back.
+    pub fn text_so_far(&self) -> String {
+        join_blocks(self.texts.values().cloned())
+    }
+
     /// The body has ended. Whatever is left in the buffer is one last event
     /// without its blank line.
     pub fn finish(mut self) -> Result<Answer, String> {
@@ -182,12 +188,7 @@ impl Stream {
         }
         Ok(Answer {
             model: self.model,
-            text: self
-                .texts
-                .into_values()
-                .filter(|t| !t.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n\n"),
+            text: join_blocks(self.texts.into_values()),
             stop_reason: self.stop_reason,
             stop_category: self.stop_category,
             usage: self.usage,
@@ -259,6 +260,15 @@ impl Stream {
         }
         Ok(())
     }
+}
+
+/// The text blocks as one answer: joined with a blank line, empty ones left
+/// out. The panel splits paragraphs on the blank line.
+fn join_blocks(blocks: impl Iterator<Item = String>) -> String {
+    blocks
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// Where the first complete event in `bytes` ends: `(length, gap)`, the gap

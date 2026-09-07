@@ -106,6 +106,9 @@ describe("tauri arm", () => {
     expect(invoke).toHaveBeenCalledWith("yahoo_finish_connect", { code: "xy7q9", state: "s-1" });
     await api.yahooDisconnect();
     expect(invoke).toHaveBeenCalledWith("yahoo_disconnect", { forgetCredentials: false });
+    invoke.mockResolvedValue(undefined);
+    await api.yahooCancelConnect();
+    expect(invoke).toHaveBeenCalledWith("yahoo_cancel_connect");
     invoke.mockResolvedValue({
       authorize_url: "https://yahoo.example",
       state: "s",
@@ -256,6 +259,8 @@ describe("browser arm", () => {
     await expect(api.yahooFinishConnect("c", "s")).rejects.toThrow("Yahoo needs the desktop app");
     await expect(api.yahooDisconnect()).rejects.toThrow("Yahoo needs the desktop app");
     await expect(api.yahooLeagues()).rejects.toThrow("Yahoo needs the desktop app");
+    // Nothing can have begun in the browser, so giving up is not an error.
+    await expect(api.yahooCancelConnect()).resolves.toBeUndefined();
   });
 
   it("calls a fixture with no platform on it a Sleeper league", async () => {

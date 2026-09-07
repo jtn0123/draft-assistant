@@ -90,7 +90,8 @@ pub mod yahoo_secrets;
 pub mod yahoo_types;
 
 use commands_chat::{
-    ask_claude, chat_settings, chat_suggestions, set_api_key, set_chat_budget, set_chat_provider,
+    ask_claude, cancel_claude, chat_settings, chat_suggestions, set_api_key, set_chat_budget,
+    set_chat_provider,
 };
 use commands_companion::{
     companion_disable, companion_enable, companion_revoke, companion_status, set_device_name,
@@ -108,8 +109,8 @@ use commands_season::{
 use commands_second_opinion::import_second_opinion;
 use commands_update::{check_for_update, install_update};
 use commands_yahoo::{
-    yahoo_auction, yahoo_begin_connect, yahoo_disconnect, yahoo_finish_connect, yahoo_leagues,
-    yahoo_save_credentials, yahoo_status,
+    yahoo_auction, yahoo_begin_connect, yahoo_cancel_connect, yahoo_disconnect,
+    yahoo_finish_connect, yahoo_leagues, yahoo_save_credentials, yahoo_status,
 };
 use companion::CompanionServer;
 use engine::Engine;
@@ -140,7 +141,7 @@ pub fn run() {
             // From here on a panic leaves a line behind. Before this, a panic
             // in a double-clicked .app killed the window and wrote nothing.
             applog::install_panic_hook();
-            let engine = Engine::new(data_dir.clone());
+            let engine = Engine::for_app(data_dir.clone());
             let config = engine.load_config();
             // Whatever the user last chose in Settings -> Diagnostics. Applied
             // before anything else can log, so a session started to reproduce
@@ -178,6 +179,7 @@ pub fn run() {
                 season_generation: Arc::new(AtomicU64::new(0)),
                 last_season_view: Arc::new(Mutex::new(None)),
                 yahoo: Arc::new(YahooState::default()),
+                chat_claims: Arc::new(Default::default()),
             };
             // The companion server is built at startup but not started: it is
             // off until the user turns it on in Settings. What it holds before
@@ -234,6 +236,7 @@ pub fn run() {
             set_chat_budget,
             chat_settings,
             ask_claude,
+            cancel_claude,
             chat_suggestions,
             sleeper_leagues,
             remove_league,
@@ -241,6 +244,7 @@ pub fn run() {
             yahoo_status,
             yahoo_save_credentials,
             yahoo_begin_connect,
+            yahoo_cancel_connect,
             yahoo_finish_connect,
             yahoo_disconnect,
             yahoo_leagues,

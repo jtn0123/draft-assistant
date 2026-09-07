@@ -75,6 +75,10 @@ export interface Api {
   yahooBeginConnect(): Promise<YahooConnectStart>;
   /** Swap the code Yahoo showed the user for a token. */
   yahooFinishConnect(code: string, state: string): Promise<YahooStatus>;
+  /** Give up a sign-in that was begun and not finished: forgets the state it
+   *  was waiting on and frees the loopback port, so the next attempt is not
+   *  told the port is busy. Nothing stored is touched. */
+  yahooCancelConnect(): Promise<void>;
   /** Forget the token. The saved credentials stay. */
   yahooDisconnect(forgetCredentials?: boolean): Promise<YahooStatus>;
   /** Every league the connected Yahoo account plays in. */
@@ -184,6 +188,7 @@ const tauriApi: Api = {
     invoke<YahooStatus>("yahoo_save_credentials", { clientId, clientSecret }),
   yahooBeginConnect: () => invoke<YahooConnectStart>("yahoo_begin_connect"),
   yahooFinishConnect: (code, state) => invoke<YahooStatus>("yahoo_finish_connect", { code, state }),
+  yahooCancelConnect: () => invoke<void>("yahoo_cancel_connect"),
   yahooDisconnect: (forgetCredentials = false) =>
     invoke<YahooStatus>("yahoo_disconnect", { forgetCredentials }),
   yahooLeagues: () => invoke<StoredLeague[]>("yahoo_leagues"),
@@ -307,6 +312,8 @@ function browserApi(): Api {
     yahooSaveCredentials: () => needsDesktop(),
     yahooBeginConnect: () => needsDesktop(),
     yahooFinishConnect: () => needsDesktop(),
+    // Nothing can have begun here, so there is nothing to give up.
+    yahooCancelConnect: () => Promise.resolve(),
     yahooDisconnect: () => needsDesktop(),
     yahooLeagues: () => needsDesktop(),
     // The preview has one league and it is always on screen.

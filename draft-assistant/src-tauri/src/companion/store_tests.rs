@@ -3,7 +3,7 @@
 //! developer's real login Keychain.
 
 use super::{
-    devices_item_for, legacy_path_in, load, load_item, save, save_item, StoredDevice, StoredHub,
+    legacy_path_in, load, load_item, save, save_item, DevicesUnder, StoredDevice, StoredHub,
 };
 use crate::companion::hub::Device;
 use crate::yahoo_secrets::{FileStore, Item, SecretStore};
@@ -165,10 +165,8 @@ fn an_old_file_that_will_not_parse_is_deleted_rather_than_left_lying_there() {
 /// other, and a second save does not disturb the first.
 fn the_headless_host_and_the_desktop_do_not_read_each_others_pairings() {
     let scratch = scratch("two-accounts");
-    let desktop = devices_item_for(false);
-    let headless = devices_item_for(true);
-    assert_eq!(desktop, Item::CompanionDevices);
-    assert_eq!(headless, Item::CompanionDevicesHeadless);
+    let desktop = Item::CompanionDevices;
+    let headless = Item::CompanionDevicesHeadless;
 
     save_item(scratch.store.as_ref(), &sample(), desktop);
     assert!(
@@ -187,4 +185,52 @@ fn the_headless_host_and_the_desktop_do_not_read_each_others_pairings() {
     let host = load_item(scratch.store.as_ref(), &scratch.data_dir, headless).expect("host");
     assert_eq!(host.code, "919191");
     assert_eq!(host.devices[0].token, "host-tok");
+}
+
+/// The store the headless host's hub is built over: a plain `load` and `save`
+/// through it land under the headless account, and a hub over the same
+/// underlying store filed under the desktop account sees none of it.
+#[test]
+fn a_store_filed_under_the_headless_account_keeps_the_hubs_plain_saves_apart() {
+    let root = dir("under");
+    let data_dir = root.join("data");
+    std::fs::create_dir_all(&data_dir).expect("the data directory is creatable");
+    let shared = root.join("secrets");
+    let headless = DevicesUnder::new(
+        Box::new(FileStore::in_dir(&shared)),
+        Item::CompanionDevicesHeadless,
+    )
+    .expect("a companion account");
+    let desktop = DevicesUnder::new(Box::new(FileStore::in_dir(&shared)), Item::CompanionDevices)
+        .expect("a companion account");
+
+    save(&headless, &sample());
+    assert!(
+        load(&desktop, &data_dir).is_none(),
+        "the desktop read the headless host's pairings"
+    );
+    let raw = FileStore::in_dir(&shared);
+    assert!(raw.read(Item::CompanionDevices).is_none());
+    assert!(raw.read(Item::CompanionDevicesHeadless).is_some());
+    assert_eq!(load(&headless, &data_dir).expect("kept").code, "424242");
+
+    // Anything that is not the device list passes through untouched.
+    headless
+        .write(Item::Token, "not-a-real-token")
+        .expect("written");
+    assert_eq!(raw.read(Item::Token).as_deref(), Some("not-a-real-token"));
+    headless.clear(Item::Token).expect("cleared");
+    assert!(raw.read(Item::Token).is_none());
+}
+
+/// The device list only ever goes under one of the two companion accounts.
+#[test]
+fn the_device_list_is_refused_a_home_over_any_other_secret() {
+    let root = dir("refused");
+    for item in [Item::Credentials, Item::Token, Item::AnthropicKey] {
+        let error = DevicesUnder::new(Box::new(FileStore::in_dir(root.join("secrets"))), item)
+            .err()
+            .expect("refused");
+        assert!(error.contains(item.account()), "{error}");
+    }
 }

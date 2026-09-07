@@ -104,6 +104,12 @@ pub struct YahooClient {
     /// request: a lock held over the network is how one slow refresh used to
     /// stall every other call the load had in flight.
     tokens: Mutex<TokenSet>,
+    /// The pair as the Keychain last had it: what the client was built from,
+    /// then whatever [`Self::mark_persisted`] was told. [`Self::unsaved_tokens`]
+    /// compares against it, so a caller that persists after every call (the
+    /// poller, every three seconds) writes only when a refresh changed
+    /// something, not on every tick.
+    persisted: Mutex<TokenSet>,
     /// The one caller allowed to be refreshing at any moment.
     refresh_gate: Mutex<()>,
     retry: RetryPolicy,
@@ -149,6 +155,7 @@ impl YahooClient {
             hosts,
             oauth,
             credentials,
+            persisted: Mutex::new(tokens.clone()),
             tokens: Mutex::new(tokens),
             refresh_gate: Mutex::new(()),
             retry: RetryPolicy::default(),
@@ -170,6 +177,20 @@ impl YahooClient {
     /// Persist this after a call to keep the refresh across restarts.
     pub async fn tokens(&self) -> TokenSet {
         self.tokens.lock().await.clone()
+    }
+
+    /// The pair, only if it differs from what was last persisted; `None`
+    /// means the Keychain already holds this one and there is nothing to
+    /// write. A caller that writes anyway spawns `security` on every poll.
+    pub async fn unsaved_tokens(&self) -> Option<TokenSet> {
+        let current = self.tokens.lock().await.clone();
+        let persisted = self.persisted.lock().await;
+        (*persisted != current).then_some(current)
+    }
+
+    /// Tell the client that `tokens` are now what the Keychain holds.
+    pub async fn mark_persisted(&self, tokens: &TokenSet) {
+        *self.persisted.lock().await = tokens.clone();
     }
 
     /// Whether a call on this client has found the grant gone. Once true the
@@ -213,6 +234,15 @@ impl YahooClient {
             }
             tokens.refresh_token.clone()
         };
+        // A stored pair with no refresh token in it cannot be renewed, now or
+        // ever: whoever wrote it had nothing to carry over. It used to come
+        // back as a plain auth error, which is not retryable and not a
+        // sign-out either, so the pair stayed in the Keychain, Settings said
+        // "Connected", and every call failed the same way until the user
+        // worked out that Disconnect was the fix. It is a sign-out.
+        if refresh_token.trim().is_empty() {
+            return Err(self.sign_out());
+        }
         let fresh = match self
             .oauth
             .refresh(&self.credentials, &refresh_token, &self.hosts.redirect_uri)

@@ -105,10 +105,14 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      # Against `vite build` + `vite preview`, not the dev server: the bundle
-      # the .app ships is what gets driven (see playwright.config.ts).
+      # Against `vite preview` over the bundle the step above built, not the
+      # dev server: the bundle the .app ships is what gets driven (see
+      # playwright.config.ts). PW_PREBUILT is what stops the webServer command
+      # from running `vite build` a second time on the same tree.
       - name: Browser end-to-end tests against the production bundle
         run: npm run test:e2e:browser:ci
+        env:
+          PW_PREBUILT: "1"
 
       - name: Upload Playwright report on failure
         if: failure()

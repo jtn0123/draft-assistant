@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { ConfirmDialog, Toast } from "./Overlays";
+import { ConfirmDialog, Toast, ToastStrip } from "./Overlays";
 import { useFocusTrap } from "./useFocusTrap";
 import type { Platform } from "../types";
 import { settle } from "../test/settle";
@@ -128,6 +128,25 @@ describe("Toast", () => {
       screen.getByRole("button", { name: "Dismiss" }).click();
     });
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the shell's toast strip", () => {
+  it("paints nothing when there is no message", () => {
+    const { container } = render(<ToastStrip toast={null} onDismiss={() => {}} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("offers Try again only when the message came with a retry", async () => {
+    const retry = vi.fn();
+    const { rerender } = render(<ToastStrip toast={{ text: "Saved" }} onDismiss={() => {}} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Saved");
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    rerender(<ToastStrip toast={{ text: "Could not save", retry }} onDismiss={() => {}} />);
+    await settle(() => {
+      screen.getByRole("button", { name: "Try again" }).click();
+    });
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 });
 

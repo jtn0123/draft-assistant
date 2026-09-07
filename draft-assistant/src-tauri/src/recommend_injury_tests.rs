@@ -255,3 +255,97 @@ fn being_out_for_a_week_costs_a_week_and_not_a_quarter_of_the_season() {
         fit.total - late.total
     );
 }
+
+#[test]
+fn yahoos_short_codes_cost_what_sleepers_words_cost() {
+    // The failure this prevents: a Yahoo player's status is "Q", not
+    // "Questionable", and it went to the recommender as it came. Every "Q"
+    // fell through to the unfamiliar-tag price, six points, three times what
+    // a practice report is worth, all night.
+    let available = vec![
+        tagged("q", "WR", 40.0, Some("Q")),
+        tagged("questionable", "WR", 40.0, Some("Questionable")),
+        tagged("o", "WR", 40.0, Some("O")),
+        tagged("out", "WR", 40.0, Some("Out")),
+        tagged("fit", "WR", 40.0, None),
+    ];
+    let mine = roster(&["QB", "RB"]);
+    let rules = RosterRules::new(&slots());
+    let inputs = RecommendInputs::new(&available, Some(&mine), &rules, 4, 15, 40, 12);
+    let ctx = context(&inputs, HashMap::from([("QB", 1), ("RB", 1)]));
+    let total = |index: usize| {
+        score_candidate(&ctx, &available[index], Mode::Balanced)
+            .expect("a WR")
+            .total
+    };
+    assert!(
+        (total(0) - total(1)).abs() < 1e-9,
+        "Q {} vs Questionable {}",
+        total(0),
+        total(1)
+    );
+    assert!(
+        (total(2) - total(3)).abs() < 1e-9,
+        "O {} vs Out {}",
+        total(2),
+        total(3)
+    );
+    let q_cost = total(4) - total(0);
+    assert!((0.0..=4.0).contains(&q_cost), "a Yahoo Q cost {q_cost}");
+}
+
+#[test]
+fn a_camp_pup_tag_before_the_draft_is_early_weeks_not_a_lost_season() {
+    // The failure this prevents: PUP is priced as season-ending, which is
+    // right in October and wrong in August, when it is a training-camp
+    // hamstring that most players come off at the roster cut. A first-round
+    // back on camp PUP was docked his whole card, the same as a man on IR.
+    let available = vec![
+        tagged("pup", "RB", 40.0, Some("PUP")),
+        tagged("pup_r", "RB", 40.0, Some("PUP-R")),
+        tagged("ir", "RB", 40.0, Some("IR")),
+        tagged("fit", "RB", 40.0, None),
+    ];
+    let mine = roster(&["QB", "WR"]);
+    let rules = RosterRules::new(&slots());
+    let mut inputs = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 1, 12);
+    inputs.pre_draft = true;
+    let ctx = context(&inputs, HashMap::from([("QB", 1), ("WR", 1)]));
+    let score =
+        |index: usize| score_candidate(&ctx, &available[index], Mode::Balanced).expect("an RB");
+    let fit = score(3).total;
+    let pup_cost = fit - score(0).total;
+    let ir_cost = fit - score(2).total;
+    assert!(pup_cost > 0.0, "camp PUP cost nothing");
+    assert!(
+        pup_cost < ir_cost / 2.0,
+        "camp PUP cost {pup_cost}, IR cost {ir_cost}"
+    );
+    assert!(
+        (fit - score(1).total - pup_cost).abs() < 1e-9,
+        "PUP-R in camp is the same list"
+    );
+    let reasons = score(0).into_reasons();
+    assert!(
+        reasons
+            .iter()
+            .any(|r| r == "on PUP in camp: may miss the early weeks"),
+        "{reasons:?}"
+    );
+
+    // Once the season is under way the same tag is what the table says: a
+    // reserve move in October is the year, and it costs what IR costs.
+    let inputs = RecommendInputs::new(&available, Some(&mine), &rules, 1, 15, 1, 12);
+    let ctx = context(&inputs, HashMap::from([("QB", 1), ("WR", 1)]));
+    let live = |index: usize| {
+        score_candidate(&ctx, &available[index], Mode::Balanced)
+            .expect("an RB")
+            .total
+    };
+    assert!(
+        (live(0) - live(2)).abs() < 1e-9,
+        "in season PUP {} vs IR {}",
+        live(0),
+        live(2)
+    );
+}
