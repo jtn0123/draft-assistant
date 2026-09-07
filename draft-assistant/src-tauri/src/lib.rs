@@ -89,38 +89,62 @@ pub mod yahoo_retry;
 pub mod yahoo_secrets;
 pub mod yahoo_types;
 
+// The Tauri application shell. Everything above this line is the library and
+// compiles without Tauri; everything below is the desktop app. Gated so a
+// consumer that only wants the library can take it with `default-features =
+// false` -- the fuzz targets in `fuzz/` do, because `generate_context!` does
+// not expand under their build settings and nothing they fuzz needs the
+// shell. On by default, so every ordinary build, test and clippy run still
+// compiles it.
+#[cfg(feature = "desktop")]
 use commands_chat::{
     ask_claude, cancel_claude, chat_settings, chat_suggestions, set_api_key, set_chat_budget,
     set_chat_provider,
 };
+#[cfg(feature = "desktop")]
 use commands_companion::{
     companion_disable, companion_enable, companion_revoke, companion_status, set_device_name,
     shared_chat_get, shared_chat_reset, shared_chat_send,
 };
+#[cfg(feature = "desktop")]
 use commands_diag::{diagnostics, log_frontend_error, open_log_folder, set_log_level};
+#[cfg(feature = "desktop")]
 use commands_draft::{
     add_league, clear_keepers, export_state, get_config, get_state, record_manual_pick,
     refresh_data, refresh_picks, set_my_username, start_polling, stop_polling, undo_manual_pick,
 };
+#[cfg(feature = "desktop")]
 use commands_season::{
     avatar, get_season, headshot, load_season, refresh_season, start_season_polling,
     stop_season_polling,
 };
+#[cfg(feature = "desktop")]
 use commands_second_opinion::import_second_opinion;
+#[cfg(feature = "desktop")]
 use commands_update::{check_for_update, install_update};
+#[cfg(feature = "desktop")]
 use commands_yahoo::{
     yahoo_auction, yahoo_begin_connect, yahoo_cancel_connect, yahoo_disconnect,
     yahoo_finish_connect, yahoo_leagues, yahoo_save_credentials, yahoo_status,
 };
+#[cfg(feature = "desktop")]
 use companion::CompanionServer;
+#[cfg(feature = "desktop")]
 use engine::Engine;
+#[cfg(feature = "desktop")]
 use leagues::{remove_league, sleeper_leagues};
+#[cfg(feature = "desktop")]
 use state::{AppState, YahooState};
+#[cfg(feature = "desktop")]
 use std::sync::atomic::{AtomicBool, AtomicU64};
+#[cfg(feature = "desktop")]
 use std::sync::Arc;
+#[cfg(feature = "desktop")]
 use tauri::{Emitter, Manager};
+#[cfg(feature = "desktop")]
 use tokio::sync::Mutex;
 
+#[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()

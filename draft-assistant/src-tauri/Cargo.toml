@@ -24,6 +24,11 @@ crate-type = ["rlib"]
 # binary. `build.rs` gates the matching capability file on the same flag, so a
 # default build cannot even grant the permission.
 [features]
+default = ["desktop"]
+# The Tauri application shell (`src/desktop_shell.rs`). On by default; the
+# fuzz targets in `fuzz/` turn it off because `generate_context!` does not
+# expand under their build settings and nothing they fuzz needs the shell.
+desktop = []
 wdio = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
 
 [build-dependencies]
@@ -97,6 +102,12 @@ tokio-tungstenite = "0.29"
 # name with a chosen expiry, and write it where the real one would be. Pure
 # Rust on the same `ring` the shipped TLS stack uses. Test-only.
 rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "ring"] }
+# Randomized property tests over the draft math and the Sleeper parsers
+# (tests/properties.rs). The shapes that break this app are the ones no
+# fixture thought to write down -- a league with no teams, a pick number of
+# zero -- and `overflow-checks` is on in release, so an underflow there is a
+# crash mid-draft rather than a wrong number. Test-only.
+proptest = { version = "1", default-features = false, features = ["std", "bit-set"] }
 
 [profile.release]
 overflow-checks = true
