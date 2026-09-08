@@ -188,3 +188,25 @@ it("says so plainly when there is neither a draft order nor a season", () => {
 
   expect(screen.getByText(/Nothing to project yet/)).toBeInTheDocument();
 });
+
+// Ranks 11, 12 and 13 are the ones an ordinal rule gets wrong: "11st" reads
+// as a bug in a sentence a user is meant to trust.
+it("writes the teens as teens when the league is big enough to have them", () => {
+  const rows = Array.from({ length: 13 }, (_, at) =>
+    drafted({ slot: at + 1, starters: 2000 - at, rank: at + 1, is_mine: at === 10 }),
+  );
+  render(<ProjectionsScreen draft={board({ draft_projections: rows })} season={null} />);
+
+  expect(screen.getByText("11th of 13 on projected starters")).toBeInTheDocument();
+});
+
+it("counts a roster with no seat of yours out of the headline", () => {
+  const rows = [drafted({ slot: 2, rank: 1 }), drafted({ slot: 3, rank: 2 })];
+  render(<ProjectionsScreen draft={board({ draft_projections: rows })} season={null} />);
+
+  const top = [...document.querySelectorAll(".proj-stat-value")].map((stat) => stat.textContent);
+  expect(top).toEqual(["-", "-"]);
+  expect(screen.getByText("no seat in this draft")).toBeInTheDocument();
+  // The table is still the league's, whether or not you are in it.
+  expect(document.querySelectorAll(".proj-draft-row.proj-body")).toHaveLength(2);
+});

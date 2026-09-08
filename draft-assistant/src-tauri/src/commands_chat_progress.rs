@@ -36,3 +36,7 @@ pub(crate) fn progress_events<R: tauri::Runtime>(
         tauri::Emitter::emit(&app, "chat-progress", progress).ok();
     })
 }
+
+#[cfg(test)]
+#[path = "commands_chat_progress_tests.rs"]
+mod tests;

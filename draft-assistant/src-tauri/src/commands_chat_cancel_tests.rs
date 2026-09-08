@@ -135,3 +135,69 @@ async fn cancelling_stops_the_cli_route_and_not_only_the_api_one() {
         std::fs::remove_dir_all(dir).ok();
     }
 }
+
+/// Every route can be asked for before the thing that answers it exists. Each
+/// refusal names what is missing and what to do about it: these are the
+/// sentences a user reads when the panel will not answer, and until now none
+/// of the three was covered.
+mod refusals {
+    use super::*;
+
+    /// A route with nothing behind it: no CLI found, no key stored.
+    fn empty(provider: &'static str) -> Route {
+        Route {
+            provider,
+            cli: None,
+            api_key: None,
+            model: ChatModel::Opus5,
+            effort: Effort::High,
+            context: crate::chat_context::SplitContext {
+                stable: String::new(),
+                volatile: String::new(),
+            },
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "Walker or Bowers?".to_string(),
+            }],
+        }
+    }
+
+    async fn refused(provider: &'static str) -> String {
+        empty(provider)
+            .call(crate::chat_client::CancelSignal::never(), None)
+            .await
+            .expect_err("there is nothing to answer with")
+            .message
+    }
+
+    #[tokio::test]
+    async fn the_codex_route_says_to_install_codex_and_log_in() {
+        let message = refused("codex").await;
+        assert!(message.contains("Codex CLI not found"), "{message}");
+        assert!(message.contains("codex login"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn the_claude_code_route_says_to_install_it_or_add_a_key() {
+        let message = refused(PROVIDER_CLI).await;
+        assert!(message.contains("Claude Code CLI not found"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn the_api_route_says_where_the_key_goes() {
+        let message = refused("api").await;
+        assert!(message.contains("no Anthropic API key set"), "{message}");
+        assert!(message.contains("Settings"), "{message}");
+    }
+
+    /// Nothing was sent, so nothing was billed: a refusal carries no partial
+    /// turn for the books to settle.
+    #[tokio::test]
+    async fn a_refusal_costs_nothing() {
+        let error = empty("api")
+            .call(crate::chat_client::CancelSignal::never(), None)
+            .await
+            .expect_err("there is nothing to answer with");
+        assert!(error.partial.is_none());
+    }
+}
