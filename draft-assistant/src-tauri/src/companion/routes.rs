@@ -32,6 +32,7 @@ pub fn router(srv: Arc<Srv>) -> Router {
             "/api/chat",
             get(super::routes_chat::get_chat).post(super::routes_chat::post_chat),
         )
+        .route("/api/chat/models", get(super::chat_models::get_models))
         .route("/api/chat/reset", post(super::routes_chat::reset_chat))
         .route("/api/events", get(super::ws::events))
         .layer(axum::middleware::from_fn_with_state(srv.clone(), gate))
@@ -59,7 +60,8 @@ pub fn csp_for(ws_origins: &[String]) -> String {
         connect.push_str(origin);
     }
     format!(
-        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; \
+        "default-src 'none'; script-src 'self'; style-src 'self'; \
+         img-src 'self' data: https://sleepercdn.com; \
          connect-src {connect}; manifest-src 'self'; worker-src 'self'; base-uri 'none'; \
          form-action 'none'; frame-ancestors 'none'"
     )

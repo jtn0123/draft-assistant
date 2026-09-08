@@ -14,6 +14,7 @@ function input(overrides: Partial<SettingsRowInput> = {}): SettingsRowInput {
   return {
     view: view(),
     chime: false,
+    ask: false,
     polling: false,
     lastSyncAt: null,
     leagueCount: 1,
@@ -27,6 +28,7 @@ function input(overrides: Partial<SettingsRowInput> = {}): SettingsRowInput {
     hostName: null,
     companionOn: false,
     onChime: vi.fn(),
+    onAsk: vi.fn(),
     onTogglePolling: vi.fn(),
     onLeaguePicker: vi.fn(),
     onYahoo: vi.fn(),
@@ -116,14 +118,15 @@ describe("where the player pictures come from", () => {
 describe("setting the Sleeper username after the first launch", () => {
   const LABEL = "Sleeper username…";
 
-  it("offers the row on a Sleeper league, and says no team is claimed yet", () => {
+  it("offers the identity picker on a Sleeper league while draft seats are pending", () => {
     const onSetUsername = vi.fn();
     const state = input({ onSetUsername });
     state.view.league.platform = "sleeper";
     state.view.my_roster = null;
 
     const set = row(buildSettingsRows(state), LABEL);
-    expect(set?.note).toContain("no team on the board is marked as yours");
+    expect(set?.note).toContain("Choose your account below");
+    expect(set?.note).toContain("draft seats may still be pending");
     expect(set?.value).toBe("Set");
     set?.onSelect();
     expect(onSetUsername).toHaveBeenCalled();
@@ -206,6 +209,7 @@ describe("what kind of thing each row is", () => {
     const rows = buildSettingsRows(input({ onSetUsername: vi.fn() }));
     const kind = (label: string) => row(rows, label)?.kind;
     expect(kind("Pick chime")).toBe("toggle");
+    expect(kind("Ask AI button")).toBe("toggle");
     expect(kind("Live sync")).toBe("toggle");
     expect(kind("Player pictures")).toBe("toggle");
     for (const label of [

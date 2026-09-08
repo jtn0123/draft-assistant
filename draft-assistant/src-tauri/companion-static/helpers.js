@@ -267,7 +267,7 @@
   /** The chat thread's list items, rebuilt whole: who asked or was answered,
    *  when (stamped on the node so a tick can move it), what it cost, and the
    *  answer as the markdown subset above. */
-  const buildChatList = (list, entries, now) => {
+  const buildChatList = (list, entries, now, busy = false) => {
     clear(list);
     for (const entry of entries) {
       const item = list.appendChild(el("li", `entry ${entry.role}`));
@@ -280,14 +280,67 @@
       );
       const when = meta.appendChild(el("span", null, relativeTime(entry.at_ms, now)));
       when.dataset.at = String(entry.at_ms);
-      spans(meta, [null, formatCost(entry.cost_usd)]);
+      const cost = formatCost(entry.cost_usd);
+      if (cost !== null) {
+        const estimate = meta.appendChild(el("span", null, `${cost} estimated`));
+        estimate.title = "API-equivalent estimate. Subscription calls are not extra token bills.";
+      }
       if (entry.error) item.appendChild(el("p", "error", entry.error));
       else if (entry.role === "assistant") item.appendChild(markdownNodes(entry.text));
       else item.appendChild(el("p", null, entry.text));
     }
-    if (!entries.length) list.appendChild(el("li", "muted", "Nothing asked yet."));
+    if (!entries.length && !busy) list.appendChild(el("li", "muted", "Nothing asked yet."));
+    // The host has the question: say so where the answer will appear.
+    if (busy) list.appendChild(el("li", "entry assistant thinking", "Thinking…"));
   };
+  /** Match the desktop's keeper/mock distinction before announcing a turn. */
+  const draftClockFacts = (draft, now, showCountdown = true) => {
+    if (!draft) return [["muted", "No draft is loaded on the host."]];
+    if (draft.status === "complete") return [["headline", "Draft complete"]];
+    if (
+      draft.status === "pre_draft" &&
+      (draft.total_picks_made ?? 0) <= (draft.keeper_picks?.length ?? 0)
+    )
+      return [
+        ["headline", "Draft has not started"],
+        ["muted", "Waiting for the host’s draft to begin."],
+      ];
+    if (draft.is_auction) return [["headline", "Auction draft is not supported"]];
+    if (draft.paused || draft.status === "paused") return [["headline", "Draft paused"]];
+    const clock = formatClock(draft.clock_deadline_ms, now);
+    return [
+      ["headline", `Pick ${draft.current_pick} · round ${draft.current_round}`],
+      [null, draft.on_clock_name || `Slot ${draft.on_clock_slot}`],
+      ["mine", draft.is_my_pick && "Your pick"],
+      ["muted", showCountdown && clock && `${clock} left`],
+    ];
+  };
+  /** Suggestions only prepare a question: sending remains an explicit action. */
+  const bindQuestionSuggestions = (doc) => {
+    doc.getElementById("chat-block").addEventListener("click", (event) => {
+      const button = event.target.closest?.("button[data-question]");
+      const input = doc.getElementById("chat-input");
+      if (!button || !input || input.disabled) return;
+      input.value = button.dataset.question;
+      input.focus();
+    });
+  };
+  const pairBusy = (button, busy) => {
+    button.disabled = busy;
+    button.textContent = busy ? "Connecting…" : "Connect";
+    button.setAttribute("aria-busy", String(busy));
+  };
+  const pairFailure = (status) =>
+    status === 429
+      ? "Too many tries. Wait a minute, then try again."
+      : status === 403
+        ? "That code did not work. Check the host’s current six-digit code and try again."
+        : "The host could not connect this device. Try again in a moment.";
   window.Companion = {
+    draftClockFacts,
+    bindQuestionSuggestions,
+    pairBusy,
+    pairFailure,
     TOKEN_KEY,
     DEVICE_KEY,
     DEVICE_ID_KEY,

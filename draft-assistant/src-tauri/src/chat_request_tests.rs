@@ -9,7 +9,7 @@ use super::*;
 #[test]
 fn model_ids_are_the_exact_published_strings() {
     assert_eq!(ChatModel::Opus5.id(), "claude-opus-5");
-    assert_eq!(ChatModel::Fable5.id(), "claude-fable-5");
+    assert_eq!(ChatModel::Fable5.id(), "claude-fable-5-1");
 }
 
 #[test]
@@ -92,12 +92,14 @@ fn one_question(text: &str) -> Vec<ChatMessage> {
 fn an_empty_key_fails_before_any_request_is_made() {
     let http = reqwest::Client::new();
     let result = tokio_test_block(ask(
-        &http,
-        "   ",
-        ChatModel::Opus5,
-        Effort::High,
-        &crate::chat_context::draft_split(&crate::chat_fixtures::draft_fixture()),
-        &one_question("hi"),
+        Question {
+            http: &http,
+            api_key: "   ",
+            model: ChatModel::Opus5,
+            effort: Effort::High,
+            context: &crate::chat_context::draft_split(&crate::chat_fixtures::draft_fixture()),
+            messages: &one_question("hi"),
+        },
         CancelSignal::never(),
     ));
     let error = result.unwrap_err();
@@ -132,8 +134,13 @@ fn a_thread_ending_on_the_assistants_turn_is_refused_before_it_is_sent() {
         context: &context,
         messages: &messages,
     };
-    let error =
-        tokio_test_block(ask_at(call, CancelSignal::never(), retry::Limits::LIVE)).unwrap_err();
+    let error = tokio_test_block(ask_at(
+        call,
+        CancelSignal::never(),
+        retry::Limits::LIVE,
+        None,
+    ))
+    .unwrap_err();
     assert_eq!(error.message, "the last turn must be a question");
 }
 
@@ -200,7 +207,7 @@ fn thinking_is_disabled_only_on_the_model_that_allows_it() {
             .to_string()
     };
     assert_eq!(off(ChatModel::Opus5), "disabled");
-    // Fable 5 always thinks; asking for it to be off is a 400.
+    // Fable 5.1 always thinks; asking for it to be off is a 400.
     assert_eq!(off(ChatModel::Fable5), "adaptive");
 }
 

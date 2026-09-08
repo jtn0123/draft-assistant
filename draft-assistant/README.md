@@ -8,7 +8,22 @@ You play in Sleeper as normal; this app is a read-only second screen that polls
 the public Sleeper API and answers under **your league's exact scoring rules**.
 
 Built with Tauri 2: Rust core engine + React/TypeScript-strict frontend. Desktop
-(macOS) now; the same core compiles into an Android build later — no server anywhere.
+(macOS) now; the same core compiles into an Android build later. No hosted server
+is required. The optional phone/second-screen feature runs a local HTTP +
+WebSocket companion server in the desktop app.
+
+### Phone companion
+
+Open gear → **All settings** → **Phone & second screen** on the Mac and turn it
+on. Open its address in Safari or Chrome and enter the current pairing code.
+For another network, connect both devices to the same private Tailscale network
+and use the host's Tailscale address. Keep the Mac awake with the app running.
+
+The phone shows recommendations, the live pick timer, upcoming managers, your
+next picks, roster and shared AI chat. Its collapsible model/effort picker is
+remembered per device; Claude and OpenAI choices use the host's existing AI
+connections. Suggested questions fill the composer without sending. Draft
+changes and connection credentials remain controlled on the Mac.
 
 ## What it does
 
@@ -53,10 +68,25 @@ Built with Tauri 2: Rust core engine + React/TypeScript-strict frontend. Desktop
   league (including ones still in review) and a league activity feed.
 - **Trends**: each team's projected strength over time.
 
-### Ask Claude
+### AI chat
 
 A chat panel on either screen that sees the current board or matchup. See
-[Ask Claude](#ask-claude) below for the two ways it can connect.
+[AI chat](#ai-chat) below for the available providers.
+
+## Draft-night controls
+
+Open the header's gear menu for quick actions, then **All settings** for the
+full settings page. Under **Draft identity**, the Sleeper username area lists
+the current league's account names. Choose yourself to save the default identity
+on this Mac; the app uses the stable Sleeper user ID and recalculates your seat.
+These are account display names from Sleeper, not custom fantasy-team names.
+You can also type your username. Before Sleeper publishes the order, your identity
+can be saved while the draft seat remains pending.
+
+The available-player list scrolls independently, keeping the draft header and
+other panels in place. In **Ask AI**, expand the model picker to change the
+model, effort, or Claude connection. Choosing a model closes the picker so the
+conversation has more room.
 
 ## Run (dev)
 
@@ -252,7 +282,7 @@ src/                        React + TS strict UI
                             Last season
     GamesTab.tsx            live NFL scoreboard joined to both sides' starters
     TrendsTab.tsx           every team's strength over time + why it moved
-    Chat.tsx                the Ask Claude panel: pickers, thread, composer
+    Chat.tsx                the AI chat panel: pickers, thread, composer
     Overlays.tsx            modal confirm and the toast strip
     useFocusTrap.ts         the one focus trap, shared by everything modal
     bits.tsx                the visual primitives both screens share
@@ -321,9 +351,9 @@ src-tauri/src/
 All files ≤ 500 LOC by project convention, enforced by `scripts/check-loc.mjs`
 in `npm run verify`.
 
-## Ask Claude
+## AI chat
 
-The chat panel reaches Claude one of two ways, picked in the panel itself:
+Choose the provider and model in the chat panel:
 
 - **Claude Code** — runs the `claude` CLI already installed on this Mac, signed
   in with your Claude subscription. No API key needed. Only offered when the
@@ -331,8 +361,15 @@ The chat panel reaches Claude one of two ways, picked in the panel itself:
 - **API key** — calls the Anthropic API directly. The key is stored in the
   macOS Keychain (`secrets.rs`), never in the repo or the config file.
 
-Either way the conversation is read-only with respect to Sleeper: Claude is
-shown the current board or matchup and never writes anything back.
+- **Codex** — runs the authenticated `codex` CLI for GPT-6 Astra or
+  GPT-5.6 Sol. Sign in to Codex on the Mac first; no OpenAI API key is needed.
+
+The conversation is read-only with respect to Sleeper: each provider is shown
+the current board or matchup and never writes anything back.
+
+Chat shows estimated API-equivalent cost for usage, including subscription CLI
+providers. This is an estimate, not your subscription bill. There is no budget
+setting, budget cap, or spending stop.
 
 ## Releases
 

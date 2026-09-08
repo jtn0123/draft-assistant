@@ -47,7 +47,7 @@ export function ChatKeyForm({
       </span>
       <span className="mid small">
         {hint === null
-          ? "Ask Claude sends your board to the Anthropic API. The key stays on this Mac and goes nowhere else."
+          ? "Ask AI sends your board to the Anthropic API. The key stays on this Mac and goes nowhere else."
           : `Currently using ${hint}.`}
       </span>
       {store !== null && <span className="muted small">{STORE_NOTE[store]}</span>}

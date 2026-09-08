@@ -5,6 +5,7 @@
 //! WebSocket. Anything else would hold a mobile connection open for the length
 //! of a model call.
 
+use super::chat_models::Choice;
 use super::routes::{fail, Auth};
 use super::server::Srv;
 use crate::chat::ChatReply;
@@ -28,7 +29,7 @@ const ANSWER_MARGIN: Duration = Duration::from_secs(30);
 /// The bound was then set at five minutes, which is shorter than the HTTP
 /// client's own ten: a long answer was abandoned here while the request was
 /// still running and still being billed, so it was paid for, thrown away, and
-/// never counted against the cap. Writing the client's timeout plus a margin
+/// missing from the cost estimate. Writing the client's timeout plus a margin
 /// in its place only moved the same bug: retries made one question three
 /// requests and two pauses long, so a question could still run half an hour
 /// while this gave up in ten minutes.
@@ -132,6 +133,10 @@ pub async fn reset_chat(
 #[derive(Deserialize)]
 pub struct AskBody {
     #[serde(default)]
+    model: String,
+    #[serde(default)]
+    effort: String,
+    #[serde(default)]
     screen: String,
     #[serde(default)]
     text: String,
@@ -146,6 +151,10 @@ pub async fn post_chat(
         Ok(screen) => screen,
         Err(e) => return fail(StatusCode::BAD_REQUEST, &e),
     };
+    let choice = match Choice::checked(&body.model, &body.effort) {
+        Ok(choice) => choice,
+        Err(error) => return fail(StatusCode::BAD_REQUEST, &error),
+    };
     // Ten questions a minute, per device: the answers cost the host money, and
     // the cap is per device so one phone cannot spend the whole league's.
     if !srv.hub.allow_chat_post(&device.device_id) {
@@ -158,7 +167,7 @@ pub async fn post_chat(
         name: device.name.clone(),
         kind: device.kind.clone(),
     };
-    match ask(srv.clone(), screen, asked_by, body.text).await {
+    match ask_selected(srv.clone(), screen, asked_by, body.text, choice).await {
         Ok(entry_id) => (
             StatusCode::ACCEPTED,
             Json(serde_json::json!({ "entry_id": entry_id })),
@@ -207,6 +216,23 @@ pub async fn ask(
     device: EntryDevice,
     text: String,
 ) -> Result<String, AskError> {
+    ask_selected(
+        srv,
+        screen,
+        device,
+        text,
+        Choice::checked("", "").expect("valid defaults"),
+    )
+    .await
+}
+
+async fn ask_selected(
+    srv: Arc<Srv>,
+    screen: &'static str,
+    device: EntryDevice,
+    text: String,
+    choice: Choice,
+) -> Result<String, AskError> {
     let league_id = active_league(&srv).await.map_err(AskError::NoLeague)?;
     // The board's in-flight slot is claimed before the question is filed.
     // Claiming after used to accept the question with a 202 while the desktop
@@ -233,6 +259,7 @@ pub async fn ask(
         device,
         ANSWER_TIMEOUT,
         held,
+        choice,
     ));
     Ok(entry_id)
 }
@@ -246,18 +273,26 @@ pub async fn answer_and_finish(
     device: EntryDevice,
     limit: Duration,
     held: crate::chat_client::InFlight,
+    choice: Choice,
 ) {
     let work = {
         let srv = srv.clone();
         let league_id = league_id.clone();
         async move {
             let messages = srv.chat.messages(&league_id, screen).await;
-            // Model and effort are the backend's defaults: the desktop panel
-            // keeps its model picker in the frontend, so there is no host-side
-            // setting to inherit. Everything that *is* host-side — provider,
-            // key, budget cap and the spend it is checked against — comes
-            // from `answer`.
-            crate::commands_chat::answer_holding(&srv.state, screen, "", "", messages, held).await
+            crate::commands_chat::answer_holding(
+                &srv.state,
+                screen,
+                choice.model,
+                choice.effort,
+                messages,
+                held,
+                // A phone is told about its answer over the socket, once, when
+                // the answer is there. Watching it arrive is the desktop
+                // panel's affair.
+                None,
+            )
+            .await
         }
     };
     finish_within(srv, screen, league_id, device, limit, work).await;

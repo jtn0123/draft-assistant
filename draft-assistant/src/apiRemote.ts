@@ -4,7 +4,7 @@
 //
 // Two rules shape all of it. Reads mirror the endpoints in COMPANION-API.md
 // one for one, so the screens cannot tell the difference. Writes — keys,
-// budget, Yahoo, league switching, drafting, the local Ask Claude — are the
+// Yahoo, league switching, drafting, the local Ask AI — are the
 // host's alone and are refused here by name, because a follower silently
 // half-doing them would be worse than a follower that says who is in charge.
 
@@ -97,6 +97,7 @@ class HostSocket {
     const socket = new WebSocket(url);
     this.socket = socket;
     socket.onopen = () => {
+      if (this.closed) return;
       this.attempt = 0;
       this.missedPongs = 0;
       setFollowStatus("connected");
@@ -120,6 +121,7 @@ class HostSocket {
     socket.onclose = (event?: { code?: number }) => {
       clearInterval(this.ping);
       this.socket = null;
+      if (this.closed) return;
       // A host that has forgotten this device closes with 4401 rather than
       // dropping the connection. Reconnecting into that forever would be a
       // device arguing with a decision that has already been made.
@@ -144,10 +146,12 @@ class HostSocket {
   /** Hand a payload to the handlers a frame of that type would have reached,
    *  so a snapshot fetched over HTTP arrives the same way a pushed one does. */
   emit(type: string, payload: unknown): void {
+    if (this.closed) return;
     for (const handler of this.handlers.get(type) ?? []) handler(payload);
   }
 
   private deliver(text: string): void {
+    if (this.closed) return;
     let frame: Frame;
     try {
       frame = JSON.parse(text) as Frame;
@@ -243,6 +247,7 @@ function forgetHost(): void {
  */
 export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
   const revoked = () => {
+    socket.stop();
     setFollowStatus("revoked");
     (onRevoked ?? forgetHost)();
   };
@@ -377,6 +382,9 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
       if (!response.ok) throw new Error(`${follow.host_name} answered ${response.status}`);
     },
     onSharedChat: (handler) => listen<SharedChatThread>("shared-chat", handler),
+    // A follower's questions are answered on the host, which tells it about
+    // the finished answer over the socket. There is nothing to watch arrive.
+    onChatProgress: () => Promise.resolve(() => undefined),
     onCompanionDevices: (handler) => listen<CompanionDevice[]>("devices", handler),
 
     // ---------- the host's alone ----------
@@ -395,6 +403,7 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
     },
     removeLeague: refused,
     setMyUsername: refused,
+    listSleeperMembers: refused,
     setApiKey: refused,
     setChatBudget: refused,
     setChatProvider: refused,
@@ -441,7 +450,7 @@ export function remoteApi(follow: FollowRecord, onRevoked?: () => void): Api {
 }
 
 /** `/api/config` is deliberately thinner than the desktop's own config — no
- *  keys, no budget — so the missing halves are defaulted here rather than
+ *  provider credentials — so the missing halves are defaulted here rather than
  *  left undefined for a screen to trip over. */
 function remoteConfig(config: RemoteConfig | null): AppConfig {
   return {

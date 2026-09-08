@@ -149,7 +149,7 @@ pub(super) async fn fetch_tick(
             users: None,
         };
     }
-    // The picks get the full retry policy; the two beside them get one short
+    // The picks get the full retry policy; optional lookups get one short
     // try. A failure of either of those is a note, and the tick used to wait
     // three tries of eight seconds on each — 25 seconds under a green badge
     // — for a resource it was going to keep the last copy of anyway.
@@ -158,7 +158,7 @@ pub(super) async fn fetch_tick(
             Some(league_id) => Some(
                 engine
                     .client
-                    .league_users(league_id)
+                    .league_users_quick(league_id)
                     .await
                     .map_err(to_message),
             ),
@@ -470,3 +470,7 @@ mod tests {
         assert_eq!(strip(under), strip(off));
     }
 }
+
+#[cfg(test)]
+#[path = "tick_member_tests.rs"]
+mod member_tests;

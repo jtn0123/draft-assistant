@@ -111,7 +111,7 @@ describe("in a browser tab", () => {
 
 describe("what a follower reports about live sync", () => {
   const view = {
-    schema_version: "1.5",
+    schema_version: "1.7",
     generated_at: 1_700_000_000,
     league: { league_id: "L1", name: "Rob's league", season: "2026", platform: "sleeper" },
     data_health: {

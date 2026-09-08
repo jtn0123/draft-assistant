@@ -1,4 +1,4 @@
-// The pinned "Shared with devices" thread inside the Ask Claude panel.
+// The pinned "Shared with devices" thread inside the Ask AI panel.
 
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   sharedChatGet: vi.fn(),
   sharedChatSend: vi.fn(),
   onSharedChat: vi.fn(),
+  onChatProgress: vi.fn(() => Promise.resolve(() => undefined)),
 }));
 
 vi.mock("../api", () => ({ api: mocks }));
@@ -103,11 +104,11 @@ describe("picking the shared thread", () => {
     await openShared();
     // The local composer, its model picker and its budget belong to the saved
     // chats; only the picker itself stays put.
-    expect(screen.queryByLabelText("Ask Claude")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Ask AI")).not.toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Saved chats"), [
       screen.getByRole("option", { name: /nothing asked yet/ }),
     ]);
-    expect(await screen.findByLabelText("Ask Claude")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Ask AI")).toBeInTheDocument();
   });
 });
 
@@ -134,7 +135,7 @@ describe("the thread", () => {
     // The answer carries the device that asked, not the host.
     expect(screen.getAllByText("Rob's iPhone")).toHaveLength(2);
     expect(screen.getByText("Justin's Mac")).toBeInTheDocument();
-    expect(screen.getByText("$0.42")).toBeInTheDocument();
+    expect(screen.getByText("$0.42 estimated")).toBeInTheDocument();
   });
 
   it("follows the host's pushes", async () => {
@@ -189,7 +190,7 @@ describe("follower mode", () => {
       await screen.findByText(/Everyone paired with this app reads this thread/),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Saved chats")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Ask Claude")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Ask AI")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Ask on the shared thread")).toBeEnabled();
   });
 });

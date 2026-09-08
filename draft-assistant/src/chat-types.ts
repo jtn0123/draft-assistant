@@ -28,12 +28,22 @@ export interface ChatReply {
   input_tokens: number;
   output_tokens: number;
   /** Which route answered this turn. */
-  provider: "api" | "claude_code";
-  /** What the turn cost: list price over the API, and $0 over the CLI, which
-   * a subscription has already paid for. */
+  provider: "api" | "claude_code" | "codex";
+  /** Estimated API-equivalent cost, including subscription routes.
+   * Subscription estimates are not additional token bills. */
   cost_usd: number;
   /** What this screen's chats have cost in total, after this turn. */
   screen_spend_usd: number;
+}
+
+/** An answer while it is still arriving: the whole of the text so far.
+ *
+ *  The backend hands over what it has rather than the piece that just landed,
+ *  so the panel replaces what it is showing and a missed event costs nothing.
+ */
+export interface ChatProgress {
+  screen: string;
+  text: string;
 }
 
 export interface ChatSettings {
@@ -41,19 +51,19 @@ export interface ChatSettings {
   key_hint: string | null;
   /** Whether the Claude Code CLI was found on this machine. */
   cli_available: boolean;
+  /** Whether ChatGPT-authenticated Codex is installed on this Mac. */
+  codex_available?: boolean;
   /** "api" or "claude_code" — the route answers will take. */
   provider: "api" | "claude_code";
   /** Where the key is kept: the macOS Keychain, or a file in this app's own
    * data directory when the Keychain is not available. */
   key_store: "keychain" | "file";
-  /** Dollars a screen's chats may spend before the backend refuses the next
-   * turn. 0 means the cap is off. */
+  /** Legacy compatibility field; no spending cap is enforced. */
   budget_usd: number;
-  /** screen -> what that screen's chats have cost so far, every conversation
-   * together. This is what the cap is checked against. */
+  /** Scope -> cumulative estimated API-equivalent cost. */
   spend_usd: Record<string, number>;
   models: string[];
-  /** Effort levels each model accepts — Fable 5 has no "Off". */
+  /** Effort levels each model accepts — Fable 5.1 has no "Off". */
   efforts: Record<string, string[]>;
   /** label -> [tooltip, footer note] */
   notes: Record<string, [string, string]>;

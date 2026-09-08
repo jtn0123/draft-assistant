@@ -126,6 +126,7 @@ pub fn draft_fixture() -> DraftView {
         replacement_baselines: HashMap::new(),
         replacement_demand: HashMap::new(),
         pick_prices: Vec::new(),
+        draft_projections: Vec::new(),
         data_health: DataHealth {
             players_fetched_at: 0,
             projections_fetched_at: 0,

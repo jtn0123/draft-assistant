@@ -9,7 +9,7 @@ import "./test/warmScreens";
 import App from "./App";
 import { resetPrefs } from "./prefs";
 import { settle } from "./test/settle";
-import { settingsRow } from "./test/settingsRow";
+import { settingsRow, openSettingsPage } from "./test/settingsRow";
 import {
   draftFixture,
   fakeStorage,
@@ -397,12 +397,11 @@ describe("the way back off the setup screen", () => {
     await screen.findByRole("heading", { name: initial.league.name });
     await settle(() => {});
 
-    await settle(() => screen.getByRole("button", { name: "Settings" }).click());
+    await openSettingsPage();
     await settle(() => settingsRow(/Sleeper username/).click());
 
-    expect(
-      await screen.findByRole("button", { name: `Back to ${initial.league.name}` }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Back to draft" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Settings" })).toHaveTextContent(initial.league.name);
     expect(screen.queryByText(/the saved league/)).toBeNull();
   });
 

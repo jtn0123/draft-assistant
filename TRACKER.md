@@ -360,6 +360,45 @@ moved to `view_signals_tests.rs`.
 Gate at `29ac5af`: 1393 Rust tests over 54 binaries, 951 frontend tests in 81
 files, 48 guard-script tests, clippy and every static check clean.
 
+## Draft-night mobile polish (2026-09-07, evening, uncommitted) — one Fable session, two lanes
+
+Ask: validate the phone companion and Tailscale for the Sharks League draft at 20:00 PDT, then add or polish what helps during a draft, keeping the page minimal.
+
+What was found before editing:
+
+- The running 0.3.1 bundle (built 18:13) matched the checkout's phone page byte for byte; 80 companion tests, the companion Rust units and the wire suite were green on the tree as found.
+- Tailscale: Mac, iPhone 15 Pro and S24 Ultra all online on the tailnet, MagicDNS name in the CSP and QR. **HTTPS is off**: `tailscale cert` answers "your Tailscale account does not support getting TLS certs", so the phones get plain http, and with it no screen wake lock and no installable app. Enabling "HTTPS Certificates" under DNS in the Tailscale admin console is the fix; the keeper retries by itself. Until then the phones need Auto-Lock off.
+- The draft itself: snake, 12 teams, 15 rounds, **60 second pick clock**, order not yet posted (the phone says so).
+
+What changed on the phone page (every file still under the cap; `app.js` gave `renderWeek` to `week.js` to make room):
+
+| Piece                         | Where                                                                 | What                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Your-turn and low-clock nudge | `alerts.js`, `extras.css`                                             | Pure `nextAlert` fires once per pick when `is_my_pick` turns on and once more under 15 s; a toast that jumps to Now, `navigator.vibrate` (Android), a two-note WebAudio chirp armed by the Alerts button or the first tap (iPhone needs the gesture). Alerts button in the masthead, on by default, remembered.            |
+| Best available                | `available.js`                                                        | Picks tab: All/QB/RB/WR/TE/K/DEF chips (present positions only, remembered), top 8 by overall rank with tier, ADP, bye, next-turn odds and injury flag. Rebuilds only when the shown rows change.                                                                                                                          |
+| Chat                          | `helpers.js`, `app.js`                                                | "Thinking…" bubble while the host answers; a new answer scrolls into view on the Chat tab.                                                                                                                                                                                                                                 |
+| Reconnect                     | `app.js`                                                              | Tapping the Reconnecting pill retries at once instead of waiting out the backoff.                                                                                                                                                                                                                                          |
+| Boot fallback                 | `boot.js`, `index.html`                                               | A Reload button appears with the "controls could not load" message (the camera-QR case).                                                                                                                                                                                                                                   |
+| Minimal chrome                | `index.html`, `models.js`, `mobile-models.css`, `app.css`, `clock.js` | Model choice is one line in the chat heading ("Opus 5 · High ▾") that opens a small panel; the always-on explanatory note is gone unless something is wrong. Masthead is one line. On your own pick the queue shows two rows, not four, so the recommendations sit higher. Dark `theme-color`; WebKit progress bar styled. |
+
+Tests: `companionPageAlerts.test.ts` and `companionPageAvailable.test.ts` (jsdom, real shipped scripts); `npm run test:e2e:mobile` walks the page as an iPhone (WebKit) and a Pixel (Chromium), light and dark, with screenshots under `e2e-browser/.results-mobile/`. That config blocks service workers: Chromium's localhost is a secure context, the page's worker registers, and its fetches bypass Playwright routing to whatever is on the port, which during this session was the live host (three wrong-code pair attempts from 127.0.0.1, none logged as a lockout).
+
+Not verified on hardware: the chirp and vibration on the two real phones, and iPhone Safari's keyboard over the sticky composer. Browser emulation only.
+
+Second pass, same evening: a **Compact** switch beside Alerts (`compact.js`; one class on the root, rules in `extras.css`: tighter cards, one reason per card, no suggestion chips, remembered per device). **Fable 5 is now Fable 5.1** everywhere with the corrected id `claude-fable-5-1` (`chat_types.rs`; the old label and id still parse so a saved config keeps working, but the phone catalog no longer offers the old label). The model catalog carries a `note` per model ("slower, smarter" for Fable 5.1, "smarter" for GPT-6 Astra) shown under the name on the phone and beside it on the desktop picker. Tests: `companionPageCompact.test.ts`, catalog shape and notes in `model_tests.rs`, and the mobile walkthrough now opens the model panel and toggles compact.
+
+Third pass, same evening (ports from the desktop, asked for after the second pass):
+
+- **Desktop palette on the phone** (`app.css`): the warm paper and ink from `src/theme.css`, green accent, amber warnings, the desktop's position colours as outlined pills, the system font. Light and dark follow the phone.
+- **Pictures** (`pictures.js`): team marks straight from Sleeper's CDN (the CSP now allows `img-src https://sleepercdn.com`), player headshots through the host's authenticated `/api/headshot` route as data URLs, one request per player per page, "no photo" remembered, a failed request not. On recommendation cards, recent picks, the roster and the best-available rows.
+- **Roster and signals** (`roster.js`, `signals.js`): the roster is now the real list of drafted players with pick numbers, pills, team and keeper tag, plus "Still to fill"; a one-line strip above Recommended names a position run and any tier with three or fewer left.
+- **Best available shows 12, then all** (`available.js`): "Show all N" per position, collapsing again on a chip tap.
+- **A reload comes back where the phone was** (`restore.js`): the tab is kept on the device, the scroll depth per tab for the session, restored once the tab has data. Never opens on the hidden Week tab.
+
+Tests: `companionPagePictures.test.ts`, `companionPageRoster.test.ts`, `companionPageRestore.test.ts`, the available tests updated for 12 and Show all; the mobile walkthrough now reloads on Picks and expects to land there.
+
+Fourth pass, same evening: the first palette-only restyle was not the desktop's look, so the four phone stylesheets were rewritten against `src/theme.css`, `bits.css`, `components.css`, `board.css` and screenshots of the web preview: square corners, one hairline `rule2` border per panel, paper on page, 13px rows with `hair` separators instead of cards, 10 to 11px spaced uppercase labels, ink-filled active tabs and segments (position chips, model choices), ghost buttons, the ink primary button, position badges as coloured type, 22px avatars, the up-next queue as the desktop's snake chips (green 1.5px when yours, dashed "+N"), the featured recommendation with the 1.5px ink border, amber notice boxes for the low-clock toast and errors, green-bordered for your turn, bottom tabs as the rail tabs with a 2px ink line. `npm run test:e2e:mobile` screenshots are the evidence; desktop reference shots were taken from `vite preview` on port 4173.
+
 ## Recovered from the abandoned branch (2026-09-07) — `0c9410a`
 
 `t3code/review-prior-grade-report` (tip `2571b4f`, last commit 2026-08-29,

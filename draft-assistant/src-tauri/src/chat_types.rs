@@ -4,41 +4,54 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The models the panel offers. Opus 5 can turn thinking off; Fable 5 cannot,
+/// The models the panel offers. Opus 5 can turn thinking off; Fable 5.1 cannot,
 /// so its effort list starts at "low".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatModel {
     Opus5,
     Fable5,
+    Astra,
+    Sol,
 }
 
 impl ChatModel {
     pub fn id(self) -> &'static str {
         match self {
             ChatModel::Opus5 => "claude-opus-5",
-            ChatModel::Fable5 => "claude-fable-5",
+            ChatModel::Fable5 => "claude-fable-5-1",
+            ChatModel::Astra => "gpt-6-astra",
+            ChatModel::Sol => "gpt-5.6-sol",
         }
     }
 
     pub fn parse(label: &str) -> Self {
         match label {
-            "Fable 5" | "claude-fable-5" => ChatModel::Fable5,
+            // The two older spellings are what a saved config or a phone may still say.
+            "Fable 5.1" | "claude-fable-5-1" | "Fable 5" | "claude-fable-5" => ChatModel::Fable5,
+            "GPT-6 Astra" | "gpt-6-astra" => ChatModel::Astra,
+            "GPT-5.6 Sol" | "gpt-5.6-sol" => ChatModel::Sol,
             _ => ChatModel::Opus5,
         }
     }
 
-    /// Fable 5's thinking is always on — asking for it to be off is a 400.
+    /// Fable 5.1's thinking is always on — asking for it to be off is a 400.
     pub(crate) fn can_disable_thinking(self) -> bool {
-        matches!(self, ChatModel::Opus5)
+        matches!(self, ChatModel::Opus5 | ChatModel::Sol)
     }
 
-    /// Anthropic's published list price, in dollars per million tokens:
+    pub fn is_openai(self) -> bool {
+        matches!(self, Self::Astra | Self::Sol)
+    }
+
+    /// Published standard list price (verified 2026-09-07), in dollars per million tokens:
     /// (input, output). The one place prices live — the panel shows what the
     /// backend charged rather than pricing the turn a second time.
     pub fn price_per_mtok(self) -> (f64, f64) {
         match self {
             ChatModel::Opus5 => (5.0, 25.0),
             ChatModel::Fable5 => (10.0, 50.0),
+            ChatModel::Astra => (10.0, 50.0),
+            ChatModel::Sol => (4.0, 20.0),
         }
     }
 
@@ -51,7 +64,11 @@ impl ChatModel {
     /// requested model charged the wrong rate, in either direction.
     pub fn from_reported(id: &str) -> Option<Self> {
         let id = id.to_ascii_lowercase();
-        if id.contains("fable") {
+        if id.starts_with("gpt-6-astra") {
+            Some(Self::Astra)
+        } else if id.starts_with("gpt-5.6-sol") || id == "gpt-5.6" {
+            Some(Self::Sol)
+        } else if id.contains("fable") {
             Some(ChatModel::Fable5)
         } else if id.contains("opus") {
             Some(ChatModel::Opus5)
@@ -159,15 +176,13 @@ pub struct ChatReply {
     pub cache_creation_input_tokens: u32,
     /// Prompt tokens served from the cache, billed at 0.1x input.
     pub cache_read_input_tokens: u32,
-    /// Which route answered: "api" or "claude_code". The transports below do
+    /// Which route answered: "api", "claude_code", or "codex". The transports do
     /// not know which one they are, so the command layer fills this in.
     pub provider: String,
-    /// What this turn cost in dollars — list price on the API route, and zero
-    /// on the CLI route, which is paid for by a subscription rather than by
-    /// the token. Also filled in by the command layer.
+    /// Estimated standard API-equivalent cost, including subscription routes.
+    /// Not a bill or a spending limit. Filled in by the command layer.
     pub cost_usd: f64,
-    /// What this screen's chat has cost in total, after this turn, against
-    /// the cap in `chat_budget_usd`.
+    /// Running estimated cost for this screen and league. No cap is enforced.
     pub screen_spend_usd: f64,
 }
 
@@ -176,8 +191,8 @@ pub struct ChatReply {
 /// A request the API accepted is billed from `message_start` on, whether or
 /// not the rest of the stream reaches this side: a timeout or a dropped
 /// socket halfway through an answer is still a charge. `partial` is the
-/// usage that had arrived by then, so the command layer can count it against
-/// the cap instead of losing it with the error.
+/// usage that had arrived by then, so the command layer includes it in the
+/// estimated cost instead of losing it with the error.
 #[derive(Debug)]
 pub struct ChatError {
     pub message: String,

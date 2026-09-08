@@ -1,19 +1,32 @@
-// Finding a settings-menu row by its label, whichever kind of menu item it is.
-//
-// A toggle (Pick chime, Live sync) is a menuitemcheckbox and an action
-// (Refresh data, Yahoo, Export state) a plain menuitem, so a test that names a
-// row by label should not have to know which. A picker's choices are
-// menuitemradio items and are looked up by their own names.
+// Settings rows may live in the quick menu or the full settings dialog.
+// Keep the menu roles for Header unit tests; the page uses buttons and switches.
 
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
+
+import { settle } from "./settle";
+
+/** Open the dedicated settings page through its quick-menu entry. */
+export async function openSettingsPage(): Promise<void> {
+  if (screen.queryByRole("dialog", { name: "Settings" })) return;
+  await settle(() => {
+    if (!screen.queryByRole("menu")) screen.getByRole("button", { name: "Settings" }).click();
+  });
+  await settle(() => screen.getByRole("menuitem", { name: /All settings/ }).click());
+  await screen.findByRole("dialog", { name: "Settings" });
+}
 
 const ROW_ROLES = ["menuitem", "menuitemcheckbox"] as const;
 
 function matches(label: RegExp): HTMLElement[] {
+  const page = screen.queryByRole("dialog", { name: "Settings" });
+  if (page)
+    return ["button", "switch"]
+      .flatMap((role) => within(page).queryAllByRole(role, { name: label }))
+      .filter((row) => row.classList.contains("settings-page-row"));
   return ROW_ROLES.flatMap((role) => screen.queryAllByRole(role, { name: label }));
 }
 
-/** The row, or null when the menu is closed or has no such row. */
+/** The row, or null when neither settings surface offers it. */
 export function querySettingsRow(label: RegExp): HTMLElement | null {
   const found = matches(label);
   if (found.length > 1) throw new Error(`${found.length} settings rows match ${String(label)}`);

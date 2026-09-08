@@ -12,7 +12,7 @@ import App from "./App";
 import { resetPrefs } from "./prefs";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
-import { settingsRow } from "./test/settingsRow";
+import { settingsRow, openSettingsPage } from "./test/settingsRow";
 import { draftFixture, fakeStorage, harness, restoringConfig } from "./test/appHarness";
 import type { DraftView } from "./types";
 
@@ -28,10 +28,7 @@ async function loaded(view: DraftView = draftFixture()) {
 
 /** Open the settings menu, if it is not already open. */
 async function openSettings() {
-  await settle(() => {
-    const gear = screen.queryByRole("button", { name: "Settings" });
-    if (gear !== null && screen.queryByRole("menu") === null) gear.click();
-  });
+  await openSettingsPage();
 }
 
 beforeEach(() => {
@@ -172,7 +169,7 @@ describe("the attribution line", () => {
     const view = draftFixture();
     view.league.platform = "yahoo";
     await loaded(view);
-    await openSettings();
+    await settle(() => screen.getByRole("button", { name: "Settings" }).click());
 
     expect(
       screen.getByText("Fantasy data provided by Yahoo Fantasy · read-only connection"),
@@ -183,7 +180,7 @@ describe("the attribution line", () => {
     const view = draftFixture();
     view.league.platform = "sleeper";
     await loaded(view);
-    await openSettings();
+    await settle(() => screen.getByRole("button", { name: "Settings" }).click());
 
     expect(screen.getByText(new RegExp(`league ${view.league.league_id}`))).toBeInTheDocument();
     expect(screen.queryByText(/provided by Yahoo Fantasy/)).toBeNull();

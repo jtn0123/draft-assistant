@@ -19,6 +19,8 @@ import { yahooNote } from "./yahoo";
 export interface SettingsRowInput {
   view: DraftView;
   chime: boolean;
+  /** Whether the header carries its Ask AI button. */
+  ask: boolean;
   polling: boolean;
   lastSyncAt: number | null;
   leagueCount: number;
@@ -33,12 +35,13 @@ export interface SettingsRowInput {
    *  have no updater of their own to ask. */
   updates: UpdateRowState;
   /** The host this app follows, when it is a follower. Everything the host
-   *  owns — the league, the keys, the budget, Yahoo — is left off the menu
+   *  owns — the league, provider credentials, Yahoo — is left off the menu
    *  rather than shown disabled: a follower cannot act on any of it. */
   hostName: string | null;
   /** Whether the companion server is currently serving. */
   companionOn: boolean;
   onChime: (next: boolean) => void;
+  onAsk: (next: boolean) => void;
   onTogglePolling: () => void;
   onLeaguePicker: () => void;
   onYahoo: () => void;
@@ -100,6 +103,28 @@ export function appearanceOptions(input: SettingsRowInput): SettingsOption[] {
   }));
 }
 
+/** The four rows the header's own menu shows, plus the way into the rest.
+ *
+ * The gear menu is a shortcut, not a second settings surface: the things a
+ * user reaches for mid-draft, and one row that opens everything else. Kept
+ * beside the full list so the two cannot drift apart, and out of the shell,
+ * which is at its line cap. */
+export function headerMenuRows(rows: SettingsRow[], onAllSettings: () => void): SettingsRow[] {
+  const quick = ["chime", "ask", "polling", "refresh"];
+  return [
+    ...rows.filter((row) => quick.includes(row.id)),
+    {
+      id: "all-settings",
+      kind: "action",
+      label: "All settings…",
+      note: "Identity, remote connections, appearance and diagnostics",
+      value: "Open",
+      on: false,
+      onSelect: onAllSettings,
+    },
+  ];
+}
+
 export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
   const follower = input.hostName !== null;
   const rows: SettingsRow[] = [
@@ -111,6 +136,15 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
       value: input.chime ? "On" : "Off",
       on: input.chime,
       onSelect: () => input.onChime(!input.chime),
+    },
+    {
+      id: "ask",
+      kind: "toggle",
+      label: "Ask AI button",
+      note: input.ask ? "Shown in the header" : "Hidden from the header",
+      value: input.ask ? "On" : "Off",
+      on: input.ask,
+      onSelect: () => input.onAsk(!input.ask),
     },
   ];
 
@@ -160,7 +194,7 @@ export function buildSettingsRows(input: SettingsRowInput): SettingsRow[] {
         label: "Sleeper username…",
         note:
           input.view.my_roster === null
-            ? "Not set, so no team on the board is marked as yours"
+            ? "Choose your account below; draft seats may still be pending"
             : "Change which team on the board is yours",
         value: input.view.my_roster === null ? "Set" : "Change",
         on: input.view.my_roster !== null,

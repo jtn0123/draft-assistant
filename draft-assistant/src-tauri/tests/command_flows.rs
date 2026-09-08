@@ -346,21 +346,28 @@ fn a_player_with_no_photo_is_a_null_rather_than_an_error() {
 fn the_chat_settings_report_what_this_machine_can_actually_do() {
     let s = session("chat-settings");
     let settings = s.ok("chat_settings", json!({}));
-    assert!(settings["budget_usd"].is_number());
+    assert_eq!(settings["budget_usd"], 0.0);
     assert!(settings["spend_usd"].is_object(), "spend is per screen");
     assert!(settings["models"].as_array().is_some_and(|m| !m.is_empty()));
     assert!(["keychain", "file"].contains(&settings["key_store"].as_str().expect("a store")));
 
-    // A budget is a number of dollars, and zero turns the cap off. A
-    // negative one is a typo rather than a setting, and is refused so it
-    // cannot be read later as "no cap".
-    assert_eq!(s.ok("set_chat_budget", json!({"dollars": 12.5})), 12.5);
+    // The legacy command remains compatible but cannot restore a cap.
+    // Invalid input still returns the same validation error.
+    assert_eq!(s.ok("set_chat_budget", json!({"dollars": 12.5})), 0.0);
+    assert_eq!(s.ok("get_config", json!({}))["chat_budget_usd"], 0.0);
     assert!(s
         .err("set_chat_budget", json!({"dollars": -3.0}))
         .contains("cannot be negative"));
     assert_eq!(s.ok("set_chat_budget", json!({"dollars": 0.0})), 0.0);
 
-    assert_eq!(s.ok("set_chat_provider", json!({"provider": "api"})), "api");
+    // The choice is still stored and still validated, but it no longer picks
+    // the route: what comes back is what will actually answer, and on a
+    // machine with Claude Code installed that is Claude Code whatever was
+    // asked for. The API route billed a key per token for answers the
+    // subscription already covers.
+    let chosen = s.ok("set_chat_provider", json!({"provider": "api"}));
+    let installed = settings["cli_available"].as_bool().unwrap_or(false);
+    assert_eq!(chosen, if installed { "claude_code" } else { "api" });
     assert!(!s
         .err("set_chat_provider", json!({"provider": "carrier pigeon"}))
         .is_empty());

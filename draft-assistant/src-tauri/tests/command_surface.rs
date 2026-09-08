@@ -166,6 +166,7 @@ fn handler_list() -> BTreeSet<String> {
     [
         "add_league",
         "set_my_username",
+        "list_sleeper_members",
         "get_config",
         "sleeper_leagues",
         "remove_league",
@@ -302,6 +303,7 @@ fn every_command_answers_over_the_ipc() {
         .invoke_handler(tauri::generate_handler![
             draft::add_league,
             draft::set_my_username,
+            draft_assistant_lib::commands_identity::list_sleeper_members,
             draft::get_config,
             leagues::sleeper_leagues,
             leagues::remove_league,

@@ -26,11 +26,13 @@ export function RecCard({
   featured,
   positionRank,
   onDraft,
+  readOnly = false,
 }: {
   rec: Recommendation;
   featured: boolean;
   positionRank: number | null;
   onDraft: (id: string, name: string) => void;
+  readOnly?: boolean;
 }) {
   return (
     <div className={featured ? "rec is-featured" : "rec"}>
@@ -57,6 +59,8 @@ export function RecCard({
       <button
         type="button"
         className={featured ? "btn-primary rec-action" : "btn-ghost rec-action"}
+        disabled={readOnly}
+        title={readOnly ? "Controlled by host" : undefined}
         onClick={() => onDraft(rec.player_id, rec.name)}
       >
         Mark drafted

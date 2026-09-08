@@ -7,6 +7,9 @@
 (() => {
   "use strict";
   const {
+    bindQuestionSuggestions,
+    pairBusy,
+    pairFailure,
     TOKEN_KEY,
     DEVICE_KEY,
     DEVICE_ID_KEY,
@@ -22,7 +25,7 @@
     backoffDelay,
     HOST_TIMEOUT,
     timedFetch,
-    formatClock,
+    draftClockFacts,
     parseMarkdown,
     initialState,
     reduce,
@@ -48,14 +51,23 @@
   function boot() {
     if (!document.getElementById("companion-root")) return;
     const $ = (id) => document.getElementById(id);
+    bindQuestionSuggestions(document);
+    const models = window.Companion.createMobileModels(document, window);
+    window.Companion.createCompact(document, window);
+    const restore = window.Companion.createRestore(window, TABS);
+    // Pictures are fetched with the pairing token, so the loader is made
+    // here and shared with the renderers that draw rows.
+    window.Companion.pictures = window.Companion.createPictures(window, () => state.token);
+    window.addEventListener("scroll", () => restore.saveScroll(state.tab), { passive: true });
+    const alerts = window.Companion.createAlerts(document, window, {
+      goNow: () => dispatch({ type: "tab", tab: "now" }),
+    });
     let state = initialState();
     let socket = null;
     let attempt = 0;
-    // Held while a draft is live and the host is connected; see pwa.js.
     const wakeLock = createWakeLock(navigator, document);
     registerServiceWorker(window, navigator);
     linkManifest(document, navigator);
-    // Every request to the host, with the deadline from helpers.js.
     const request = (url, init) => timedFetch(window, (u, i) => fetch(u, i), url, init);
     // The one pending reconnect. Kept so a wake can cancel it: a timer left
     // running opened a second socket beside the one the wake had just made.
@@ -72,7 +84,6 @@
       socket.close();
       socket = null;
     };
-    // Private browsing can refuse storage: the page works, it just forgets.
     const store = (key, value) => {
       try {
         if (value === null) window.localStorage.removeItem(key);
@@ -92,6 +103,7 @@
       const next = reduce(state, action);
       if (next === state) return;
       state = next;
+      if (action.type === "tab") restore.rememberTab(state.tab);
       render();
     };
     const dropToken = () => {
@@ -108,6 +120,9 @@
       return response.ok ? await response.json() : null;
     };
     async function loadEverything() {
+      void read("/api/chat/models")
+        .then(models.configure)
+        .catch(() => models.configure(null));
       const paths = [
         "/api/state",
         "/api/season",
@@ -129,7 +144,6 @@
         connect();
       }
     }
-    // ---- pairing -------------------------------------------------------
     // An installed copy of the page (see pwa.js) starts with empty storage
     // but an address that says which phone it is; that identity is taken up
     // so the re-pair replaces the browser's entry on the host, and the form
@@ -143,7 +157,8 @@
       event.preventDefault();
       const code = $("pair-code").value.trim();
       const device = $("pair-device").value.trim() || deviceGuess(navigator.userAgent);
-      $("pair-submit").disabled = true;
+      pairBusy($("pair-submit"), true);
+      dispatch({ type: "pair-error", message: "" });
       try {
         const response = await request("/api/pair", {
           method: "POST",
@@ -159,9 +174,7 @@
         });
         const body = await response.json().catch(() => ({}));
         if (response.status !== 200 || !body.token) {
-          const late = response.status === 429;
-          const message = late ? "Too many tries. Wait a minute." : "That code did not work.";
-          dispatch({ type: "pair-error", message });
+          dispatch({ type: "pair-error", message: pairFailure(response.status) });
           return;
         }
         store(TOKEN_KEY, body.token);
@@ -172,9 +185,12 @@
         dispatch({ type: "paired", token: body.token, hostName: body.host_name });
         await loadEverything();
       } catch {
-        dispatch({ type: "pair-error", message: "The host did not answer." });
+        dispatch({
+          type: "pair-error",
+          message: "The host did not answer. Check your connection and try again.",
+        });
       } finally {
-        $("pair-submit").disabled = false;
+        pairBusy($("pair-submit"), false);
       }
     });
 
@@ -264,6 +280,15 @@
     });
     window.addEventListener("pageshow", revive);
     window.addEventListener("online", revive);
+    // Waiting out a thirty second backoff is the wrong answer to a thumb.
+    $("reconnect-pill").addEventListener("click", () => {
+      if (!state.token) return;
+      cancelReconnect();
+      detachSocket();
+      heartbeat.stop();
+      attempt = 0;
+      void loadEverything();
+    });
 
     // ---- chat ----------------------------------------------------------
     /** Which thread the chat block shows: the Week tab is always the season. */
@@ -276,7 +301,7 @@
       const screen = chatScreen();
       const input = $("chat-input");
       const text = input.value.trim();
-      if (!text || asking) return;
+      if (!text || asking || !models.available()) return;
       asking = true;
       dispatch({ type: "note", screen, message: null });
       // The question stays in the box until the host has taken it. It used to
@@ -287,7 +312,7 @@
         const response = await request("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
-          body: JSON.stringify({ screen, text }),
+          body: JSON.stringify({ screen, text, ...models.selection() }),
         });
         if (response.status === 401) {
           dropToken();
@@ -324,23 +349,15 @@
       const view = state.draft;
       const strip = clear($("clock-strip"));
       const d = view?.draft;
-      if (!d) spans(strip, ["muted", "No draft is loaded on the host."]);
-      else {
-        // The host's clock, not this phone's: the deadline is the host's.
-        const clock = formatClock(d.clock_deadline_ms, Date.now() + state.offset);
-        spans(
-          strip,
-          ["headline", `Pick ${d.current_pick} · round ${d.current_round}`],
-          [null, d.on_clock_name || `Slot ${d.on_clock_slot}`],
-          ["mine", d.is_my_pick && "Your pick"],
-          ["muted", clock && `${clock} left`],
-        );
-      }
+      spans(strip, ...draftClockFacts(d, Date.now() + state.offset, false));
+      window.Companion.renderMobileDraft?.(view, Date.now() + state.offset);
+      window.Companion.renderSignals(view);
       const recs = clear($("recs"));
       for (const rec of collapseAgreeing((view?.recommendations ?? []).slice(0, 5))) {
         const card = recs.appendChild(el("li", "card"));
         if (rec.mode) card.appendChild(el("div", "card-mode", rec.mode));
         const head = card.appendChild(el("div", "card-head"));
+        head.appendChild(window.Companion.pictures.avatar(rec));
         spans(head, ["name", rec.name], [positionClass(rec.position), rec.position]);
         spans(head, ["muted", rec.team]);
         const survives = rec.survival_next;
@@ -349,25 +366,16 @@
           facts,
           [null, `Tier ${rec.tier}`],
           [null, `ADP ${rec.adp === null ? "-" : rec.adp.toFixed(1)}`],
-          [null, typeof survives === "number" && `Survives ${Math.round(survives * 100)}%`],
+          [
+            null,
+            typeof survives === "number" &&
+              `${Math.round(survives * 100)}% chance available next turn`,
+          ],
         );
         const list = card.appendChild(el("ul", "reasons"));
         for (const reason of rec.reasons ?? []) list.appendChild(el("li", null, reason));
       }
-      const players = view?.my_roster?.players ?? [];
-      const counts = {};
-      for (const p of players) counts[p.position] = (counts[p.position] ?? 0) + 1;
-      const drafted = Object.entries(counts)
-        .map(([position, n]) => `${n} ${position}`)
-        .join(" · ");
-      const open = (view?.my_roster?.open_starters ?? [])
-        .map(([slot, n]) => `${n} ${slot}`)
-        .join(", ");
-      spans(
-        clear($("roster")),
-        [null, drafted || "Nothing drafted yet."],
-        ["muted", open && `Still to fill: ${open}`],
-      );
+      window.Companion.renderRoster(view);
       const size = view ? `${view.data_health.board_size} players on the board` : "";
       $("health").textContent = [size, syncLine(state, Date.now())].filter(Boolean).join(" · ");
     }
@@ -379,11 +387,14 @@
       const mySlot = view?.draft?.my_slot ?? null;
       for (const pick of picks.slice(0, 25)) {
         const row = list.appendChild(el("li", pick.slot === mySlot ? "row is-mine" : "row"));
-        spans(row, ["pick-no", `${pick.round}.${pick.pick_no}`], ["name", pick.name]);
+        spans(row, ["pick-no", `${pick.round}.${pick.pick_no}`]);
+        row.appendChild(window.Companion.pictures.avatar(pick));
+        spans(row, ["name", pick.name]);
         spans(row, [positionClass(pick.position), pick.position]);
         spans(row, ["muted", pick.slot_name || `Slot ${pick.slot}`]);
       }
       if (!picks.length) list.appendChild(el("li", "muted", "No picks yet."));
+      window.Companion.renderAvailable(view);
     }
 
     // Where the chat block sits and which thread its list was built from.
@@ -392,6 +403,7 @@
     // focus off the input while someone was typing on a phone.
     let chatShownIn = null;
     let chatBuiltFrom = { screen: null, thread: undefined, fresh: true };
+    let chatEntries = 0;
     function renderChat() {
       const screen = chatScreen();
       const shownIn = state.tab === "week" ? "tab-week" : "tab-chat";
@@ -410,45 +422,20 @@
           when.textContent = relativeTime(Number(when.dataset.at), now);
         }
       } else {
-        buildChatList(list, thread?.entries ?? [], now);
+        const grew = (thread?.entries ?? []).length > chatEntries;
+        chatEntries = (thread?.entries ?? []).length;
+        buildChatList(list, thread?.entries ?? [], now, Boolean(thread?.busy));
+        // A new answer lands below the fold on a long thread; bring it up.
+        if (grew && !$(shownIn).hidden) list.lastElementChild?.scrollIntoView?.({ block: "end" });
         chatBuiltFrom = { screen, thread, fresh: false };
       }
       $("chat-note").hidden = !state.note[screen];
       $("chat-note").textContent = state.note[screen] ?? "";
       const busy = Boolean(thread?.busy);
       $("chat-input").disabled = busy;
-      $("chat-send").disabled = busy;
+      $("chat-send").disabled = busy || !models.available();
+      models.setBusy(busy);
       $("chat-send").textContent = busy ? "Answering…" : "Send";
-    }
-
-    function renderWeek() {
-      const view = state.season;
-      const header = clear($("week-header"));
-      if (!view) return;
-      const head = view.header ?? {};
-      const live = view.live?.totals;
-      const projected =
-        typeof head.my_projected === "number" &&
-        `Projected ${head.my_projected.toFixed(1)} - ${head.opp_projected.toFixed(1)}`;
-      spans(
-        header,
-        ["headline", `Week ${view.week}`],
-        [null, `${view.matchup?.my_name ?? "You"} vs ${head.opponent_name ?? "-"}`],
-        ["mine", live && `${live.my_live_points.toFixed(1)} - ${live.opp_live_points.toFixed(1)}`],
-        ["muted", projected],
-      );
-      const behind = state.seasonHealth?.consecutive_failures ?? 0;
-      if (behind) spans(header, ["muted", `${behind} failed syncs`]);
-      const calls = clear($("week-calls"));
-      for (const call of view.calls ?? []) {
-        const row = calls.appendChild(el("li", "row"));
-        spans(row, ["pick-no", call.slot], ["name", `Start ${call.player_in}`]);
-        spans(row, ["muted", `over ${call.player_out}`], ["mine", `+${call.gain.toFixed(1)}`]);
-        spans(row, ["muted", call.why]);
-      }
-      if (!(view.calls ?? []).length) {
-        calls.appendChild(el("li", "muted", "The lineup you have set is already the best one."));
-      }
     }
 
     function render() {
@@ -462,6 +449,7 @@
       $("pair-error").textContent = state.pairError ?? "";
       ticker.sync(needsTicker(state));
       wakeLock.sync(wantsWakeLock(state));
+      alerts.observe(state, Date.now() + state.offset);
       if (state.screen === "pair") return;
       for (const button of $("tabbar").children) {
         if (button.dataset.tab === "week") button.hidden = !state.season;
@@ -473,20 +461,27 @@
       else if (state.tab === "picks") renderPicks();
       else if (state.tab === "chat") renderChat();
       else if (state.tab === "week") {
-        renderWeek();
+        window.Companion.renderWeek(state);
         renderChat();
       }
+      if (state.draft || state.season) restore.restoreScroll(state.tab);
     }
 
     const saved = load(TOKEN_KEY);
     if (saved) {
-      state = { ...state, token: saved, screen: "app" };
+      // Back on the tab this phone was on, unless it was the Week tab: that
+      // one is hidden until the season snapshot arrives and picks itself.
+      const tab = restore.tab();
+      state = { ...state, token: saved, screen: "app", tab: tab && tab !== "week" ? tab : "now" };
       // A phone paired before the address carried its identity gets it now,
       // so an install made today still pairs as the same phone.
       rememberIdentityInAddress(window, load(DEVICE_ID_KEY), load(DEVICE_KEY));
       void loadEverything();
     }
     render();
+    $("pair-form").dataset.ready = "true";
+    $("pair-submit").disabled = false;
+    $("boot-status").hidden = true;
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

@@ -47,6 +47,14 @@ fn question() -> Vec<ChatMessage> {
 }
 
 async fn ask_script(cli: &Path) -> Result<ChatReply, String> {
+    ask_watching(cli, None).await
+}
+
+/// The same, with somewhere for the answer to go while it is being written.
+async fn ask_watching(
+    cli: &Path,
+    progress: Option<crate::chat::OnProgress>,
+) -> Result<ChatReply, String> {
     ask(
         cli,
         ChatModel::Opus5,
@@ -54,8 +62,81 @@ async fn ask_script(cli: &Path) -> Result<ChatReply, String> {
         "the board",
         &question(),
         CancelSignal::never(),
+        progress,
     )
     .await
+}
+
+/// The CLI writes an answer a few words at a time under `stream-json`, and
+/// the app read none of it until the process exited: the panel sat on
+/// "Thinking it through…" for the length of the call and then painted a
+/// finished wall of text.
+#[tokio::test]
+async fn the_answer_is_handed_over_while_the_cli_is_still_writing_it() {
+    let cli = fake_cli(
+        "stream",
+        r#"cat > /dev/null
+echo '{"type":"system","subtype":"init"}'
+echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Take "}}}'
+echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"weighing tiers"}}}'
+echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Bowers."}}}'
+echo '{"type":"result","is_error":false,"result":"Take Bowers.","usage":{"input_tokens":7,"output_tokens":2},"modelUsage":{"claude-opus-5":{}}}'"#,
+    );
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let watcher: crate::chat::OnProgress = {
+        let seen = Arc::clone(&seen);
+        Arc::new(move |text: &str| seen.lock().expect("the log").push(text.to_string()))
+    };
+
+    let reply = ask_watching(&cli, Some(watcher))
+        .await
+        .expect("the script answered");
+
+    assert_eq!(reply.text, "Take Bowers.");
+    let seen = seen.lock().expect("the log").clone();
+    // Whatever the throttle let through, the last telling is the whole answer
+    // and nothing thinking-only ever reached the panel.
+    assert_eq!(seen.last().map(String::as_str), Some("Take Bowers."));
+    assert!(
+        seen.iter().all(|text| "Take Bowers.".starts_with(text)),
+        "only the answer, and only ever more of it: {seen:?}",
+    );
+    remove(&cli);
+}
+
+/// The user's own MCP servers are not free: on the machine this was written
+/// on they put roughly 58,000 tokens of tool schemas in front of every
+/// question, so most of what the model read was tool documentation rather
+/// than the draft board.
+#[tokio::test]
+async fn the_users_mcp_servers_are_kept_out_of_the_call() {
+    let cli = fake_cli(
+        "mcp",
+        r#"here=$(dirname "$0")
+cat > /dev/null
+printf '%s\n' "$@" > "$here/args.txt"
+echo '{"type":"result","is_error":false,"result":"ok"}'"#,
+    );
+    ask_script(&cli).await.expect("the script answered");
+
+    let args = std::fs::read_to_string(cli.parent().expect("scratch dir").join("args.txt"))
+        .expect("args were written");
+    let flags: Vec<&str> = args.lines().collect();
+    assert!(flags.contains(&"--strict-mcp-config"), "{flags:?}");
+    let at = flags
+        .iter()
+        .position(|flag| *flag == "--mcp-config")
+        .expect("an empty server list is passed");
+    assert_eq!(flags[at + 1], r#"{"mcpServers":{}}"#);
+    // And the flags streaming needs, which is why any of this is read at all.
+    assert!(flags.contains(&"--verbose"), "{flags:?}");
+    assert!(flags.contains(&"--include-partial-messages"), "{flags:?}");
+    let at = flags
+        .iter()
+        .position(|flag| *flag == "--output-format")
+        .expect("an output format is chosen");
+    assert_eq!(flags[at + 1], "stream-json");
+    remove(&cli);
 }
 
 #[tokio::test]
@@ -63,7 +144,7 @@ async fn a_successful_cli_run_becomes_the_same_reply_the_api_gives() {
     let cli = fake_cli(
         "success",
         r#"cat > /dev/null
-echo '{"is_error":false,"result":"Bowers.","usage":{"input_tokens":7,"output_tokens":2},"modelUsage":{"claude-opus-5":{}}}'"#,
+echo '{"type":"result","is_error":false,"result":"Bowers.","usage":{"input_tokens":7,"output_tokens":2},"modelUsage":{"claude-opus-5":{}}}'"#,
     );
     let reply = ask_script(&cli).await.expect("the script answered");
     assert_eq!(reply.text, "Bowers.");
@@ -84,7 +165,7 @@ async fn the_question_reaches_the_cli_on_stdin_and_the_board_as_a_flag() {
         r#"here=$(dirname "$0")
 cat > "$here/stdin.txt"
 printf '%s\n' "$@" > "$here/args.txt"
-echo '{"is_error":false,"result":"ok"}'"#,
+echo '{"type":"result","is_error":false,"result":"ok"}'"#,
     );
     ask(
         &cli,
@@ -93,6 +174,7 @@ echo '{"is_error":false,"result":"ok"}'"#,
         "BOARD-MARKER",
         &question(),
         CancelSignal::never(),
+        None,
     )
     .await
     .expect("the script answered");
@@ -124,7 +206,7 @@ async fn a_json_error_on_a_failed_exit_is_preferred_to_the_stderr_text() {
     let cli = fake_cli(
         "json-error",
         r#"cat > /dev/null
-echo '{"is_error":true,"result":"Credit balance too low"}'
+echo '{"type":"result","is_error":true,"result":"Credit balance too low"}'
 echo 'noise on stderr' >&2
 exit 1"#,
     );
@@ -226,6 +308,7 @@ exec sleep 30"#,
         &question(),
         CancelSignal::never(),
         Duration::from_millis(800),
+        None,
     )
     .await
     .expect_err("the script never answers");
@@ -261,6 +344,7 @@ async fn a_child_that_never_reads_its_stdin_times_out_instead_of_hanging() {
         &question,
         CancelSignal::never(),
         Duration::from_millis(500),
+        None,
     )
     .await
     .expect_err("nothing is reading the prompt");
@@ -289,6 +373,7 @@ async fn an_empty_thread_is_refused_before_anything_is_spawned() {
         "",
         &[],
         CancelSignal::never(),
+        None,
     )
     .await
     .expect_err("there is no question");
@@ -353,6 +438,7 @@ exec sleep 30"#,
         // Four minutes, as in the shipped route: the cancel is what has to end
         // this, not the deadline.
         TIMEOUT,
+        None,
     )
     .await
     .expect("a cancel is a reply, not an error");
@@ -387,8 +473,12 @@ async fn a_question_cancelled_before_it_starts_never_runs_the_cli() {
         "the board",
         &question(),
         cancel,
+        None,
     )
     .await
     .expect("a cancel is a reply, not the missing-CLI error");
     assert!(reply.cancelled);
 }
+
+#[path = "chat_cli_stderr_tests.rs"]
+mod stderr_tests;

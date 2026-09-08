@@ -28,14 +28,10 @@ pub struct AppConfig {
     /// whichever is available, preferring the CLI when there is no key.
     #[serde(default)]
     pub chat_provider: Option<String>,
-    /// Dollars one screen's Ask Claude may spend before the backend refuses
-    /// the next turn. `None` means nobody has set one and the default is in
-    /// force; `Some(0.0)` means the user turned the cap off.
+    /// Legacy saved value, ignored. Chat now shows estimates without a cap.
     #[serde(default)]
     pub chat_budget_usd: Option<f64>,
-    /// screen ("draft" / "season") -> what that screen's chats have cost, all
-    /// conversations together. The cap is checked against this, so it has to
-    /// outlive both the conversation and the app.
+    /// screen.league -> accumulated API-equivalent cost estimates.
     #[serde(default)]
     pub chat_spend_usd: HashMap<String, f64>,
     /// What this Mac calls itself in the shared chat and on a follower's

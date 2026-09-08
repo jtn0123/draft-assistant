@@ -18,7 +18,7 @@ import "../companion.css";
 /** The sentence under the title. The whole of the security model, in one
  *  line, before anyone reads the code out loud. */
 const GUIDANCE =
-  "Same Wi-Fi only. Anyone with the code can read this league and ask questions on your budget.";
+  "Use the same Wi-Fi or your private Tailscale network. Anyone with the code can read this league and ask questions using this Mac's AI connection.";
 
 /** "418 902" — the six digits as they are read aloud. */
 function spacedCode(code: string): string {
@@ -134,6 +134,10 @@ export function CompanionPanel({ onClose }: { onClose: () => void }) {
           Phone &amp; second screen
         </span>
         <span className="mid dialog-note">{GUIDANCE}</span>
+        <p className="muted small">
+          For another network, connect Tailscale on this Mac and on the phone or second computer to
+          the same private network, then use the Tailscale address below.
+        </p>
 
         <div className="companion-toggle">
           <button
@@ -164,6 +168,12 @@ export function CompanionPanel({ onClose }: { onClose: () => void }) {
             <div className="companion-join-text">
               <span className="eyebrow">Open this on the phone</span>
               <span className="companion-url">{status.url}</span>
+              {tailUrl === "" && (
+                <p className="muted small">
+                  No Tailscale address detected. Connect Tailscale on this Mac to show the remote
+                  address.
+                </p>
+              )}
               {tailUrl !== "" && (
                 <>
                   <span className="eyebrow">Or, over Tailscale, from anywhere</span>

@@ -12,7 +12,7 @@ import type { DraftView } from "./types";
 /** "Round 3 of 15 · 41 picks in" on the draft board; "Week 3 · 2-0 · 1st of
  *  12" on the season screen, or the season's year before it has loaded. */
 export function headerSubtitle(screen: Screen, view: DraftView, season: SeasonView | null): string {
-  if (screen !== "season") {
+  if (screen === "draft") {
     const d = view.draft;
     return `Round ${d.current_round} of ${d.rounds} · ${d.total_picks_made} picks in`;
   }

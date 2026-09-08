@@ -10,11 +10,12 @@ import type {
   SecondOpinionImport,
   SharedChatThread,
   StoredLeague,
+  SleeperMember,
   YahooConnectStart,
   YahooStatus,
 } from "./types";
 import type { SeasonView } from "./season-types";
-import type { ChatReply, ChatRequest, ChatSettings } from "./chat-types";
+import type { ChatProgress, ChatReply, ChatRequest, ChatSettings } from "./chat-types";
 import { ReplayFeed, replaySource } from "./replay";
 import { readFollow } from "./companion";
 import { remoteApi } from "./apiRemote";
@@ -24,7 +25,7 @@ import type { UpdateCheck } from "./updateRow";
 // SEASON_SCHEMA_VERSION in src-tauri/src/season.rs. Bump both sides together
 // with the fixtures in public/ — src-tauri/tests/fixture_shape.rs fails if the
 // fixtures and the structs disagree about a single field.
-const DRAFT_VIEW_SCHEMA_VERSION = "1.5";
+const DRAFT_VIEW_SCHEMA_VERSION = "1.7";
 const SEASON_VIEW_SCHEMA_VERSION = "1.4";
 
 export function validateDraftView(value: DraftView): DraftView {
@@ -61,6 +62,7 @@ const inTauri = "__TAURI_INTERNALS__" in window;
 export interface Api {
   addLeague(leagueId: string, force?: boolean): Promise<DraftView>;
   setMyUsername(username: string): Promise<string>;
+  listSleeperMembers(): Promise<SleeperMember[]>;
   getConfig(): Promise<AppConfig>;
   /** Every league the saved Sleeper account plays in that season. */
   sleeperLeagues(season: string): Promise<StoredLeague[]>;
@@ -145,6 +147,10 @@ export interface Api {
    *  thread on the `shared-chat` event. */
   sharedChatReset(screen: string): Promise<void>;
   onSharedChat(handler: (thread: SharedChatThread) => void): Promise<UnlistenFn>;
+  /** The answer to the question this panel just asked, while it is still
+   *  being written. Only the API route reports one; a CLI route says nothing
+   *  until it says everything. */
+  onChatProgress(handler: (progress: ChatProgress) => void): Promise<UnlistenFn>;
   onCompanionDevices(handler: (devices: CompanionDevice[]) => void): Promise<UnlistenFn>;
 
   // ---------- diagnostics ----------
@@ -180,6 +186,7 @@ export interface Api {
 const tauriApi: Api = {
   addLeague: (leagueId, force = false) => invokeView("add_league", { leagueId, force }),
   setMyUsername: (username) => invoke<string>("set_my_username", { username }),
+  listSleeperMembers: () => invoke<SleeperMember[]>("list_sleeper_members"),
   getConfig: () => invoke<AppConfig>("get_config"),
   sleeperLeagues: (season) => invoke<StoredLeague[]>("sleeper_leagues", { season }),
   removeLeague: (leagueId) => invoke<StoredLeague[]>("remove_league", { leagueId }),
@@ -236,6 +243,8 @@ const tauriApi: Api = {
   sharedChatReset: (screen) => invoke<void>("shared_chat_reset", { screen }),
   onSharedChat: (handler) =>
     listen<SharedChatThread>("shared-chat", (event) => handler(event.payload)),
+  onChatProgress: (handler) =>
+    listen<ChatProgress>("chat-progress", (event) => handler(event.payload)),
   onCompanionDevices: (handler) =>
     listen<CompanionDevice[]>("companion-devices", (event) => handler(event.payload)),
   diagnostics: () => invoke<Diagnostics>("diagnostics"),
@@ -296,6 +305,7 @@ function browserApi(): Api {
   return {
     addLeague: fixture,
     setMyUsername: (u) => Promise.resolve(u),
+    listSleeperMembers: () => readOnly("Sleeper account names require the desktop app"),
     getConfig: async () => {
       const v = await fixture();
       return {
@@ -361,25 +371,28 @@ function browserApi(): Api {
     onSeasonPollHealth: (handler) => Promise.resolve(season.onHealth(handler)),
     setApiKey: () => Promise.resolve(false),
     setChatProvider: () => Promise.resolve("api"),
-    setChatBudget: (dollars) => Promise.resolve(dollars),
+    setChatBudget: () => Promise.resolve(0),
     chatSettings: () =>
       Promise.resolve({
         has_key: false,
         key_hint: null,
         cli_available: false,
+        codex_available: false,
         provider: "api",
         key_store: "file",
-        budget_usd: 5,
+        budget_usd: 0,
         spend_usd: {},
-        models: ["Opus 5", "Fable 5"],
+        models: ["Opus 5", "Fable 5.1", "GPT-6 Astra", "GPT-5.6 Sol"],
         efforts: {
+          "GPT-6 Astra": ["Low", "Medium", "High", "xhigh", "Max"],
+          "GPT-5.6 Sol": ["Off", "Low", "Medium", "High", "xhigh", "Max"],
           "Opus 5": ["Off", "Low", "Medium", "High", "xhigh", "Max"],
-          "Fable 5": ["Low", "Medium", "High", "xhigh", "Max"],
+          "Fable 5.1": ["Low", "Medium", "High", "xhigh", "Max"],
         },
         notes: {},
       }),
     chatSuggestions: () => Promise.resolve([]),
-    askClaude: () => readOnly("Ask Claude requires the desktop app"),
+    askClaude: () => readOnly("Ask AI requires the desktop app"),
     // The preview has no LAN server, so the panel is shown with plausible
     // fixtures: turning it on flips a variable in this closure and nothing
     // else, which is enough to lay the dialog out and read its copy.
@@ -409,6 +422,7 @@ function browserApi(): Api {
     sharedChatSend: () => readOnly("the shared chat needs the desktop app"),
     sharedChatReset: () => readOnly("the shared chat needs the desktop app"),
     onSharedChat: () => Promise.resolve(() => undefined),
+    onChatProgress: () => Promise.resolve(() => undefined),
     onCompanionDevices: () => Promise.resolve(() => undefined),
     // The preview has no log and no file manager, so the dialog is shown with
     // what the page itself knows and its log actions stay hidden.

@@ -4,8 +4,9 @@
 //! api.sleeper.app. A debug build will send them somewhere else when
 //! `DRAFT_ASSISTANT_SLEEPER_BASE` says so — that is how
 //! `scripts/replay-sleeper.mjs` stands in for Sleeper and replays a recorded
-//! draft's picks on a timer. A release build ignores the variable entirely,
-//! so a shipped app can never be pointed at another host.
+//! draft's picks on a timer. A normal release build ignores the variable entirely,
+//! so a shipped app can never be pointed at another host. The opt-in WDIO
+//! test build also accepts it for deterministic native rehearsals.
 
 use std::borrow::Cow;
 
@@ -16,7 +17,7 @@ pub(crate) const DEFAULT: &str = "https://api.sleeper.app";
 pub(crate) fn host() -> &'static str {
     static HOST: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     HOST.get_or_init(|| {
-        let given = if cfg!(debug_assertions) {
+        let given = if cfg!(any(debug_assertions, feature = "wdio")) {
             std::env::var("DRAFT_ASSISTANT_SLEEPER_BASE").ok()
         } else {
             None

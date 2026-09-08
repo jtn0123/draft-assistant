@@ -118,3 +118,25 @@ describe("DraftScreen", () => {
     expect(screen.getByText(`${other.available.length} players`)).toBeInTheDocument();
   });
 });
+
+it("disables every pick action on a follower and restores them after leaving", async () => {
+  const user = userEvent.setup();
+  const view = fixture();
+  const onDraft = vi.fn();
+  const { rerender } = render(<DraftScreen view={view} busy={false} readOnly onDraft={onDraft} />);
+  expect(screen.getByText(/Controlled by host. Record manual picks/)).toBeInTheDocument();
+  const actions = screen.getAllByRole("button", { name: /^(Mark drafted|Draft)$/ });
+  expect(actions.length).toBeGreaterThan(1);
+  for (const action of actions) {
+    expect(action).toBeDisabled();
+    expect(action).toHaveAttribute("title", "Controlled by host");
+    await user.click(action);
+  }
+  expect(onDraft).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Search players")).toBeEnabled();
+  rerender(<DraftScreen view={view} busy={false} onDraft={onDraft} />);
+  const recommendation = screen.getByRole("button", { name: "Mark drafted" });
+  expect(recommendation).toBeEnabled();
+  await user.click(recommendation);
+  expect(onDraft).toHaveBeenCalledTimes(1);
+});

@@ -5,6 +5,7 @@ pub mod cache;
 pub mod chat;
 pub mod chat_cli;
 pub mod chat_client;
+pub mod chat_codex;
 pub mod chat_context;
 pub mod chat_copy;
 /// Hand-built views for the chat context tests.
@@ -15,12 +16,16 @@ pub mod commands_chat;
 pub mod commands_companion;
 pub mod commands_diag;
 pub mod commands_draft;
+pub mod commands_identity;
+#[cfg(feature = "desktop")]
+use commands_identity::list_sleeper_members;
 pub mod commands_season;
 pub mod commands_second_opinion;
 pub mod commands_update;
 pub mod commands_yahoo;
 pub mod companion;
 pub mod draft;
+pub mod draft_projection;
 pub mod engine;
 pub mod engine_assemble;
 pub mod engine_yahoo;
@@ -165,7 +170,14 @@ pub fn run() {
             // From here on a panic leaves a line behind. Before this, a panic
             // in a double-clicked .app killed the window and wrote nothing.
             applog::install_panic_hook();
-            let engine = Engine::for_app(data_dir.clone());
+            // The separately identified WDIO rehearsal must never read login Keychain.
+            let rehearsal = cfg!(feature = "wdio")
+                && app.config().identifier == "com.justin.draft-assistant.rehearsal";
+            let engine = if rehearsal {
+                Engine::new(data_dir.clone())
+            } else {
+                Engine::for_app(data_dir.clone())
+            };
             let config = engine.load_config();
             // Whatever the user last chose in Settings -> Diagnostics. Applied
             // before anything else can log, so a session started to reproduce
@@ -209,11 +221,15 @@ pub fn run() {
             // off until the user turns it on in Settings. What it holds before
             // then is the pairing code, the shared chat threads, and a handle
             // onto the same state every command works through.
-            let companion = Arc::new(CompanionServer::new_under(
-                host_name,
-                data_dir,
-                yahoo_secrets::Item::CompanionDevices,
-            )?);
+            let companion = Arc::new(if rehearsal {
+                CompanionServer::sandboxed(host_name, data_dir)?
+            } else {
+                CompanionServer::new_under(
+                    host_name,
+                    data_dir,
+                    yahoo_secrets::Item::CompanionDevices,
+                )?
+            });
             let handle = app.handle().clone();
             companion.attach(
                 Arc::new(state.share()),
@@ -242,6 +258,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             add_league,
             set_my_username,
+            list_sleeper_members,
             get_config,
             get_state,
             refresh_picks,

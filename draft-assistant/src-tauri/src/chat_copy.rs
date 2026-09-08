@@ -48,7 +48,7 @@ pub fn effort_levels(model: ChatModel) -> Vec<&'static str> {
     if model.can_disable_thinking() {
         vec!["Off", "Low", "Medium", "High", "xhigh", "Max"]
     } else {
-        // Fable 5 thinks on every turn; there is no off.
+        // Fable 5.1 thinks on every turn; there is no off.
         vec!["Low", "Medium", "High", "xhigh", "Max"]
     }
 }

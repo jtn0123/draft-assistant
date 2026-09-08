@@ -6,6 +6,7 @@
 //! here ever serves a secret: `/api/config` is assembled field by field rather
 //! than by serialising [`crate::engine::AppConfig`], which carries the API key.
 
+pub mod chat_models;
 pub mod hub;
 pub mod media;
 pub mod names;

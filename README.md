@@ -58,7 +58,7 @@ whole contract lives in [`COMPANION-API.md`](COMPANION-API.md).
 
 Turn it on in Settings → **Phone & second screen**; join one from Settings →
 **Join another Draft Assistant…** (also on the first-launch screen). A follower
-is read-only by construction: the league, the API key, the budget, Yahoo and
+is read-only by construction: the league, provider credentials, Yahoo and
 the username all stay with the host, and `src/apiRemote.ts` refuses those calls
 by name rather than half-doing them.
 

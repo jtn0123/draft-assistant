@@ -16,7 +16,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { resetPrefs } from "./prefs";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
-import { settingsRow } from "./test/settingsRow";
+import { settingsRow, openSettingsPage } from "./test/settingsRow";
 import { draftFixture, fakeStorage, harness, restoringConfig } from "./test/appHarness";
 
 const h = harness();
@@ -103,18 +103,14 @@ describe("the version row", () => {
     vi.mocked(getVersion).mockResolvedValue("9.9.9");
     await loaded();
 
-    await settle(() => {
-      screen.getByRole("button", { name: "Settings" }).click();
-    });
+    await openSettingsPage();
     await waitFor(() => expect(settingsRow(/Version/)).toHaveTextContent("v9.9.9"));
   });
 
   it("falls back to the packaged version where there is no shell to ask", async () => {
     await loaded();
 
-    await settle(() => {
-      screen.getByRole("button", { name: "Settings" }).click();
-    });
+    await openSettingsPage();
     // The browser preview: `getVersion` throws, and the row still says
     // something rather than "vundefined".
     expect(settingsRow(/Version/)).toHaveTextContent(/^Versionv?/);
@@ -158,7 +154,7 @@ describe("getting past the header", () => {
     // The failure this prevents: the shell rendered a `<header>` and then
     // plain `<div>`s, so a screen-reader user had one landmark for the whole
     // app and no way to the board except tabbing through the league switcher,
-    // the screen toggle, the re-pull, the undo, the chime, Ask Claude and the
+    // the screen toggle, the re-pull, the undo, the chime, Ask AI and the
     // settings gear.
     await loaded();
     const main = screen.getByRole("main");

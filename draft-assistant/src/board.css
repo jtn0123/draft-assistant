@@ -10,7 +10,21 @@
   /* The rows are a grid of mostly fixed tracks, so below a certain width they
      are simply wider than the column they sit in. When that happens the board
      scrolls inside itself — the window never does. */
-  overflow-x: auto;
+  overflow: hidden;
+  align-self: flex-start;
+}
+
+.board-scroll {
+  max-height: clamp(320px, 65vh, 800px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.board-scroll .board-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--paper);
 }
 
 .board-controls {
@@ -64,7 +78,15 @@
    pure `1fr` it was the only track that could give, so between about 950 and
    1160px — inside the window's own 1000px minimum — it gave everything and
    collapsed to nothing, leaving a row of numbers with no player on it. */
+/* Positioned so the row is the containing block for its own `.sr-only`
+   labels. Those are `position: absolute`, and with no positioned ancestor
+   their containing block was the document: a row 300 places down the board
+   put its screen-reader label 14,000px down the *page*, so the window grew
+   to the height of the whole player list and the entire app scrolled through
+   thousands of pixels of nothing. The board clips its rows; now their labels
+   are clipped with them. */
 .board-row {
+  position: relative;
   display: grid;
   grid-template-columns: 34px minmax(9rem, 1fr) 52px 74px 36px 44px 44px 34px 44px 47px 60px;
   gap: 8px;

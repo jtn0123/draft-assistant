@@ -29,7 +29,7 @@ fn the_first_tick_always_counts_as_a_change() {
         memory.picks_changed(&picks(0, None)),
         "the initial state must reach the UI"
     );
-    assert!(memory.status_changed("pre_draft"));
+    assert!(memory.draft_changed(&crate::keepers::bare_league("initial").draft));
 }
 
 #[test]
@@ -64,9 +64,12 @@ fn a_commissioner_swapping_a_pick_is_a_change_at_the_same_count() {
 #[test]
 fn a_status_move_is_a_change_even_with_no_new_pick() {
     let mut memory = DraftPollMemory::default();
-    memory.status_changed("drafting");
-    assert!(!memory.status_changed("drafting"));
-    assert!(memory.status_changed("complete"));
+    let mut draft = crate::keepers::bare_league("status").draft;
+    draft.status = "drafting".into();
+    memory.draft_changed(&draft);
+    assert!(!memory.draft_changed(&draft));
+    draft.status = "complete".into();
+    assert!(memory.draft_changed(&draft));
 }
 
 #[test]
@@ -160,4 +163,32 @@ fn a_rebuilt_analysis_reaches_the_screen_even_with_nothing_scored() {
         "a fresh analysis is news even at 0 - 0"
     );
     assert!(!gate.should_emit(0.0, 0.0, quiet, 2));
+}
+
+#[test]
+fn keeper_and_ownership_edits_emit_without_another_selection() {
+    let mut memory = DraftPollMemory::default();
+    let mut entries = picks(1, None);
+    assert!(memory.picks_changed(&entries));
+    entries[0].is_keeper = Some(true);
+    assert!(memory.picks_changed(&entries), "keeper edit was invisible");
+    entries[0].draft_slot = 2;
+    assert!(memory.picks_changed(&entries), "slot edit was invisible");
+    entries[0].picked_by = Some("new-owner".into());
+    assert!(memory.picks_changed(&entries), "owner edit was invisible");
+    assert!(!memory.picks_changed(&entries));
+}
+
+#[test]
+fn settings_order_and_clock_edits_emit_at_the_same_status() {
+    let mut memory = DraftPollMemory::default();
+    let mut draft = crate::keepers::bare_league("poll-changes").draft;
+    assert!(memory.draft_changed(&draft));
+    draft.settings.pick_timer = Some(45);
+    assert!(memory.draft_changed(&draft), "timer edit was invisible");
+    draft.draft_order = Some(std::collections::HashMap::from([("owner".into(), 2)]));
+    assert!(memory.draft_changed(&draft), "order edit was invisible");
+    draft.last_picked = Some(12345);
+    assert!(memory.draft_changed(&draft), "clock reset was invisible");
+    assert!(!memory.draft_changed(&draft));
 }

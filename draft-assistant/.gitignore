@@ -33,3 +33,4 @@ node_modules/.tmp
 # Playwright browser-e2e output
 playwright-report
 e2e-browser/.results
+e2e-browser/.results-mobile

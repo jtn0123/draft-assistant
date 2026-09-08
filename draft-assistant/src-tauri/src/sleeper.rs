@@ -84,7 +84,7 @@ impl League {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DraftSettings {
     pub teams: u32,
     pub rounds: u32,
@@ -114,7 +114,7 @@ pub struct DraftSettings {
     pub slots_def: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DraftMetadata {
     #[serde(default)]
     pub name: Option<String>,
@@ -123,7 +123,7 @@ pub struct DraftMetadata {
     pub scoring_type: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Draft {
     pub draft_id: String,
     pub status: String,
@@ -152,7 +152,7 @@ pub struct Draft {
     pub slot_to_roster_id: Option<HashMap<String, u32>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
 pub struct Pick {
     pub round: u32,
     /// overall pick number, 1-based
@@ -170,7 +170,7 @@ pub struct Pick {
     pub is_keeper: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
 pub struct PickMeta {
     #[serde(default)]
     pub first_name: Option<String>,

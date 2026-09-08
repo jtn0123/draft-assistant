@@ -37,7 +37,7 @@ beforeEach(() => {
   h.reset();
   // jsdom has no Element.scrollTo, and the chat thread scrolls itself.
   Element.prototype.scrollTo = vi.fn();
-  fakeStorage({ "da.screen": "draft" });
+  fakeStorage({ "da.screen": "draft", "da.askButton": "on" });
   resetPrefs();
   resetThemePreference();
 });
@@ -49,7 +49,7 @@ afterEach(() => {
 
 describe("the season screen before it has anything to show", () => {
   it("says it is loading rather than showing an empty week", async () => {
-    fakeStorage({ "da.screen": "season" });
+    fakeStorage({ "da.screen": "season", "da.askButton": "on" });
     resetPrefs();
     // A load that never answers: the state between opening the tab and the
     // first view arriving.
@@ -62,7 +62,7 @@ describe("the season screen before it has anything to show", () => {
   });
 
   it("names the week and the user's record once it has", async () => {
-    fakeStorage({ "da.screen": "season" });
+    fakeStorage({ "da.screen": "season", "da.askButton": "on" });
     resetPrefs();
     h.api.loadSeason.mockResolvedValue(seasonFixture());
     await loaded();
@@ -71,7 +71,7 @@ describe("the season screen before it has anything to show", () => {
   });
 
   it("counts the league instead when none of the standings are the user's", async () => {
-    fakeStorage({ "da.screen": "season" });
+    fakeStorage({ "da.screen": "season", "da.askButton": "on" });
     resetPrefs();
     const view = seasonFixture();
     view.standings = view.standings.map((row) => ({ ...row, is_mine: false }));
@@ -82,7 +82,7 @@ describe("the season screen before it has anything to show", () => {
   });
 
   it("rebuilds the season too when the projections are refreshed under it", async () => {
-    fakeStorage({ "da.screen": "season" });
+    fakeStorage({ "da.screen": "season", "da.askButton": "on" });
     resetPrefs();
     const refreshed = draftFixture();
     refreshed.data_health.board_size = 312;
@@ -111,15 +111,12 @@ describe("the chat panel", () => {
   it("opens beside the draft board and tells Claude which pick it is", async () => {
     await loaded();
     await settle(() => {
-      screen.getByRole("button", { name: "Ask Claude" }).click();
+      screen.getByRole("button", { name: "Ask AI" }).click();
     });
 
     // Pick 27 of a 14-team draft is 2.13.
     expect(await screen.findByText(/Sees this draft · pick 2.13/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ask Claude" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByRole("button", { name: "Ask AI" })).toHaveAttribute("aria-pressed", "true");
 
     await settle(() => {
       screen.getByRole("button", { name: "Close" }).click();
@@ -128,14 +125,14 @@ describe("the chat panel", () => {
   });
 
   it("tells Claude about the week instead when the season screen is showing", async () => {
-    fakeStorage({ "da.screen": "season" });
+    fakeStorage({ "da.screen": "season", "da.askButton": "on" });
     resetPrefs();
     h.api.loadSeason.mockResolvedValue(seasonFixture());
     await loaded();
     await screen.findByText("Week 3 · 2-0 · 2nd of 1");
 
     await settle(() => {
-      screen.getByRole("button", { name: "Ask Claude" }).click();
+      screen.getByRole("button", { name: "Ask AI" }).click();
     });
     expect(await screen.findByText(/Sees week 3 · your lineup and the league/)).toBeInTheDocument();
   });

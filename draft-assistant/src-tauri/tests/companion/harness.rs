@@ -42,9 +42,15 @@ pub fn scratch_dir(label: &str) -> std::path::PathBuf {
 
 /// The app state the fixture league produces, with nothing polling.
 pub fn fixture_state(data_dir: &std::path::Path) -> AppState {
-    let (loaded, season, config) = common::fixture();
+    let (loaded, season, mut config) = common::fixture();
+    // Disable CLI discovery too: installed subscription credentials must never
+    // be reachable by this fixture, regardless of production provider preference.
+    // Always fail locally if a shared-chat test reaches the model provider.
+    // Engine::new uses this fixture directory, never the real Keychain.
+    config.chat_provider = Some("api".into());
+    config.anthropic_api_key = None;
     AppState {
-        engine: Arc::new(Engine::new(data_dir.to_path_buf())),
+        engine: Arc::new(Engine::new(data_dir.to_path_buf()).without_chat_clis()),
         loaded: Arc::new(AsyncMutex::new(Some(loaded))),
         season: Arc::new(AsyncMutex::new(Some(season))),
         config: Arc::new(AsyncMutex::new(config)),

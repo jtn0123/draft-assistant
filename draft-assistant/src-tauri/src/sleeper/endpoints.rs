@@ -78,6 +78,17 @@ impl SleeperClient {
         Ok(v.unwrap_or_default())
     }
 
+    /// Optional member recovery during a draft tick: one bounded attempt.
+    pub async fn league_users_quick(
+        &self,
+        league_id: &str,
+    ) -> Result<Vec<LeagueUser>, SleeperError> {
+        let users: Option<Vec<LeagueUser>> = self
+            .get_json_quick(&format!("{BASE}/league/{league_id}/users"))
+            .await?;
+        Ok(users.unwrap_or_default())
+    }
+
     /// Full player dictionary, unparsed: ~14.6 MB of JSON, cached on disk.
     ///
     /// Bytes rather than a `HashMap` because the caller parses it on the

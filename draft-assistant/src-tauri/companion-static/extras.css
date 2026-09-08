@@ -1,0 +1,188 @@
+/* The masthead switches, the toast, pictures, roster rows, signals, the
+   best-available chips and the compact layout. */
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.masthead .eyebrow {
+  display: none;
+}
+.masthead-switches {
+  display: flex;
+  gap: 6px;
+}
+.alerts-toggle {
+  min-height: 34px;
+  padding: 4px 10px;
+}
+.alerts-toggle[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--posrule);
+}
+/* The toast is the desktop's notice bar: amber for the clock, green when
+   the pick is yours. */
+.toast {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--posrule);
+  background: var(--mine-bg);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: center;
+  cursor: pointer;
+}
+.toast[data-kind="low-time"] {
+  border-color: var(--warn-rule);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.toast[hidden] {
+  display: none;
+}
+.entry.thinking {
+  color: var(--faint);
+  font-size: 12px;
+}
+/* Position chips are the desktop board's tabs: ink when on. */
+.chips {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 6px;
+  margin-bottom: 0;
+  border: 1px solid var(--rule2);
+  border-bottom: 0;
+  background: var(--surface);
+  scrollbar-width: none;
+}
+.chips button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 5px 11px;
+  border: 0;
+  color: var(--ink-soft);
+}
+.chips button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--surface);
+}
+#available .rank {
+  color: var(--faint);
+  font-size: 12px;
+  min-width: 26px;
+}
+#available .facts {
+  width: 100%;
+}
+#available .injury {
+  color: var(--warn);
+  font-weight: 700;
+  font-size: 11px;
+  border: 1px solid var(--warn-rule);
+  padding: 0 4px;
+}
+/* Pictures: the desktop's 22px round slot, the same size whether a face,
+   a team mark or nothing is in it. */
+.avatar {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.avatar img {
+  width: 22px;
+  height: 22px;
+  object-fit: cover;
+  object-position: top;
+  display: block;
+}
+.avatar.avatar-blank img,
+.avatar img.avatar-blank {
+  display: none;
+}
+.roster-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 5px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--hair);
+}
+.roster-row:last-child {
+  border-bottom: 0;
+}
+.roster-row .pick-no {
+  color: var(--faint);
+  font-size: 12px;
+  min-width: 34px;
+}
+.signals {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+.signals[hidden] {
+  display: none;
+}
+.show-all {
+  width: 100%;
+  margin-top: 0;
+  border-top: 0;
+}
+/* Names clip rather than wrap beside a picture, as on the desktop board. */
+#available .name,
+.roster-row .name,
+#picks .name {
+  flex: 1 1 120px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Compact: tighter rows, one reason per card, no suggestion chips. */
+.compact .strip,
+.compact .card,
+.compact .entry {
+  padding: 8px 10px;
+}
+.compact .row {
+  padding: 5px 10px;
+}
+.compact h2 {
+  margin: 10px 0 4px;
+}
+.compact .masthead {
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+}
+.compact .strip .headline {
+  font-size: 18px;
+}
+.compact .mobile-timer-value {
+  font-size: 22px;
+}
+.compact .card-head .name {
+  font-size: 15px;
+}
+.compact .reasons li:nth-child(n + 2),
+.compact .chat-suggestions,
+.compact .mobile-my-picks {
+  display: none;
+}

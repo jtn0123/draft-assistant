@@ -2,7 +2,7 @@
 // device can read and add to.
 //
 // Nothing here is stored locally. The host owns the thread — it appends the
-// question at once, answers it on its own budget, and pushes the whole thread
+// question at once, answers it using its AI connection, and pushes the whole thread
 // back down the `shared-chat` event — so this component holds exactly one
 // piece of state, the thread as last received, and sends into it.
 
@@ -26,7 +26,7 @@ function Entry({ entry }: { entry: SharedChatEntry }) {
         <span className={`device-glyph is-${entry.device.kind}`} aria-hidden="true" />
         {entry.device.name}
         {entry.cost_usd !== null && (
-          <span className="shared-cost">{formatUsd(entry.cost_usd)}</span>
+          <span className="shared-cost">{formatUsd(entry.cost_usd)} estimated</span>
         )}
       </span>
       {entry.error !== null ? (
@@ -130,7 +130,7 @@ export function SharedChat({ screen, compact }: { screen: string; compact: boole
             <span className="chat-empty-title">Shared with devices</span>
             <span>
               Everyone paired with this app reads this thread and can ask on it. Answers come from
-              the host, on the host&rsquo;s budget.
+              the host, using the host&rsquo;s AI connection.
             </span>
           </div>
         ) : (
@@ -172,7 +172,8 @@ export function SharedChat({ screen, compact }: { screen: string; compact: boole
           </button>
         </div>
         <span className="muted chat-foot">
-          Shared with every paired device · answered by the host, on the host&rsquo;s budget
+          Shared with every paired device · answered by the host, using the host&rsquo;s AI
+          connection
           <button
             type="button"
             className="link-btn"

@@ -18,6 +18,11 @@ async function openBoard(page: import("@playwright/test").Page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  // The header's Ask AI button is a preference now, off unless it is asked
+  // for; the chat test below is about the panel, not about finding it.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("da.askButton", "on");
+  });
   await page.goto("/");
   await openBoard(page);
 });
@@ -65,12 +70,17 @@ test("search narrows the board, and says so when nothing matches", async ({ page
 });
 
 test("clicking a column header re-sorts the board", async ({ page }) => {
+  // The board opens in its own rank order, low to high. Points is a column
+  // you choose: sorted by it, the top of an ALL board is nothing but
+  // quarterbacks, who outscore every other position and are drafted last.
+  const rank = page.getByRole("button", { name: /^#/ });
+  await expect(rank).toContainText("▲");
+  const first = await page.locator(".board-body").first().innerText();
+
   const points = page.getByRole("button", { name: /^Pts/ });
-  await expect(points).toContainText("▼");
-  const highest = await page.locator(".board-body").first().innerText();
   await points.click();
-  await expect(points).toContainText("▲");
-  await expect(page.locator(".board-body").first()).not.toHaveText(highest);
+  await expect(points).toContainText("▼");
+  await expect(page.locator(".board-body").first()).not.toHaveText(first);
 });
 
 test("the board still has a player column at the 1000px minimum width", async ({ page }) => {
@@ -174,12 +184,29 @@ test("live sync stays off, and says why, without a replay source", async ({ page
   await expect(page.locator(".header-actions")).toContainText(/Live sync off/i);
 });
 
+// The board's rows carry absolutely positioned `.sr-only` labels. With no
+// positioned ancestor their containing block was the document, so a row three
+// hundred places down put its screen-reader label fourteen thousand pixels
+// down the *page*: the window grew to the height of the whole player list and
+// the app scrolled through thousands of pixels of nothing, while the board's
+// own scroll box showed the same twelve rows.
+test("the window is only as tall as the app, however long the board is", async ({ page }) => {
+  await page.getByRole("button", { name: /Show \d+ more/ }).click();
+  await expect(page.locator(".board-body").nth(200)).toBeAttached();
+
+  const height = await page.evaluate(() => ({
+    document: document.documentElement.scrollHeight,
+    app: document.body.scrollHeight,
+  }));
+  expect(height.document).toBeLessThanOrEqual(height.app + 2);
+});
+
 test("an injury tag stays inside its column with the chat panel open", async ({ page }) => {
   // The fixture carries Sleeper's own spellings ("Questionable", "IR", "PUP")
   // and the row draws each as one letter. Opening the chat takes 380px out of
   // the player column, which is where a tag that could not shrink used to run
   // straight over the position badge beside it.
-  await page.getByRole("button", { name: "Ask Claude" }).click();
+  await page.getByRole("button", { name: "Ask AI" }).click();
   await expect(page.locator(".board")).toBeVisible();
 
   const rows = page.locator(".board-body").filter({ has: page.locator(".tag") });

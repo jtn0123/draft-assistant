@@ -6,8 +6,8 @@
 
 import { persisted, usePersisted } from "./persisted";
 
-/** Which of the two main screens the window is showing. */
-export type Screen = "draft" | "season";
+/** Which of the three main screens the window is showing. */
+export type Screen = "draft" | "season" | "projections";
 /** How the head-to-head lineup is laid out. */
 export type LineupView = "Table" | "Scoreboard";
 
@@ -17,8 +17,17 @@ const chime = persisted<"on" | "off">("da.chime", (raw) => (raw === "off" ? "off
 // choice is remembered so a draft-night user lands back on the board.
 const screen = persisted<Screen>(
   "da.screen",
-  (raw) => (raw === "draft" ? "draft" : "season"),
+  (raw) => (raw === "draft" || raw === "projections" ? raw : "season"),
   "season",
+);
+
+// The header's Ask AI button. Off by default: the panel is a few hours a
+// year and the button sat in the header the rest of the time, so it is
+// switched on from the settings menu by whoever wants it there.
+const askButton = persisted<"on" | "off">(
+  "da.askButton",
+  (raw) => (raw === "on" ? "on" : "off"),
+  "off",
 );
 
 const lineupView = persisted<LineupView>(
@@ -33,6 +42,14 @@ export function setChime(next: boolean): void {
 
 export function useChime(): boolean {
   return usePersisted(chime) === "on";
+}
+
+export function setAskButton(next: boolean): void {
+  askButton.set(next ? "on" : "off");
+}
+
+export function useAskButton(): boolean {
+  return usePersisted(askButton) === "on";
 }
 
 export function setScreen(next: Screen): void {
@@ -54,6 +71,7 @@ export function useLineupView(): LineupView {
 /** Test seam: forget this session's choices and re-read what is stored. */
 export function resetPrefs(): void {
   chime.reset();
+  askButton.reset();
   screen.reset();
   lineupView.reset();
 }

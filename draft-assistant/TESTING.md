@@ -1,11 +1,12 @@
 # Testing
 
-Split out of `README.md`, which sits at the 500-line cap the repo enforces on
-every first-party file.
+Split out of `README.md` to keep both documents within the 500-line cap the
+repo enforces on every first-party file.
 
 `npm run verify` is the gate: format, lint, typecheck, the vitest suite, the
-Rust suite, and a production `vite build`. Everything in it runs offline and
-finishes in seconds, and it is meant to stay that way.
+Rust suite with coverage floors, guard-script tests, and a production `vite build`.
+It does not require live Sleeper or provider requests; Rust compilation and
+coverage can take several minutes, especially on a cold cache.
 
 CI (`.github/workflows/ci.yml`) runs that plus the things that need the
 network or a browser: `npm run check:version`, `npm run test:scripts` (the
@@ -17,6 +18,21 @@ reason beside each), and the Playwright suite against the production bundle
 (`npm run test:e2e:browser:ci`: `vite build` then `vite preview` on port
 1420, where `npm run test:e2e:browser` drives the dev server locally). The
 release workflow calls this one and waits on it, so a tag gets the same gate.
+
+The draft preview fixture uses schema 1.7, including `draft_projections`.
+It contains roster identities and picks but no projections for drafted players;
+its available-player list excludes them. Projection rows therefore match the
+engine's missing-data behavior: zero points, every starter slot open, and stable
+roster-order ranks. With zero means and spreads, the current simulation breaks
+all ties toward the first roster (100% versus 0%); those fixture odds are not
+football estimates. Real loaded boards retain drafted-player projections.
+`fixture_shape` checks the complete serialized shape without exceptions for this field.
+
+Playwright uses zero retries and retains traces and screenshots on failure.
+Both local and CI runs generate `playwright-report/`. If the browser step fails,
+CI uploads that HTML report plus `e2e-browser/.results/` (including the hidden
+results directory) as `playwright-report`. Inspect it with
+`npx playwright show-report`, or open a trace with `npx playwright show-trace <trace.zip>`.
 
 Vitest's coverage floors count every file under `src/` (`coverage.include`),
 not only the files some test imports, so removing a screen's tests lowers the
@@ -64,7 +80,56 @@ npm run tauri dev
 4. The season screen opens and shows the matchup, lineup and standings.
 5. Player headshots and manager avatars render. They arrive as `data:` URLs, so
    a missing image is usually a change to `img-src` in the CSP.
-6. Ask Claude opens and reports a provider.
+6. Ask AI opens and reports a provider.
+
+### Native draft rehearsal
+
+From `draft-assistant/` on macOS, run:
+
+```bash
+npm run test:e2e:rehearsal
+```
+
+This builds and launches the native WKWebView app with an isolated rehearsal
+profile and a local Sleeper fixture. It checks initial loading, incoming API
+picks, manual pick recording and undo, then a simulated outage and recovery.
+Your saved league/profile is separate from the rehearsal data.
+
+The runner prints a temporary evidence directory (`draft-native-rehearsal-*`).
+Screenshots, build/install/test logs, fixture requests, and rehearsal data remain
+there after the run. The temporary profile link is removed when the runner exits
+normally, including test failures. This checks native behavior deterministically;
+verify the actual league, draft order, and start time against live Sleeper too.
+
+### Phone page as a phone
+
+```bash
+npm run test:e2e:mobile
+```
+
+Walks the companion page in WebKit as an iPhone 15 and in Chromium as a Pixel 7, light and dark: pairing, the your-turn nudge with the urgent clock, the best-available list, the chat with an answer in flight, and a dropped socket brought back by tapping the pill. No dev server; `e2e-browser/companionServer.ts` serves the shipped files and answers as the host. Screenshots land in `e2e-browser/.results-mobile/`. Team marks are let through to Sleeper's CDN so the pictures in the screenshots are real, and the first one is asserted to have loaded; headshots go through the fake host, which has none. Service workers are blocked in that config on purpose: Chromium treats localhost as a secure context, registers the page's worker, and the worker's fetches go around Playwright's routing to whatever is really on the port. This is browser emulation, not a phone: sound, vibration and the iPhone keyboard are only proven on hardware.
+
+### Phone and desktop with a real companion host
+
+From `draft-assistant/`, with npm dependencies and Playwright Chromium installed
+and localhost port 1420 free, run the isolated browser rehearsal:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml --test companion_wire phone_and_desktop_follow_a_real_host_and_recover_together -- --ignored --nocapture
+```
+
+The Rust driver starts a fixture companion host and supplies its temporary
+pairing credentials to the browser helper; do not run the helper directly.
+It exercises phone pairing, desktop follower mode, authenticated reads, refusal
+of host-only writes, shared-thread reset, offline/reconnect with updated state,
+and revocation on both devices. It uses no external model calls. The runner
+prints the retained screenshots and logs directory under the system temporary
+folder (`draft-assistant-companion-browser-rehearsal-*/browser-evidence`).
+
+For the draft-night UI, also check gear → **All settings**, saving the current
+league account as your default identity, independent player-list scrolling,
+and expanding/collapsing the AI model picker. A saved account before the draft
+order appears should show a pending seat rather than inventing a pick position.
 
 ### End-to-end, for real
 
@@ -86,7 +151,7 @@ machine with a league saved the spec logs what it read off the screen:
 ```
 [e2e] resolved on .app-header; screen reads:
 UMass Wrestling Fantasy Football LeagueWeek 1 · 0–0 · 7th of 14SeasonDraft
-14-team full-PPR · 15 roundsLive · 0s agoAsk ClaudeThis weekvs Meatball ·
+14-team full-PPR · 15 roundsLive · 0s agoAsk AIThis weekvs Meatball ·
 127.6 – 125.4Win odds52%Playoffs44%Locks in10d 18h…
 ```
 
@@ -132,12 +197,16 @@ failed to run tauri-build: Permission wdio:default not found,
 expected one of core:default, core:app:default, …
 ```
 
-The evidence that a default build is clean:
+Check that a default build excludes the WebDriver plugins. Axum is an ordinary
+dependency used by the optional companion server and is present in default
+builds; its presence does not mean WebDriver is enabled.
+
+Example checks (symbol counts vary with build and toolchain):
 
 ```
-$ cargo tree -e normal | grep -iE 'wdio|axum'                     # nothing
-$ cargo tree -e normal --features wdio | grep -iE 'wdio|axum'
-├── axum v0.8.9 … ├── tauri-plugin-wdio … └── tauri-plugin-wdio-webdriver
+$ cargo tree -e normal | grep -i wdio                          # nothing
+$ cargo tree -e normal --features wdio | grep -i wdio
+├── tauri-plugin-wdio … └── tauri-plugin-wdio-webdriver
 $ strings -a target/release/draft-assistant      | grep -ci wdio  # 0
 $ strings -a target/wdio/release/draft-assistant | grep -ci wdio  # 48
 $ nm -a target/debug/draft-assistant             | grep -ci wdio  # 0
@@ -164,7 +233,7 @@ touching the seam it watches (`lib.rs`, `capabilities/`, `build.rs`,
 It stays out of the PR gate because it is expensive and can fail for reasons
 that are not the diff's fault: `--features wdio` is a different feature set
 from everything `verify` builds and shares no artifacts with it — a second
-full compile of `tauri`, `wry` and `reqwest` plus `axum` and the plugins, on
+full compile of `tauri`, `wry`, `reqwest`, and the WebDriver plugins, on
 a runner billed at ten times the Linux rate — and it needs a real window and
 the live Sleeper API. Its npm side is another ~152 MB.
 

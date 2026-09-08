@@ -71,3 +71,17 @@ describe("Board paging across a filter change", () => {
     expect(foot().getByRole("button", { name: /^Show 25 more$/ })).toBeInTheDocument();
   });
 });
+
+it("offers a keyboard-focusable player scroller and resets it for a new filter", () => {
+  const view = board();
+  const region = view.getByRole("region", { name: "Available players" });
+  expect(region).toHaveAttribute("tabindex", "0");
+  region.scrollTop = 800;
+  fireEvent.click(view.controls().getByRole("button", { name: "RB" }));
+  expect(region.scrollTop).toBe(0);
+  region.scrollTop = 500;
+  fireEvent.change(view.controls().getByLabelText("Search players"), {
+    target: { value: "Player 0" },
+  });
+  expect(region.scrollTop).toBe(0);
+});

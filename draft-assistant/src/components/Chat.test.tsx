@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   // The panel listens for the shared thread's answers to refresh the screen
   // spend; what that does is covered in Chat.inflight.test.tsx.
   onSharedChat: vi.fn(() => Promise.resolve(() => undefined)),
+  onChatProgress: vi.fn(() => Promise.resolve(() => undefined)),
 }));
 
 vi.mock("../api", () => ({ api: mocks }));
@@ -28,10 +29,10 @@ function settings(overrides: Partial<ChatSettings>): ChatSettings {
     key_store: "keychain",
     budget_usd: 5,
     spend_usd: {},
-    models: ["Opus 5", "Fable 5"],
+    models: ["Opus 5", "Fable 5.1"],
     efforts: {
       "Opus 5": ["Off", "Low", "Medium", "High", "xhigh", "Max"],
-      "Fable 5": ["Low", "Medium", "High", "xhigh", "Max"],
+      "Fable 5.1": ["Low", "Medium", "High", "xhigh", "Max"],
     },
     notes: {},
     ...overrides,
@@ -79,8 +80,9 @@ describe("Chat copy", () => {
     expect(
       screen.getByText(/Sees this draft · pick 3\.04 · Opus 5 · high effort/),
     ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Model:/ }));
     expect(screen.getByRole("button", { name: "Opus 5" })).toHaveAttribute("title");
-    expect(screen.getByRole("button", { name: "Fable 5" })).toHaveAttribute("title");
+    expect(screen.getByRole("button", { name: "Fable 5.1" })).toHaveAttribute("title");
   });
 
   it("changes the empty-thread copy for the season screen", async () => {
@@ -92,43 +94,30 @@ describe("Chat copy", () => {
   });
 });
 
+// The API route billed a key per token for answers the Claude Code
+// subscription already covers, so the app no longer offers the choice: the
+// CLI answers whenever it is installed, and the panel has no route picker.
 describe("Chat routing", () => {
-  it("asks for a key only when the API route has none", async () => {
+  it("asks for no key, and offers no route, when the CLI is installed", async () => {
     mocks.chatSettings.mockResolvedValue(
       settings({ cli_available: true, provider: "claude_code" }),
     );
     render(
       <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
-    await waitFor(() => expect(screen.getByRole("group", { name: "Route" })).toBeInTheDocument());
+    expect(await screen.findByText(/via Claude Code/)).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Route" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Anthropic API key")).not.toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled();
-    expect(screen.getByText(/via Claude Code/)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Ask AI" })).toBeEnabled();
   });
 
-  it("hides the route picker when the CLI is not installed", async () => {
+  it("still asks for a key on a machine with no CLI, which has no other route", async () => {
     mocks.chatSettings.mockResolvedValue(settings({}));
     render(
       <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
     await waitFor(() => expect(screen.getByLabelText("Anthropic API key")).toBeInTheDocument());
     expect(screen.queryByRole("group", { name: "Route" })).not.toBeInTheDocument();
-  });
-
-  it("switching route saves it and re-reads the settings", async () => {
-    mocks.chatSettings
-      .mockResolvedValueOnce(settings({ cli_available: true, provider: "claude_code" }))
-      .mockResolvedValueOnce(settings({ cli_available: true, provider: "api" }));
-    mocks.setChatProvider.mockResolvedValue("api");
-    render(
-      <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
-    );
-    await waitFor(() => expect(screen.getByRole("group", { name: "Route" })).toBeInTheDocument());
-
-    await userEvent.click(screen.getByRole("button", { name: "API key" }));
-    expect(mocks.setChatProvider).toHaveBeenCalledWith("api");
-    await waitFor(() => expect(screen.getByLabelText("Anthropic API key")).toBeInTheDocument());
-    expect(screen.getByText(/via the API/)).toBeInTheDocument();
   });
 });
 
@@ -139,7 +128,7 @@ describe("Chat conversation", () => {
     render(
       <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
-    const input = await screen.findByRole("textbox", { name: "Ask Claude" });
+    const input = await screen.findByRole("textbox", { name: "Ask AI" });
 
     await userEvent.type(input, "Who should I take?{Enter}");
     expect(await screen.findByText("Take the RB.")).toBeInTheDocument();
@@ -164,7 +153,7 @@ describe("Chat conversation", () => {
     render(
       <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
-    const input = await screen.findByRole("textbox", { name: "Ask Claude" });
+    const input = await screen.findByRole("textbox", { name: "Ask AI" });
     await userEvent.type(input, "collude with me{Enter}");
     expect(await screen.findByText("Declined")).toBeInTheDocument();
   });
@@ -177,7 +166,7 @@ describe("Chat conversation", () => {
     render(
       <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
-    const input = await screen.findByRole("textbox", { name: "Ask Claude" });
+    const input = await screen.findByRole("textbox", { name: "Ask AI" });
 
     await userEvent.type(input, "First try{Enter}");
     expect(await screen.findByText(/network down/)).toBeInTheDocument();
@@ -209,14 +198,15 @@ describe("Chat model and effort", () => {
     render(
       <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
-    await screen.findByRole("textbox", { name: "Ask Claude" });
+    await screen.findByRole("textbox", { name: "Ask AI" });
 
     await userEvent.click(screen.getByRole("button", { name: "Off" }));
     expect(screen.getByText(/no thinking/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Fable 5" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Model:/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Fable 5.1" }));
     expect(screen.queryByRole("button", { name: "Off" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Fable 5 · high effort/)).toBeInTheDocument();
+    expect(screen.getByText(/Fable 5\.1 · high effort/)).toBeInTheDocument();
     expect(screen.getByText("thinking always on")).toBeInTheDocument();
   });
 
@@ -227,14 +217,14 @@ describe("Chat model and effort", () => {
     render(
       <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
-    await screen.findByRole("textbox", { name: "Ask Claude" });
+    await screen.findByRole("textbox", { name: "Ask AI" });
 
     const level = screen.getByRole("button", { name: "X-High" });
     expect(screen.queryByRole("button", { name: "xhigh" })).not.toBeInTheDocument();
     // Only the label changed: what is sent is still the value the API takes.
     await userEvent.click(level);
     mocks.askClaude.mockResolvedValue(reply({ text: "An answer." }));
-    await userEvent.type(screen.getByRole("textbox", { name: "Ask Claude" }), "Who?{Enter}");
+    await userEvent.type(screen.getByRole("textbox", { name: "Ask AI" }), "Who?{Enter}");
     await screen.findByText("An answer.");
     expect(mocks.askClaude).toHaveBeenLastCalledWith(expect.objectContaining({ effort: "xhigh" }));
   });
@@ -247,7 +237,7 @@ describe("Chat thread controls", () => {
     render(
       <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
-    const input = await screen.findByRole("textbox", { name: "Ask Claude" });
+    const input = await screen.findByRole("textbox", { name: "Ask AI" });
     await userEvent.type(input, "A question{Enter}");
     await screen.findByText("An answer.");
   };
@@ -280,7 +270,7 @@ describe("Chat thread controls", () => {
     const { container } = render(
       <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
-    await screen.findByRole("textbox", { name: "Ask Claude" });
+    await screen.findByRole("textbox", { name: "Ask AI" });
     await userEvent.click(screen.getByRole("button", { name: "Compact" }));
     expect(container.querySelector(".chat-thread.is-compact")).not.toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Cozy" }));
@@ -298,11 +288,11 @@ describe("API key form", () => {
       <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
     const field = await screen.findByLabelText("Anthropic API key");
-    expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Ask AI" })).toBeDisabled();
 
     await userEvent.type(field, "sk-ant-test{Enter}");
     expect(mocks.setApiKey).toHaveBeenCalledWith("sk-ant-test");
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Ask AI" })).toBeEnabled());
   });
 
   it("asks for the key once, and points the composer at the form", async () => {
@@ -313,7 +303,7 @@ describe("API key form", () => {
     await screen.findByLabelText("Anthropic API key");
     // One call to action, not two: the form asks, the composer waits.
     expect(screen.getByText("Add an Anthropic API key")).toBeInTheDocument();
-    const input = screen.getByRole("textbox", { name: "Ask Claude" });
+    const input = screen.getByRole("textbox", { name: "Ask AI" });
     expect(input).toBeDisabled();
     expect(input).toHaveAttribute("placeholder", "Waiting on the key above…");
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
@@ -354,11 +344,68 @@ describe("API key form", () => {
     render(
       <Chat screen="draft" leagueId="1" contextNote="Sees this draft" onClose={() => undefined} />,
     );
-    await screen.findByRole("textbox", { name: "Ask Claude" });
+    await screen.findByRole("textbox", { name: "Ask AI" });
     await userEvent.click(screen.getByRole("button", { name: "change key" }));
     expect(screen.getByText("Replace the stored key")).toBeInTheDocument();
     expect(screen.getByText(/Currently using ····abcd/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "cancel" }));
     expect(screen.queryByText("Replace the stored key")).not.toBeInTheDocument();
   });
+});
+
+it.each(["GPT-6 Astra", "GPT-5.6 Sol"])("uses %s without an Anthropic key", async (model) => {
+  mocks.chatSettings.mockResolvedValue(
+    settings({
+      has_key: false,
+      codex_available: true,
+      models: ["Opus 5", model],
+      efforts: { "Opus 5": ["High"], [model]: ["Low", "High"] },
+    }),
+  );
+  mocks.askClaude.mockResolvedValue(
+    reply({ text: "OpenAI answer", model, provider: "codex", cost_usd: 0.02 }),
+  );
+  render(
+    <Chat
+      screen="draft"
+      leagueId="openai"
+      contextNote="Sees this draft"
+      onClose={() => undefined}
+    />,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: /^Model:/ }));
+  await userEvent.click(await screen.findByRole("button", { name: model }));
+  expect(screen.queryByLabelText("Anthropic API key")).not.toBeInTheDocument();
+  await userEvent.type(screen.getByRole("textbox", { name: "Ask AI" }), "Who?{Enter}");
+  await screen.findByText("OpenAI answer");
+  expect(mocks.askClaude).toHaveBeenLastCalledWith(
+    expect.objectContaining({ model, effort: "High" }),
+  );
+  expect(screen.getByText(/Subscription calls are not extra token bills/)).toBeInTheDocument();
+});
+
+it("explains an unavailable Codex connection and restores Claude's key form", async () => {
+  mocks.chatSettings.mockResolvedValue(
+    settings({
+      codex_available: false,
+      models: ["Opus 5", "GPT-6 Astra"],
+      efforts: { "Opus 5": ["High"], "GPT-6 Astra": ["Low"] },
+    }),
+  );
+  render(
+    <Chat
+      screen="draft"
+      leagueId="missing-codex"
+      contextNote="Sees this draft"
+      onClose={() => undefined}
+    />,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: /^Model:/ }));
+  await userEvent.click(await screen.findByRole("button", { name: "GPT-6 Astra" }));
+  expect(screen.getByText(/Install Codex and sign in with ChatGPT/)).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Ask AI" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Low" })).toHaveAttribute("aria-pressed", "true");
+  await userEvent.click(screen.getByRole("button", { name: /^Model:/ }));
+  await userEvent.click(screen.getByRole("button", { name: "Opus 5" }));
+  expect(screen.getByLabelText("Anthropic API key")).toBeInTheDocument();
 });

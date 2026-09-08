@@ -104,7 +104,140 @@
    *  throws a working connection away. */
   const needsRevive = (socket) => !socket || socket.readyState !== 1;
 
+  const pickLabel = (pick, teams) =>
+    `${Math.floor((pick - 1) / teams) + 1}.${String(((pick - 1) % teams) + 1).padStart(2, "0")}`;
+  const waiting = (draft) =>
+    draft.status === "pre_draft" &&
+    (draft.total_picks_made ?? 0) <= (draft.keeper_picks?.length ?? 0);
+  /** Same plain-snake baseline as desktop; overrides cover trades and 3RR. */
+  const mobilePickQueue = (view) => {
+    const d = view?.draft;
+    if (!d || d.status === "complete" || d.is_auction || !Number.isInteger(d.teams) || d.teams < 1)
+      return [];
+    const names = new Map((view.rosters ?? []).map((r) => [r.slot, r.display_name]));
+    const keepers = new Set(d.keeper_picks ?? []);
+    const queue = [];
+    for (let pick = d.current_pick; pick <= d.teams * d.rounds && queue.length < 24; pick++) {
+      if (keepers.has(pick)) continue;
+      const round = Math.floor((pick - 1) / d.teams) + 1;
+      const index = (pick - 1) % d.teams;
+      const slot =
+        d.pick_slot_overrides?.[String(pick)] ?? (round % 2 ? index + 1 : d.teams - index);
+      queue.push({
+        pick,
+        slot,
+        label: pickLabel(pick, d.teams),
+        name: names.get(slot) || `Slot ${slot}`,
+        mine: slot === d.my_slot,
+      });
+    }
+    return queue;
+  };
+  let queueSignature = "";
+  const renderMobileDraft = (view, now) => {
+    const { el, clear, formatClock } = window.Companion;
+    const strip = document.getElementById("clock-strip");
+    if (!strip) return;
+    const d = view?.draft;
+    // renderNow rebuilds the clock strip; the queue stays mounted while time ticks.
+    strip.querySelector(".mobile-timer")?.remove();
+    if (
+      d &&
+      !waiting(d) &&
+      !d.paused &&
+      d.status !== "paused" &&
+      d.status !== "complete" &&
+      !d.is_auction
+    ) {
+      const timer = strip.appendChild(el("div", "mobile-timer"));
+      if (typeof d.clock_deadline_ms === "number") {
+        timer.appendChild(el("span", "mobile-timer-label", "Time left"));
+        const value = timer.appendChild(
+          el("strong", "mobile-timer-value", formatClock(d.clock_deadline_ms, now)),
+        );
+        value.setAttribute("role", "timer");
+        const seconds = Math.max(0, Math.ceil((d.clock_deadline_ms - now) / 1000));
+        timer.classList.toggle("urgent", seconds <= 15);
+        if (d.pick_timer > 0) {
+          const progress = timer.appendChild(el("progress"));
+          progress.max = d.pick_timer;
+          progress.value = Math.min(d.pick_timer, seconds);
+          progress.setAttribute("aria-label", "Pick time remaining");
+        }
+      } else timer.appendChild(el("span", "muted small", "Waiting for the live pick clock"));
+    } else if (d?.pick_timer > 0 && waiting(d)) {
+      strip.appendChild(el("div", "mobile-timer muted small", `${d.pick_timer} seconds per pick`));
+    }
+    let panel = document.getElementById("mobile-up-next");
+    if (!panel) {
+      panel = el("section", "mobile-up-next");
+      panel.id = "mobile-up-next";
+      panel.setAttribute("aria-label", "Upcoming draft picks");
+      strip.after(panel);
+      queueSignature = "";
+    }
+    const signature = JSON.stringify([d, view?.rosters]);
+    if (signature === queueSignature) return;
+    queueSignature = signature;
+    const expanded = panel.querySelector("details")?.open ?? false;
+    clear(panel);
+    panel.hidden = !d || d.status === "complete" || Boolean(d.is_auction);
+    if (panel.hidden) return;
+    panel.appendChild(el("h2", null, "Who’s next"));
+    const orderKnown = (view.rosters ?? []).some((r) => r.display_name);
+    if (waiting(d) && !orderKnown) {
+      panel.appendChild(el("p", "muted small", "Waiting for the draft order to be posted."));
+      return;
+    }
+    if (d.paused || d.status === "paused")
+      panel.appendChild(el("p", "muted small", "Upcoming order · draft paused"));
+    else if (d.picks_until_mine != null)
+      panel.appendChild(
+        el(
+          "p",
+          "mobile-your-turn",
+          d.picks_until_mine === 0 && !waiting(d)
+            ? "You’re up now"
+            : `${d.picks_until_mine} picks until your turn`,
+        ),
+      );
+    const queue = mobilePickQueue(view);
+    const list = el("ol", "mobile-pick-queue");
+    const add = (parent, entry) => {
+      const row = parent.appendChild(el("li", entry.mine ? "queue-pick is-mine" : "queue-pick"));
+      row.appendChild(el("span", "queue-number", entry.label));
+      row.appendChild(el("span", "queue-name", entry.name));
+      if (entry.mine) row.appendChild(el("span", "queue-you", "You"));
+    };
+    // On your own pick the recommendations matter more than the queue, so
+    // fewer rows sit between the clock and them.
+    const shown = d.is_my_pick && !waiting(d) ? 2 : 4;
+    queue.slice(0, shown).forEach((entry) => add(list, entry));
+    panel.appendChild(list);
+    if (queue.length > shown) {
+      const more = panel.appendChild(el("details", "queue-more"));
+      more.open = expanded;
+      more.appendChild(el("summary", null, `Show ${queue.length - shown} more upcoming picks`));
+      const rest = more.appendChild(el("ol", "mobile-pick-queue"));
+      queue.slice(shown).forEach((entry) => add(rest, entry));
+    }
+    if (d.my_next_picks?.length) {
+      panel.appendChild(
+        el(
+          "p",
+          "mobile-my-picks",
+          `Your next picks: ${d.my_next_picks
+            .slice(0, 4)
+            .map((pick) => pickLabel(pick, d.teams))
+            .join(" · ")}`,
+        ),
+      );
+    } else if (d.seat_note) panel.appendChild(el("p", "muted small", d.seat_note));
+  };
+
   window.Companion = {
+    mobilePickQueue,
+    renderMobileDraft,
     ...window.Companion,
     TICK_MS,
     REVOKED_CLOSE,

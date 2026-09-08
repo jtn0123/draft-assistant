@@ -1,5 +1,5 @@
 // The shared thread's own controls, rendered on their own rather than through
-// the whole Ask Claude panel.
+// the whole Ask AI panel.
 
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -75,7 +75,7 @@ it("has nothing to empty on a thread nobody has asked on yet", async () => {
   await waitFor(() => expect(screen.getByRole("button", { name: "New thread" })).toBeDisabled());
 });
 
-/** A question is already being answered on the host's budget; emptying the
+/** A question is already being answered using the host's AI connection; emptying the
  *  thread under it would leave the answer arriving into nothing. */
 it("cannot be emptied while an answer is on its way", async () => {
   mocks.sharedChatGet.mockResolvedValue(thread({ busy: true, entries: [entry()] }));

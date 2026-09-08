@@ -81,7 +81,7 @@ interface Companion {
 // and under jsdom `import.meta.url` is not a file URL.
 // helpers.js publishes `window.Companion`; app.js only reads it back. Both
 // run so a helper app.js needs but helpers.js forgot to publish fails here.
-const source = ["helpers.js", "clock.js", "app.js"]
+const source = ["helpers.js", "clock.js", "models.js", "app.js"]
   .map((file) => readFileSync(resolve(`src-tauri/companion-static/${file}`), "utf8"))
   .join("\n");
 

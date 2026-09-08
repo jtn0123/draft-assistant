@@ -14,6 +14,10 @@ export const SeasonScreen = lazy(() =>
   import("./SeasonScreen").then((m) => ({ default: m.SeasonScreen })),
 );
 
+export const ProjectionsScreen = lazy(() =>
+  import("./ProjectionsScreen").then((m) => ({ default: m.ProjectionsScreen })),
+);
+
 export const Chat = lazy(() => import("./Chat").then((m) => ({ default: m.Chat })));
 
 // Shown while a screen's chunk is still in flight. Deliberately plain: the

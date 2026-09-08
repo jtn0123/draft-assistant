@@ -17,7 +17,7 @@ pub use season_loop::{
 use crate::engine::{now_secs, LoadedLeague};
 use crate::season::{SeasonAnalysis, SeasonView};
 use crate::season_live::LiveGame;
-use crate::sleeper::Pick;
+use crate::sleeper::{Draft, Pick};
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -41,7 +41,7 @@ pub fn poll_health(loaded: &LoadedLeague) -> PollHealth {
 }
 
 /// A cheap stand-in for the whole pick list: how many there are, and a hash of
-/// which player sits at which pick number.
+/// every field that can affect the board, including keeper and owner edits.
 ///
 /// Counting alone missed the case that actually bites — a commissioner editing
 /// or replacing a pick, which leaves the count untouched but changes the board
@@ -52,8 +52,7 @@ type PicksSignature = (usize, u64);
 fn picks_signature(picks: &[Pick]) -> PicksSignature {
     let mut hasher = DefaultHasher::new();
     for pick in picks {
-        pick.pick_no.hash(&mut hasher);
-        pick.player_id.hash(&mut hasher);
+        pick.hash(&mut hasher);
     }
     (picks.len(), hasher.finish())
 }
@@ -63,7 +62,7 @@ fn picks_signature(picks: &[Pick]) -> PicksSignature {
 #[derive(Debug, Default)]
 pub struct DraftPollMemory {
     last_picks: Option<PicksSignature>,
-    last_status: String,
+    last_draft: Option<Draft>,
 }
 
 impl DraftPollMemory {
@@ -80,13 +79,13 @@ impl DraftPollMemory {
         true
     }
 
-    /// True when the draft's status string moved (`pre_draft` -> `drafting` ->
-    /// `complete`), which changes what the screen shows even with no new pick.
-    pub fn status_changed(&mut self, status: &str) -> bool {
-        if self.last_status == status {
+    /// Status, timer resets, order and settings all affect the displayed draft.
+    /// Compare the typed payload so map insertion order cannot cause redraws.
+    pub fn draft_changed(&mut self, draft: &Draft) -> bool {
+        if self.last_draft.as_ref() == Some(draft) {
             return false;
         }
-        self.last_status = status.to_string();
+        self.last_draft = Some(draft.clone());
         true
     }
 }

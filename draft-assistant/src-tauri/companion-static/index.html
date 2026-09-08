@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
     <title>Draft Assistant companion</title>
-    <meta name="theme-color" content="#f7f7f5" />
+    <meta name="theme-color" content="#e6e2da" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#101215" media="(prefers-color-scheme: dark)" />
     <!-- Installable as an app from the https tailnet address; ignored over http.
          The manifest link is added by pwa.js, which leaves it out on iOS (see
          there for why). iOS reads only a PNG touch icon; the SVG left the
@@ -16,15 +17,32 @@
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
     <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/mobile-models.css" />
+    <link rel="stylesheet" href="/static/draft-mobile.css" />
+    <link rel="stylesheet" href="/static/extras.css" />
   </head>
   <body>
     <div id="companion-root">
-      <p id="reconnect-pill" class="pill" role="status" hidden>Reconnecting…</p>
+      <p id="reconnect-pill" class="pill" role="status" hidden>Reconnecting… Tap to retry now</p>
+      <p id="alert-toast" class="toast" role="status" hidden></p>
 
       <section id="pair-screen" class="screen pair" aria-labelledby="pair-title">
-        <h1 id="pair-title">Draft Assistant</h1>
+        <span class="eyebrow">Your draft-night companion</span>
+        <h1 id="pair-title">Draft Assistant<span class="brand-dot" aria-hidden="true">.</span></h1>
+        <p class="muted">The board, your roster and a second opinion. Right here on your phone.</p>
         <p id="pair-host" class="muted" hidden></p>
         <p id="pair-error" class="error" role="alert" hidden></p>
+        <p id="boot-status" class="muted small" role="status">
+          Loading connection controls… If this stays here, reload or open this address directly in
+          Safari or Chrome.
+        </p>
+        <button id="boot-reload" type="button" hidden>Reload</button>
+        <noscript
+          ><p class="error">
+            JavaScript is needed to connect. Open this address directly in Safari or Chrome and
+            enable JavaScript.
+          </p></noscript
+        >
         <form id="pair-form" novalidate>
           <label class="field">
             <span>Pairing code</span>
@@ -43,7 +61,7 @@
             <span>This device</span>
             <input id="pair-device" name="device" autocomplete="off" required />
           </label>
-          <button id="pair-submit" class="primary" type="submit">Connect</button>
+          <button id="pair-submit" class="primary" type="submit" disabled>Connect</button>
         </form>
         <p class="muted small">
           Ask the host for the six-digit code shown under Phone &amp; second screen.
@@ -51,16 +69,35 @@
       </section>
 
       <main id="app-screen" class="screen" hidden>
+        <header class="masthead">
+          <div>
+            <span class="eyebrow">Draft Assistant</span>
+            <h1>Your draft<span class="brand-dot" aria-hidden="true">.</span></h1>
+          </div>
+          <div class="masthead-switches">
+            <button id="compact-toggle" type="button" aria-pressed="false" class="alerts-toggle">
+              Compact off
+            </button>
+            <button id="alerts-toggle" type="button" aria-pressed="false" class="alerts-toggle">
+              Alerts off
+            </button>
+          </div>
+        </header>
         <section id="tab-now" class="panel" aria-label="Now">
           <div id="clock-strip" class="strip"></div>
+          <p id="signals" class="signals muted small" hidden></p>
           <h2>Recommended</h2>
           <ul id="recs" class="cards"></ul>
           <h2>Your roster</h2>
           <div id="roster" class="roster"></div>
+          <p id="roster-open" class="muted small"></p>
           <p id="health" class="muted small"></p>
         </section>
 
         <section id="tab-picks" class="panel" aria-label="Picks" hidden>
+          <h2>Best available</h2>
+          <div id="available-filter" class="chips" role="group" aria-label="Position filter"></div>
+          <ul id="available" class="rows"></ul>
           <h2>Last picks</h2>
           <ul id="picks" class="rows"></ul>
         </section>
@@ -74,9 +111,36 @@
         <!-- One chat block, moved into whichever panel is showing it. -->
         <section id="tab-chat" class="panel" aria-label="Chat" hidden>
           <div id="chat-block">
-            <h2 id="chat-heading">Chat</h2>
+            <div class="chat-head">
+              <h2 id="chat-heading">Chat</h2>
+              <button
+                id="model-toggle"
+                class="model-toggle"
+                type="button"
+                aria-expanded="false"
+                aria-controls="model-panel"
+              >
+                Model: Opus 5
+              </button>
+            </div>
+            <div id="model-panel" class="mobile-models" hidden>
+              <div id="model-options" role="group" aria-label="AI model choices"></div>
+              <label class="model-effort-label" for="model-effort"
+                >Effort<select id="model-effort" aria-label="AI effort">
+                  <option>High</option>
+                </select></label
+              >
+              <p id="model-note" class="muted" hidden></p>
+            </div>
             <ul id="chat-list" class="chat"></ul>
             <p id="chat-note" class="error" role="alert" hidden></p>
+            <div class="chat-suggestions" role="group" aria-label="Suggested questions">
+              <button type="button" data-question="Who should I draft next?">Next pick</button>
+              <button type="button" data-question="Which position should I target?">
+                Roster needs
+              </button>
+              <button type="button" data-question="Who is the best value left?">Best value</button>
+            </div>
             <form id="chat-form" class="composer" novalidate>
               <label class="sr-only" for="chat-input">Ask the assistant</label>
               <input id="chat-input" name="text" autocomplete="off" placeholder="Ask a question" />
@@ -87,15 +151,44 @@
       </main>
 
       <nav id="tabbar" aria-label="Sections" hidden>
-        <button type="button" data-tab="now">Now</button>
-        <button type="button" data-tab="picks">Picks</button>
-        <button type="button" data-tab="chat">Chat</button>
-        <button type="button" data-tab="week" hidden>Week</button>
+        <button type="button" data-tab="now">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" /></svg
+          ><span>Now</span>
+        </button>
+        <button type="button" data-tab="picks">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M9 6h11M9 12h11M9 18h11M3 5l1 1 2-2M3 11l1 1 2-2M3 17l1 1 2-2" /></svg
+          ><span>Picks</span>
+        </button>
+        <button type="button" data-tab="chat">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path
+              d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2zM7 9h10M7 13h7"
+            /></svg
+          ><span>Chat</span>
+        </button>
+        <button type="button" data-tab="week" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <rect x="3" y="5" width="18" height="16" rx="2" />
+            <path d="M7 3v4M17 3v4M3 11h18M7 15h3M14 15h3" /></svg
+          ><span>Week</span>
+        </button>
       </nav>
     </div>
+    <script src="/static/boot.js"></script>
     <script src="/static/helpers.js"></script>
     <script src="/static/clock.js"></script>
     <script src="/static/pwa.js"></script>
+    <script src="/static/models.js"></script>
+    <script src="/static/pictures.js"></script>
+    <script src="/static/restore.js"></script>
+    <script src="/static/roster.js"></script>
+    <script src="/static/signals.js"></script>
+    <script src="/static/week.js"></script>
+    <script src="/static/available.js"></script>
+    <script src="/static/alerts.js"></script>
+    <script src="/static/compact.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

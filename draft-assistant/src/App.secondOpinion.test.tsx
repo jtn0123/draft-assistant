@@ -13,7 +13,7 @@ import { setAvatarMode } from "./avatars";
 import { resetPrefs } from "./prefs";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
-import { settingsRow } from "./test/settingsRow";
+import { settingsRow, openSettingsPage } from "./test/settingsRow";
 import { draftFixture, fakeStorage, harness, restoringConfig } from "./test/appHarness";
 import type { DraftView } from "./types";
 
@@ -27,10 +27,7 @@ async function loaded(view: DraftView) {
 }
 
 async function chooseSetting(label: RegExp) {
-  await settle(() => {
-    const gear = screen.queryByRole("button", { name: "Settings" });
-    if (gear !== null && screen.queryByRole("menu") === null) gear.click();
-  });
+  await openSettingsPage();
   await settle(() => {
     settingsRow(label).click();
   });
@@ -60,9 +57,7 @@ afterEach(() => {
 describe("the import projections row", () => {
   it("offers the import when nothing has been loaded", async () => {
     await loaded(withoutImport());
-    await settle(() => {
-      screen.queryByRole("button", { name: "Settings" })?.click();
-    });
+    await openSettingsPage();
     const row = settingsRow(/Import projections CSV/);
     expect(row).toHaveTextContent("Add a second opinion column to the board");
     // An action, not a toggle: it opens a file picker, so it carries no
@@ -73,9 +68,7 @@ describe("the import projections row", () => {
 
   it("names the source and the load date once something is loaded", async () => {
     await loaded(draftFixture(3));
-    await settle(() => {
-      screen.queryByRole("button", { name: "Settings" })?.click();
-    });
+    await openSettingsPage();
     const row = settingsRow(/Import projections CSV/);
     expect(row).toHaveTextContent(/Clay loaded/);
     expect(row.querySelector(".settings-row-value")).toHaveClass("is-on");

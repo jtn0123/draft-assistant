@@ -176,6 +176,23 @@ export interface PickPrice {
   example: string | null;
 }
 
+/** One roster, and the season the draft has bought it so far. */
+export interface TeamProjection {
+  slot: number;
+  name: string | null;
+  /** Best starting lineup's season points, on this league's scoring. */
+  starters: number;
+  /** Everyone else drafted, at their own season points. */
+  bench: number;
+  /** Starting slots nobody on this roster can fill yet. */
+  holes: string[];
+  /** 1 for the roster projecting the most starting points. */
+  rank: number;
+  /** 0..1: how often it finishes the season first on points. */
+  title_odds: number;
+  is_mine: boolean;
+}
+
 export interface DraftView {
   schema_version: string;
   generated_at: number;
@@ -192,6 +209,9 @@ export interface DraftView {
   replacement_demand: Record<string, number>;
   /** Optional: a fixture captured before pick pricing existed has none. */
   pick_prices?: PickPrice[];
+  /** What each roster projects for the season from what it has drafted, best
+   *  first. Optional for the same reason: older fixtures have none. */
+  draft_projections?: TeamProjection[];
   data_health: DataHealth;
 }
 
@@ -357,4 +377,12 @@ export interface Diagnostics {
   /** "debug" or "info": what the Verbose logging checkbox shows. */
   log_level: string;
   log_tail: string[];
+}
+
+/** Accounts returned by the current Sleeper league, independent of draft order. */
+export interface SleeperMember {
+  user_id: string;
+  display_name: string | null;
+  draft_slot: number | null;
+  is_current: boolean;
 }

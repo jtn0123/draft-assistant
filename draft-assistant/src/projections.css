@@ -1,0 +1,142 @@
+/* The projections screen: this week's price, and the league ordered by what
+   it projects from here. Rows share the board's column helpers (`right`,
+   `num`, `ellipsis`) from board.css; everything named here is its own. */
+
+.projections-screen {
+  padding: 18px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.proj-card {
+  border: 1px solid var(--rule2);
+  background: var(--paper);
+  padding: 12px 14px;
+}
+
+.proj-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.proj-stat-value {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.proj-top {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.proj-week-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.proj-week-body {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.proj-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.proj-side strong {
+  font-size: 26px;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.proj-side.is-them {
+  text-align: right;
+  align-items: flex-end;
+}
+
+.proj-margin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.proj-move {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.proj-move.is-up {
+  color: var(--pos);
+}
+
+.proj-move.is-down {
+  color: var(--act);
+}
+
+.proj-heading {
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin: 8px 0 0;
+}
+
+/* One grid for the head and every row, so the columns cannot drift apart. */
+.proj-row {
+  display: grid;
+  grid-template-columns: 28px minmax(8rem, 1fr) 56px 64px 76px 72px 44px;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 2px;
+}
+
+/* The draft table has its own columns: no record or seed to carry, and a
+   column of slots a roster has not filled yet. */
+.proj-draft-row {
+  grid-template-columns: 28px minmax(8rem, 1fr) 76px 64px 64px minmax(6rem, 0.7fr);
+}
+
+.proj-head {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+  border-bottom: 1px solid var(--rule2);
+}
+
+.proj-body {
+  font-size: 13px;
+  border-bottom: 1px solid var(--hair);
+}
+
+.proj-body:last-child {
+  border-bottom: 0;
+}
+
+.proj-body.is-mine {
+  background: var(--mine);
+  font-weight: 600;
+}
+
+.proj-points {
+  font-weight: 700;
+}
+
+.proj-note {
+  max-width: 68ch;
+}

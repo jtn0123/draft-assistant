@@ -39,7 +39,7 @@ league and share one chat thread. Off by default. LAN only. Default port 7878.
 
 - `GET /api/state` → `DraftView` (schema-gated by the client) or `404 { "error": "no league loaded" }`
 - `GET /api/season` → `SeasonView` or `404`
-- `GET /api/config` → `{ "active_league_id", "leagues": StoredLeague[], "my_user_id", "host_name", "platform" }` — never keys, tokens, or budget
+- `GET /api/config` → `{ "active_league_id", "leagues": StoredLeague[], "my_user_id", "host_name", "platform" }` — never keys or tokens
 - `GET /api/headshot/{player_id}` → image bytes (`content-type` set) or `404`; `GET /api/avatar/{reference}?full=1` likewise
 - `GET /api/devices` → `Device[]` where `Device = { device_id, name, kind, paired_at_ms, last_seen_ms, connected }`
 - `GET /` and `/static/*` → the phone page (no token needed for `/`; the page asks for the code).
@@ -73,7 +73,8 @@ on the same LAN is somebody else's origin, not this server's.
 - `POST /api/chat` body `{ "screen": "draft", "text": "who should I take?" }` → `202 { "entry_id" }`.
   The question is appended at once; the answer (or an `error` entry) arrives later over WebSocket.
   `409 { "error": "busy" }` while another question is being answered; 10 questions/min/device → `429`.
-  Answers use the host's provider (API key or Claude Code) and the host's per-league budget cap.
+  Answers use the host's provider (Anthropic API, Claude Code, or authenticated Codex CLI).
+  Cost is an estimated API-equivalent amount, not a subscription bill. There is no budget cap or spending stop.
 - `POST /api/chat/reset` body `{ "screen": "draft" }` → `200 SharedChatThread` with no entries.
   Any paired device may start the thread over, and the emptied thread goes out on the WebSocket
   the same way an answer does. A screen that is being answered keeps `busy` until that answer lands.
@@ -119,4 +120,4 @@ with a token the host has forgotten.
 ## Follower desktop
 
 Settings → "Join another Draft Assistant…" (also on the first-launch screen): enter `host:port` (or the URL from the QR) and the code.
-The app then runs its `Api` against the host over HTTP/WS; league switching, keys, budget, Yahoo and username edits are host-only and disabled with a "Hosted by Justin's Mac" pill. "Leave" returns to local mode. Stored in `localStorage` (`da.companion.follow` = `{ url, token, host_name }`).
+The app then runs its `Api` against the host over HTTP/WS; league switching, provider credentials, Yahoo and username edits are host-only and disabled with a "Hosted by Justin's Mac" pill. "Leave" returns to local mode. Stored in `localStorage` (`da.companion.follow` = `{ url, token, host_name }`).

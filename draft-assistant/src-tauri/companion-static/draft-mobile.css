@@ -1,0 +1,132 @@
+/* The pick clock and the up-next chips, as the desktop's clock box and
+   snake row (src/components.css). */
+.mobile-timer {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 6px;
+}
+.mobile-timer-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--faint);
+}
+.mobile-timer-value {
+  font-size: 25px;
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.mobile-timer progress {
+  width: 100%;
+  height: 3px;
+  accent-color: var(--ink);
+  border: 0;
+}
+.mobile-timer progress::-webkit-progress-bar {
+  background: var(--line);
+}
+.mobile-timer progress::-webkit-progress-value {
+  background: var(--ink);
+}
+.mobile-timer.urgent .mobile-timer-value {
+  color: var(--warn);
+}
+.mobile-timer.urgent progress {
+  accent-color: var(--warn);
+}
+.mobile-timer.urgent progress::-webkit-progress-value {
+  background: var(--warn);
+}
+.mobile-up-next {
+  margin-top: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.mobile-up-next[hidden] {
+  display: none;
+}
+.mobile-up-next h2 {
+  margin: 0 0 4px;
+}
+.mobile-your-turn {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink);
+}
+/* Chips in a row, as the desktop's snake; wrapping rather than clipping. */
+.mobile-pick-queue {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.queue-pick {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--rule2);
+  color: var(--ink-soft);
+  max-width: 100%;
+}
+.queue-pick.is-mine {
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+.queue-number {
+  font-size: 10px;
+  opacity: 0.65;
+}
+.queue-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+.queue-you {
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.queue-more {
+  margin-top: 6px;
+}
+.queue-more summary {
+  cursor: pointer;
+  display: inline-block;
+  min-height: 32px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px dashed var(--rule2);
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  list-style: none;
+}
+.queue-more summary::-webkit-details-marker {
+  display: none;
+}
+.queue-more[open] summary {
+  margin-bottom: 6px;
+}
+.mobile-my-picks {
+  color: var(--faint);
+  font-size: 12px;
+  margin: 8px 0 0;
+}

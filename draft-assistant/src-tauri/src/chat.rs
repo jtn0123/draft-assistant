@@ -8,6 +8,7 @@
 //! is here is the call and everything that happens to the reply.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// The models, the effort levels, a turn, a reply and the error type.
 #[path = "chat_types.rs"]
@@ -26,6 +27,22 @@ mod retry;
 /// anything that has to outwait an answer (the shared thread's deadline) reads
 /// the same number rather than adding it up again.
 pub use retry::WORST_CASE_ELAPSED;
+
+/// Where an answer's text goes while it is still arriving.
+///
+/// The API sends an answer a few words at a time and this file has always
+/// reassembled it in silence, so the panel sat on "Thinking it through…" for
+/// the whole call and then painted a finished wall of text. A watcher is
+/// handed the text *so far*, not the piece that just arrived: the receiver
+/// replaces what it is showing rather than appending to it, so a call that is
+/// dropped or arrives late cannot corrupt what is on screen.
+pub type OnProgress = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// How often at most a watcher hears about an answer that is still growing.
+///
+/// The deltas arrive many times a second, and each one would have the panel
+/// re-render the whole markdown of everything written so far.
+pub(crate) const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 
 const ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
@@ -60,8 +77,7 @@ pub fn turn_cost(model: ChatModel, input_tokens: u32, output_tokens: u32) -> f64
 /// on a turn that hits the cache most of the prompt is billed as a cache read
 /// and none of it appears in `input_tokens`. Pricing a turn from `input_tokens` alone
 /// therefore undercounts it — badly on the turn that writes the cache, which
-/// is charged at a premium — and the panel's running spend drifts under the
-/// cap it is supposed to enforce.
+/// is charged at a premium — leaving the panel's running estimate too low.
 pub fn turn_cost_of(model: ChatModel, reply: &ChatReply) -> f64 {
     let (input, _) = model.price_per_mtok();
     let cached = f64::from(reply.cache_creation_input_tokens) * input * CACHE_WRITE_MULTIPLIER
@@ -145,25 +161,45 @@ fn reply_from(model: String, text: String, usage: &stream::Usage, flags: Flags) 
 /// cached system prompt, the board after the conversation. `cancel` is the
 /// signal the panel's Cancel button pulls; a stopped answer comes back as a
 /// reply marked `cancelled`, with whatever text had arrived.
+/// One question, as the caller holds it: the six values that always travel
+/// together, kept in a struct so asking and watching an answer arrive are not
+/// two eight-argument functions.
+pub struct Question<'a> {
+    pub http: &'a reqwest::Client,
+    pub api_key: &'a str,
+    pub model: ChatModel,
+    pub effort: Effort,
+    pub context: &'a crate::chat_context::SplitContext,
+    pub messages: &'a [ChatMessage],
+}
+
 pub async fn ask(
-    http: &reqwest::Client,
-    api_key: &str,
-    model: ChatModel,
-    effort: Effort,
-    context: &crate::chat_context::SplitContext,
-    messages: &[ChatMessage],
+    question: Question<'_>,
     cancel: Arc<CancelSignal>,
+) -> Result<ChatReply, ChatError> {
+    ask_watched(question, cancel, None).await
+}
+
+/// [`ask`], with somewhere for the answer to go while it is still arriving.
+///
+/// Only the live panel wants this. Every other caller — the shared thread a
+/// phone asks through, the tests — waits for the finished answer and passes
+/// nothing.
+pub async fn ask_watched(
+    question: Question<'_>,
+    cancel: Arc<CancelSignal>,
+    progress: Option<OnProgress>,
 ) -> Result<ChatReply, ChatError> {
     let call = Call {
         endpoint: ENDPOINT,
-        http,
-        api_key,
-        model,
-        effort,
-        context,
-        messages,
+        http: question.http,
+        api_key: question.api_key,
+        model: question.model,
+        effort: question.effort,
+        context: question.context,
+        messages: question.messages,
     };
-    ask_at(call, cancel, retry::Limits::LIVE).await
+    ask_at(call, cancel, retry::Limits::LIVE, progress).await
 }
 
 /// One question as the wire sees it: where it goes, what it says, and the
@@ -197,8 +233,15 @@ enum Attempt {
 /// is still a billed request from `message_start` on, so the error carries
 /// what had been charged so far. A cancel drops the response, which closes the
 /// request, and hands back what had arrived.
-async fn read_answer(mut response: reqwest::Response, cancel: &CancelSignal) -> Attempt {
+async fn read_answer(
+    mut response: reqwest::Response,
+    cancel: &CancelSignal,
+    progress: Option<&OnProgress>,
+) -> Attempt {
     let mut stream = stream::Stream::new();
+    // When the watcher was last told, so a fast run of deltas is not a fast
+    // run of repaints.
+    let mut told_at: Option<Instant> = None;
     loop {
         let chunk = tokio::select! {
             chunk = response.chunk() => chunk,
@@ -209,6 +252,12 @@ async fn read_answer(mut response: reqwest::Response, cancel: &CancelSignal) -> 
                 if let Err(failure) = stream.feed(&bytes) {
                     return stopped_by(&stream, failure);
                 }
+                if let Some(watcher) = progress {
+                    if told_at.is_none_or(|at| at.elapsed() >= PROGRESS_EVERY) {
+                        told_at = Some(Instant::now());
+                        watcher(&stream.text_so_far());
+                    }
+                }
             }
             Ok(None) => break,
             Err(e) => {
@@ -218,6 +267,13 @@ async fn read_answer(mut response: reqwest::Response, cancel: &CancelSignal) -> 
                 });
             }
         }
+    }
+    // The last words of an answer arrive in the same breath as the end of it,
+    // and the throttle above swallows them more often than not. The finished
+    // reply carries them, but this is what the panel is showing until it
+    // lands, and it should not stop a sentence short.
+    if let Some(watcher) = progress {
+        watcher(&stream.text_so_far());
     }
     match stream.finish() {
         Ok(answer) => Attempt::Done(answer),
@@ -247,6 +303,7 @@ async fn ask_at(
     call: Call<'_>,
     cancel: Arc<CancelSignal>,
     limits: retry::Limits,
+    progress: Option<OnProgress>,
 ) -> Result<ChatReply, ChatError> {
     let Call {
         endpoint,
@@ -300,7 +357,7 @@ async fn ask_at(
             .map_err(|e| format!("could not reach the Anthropic API: {e}"))?;
         let status = response.status();
         let (status, retry_after, message) = if status.is_success() {
-            match read_answer(response, &cancel).await {
+            match read_answer(response, &cancel, progress.as_ref()).await {
                 Attempt::Done(answer) => break answer,
                 Attempt::Stopped(reply) => return Ok(reply),
                 Attempt::Failed(error) => return Err(error),

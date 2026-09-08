@@ -1,6 +1,5 @@
-//! The rules of money and length for the Ask Claude commands: which screens
-//! may ask, what a thread may carry, what the cap is, and where the spend is
-//! filed. Pure functions, split out of `commands_chat.rs` for the line cap.
+//! Pure rules for AI chat screens, thread length, legacy budget inputs, and
+//! estimated cost tallies. Split out of `commands_chat.rs` for the line cap.
 
 use crate::chat::{ChatMessage, ChatModel};
 use crate::engine::AppConfig;
@@ -48,39 +47,16 @@ pub(super) fn window(messages: &[ChatMessage]) -> Result<&[ChatMessage], String>
     Ok(windowed)
 }
 
-/// The cap a screen's chat runs under until the user sets one of their own.
-pub const DEFAULT_BUDGET_USD: f64 = 5.0;
+/// Compatibility value for older companions. Spending caps have been removed.
+pub const DEFAULT_BUDGET_USD: f64 = 0.0;
 
-/// The cap in force, in dollars. Zero means the user turned it off.
-pub fn budget_of(config: &AppConfig) -> f64 {
-    config
-        .chat_budget_usd
-        .unwrap_or(DEFAULT_BUDGET_USD)
-        .max(0.0)
+/// Old saved caps must never stop a draft-night answer after upgrading.
+pub fn budget_of(_config: &AppConfig) -> f64 {
+    DEFAULT_BUDGET_USD
 }
 
-/// Refuse a turn whose screen has already spent its cap.
-///
-/// The check is necessarily *before* the turn, because what a turn costs is
-/// only known once it has been answered. So a turn that starts under the cap
-/// always finishes, however far over it lands — and then counts in full
-/// against the cap, which the next turn is refused by. The cap is a stop, not
-/// a ceiling; the overshoot is one turn wide.
-pub(super) fn check_budget(spent: f64, cap: f64, screen: &str) -> Result<(), String> {
-    if cap > 0.0 && spent >= cap {
-        return Err(format!(
-            "Ask Claude has spent ${spent:.2} of its ${cap:.2} cap on the {screen} screen. Raise the budget above to keep asking."
-        ));
-    }
-    Ok(())
-}
-
-/// The cap a caller asked for, or a refusal.
-///
-/// A negative cap used to be quietly rounded up to zero — and zero is the one
-/// value that means *no cap at all*, so "-1" turned the budget off instead of
-/// being rejected. Nothing below zero is a cap, so nothing below zero is
-/// accepted; the panel keeps whatever cap it had and says why.
+/// Validate a legacy budget command input, preserving its existing errors.
+/// The caller discards valid values and stores zero; no cap is restored.
 pub(super) fn checked_budget(dollars: f64) -> Result<f64, String> {
     if !dollars.is_finite() {
         return Err("that is not a number of dollars".to_string());
@@ -95,8 +71,8 @@ pub(super) fn checked_budget(dollars: f64) -> Result<f64, String> {
 
 /// The two screens that can ask a question.
 ///
-/// `screen` picks the context, and further down it keys the running spend the
-/// budget is checked against. Anything else would open a fresh, uncapped tally
+/// `screen` picks the context and keys the estimated cost tally. Anything else
+/// would open an unrelated tally
 /// under whatever name arrived over the IPC — and the config would grow a new
 /// entry for every one of them.
 pub(super) fn check_screen(screen: &str) -> Result<(), String> {
@@ -111,15 +87,14 @@ pub(super) fn check_screen(screen: &str) -> Result<(), String> {
 /// The same shape the panel files its saved conversations under (`chatScope`
 /// in `chatSessions.ts`), and for the same reason — a question about one
 /// league's board is not a question about another's. Spend used to be keyed by
-/// screen alone, so every league on the machine drew down one shared cap and
+/// screen alone, so every league on the machine shared a cost tally and
 /// the panel's "spent on this screen" figure belonged to no league in
 /// particular.
 ///
 /// Keys written under the old scheme are bare screen names, which no scope can
 /// collide with. They are left in the config and never read: they are a
 /// mixture of every league's spending, so there is no league to migrate them
-/// to, and the alternative — charging them all to whichever league happens to
-/// be open — would refuse turns over money that league never spent.
+/// to. Assigning them to the currently open league would inflate its estimate.
 pub fn spend_key(screen: &str, league_id: Option<&str>) -> String {
     format!("{screen}.{}", league_id.unwrap_or("none"))
 }
@@ -131,7 +106,7 @@ pub fn spend_key(screen: &str, league_id: Option<&str>) -> String {
 /// built from. The backend used to file the spend under
 /// `config.active_league_id`, which is a record of what was last loaded rather
 /// than what is loaded now; while a league is being switched the two disagree,
-/// and the cap was then drawn down under a key the panel was not reading. Both
+/// and cost was recorded under a key the panel was not reading. Both
 /// sides go through this one function so they cannot drift again.
 pub(super) fn charged_league<'a>(
     loaded: Option<&'a str>,
@@ -145,8 +120,7 @@ pub(super) fn charged_league<'a>(
 /// The requested model is what the panel picked; the reported one is what
 /// answered. Those differ whenever a server-side fallback rescues a refusal,
 /// and pricing the answer as the request charged the wrong rate — under, if
-/// Opus was asked for and Fable answered, so the cap let the next turn
-/// through on money that had already been spent.
+/// Opus was asked for and Fable answered, for example.
 pub(super) fn billed_model(requested: ChatModel, reported: &str) -> ChatModel {
     ChatModel::from_reported(reported).unwrap_or(requested)
 }

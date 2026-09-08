@@ -288,3 +288,22 @@ describe("what the host says about itself", () => {
     expect(getHostSync()).toEqual({ polling: true, hostName: "Justin's Mac" });
   });
 });
+
+describe("HTTP revocation ends the live connection", () => {
+  it("closes the socket and does not reconnect or deliver late frames after a 401", async () => {
+    vi.useFakeTimers();
+    const api = remoteApi(follow, () => undefined);
+    const received = vi.fn();
+    await api.onDraftUpdated(received);
+    const connection = newest();
+    fetchMock.mockResolvedValue(json({ error: "not paired" }, 401));
+    await expect(api.getState()).rejects.toThrow("The host revoked this device");
+    expect(connection.closed).toBe(true);
+    connection.push("draft-updated", draftView);
+    expect(received).not.toHaveBeenCalled();
+    connection.onclose?.({ code: 1006 });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(FakeSocket.live).toHaveLength(1);
+    expect(getFollowStatus()).toBe("revoked");
+  });
+});

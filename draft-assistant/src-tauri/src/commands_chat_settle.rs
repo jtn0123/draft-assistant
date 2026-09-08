@@ -2,7 +2,6 @@
 //! whatever becomes of the caller. Split out of `commands_chat.rs` for the
 //! line cap.
 
-use super::PROVIDER_CLI;
 use crate::chat::{self, ChatModel, ChatReply};
 use crate::chat_client;
 use crate::engine::AppConfig;
@@ -18,16 +17,9 @@ pub(crate) struct Books {
 }
 
 impl Books {
-    /// What a reply — or the billed part of a failed one — cost.
-    ///
-    /// The CLI route is paid for by a subscription, not by the token:
-    /// charging it list rates would stop the panel over money nobody spent.
+    /// Standard API-equivalent estimate, even for subscription-backed calls.
     fn cost_of(&self, reply: &ChatReply) -> f64 {
-        if self.provider == PROVIDER_CLI {
-            0.0
-        } else {
-            chat::turn_cost_of(super::billed_model(self.model, &reply.model), reply)
-        }
+        chat::turn_cost_of(super::billed_model(self.model, &reply.model), reply)
     }
 
     /// Add `cost` to the running spend and return the new total.
@@ -62,7 +54,7 @@ impl Books {
 /// cancel it. That matters because cancelling the future does not cancel the
 /// bill: the API charges from the moment it accepts the request, and a turn
 /// that was aborted at the await used to be billed, discarded, and never
-/// counted against the cap. Here the spend is recorded by the same task that
+/// included in the cost estimate. Here usage is recorded by the same task that
 /// made the call, before anything is handed back, and a call that fails after
 /// the API started answering records the usage that did arrive.
 pub(crate) async fn settle<F>(

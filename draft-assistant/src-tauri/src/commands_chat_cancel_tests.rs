@@ -62,7 +62,7 @@ async fn a_claim_made_up_front_is_the_one_the_answer_holds() {
     );
     // Handing the claim to the answer path does not double-claim: the call
     // fails on the empty thread, and the claim is released with it.
-    let error = answer_holding(&state, "draft", "", "", Vec::new(), held)
+    let error = answer_holding(&state, "draft", "", "", Vec::new(), held, None)
         .await
         .expect_err("an empty thread is nothing to ask");
     assert!(error.contains("nothing to ask"), "{error}");
@@ -122,7 +122,7 @@ async fn cancelling_stops_the_cli_route_and_not_only_the_api_one() {
     });
     let started = std::time::Instant::now();
     let reply = route
-        .call(cancel)
+        .call(cancel, None)
         .await
         .expect("a cancel is a reply, not an error");
     assert!(reply.cancelled, "the CLI route ignored the signal");

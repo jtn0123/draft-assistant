@@ -14,7 +14,7 @@ import { setAvatarMode } from "./avatars";
 import { resetPrefs } from "./prefs";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
-import { settingsRow } from "./test/settingsRow";
+import { settingsRow, openSettingsPage } from "./test/settingsRow";
 import { draftFixture, fakeStorage, harness, restoringConfig } from "./test/appHarness";
 import type { DraftView } from "./types";
 
@@ -40,10 +40,7 @@ async function loaded(view = draftFixture()) {
 
 /** Open the settings menu and click one of its rows. */
 async function chooseSetting(label: RegExp) {
-  await settle(() => {
-    const gear = screen.queryByRole("button", { name: "Settings" });
-    if (gear !== null && screen.queryByRole("menu") === null) gear.click();
-  });
+  await openSettingsPage();
   await settle(() => {
     settingsRow(label).click();
   });
@@ -74,6 +71,37 @@ describe("the pick chime row", () => {
     });
     expect(settingsRow(/Pick chime/)).toHaveAttribute("aria-checked", "true");
     expect(settingsRow(/Pick chime/)).toHaveTextContent("On");
+  });
+});
+
+// The header carried an Ask AI button whether or not anybody used the panel.
+// It is a preference now, and the menu is the only way back to it, so the row
+// has to both hide the button and bring it back.
+describe("the Ask AI button row", () => {
+  it("leaves the header clear until the row is switched on", async () => {
+    await loaded();
+    expect(screen.queryByRole("button", { name: "Ask AI" })).not.toBeInTheDocument();
+
+    await chooseSetting(/Ask AI button/);
+    expect(settingsRow(/Ask AI button/)).toHaveTextContent("On");
+    await settle(() => screen.getByRole("button", { name: "Back to draft" }).click());
+
+    const ask = screen.getByRole("button", { name: "Ask AI" });
+    expect(ask).toHaveAttribute("aria-pressed", "false");
+    await settle(() => ask.click());
+    expect(screen.getByRole("button", { name: "Ask AI" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("takes the button off the header again, leaving the panel closed", async () => {
+    await loaded();
+    await chooseSetting(/Ask AI button/);
+    await settle(() => screen.getByRole("button", { name: "Back to draft" }).click());
+    await settle(() => screen.getByRole("button", { name: "Ask AI" }).click());
+
+    await chooseSetting(/Ask AI button/);
+    expect(settingsRow(/Ask AI button/)).toHaveTextContent("Off");
+    await settle(() => screen.getByRole("button", { name: "Back to draft" }).click());
+    expect(screen.queryByRole("button", { name: "Ask AI" })).not.toBeInTheDocument();
   });
 });
 
@@ -123,7 +151,7 @@ describe("the live sync row", () => {
 });
 
 describe("the Sleeper username row", () => {
-  it("opens the setup screen, where the username lives, with a way back", async () => {
+  it("opens the embedded identity picker with a way back to the draft", async () => {
     // The roster panel tells a Sleeper user to set their username, and until
     // now nothing after the first launch could reach the field.
     await loaded();
@@ -133,7 +161,7 @@ describe("the Sleeper username row", () => {
     expect(screen.getByRole("button", { name: /^Back to/ })).toBeInTheDocument();
   });
 
-  it("saves a username typed on its own and comes back to the board", async () => {
+  it("saves a username without reloading the league and returns to the board", async () => {
     // Arriving was not the point. The form's submit needed a league id, so a
     // user who came to change one word was stuck until they went and found
     // the id of the league already on their screen.
@@ -143,7 +171,9 @@ describe("the Sleeper username row", () => {
     await chooseSetting(/Sleeper username/);
 
     const field = await screen.findByLabelText("Sleeper username");
-    expect(screen.getByLabelText("League ID")).toHaveValue(view.league.league_id);
+    expect(screen.queryByLabelText("League ID")).not.toBeInTheDocument();
+    const leagueLoads = h.api.addLeague.mock.calls.length;
+    h.api.getState.mockResolvedValue(view);
     await settle(() => {
       fireEvent.change(field, { target: { value: "mcsleeper26" } });
     });
@@ -152,7 +182,10 @@ describe("the Sleeper username row", () => {
     });
 
     await waitFor(() => expect(h.api.setMyUsername).toHaveBeenCalledWith("mcsleeper26"));
-    expect(h.api.addLeague).toHaveBeenLastCalledWith(view.league.league_id);
+    expect(h.api.getState).toHaveBeenCalled();
+    expect(h.api.addLeague).toHaveBeenCalledTimes(leagueLoads);
+    await screen.findByText(/mcsleeper26 is your default Sleeper identity/);
+    await settle(() => screen.getByRole("button", { name: "Back to draft" }).click());
     expect(await screen.findByRole("heading", { name: view.league.name })).toBeInTheDocument();
     expect(screen.queryByLabelText("Sleeper username")).toBeNull();
   });
@@ -238,36 +271,34 @@ describe("the player pictures row", () => {
 describe("the appearance picker", () => {
   it("moves between following the system and an explicit light or dark", async () => {
     await loaded();
-    await settle(() => {
-      screen.getByRole("button", { name: "Settings" }).click();
-    });
+    await openSettingsPage();
 
-    const choice = (name: string) => screen.getByRole("menuitemradio", { name });
+    const choice = (name: string) => screen.getByRole("button", { name });
     const group = () => screen.getByRole("group", { name: "Appearance" });
     expect(group().parentElement).toHaveTextContent(
       "Following your system setting, light right now",
     );
-    expect(choice("System")).toHaveAttribute("aria-checked", "true");
+    expect(choice("System")).toHaveAttribute("aria-pressed", "true");
 
     // Dark is two steps from System on the shell's cycle; one click gets there.
     await settle(() => {
       choice("Dark").click();
     });
-    expect(choice("Dark")).toHaveAttribute("aria-checked", "true");
-    expect(choice("System")).toHaveAttribute("aria-checked", "false");
+    expect(choice("Dark")).toHaveAttribute("aria-pressed", "true");
+    expect(choice("System")).toHaveAttribute("aria-pressed", "false");
     expect(group().parentElement).toHaveTextContent("Overriding your system setting");
     expect(document.documentElement.dataset.theme).toBe("dark");
 
     await settle(() => {
       choice("Light").click();
     });
-    expect(choice("Light")).toHaveAttribute("aria-checked", "true");
+    expect(choice("Light")).toHaveAttribute("aria-pressed", "true");
     expect(document.documentElement.dataset.theme).toBe("light");
 
     await settle(() => {
       choice("System").click();
     });
-    expect(choice("System")).toHaveAttribute("aria-checked", "true");
+    expect(choice("System")).toHaveAttribute("aria-pressed", "true");
     expect(group().parentElement).toHaveTextContent("Following your system setting");
   });
 });

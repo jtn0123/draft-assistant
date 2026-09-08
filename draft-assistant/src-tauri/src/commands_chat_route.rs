@@ -34,11 +34,30 @@ impl Route {
     /// found the claim, and the panel sat on "Thinking" until the CLI's own
     /// four-minute deadline. Both routes race it now, and both hand back a
     /// reply marked cut short.
+    /// `progress` is where the answer's text goes while it is still
+    /// arriving. The API route and the Claude Code route both report it; the
+    /// Codex route waits for its process to exit and reads the output in one
+    /// go, so there is nothing to hand over until there is everything.
     pub(crate) async fn call(
         self,
         cancel: Arc<CancelSignal>,
+        progress: Option<chat::OnProgress>,
     ) -> Result<ChatReply, chat::ChatError> {
-        if self.provider == super::PROVIDER_CLI {
+        if self.provider == "codex" {
+            let cli = self.cli.ok_or_else(|| {
+                "Codex CLI not found. Install Codex and run `codex login` once.".to_string()
+            })?;
+            crate::chat_codex::ask(
+                &cli,
+                self.model,
+                self.effort,
+                &self.context.joined(),
+                &self.messages,
+                cancel,
+            )
+            .await
+            .map_err(chat::ChatError::from)
+        } else if self.provider == super::PROVIDER_CLI {
             let cli = self.cli.ok_or_else(|| {
                 "Claude Code CLI not found: install it or add an API key".to_string()
             })?;
@@ -49,6 +68,7 @@ impl Route {
                 &self.context.joined(),
                 &self.messages,
                 cancel,
+                progress,
             )
             .await
             .map_err(chat::ChatError::from)
@@ -56,16 +76,19 @@ impl Route {
             let api_key = self
                 .api_key
                 .ok_or_else(|| "no Anthropic API key set: add one in Settings".to_string())?;
-            chat::ask(
-                // Not the Sleeper client: its eight-second budget cut off every
-                // answer that took longer than a board refresh.
-                &chat_client::client(),
-                &api_key,
-                self.model,
-                self.effort,
-                &self.context,
-                &self.messages,
+            chat::ask_watched(
+                chat::Question {
+                    // Not the Sleeper client: its eight-second budget cut off
+                    // every answer that took longer than a board refresh.
+                    http: &chat_client::client(),
+                    api_key: &api_key,
+                    model: self.model,
+                    effort: self.effort,
+                    context: &self.context,
+                    messages: &self.messages,
+                },
                 cancel,
+                progress,
             )
             .await
         }

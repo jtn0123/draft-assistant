@@ -20,12 +20,14 @@ export const BoardRow = memo(function BoardRow({
   player: p,
   showSecondOpinion,
   disabled = false,
+  readOnly = false,
   onDraft,
 }: {
   player: AvailablePlayer;
   showSecondOpinion: boolean;
   /** The draft is complete, so recording a pick is off. */
   disabled?: boolean;
+  readOnly?: boolean;
   onDraft: (id: string, name: string) => void;
 }) {
   return (
@@ -57,8 +59,8 @@ export const BoardRow = memo(function BoardRow({
         <button
           type="button"
           className="btn-ghost btn-row"
-          disabled={disabled}
-          title={disabled ? DRAFT_OVER_TITLE : undefined}
+          disabled={disabled || readOnly}
+          title={readOnly ? "Controlled by host" : disabled ? DRAFT_OVER_TITLE : undefined}
           onClick={() => onDraft(p.player_id, p.name)}
         >
           Draft

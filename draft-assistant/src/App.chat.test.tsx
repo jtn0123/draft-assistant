@@ -1,4 +1,4 @@
-// The Ask Claude panel inside the shell: closed with the header button and
+// The Ask AI panel inside the shell: closed with the header button and
 // opened again while an answer is still on its way.
 
 import { act, render, screen } from "@testing-library/react";
@@ -50,7 +50,7 @@ function reply(overrides: Partial<ChatReply>): ChatReply {
 beforeEach(() => {
   h.reset();
   resetPendingTurns();
-  fakeStorage({ "da.screen": "draft" });
+  fakeStorage({ "da.screen": "draft", "da.askButton": "on" });
   resetPrefs();
   resetThemePreference();
   Element.prototype.scrollTo = vi.fn();
@@ -62,8 +62,8 @@ beforeEach(() => {
     key_store: "keychain",
     budget_usd: 5,
     spend_usd: {},
-    models: ["Opus 5", "Fable 5"],
-    efforts: { "Opus 5": ["Off", "High"], "Fable 5": ["Low", "High"] },
+    models: ["Opus 5", "Fable 5.1"],
+    efforts: { "Opus 5": ["Off", "High"], "Fable 5.1": ["Low", "High"] },
     notes: {},
   });
 });
@@ -72,7 +72,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const askButton = () => screen.getByRole("button", { name: "Ask Claude" });
+const askButton = () => screen.getByRole("button", { name: "Ask AI" });
 
 describe("the chat panel in the shell", () => {
   it("keeps a question, its thinking state and its spend across a close and reopen", async () => {
@@ -85,27 +85,27 @@ describe("the chat panel in the shell", () => {
     );
 
     await settle(() => askButton().click());
-    const input = await screen.findByRole("textbox", { name: "Ask Claude" });
+    const input = await screen.findByRole("textbox", { name: "Ask AI" });
     await userEvent.type(input, "Who should I take?{Enter}");
     expect(screen.getByText(/Thinking it through/)).toBeInTheDocument();
 
     // Closing the panel unmounts it. The question, and the money the answer
     // was about to cost, used to go with it.
     await settle(() => screen.getByRole("button", { name: "Close" }).click());
-    expect(screen.queryByRole("textbox", { name: "Ask Claude" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Ask AI" })).not.toBeInTheDocument();
 
     await settle(() => askButton().click());
     expect(await screen.findByText("Who should I take?")).toBeInTheDocument();
     expect(screen.getByText(/Thinking it through/)).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Ask AI" })).toBeDisabled();
 
     await act(async () => {
       resolve(reply({ text: "The RB.", cost_usd: 0.05, screen_spend_usd: 0.05 }));
       await Promise.resolve();
     });
     expect(await screen.findByText("The RB.")).toBeInTheDocument();
-    expect(screen.getByText(/\$0\.05 spent/)).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Ask Claude" })).toBeEnabled();
+    expect(screen.getByText(/\$0\.05 estimated cost/)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Ask AI" })).toBeEnabled();
     // One call: the reopened panel picked the answer up rather than asking again.
     expect(h.api.askClaude).toHaveBeenCalledTimes(1);
     expect(listSessions(`draft.${view.league.league_id}`)[0]).toMatchObject({
@@ -124,7 +124,7 @@ describe("the chat panel in the shell", () => {
     );
     await settle(() => askButton().click());
     await userEvent.type(
-      await screen.findByRole("textbox", { name: "Ask Claude" }),
+      await screen.findByRole("textbox", { name: "Ask AI" }),
       "Who should I take?{Enter}",
     );
     await settle(() => screen.getByRole("button", { name: "Close" }).click());
@@ -144,6 +144,6 @@ describe("the chat panel in the shell", () => {
 
     await settle(() => askButton().click());
     expect(await screen.findByText("The RB.")).toBeInTheDocument();
-    expect(screen.getByText(/\$0\.05 spent/)).toBeInTheDocument();
+    expect(screen.getByText(/\$0\.05 estimated cost/)).toBeInTheDocument();
   });
 });

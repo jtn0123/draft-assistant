@@ -20,6 +20,7 @@ import type {
   SharedChatThread,
 } from "../types";
 import type { SeasonView } from "../season-types";
+import type { ChatProgress } from "../chat-types";
 
 /**
  * One stub per backend call, keyed off the real `Api` type.
@@ -32,6 +33,7 @@ import type { SeasonView } from "../season-types";
 const METHODS: Record<keyof Api, true> = {
   addLeague: true,
   setMyUsername: true,
+  listSleeperMembers: true,
   getConfig: true,
   sleeperLeagues: true,
   removeLeague: true,
@@ -78,6 +80,7 @@ const METHODS: Record<keyof Api, true> = {
   sharedChatSend: true,
   sharedChatReset: true,
   onSharedChat: true,
+  onChatProgress: true,
   onCompanionDevices: true,
   diagnostics: true,
   openLogFolder: true,
@@ -99,6 +102,8 @@ export interface PushHandlers {
   seasonHealth: ((health: PollHealth) => void) | null;
   /** The shared thread the companion server pushes. */
   sharedChat: ((thread: SharedChatThread) => void) | null;
+  /** The answer being written right now, as the backend hands it over. */
+  chatProgress: ((progress: ChatProgress) => void) | null;
   /** The paired-device list, pushed whenever one connects or drops. */
   devices: ((devices: CompanionDevice[]) => void) | null;
 }
@@ -137,6 +142,7 @@ function build(): Harness {
     season: null,
     seasonHealth: null,
     sharedChat: null,
+    chatProgress: null,
     devices: null,
   };
 
@@ -147,6 +153,7 @@ function build(): Harness {
     push.season = null;
     push.seasonHealth = null;
     push.sharedChat = null;
+    push.chatProgress = null;
     push.devices = null;
 
     api.startPolling.mockResolvedValue(undefined);
@@ -157,6 +164,7 @@ function build(): Harness {
     api.headshot.mockResolvedValue(null);
     api.avatar.mockResolvedValue(null);
     api.chatSuggestions.mockResolvedValue([]);
+    api.listSleeperMembers.mockResolvedValue([]);
     api.companionStatus.mockResolvedValue(companionStatus());
     api.companionEnable.mockResolvedValue(companionStatus({ enabled: true }));
     api.companionDisable.mockResolvedValue(companionStatus());
@@ -183,8 +191,8 @@ function build(): Harness {
       provider: "api",
       has_key: false,
       key_hint: null,
-      models: ["Opus 5", "Fable 5"],
-      efforts: { "Opus 5": ["Off", "High"], "Fable 5": ["Low", "High"] },
+      models: ["Opus 5", "Fable 5.1"],
+      efforts: { "Opus 5": ["Off", "High"], "Fable 5.1": ["Low", "High"] },
       notes: {},
     });
 
@@ -208,6 +216,10 @@ function build(): Harness {
     });
     api.onSharedChat.mockImplementation((handler: (thread: SharedChatThread) => void) => {
       push.sharedChat = handler;
+      return Promise.resolve(() => undefined);
+    });
+    api.onChatProgress.mockImplementation((handler: (progress: ChatProgress) => void) => {
+      push.chatProgress = handler;
       return Promise.resolve(() => undefined);
     });
     api.onCompanionDevices.mockImplementation((handler: (devices: CompanionDevice[]) => void) => {

@@ -1,14 +1,15 @@
-// The Ask Claude panel: model and effort pickers, saved conversations, the
+// The Ask AI panel: model and effort pickers, saved conversations, the
 // thread, and the composer. Every answer is a real Messages API call against
 // the current board — there is no canned content here.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { ChatSettings } from "../chat-types";
-import { formatUsd, overBudget, setChatBudget, useChatBudget } from "../chatCost";
 import { chatScope } from "../chatSessions";
-import { describeError } from "../errorText";
-import type { Screen } from "../prefs";
+/** The screens a question can be asked about. The window has a third,
+ *  Projections, which is the season's own numbers and asks about the season:
+ *  the shell hands this panel "season" for it. */
+type AskScreen = "draft" | "season";
 import { ChatControls } from "./ChatControls";
 import { ChatKeyForm } from "./ChatKeyForm";
 import { ChatSessionBar } from "./ChatSessionBar";
@@ -31,11 +32,12 @@ function effortTag(level: string): string {
   return level === "Off" ? "no thinking" : `${level.toLowerCase()} effort`;
 }
 
-/** What Claude can see, per screen, for the empty thread. */
-const EMPTY_NOTE: Record<Screen, string> = {
-  draft: "Claude sees your live board, your roster and the clock. Ask anything about who to take.",
+/** What the selected AI can see, per screen, for the empty thread. */
+const EMPTY_NOTE: Record<AskScreen, string> = {
+  draft:
+    "Your selected AI sees your live board, your roster and the clock. Ask anything about who to take.",
   season:
-    "Claude sees this week's matchup, your roster and the waiver wire. Ask anything about who to start.",
+    "Your selected AI sees this week's matchup, your roster and the waiver wire. Ask anything about who to start.",
 };
 
 /** Thinking copy while a request is in flight, per effort level. */
@@ -65,12 +67,12 @@ export function Chat({
   sharedOnly = false,
   onClose,
 }: {
-  screen: Screen;
+  screen: AskScreen;
   /** Which league the questions are about. Conversations are filed under it,
    *  so switching leagues opens a thread about the board now on screen. */
   leagueId: string;
   contextNote: string;
-  /** Follower mode: the host owns the local composer, its key and its budget,
+  /** Follower mode: the host owns the local composer and provider credentials,
    *  so the panel offers the shared thread and nothing else. */
   sharedOnly?: boolean;
   onClose: () => void;
@@ -99,7 +101,6 @@ export function Chat({
   const [suggestions, setSuggestions] = useState<string[]>([]);
   /// Bumped after the key is saved, to re-read whether one is stored.
   const [settingsToken, setSettingsToken] = useState(0);
-  const budget = useChatBudget();
 
   const sessions = useChatSessions({
     scope,
@@ -126,12 +127,8 @@ export function Chat({
         if (cancelled) return;
         setSettings(next);
         setShowKeyForm(!sharedOnly && next.provider === "api" && !next.has_key);
-        // The backend holds the cap and the running total it is checked
-        // against; the stored copy here is only a cache of them.
-        setChatBudget(next.budget_usd);
-        // Keyed by screen *and* league, the same scope the conversations are
-        // filed under: a cap drawn down by another league's questions is not
-        // this league's cap.
+        // Cache the backend's estimated cost for this screen and league,
+        // using the same scope as its saved conversations.
         setScreenSpend(next.spend_usd[scope] ?? 0);
       })
       .catch(() => {
@@ -143,10 +140,9 @@ export function Chat({
     };
   }, [settingsToken, scope, sharedOnly, setScreenSpend]);
 
-  // A phone's question is answered on this machine's budget and written to
-  // the same tally, but it never passes through this panel, so the screen
-  // figure here stood still while the phones spent. Every answer on the
-  // shared thread re-reads the tally.
+  // A phone's question uses this machine's provider and updates the same
+  // estimated cost tally without passing through this panel. Re-read that
+  // tally after each shared answer so the displayed estimate stays current.
   useEffect(() => {
     let live = true;
     const pending = api.onSharedChat((next) => {
@@ -181,40 +177,49 @@ export function Chat({
     };
   }, [screen]);
 
-  // Fable 5 cannot turn thinking off, so the picked level may not be legal for
+  // Fable 5.1 cannot turn thinking off, so the picked level may not be legal for
   // the picked model. Derive the effective one rather than correcting state
   // after render — switching model must never send a level the API rejects.
   const allowedEfforts = useMemo(
     () => settings?.efforts[model] ?? ["Low", "Medium", "High", "xhigh", "Max"],
     [settings, model],
   );
-  const activeEffort = allowedEfforts.includes(effort) ? effort : DEFAULT_EFFORT;
+  const activeEffort = allowedEfforts.includes(effort)
+    ? effort
+    : allowedEfforts.includes(DEFAULT_EFFORT)
+      ? DEFAULT_EFFORT
+      : (allowedEfforts[0] ?? DEFAULT_EFFORT);
   const { entries, spend, sending, screenSpend } = thread;
-  // What the cap is actually measured against: everything this screen's chats
-  // have cost together. This conversation's own total is the floor, because
-  // the screen figure is only as fresh as the last answer — a turn charged
-  // here before the backend reported back is still money spent.
-  const spentOnScreen = Math.max(spend.costUsd, screenSpend);
-  // A warning, not a lock: the backend holds the real cap and charges the
-  // Claude Code route nothing. Disabling the composer here would stop
-  // questions over money that was never spent.
-  const nearingCap = overBudget(spentOnScreen, budget);
+  const isOpenAI = model.startsWith("GPT-");
+  const needsKey = !isOpenAI && showKeyForm;
+  const missingCodex = isOpenAI && settings?.codex_available === false;
+  const route = isOpenAI ? "codex" : (settings?.provider ?? null);
 
-  /** Keep the cap the panel warns on and the cap the backend enforces the
-   *  same number. A backend that refuses the write still warns correctly. */
-  const pickBudget = (next: number) => {
-    // A cap the local half will not take is one the backend refuses too, so
-    // it never goes over the wire.
-    if (!setChatBudget(next)) return;
-    api.setChatBudget(next).catch(() => {
-      // Not stored for next time; this session still uses it.
+  // What the backend has written of the answer so far. The API route hands it
+  // over as it arrives; a CLI route says nothing until it says everything, and
+  // this stays empty there.
+  const [arriving, setArriving] = useState("");
+  useEffect(() => {
+    let live = true;
+    const pending = api.onChatProgress((progress) => {
+      // Both screens' questions are answered through one command, so a season
+      // answer must not be painted into the draft panel.
+      if (live && progress.screen === screen) setArriving(progress.text);
     });
-  };
+    return () => {
+      live = false;
+      void pending.then((stop) => stop());
+    };
+  }, [screen]);
+  // Nothing clears this when the answer lands: it is only ever rendered while
+  // the turn is in flight, the finished turn carries the same text rendered
+  // properly, and the next question clears it before asking.
 
   const send = (text: string) => {
     const question = text.trim();
-    if (!question || sending || showKeyForm) return;
+    if (!question || sending || needsKey || missingCodex) return;
     setDraft("");
+    setArriving("");
     const startedAt = sessionStartedAt(sessions.sessions, sessions.sessionId);
     thread.send(
       question,
@@ -223,22 +228,15 @@ export function Chat({
     );
   };
 
-  // Switching route re-reads settings, which also decides whether the key
-  // form needs to show.
-  const pickProvider = (id: "api" | "claude_code") => {
-    api
-      .setChatProvider(id)
-      .then(() => setSettingsToken((n) => n + 1))
-      .catch((e: unknown) => thread.add({ kind: "error", lines: [describeError(e)] }));
-  };
-
   const startFresh = () => {
+    if (sending) return;
     thread.clear();
     sessions.startNew();
     setAskingNew(false);
   };
 
   const carryThread = () => {
+    if (sending) return;
     // A separate file from here on; the turns above it stay in both.
     sessions.startNew();
     thread.add({ kind: "divider", lines: ["New chat · carried the thread above as context"] });
@@ -246,13 +244,13 @@ export function Chat({
   };
 
   const note = settings?.notes[activeEffort];
-  const composerOff = showKeyForm || sending;
+  const composerOff = needsKey || sending || missingCodex;
 
   return (
     <aside className="chat" ref={useRevealOnMount<HTMLElement>()}>
       <div className="chat-head">
         <div className="chat-head-titles">
-          <span className="chat-title">Ask Claude</span>
+          <span className="chat-title">Ask AI</span>
           <span className="muted small ellipsis">
             {contextNote} · {model} · {effortTag(activeEffort)}
           </span>
@@ -270,7 +268,7 @@ export function Chat({
             type="button"
             className="btn-ghost btn-row"
             onClick={() => setAskingNew(true)}
-            disabled={shared || entries.length === 0}
+            disabled={shared || sending || entries.length === 0}
           >
             New
           </button>
@@ -289,7 +287,6 @@ export function Chat({
           efforts={allowedEfforts}
           effort={activeEffort}
           onEffort={setEffort}
-          onProvider={pickProvider}
         />
       )}
 
@@ -302,22 +299,30 @@ export function Chat({
           saved={sessions.saved}
           spent={spend.costUsd}
           screenSpent={screenSpend}
-          budget={budget}
-          provider={settings?.provider ?? null}
+          provider={route}
           disabled={sending}
           onOpen={sessions.open}
           onDelete={sessions.remove}
-          onBudget={pickBudget}
         />
       )}
 
       {askingNew && !shared && (
         <div className="chat-newbar">
           <span className="small">Start a new chat:</span>
-          <button type="button" className="btn-primary btn-row" onClick={startFresh}>
+          <button
+            type="button"
+            className="btn-primary btn-row"
+            disabled={sending}
+            onClick={startFresh}
+          >
             Fresh start
           </button>
-          <button type="button" className="btn-ghost btn-row" onClick={carryThread}>
+          <button
+            type="button"
+            className="btn-ghost btn-row"
+            disabled={sending}
+            onClick={carryThread}
+          >
             Carry this thread
           </button>
           <button
@@ -339,7 +344,7 @@ export function Chat({
             compact={compact}
             sending={sending}
             keyForm={
-              showKeyForm ? (
+              needsKey ? (
                 <ChatKeyForm
                   hint={settings?.key_hint ?? null}
                   store={settings?.key_store ?? null}
@@ -352,10 +357,15 @@ export function Chat({
           />
 
           <div className="chat-composer">
+            {sending && arriving !== "" && (
+              <div className="chat-arriving" aria-live="polite" aria-atomic="false">
+                {arriving}
+              </div>
+            )}
             {sending && (
               <div className="chat-thinking">
                 <span className="live-dot" />
-                {THINKING_NOTE[activeEffort] ?? "Thinking…"}
+                {arriving === "" ? (THINKING_NOTE[activeEffort] ?? "Thinking…") : "Writing…"}
                 <button
                   type="button"
                   className="link-btn chat-cancel"
@@ -367,14 +377,12 @@ export function Chat({
                 </button>
               </div>
             )}
-            {nearingCap && (
+            {missingCodex && (
               <div className="chat-stopped" role="status">
-                This screen&rsquo;s chats have spent {formatUsd(spentOnScreen)} of their{" "}
-                {formatUsd(budget)} budget, so the next question may be refused. Raise the budget
-                above.
+                Install Codex and sign in with ChatGPT on this Mac to use {model}.
               </div>
             )}
-            {!showKeyForm && entries.length === 0 && suggestions.length > 0 && (
+            {!needsKey && entries.length === 0 && suggestions.length > 0 && (
               <div className="chat-suggestions">
                 {suggestions.map((text) => (
                   <button
@@ -394,14 +402,14 @@ export function Chat({
                 className="text-input chat-input"
                 /* The form above is the one place a key is added; the composer
                points at it rather than asking a second time. */
-                placeholder={showKeyForm ? "Waiting on the key above…" : "Ask about the board…"}
+                placeholder={needsKey ? "Waiting on the key above…" : "Ask about the board…"}
                 value={draft}
                 disabled={composerOff}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") send(draft);
                 }}
-                aria-label="Ask Claude"
+                aria-label="Ask AI"
               />
               <button
                 type="button"
@@ -414,9 +422,13 @@ export function Chat({
             </div>
             <span className="muted chat-foot">
               {model} · {note?.[1] ?? activeEffort} ·{" "}
-              {settings?.provider === "claude_code" ? "via Claude Code" : "via the API"} · reads
-              your board, never writes to your league
-              {settings?.has_key === true && (
+              {route === "codex"
+                ? "via ChatGPT (Codex)"
+                : route === "claude_code"
+                  ? "via Claude Code"
+                  : "via the API"}{" "}
+              · reads your board, never writes to your league
+              {!isOpenAI && settings?.has_key === true && (
                 <>
                   {" · "}
                   <button

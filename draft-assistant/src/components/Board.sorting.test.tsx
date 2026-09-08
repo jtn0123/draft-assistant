@@ -63,11 +63,12 @@ describe("Board sorting", () => {
 
   it("orders by each column in the direction that column naturally reads", () => {
     const { names, sortBy } = board();
-    // Points is the board's opening sort, high to low.
+    // Board order — the "#" rank, low to high — is the opening sort.
     expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
 
+    // Clicking the column the board already sorts by turns it around.
     sortBy("#");
-    expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
+    expect(names()).toEqual(["Alpha", "Charlie", "Bravo"]);
     sortBy("Player");
     expect(names()).toEqual(["Alpha", "Bravo", "Charlie"]);
     sortBy("Pos");
@@ -139,7 +140,7 @@ describe("Board sorting", () => {
     expect(names()).toEqual(["Charlie", "Alpha", "Bravo"]);
   });
 
-  it("falls back to points when the column it was sorting by disappears", () => {
+  it("falls back to board order when the column it was sorting by disappears", () => {
     // The imported column exists only while a projections CSV is loaded. A
     // rebuild without one used to leave the board unsorted while the footer
     // went on claiming the imported rank had ordered it.
@@ -150,9 +151,9 @@ describe("Board sorting", () => {
     });
     const withOpinions = [
       // The two orders disagree, so which one is in force is visible.
-      player("a", "Alpha", "WR", { points: 300, second_opinion: imported(3) }),
-      player("b", "Bravo", "RB", { points: 100, second_opinion: imported(1) }),
-      player("c", "Charlie", "QB", { points: 200, second_opinion: imported(2) }),
+      player("a", "Alpha", "WR", { points: 300, overall_rank: 1, second_opinion: imported(3) }),
+      player("b", "Bravo", "RB", { points: 100, overall_rank: 3, second_opinion: imported(1) }),
+      player("c", "Charlie", "QB", { points: 200, overall_rank: 2, second_opinion: imported(2) }),
     ];
     const view = render(
       <Board
@@ -183,7 +184,7 @@ describe("Board sorting", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /^Clay, / })).toBeNull();
-    expect(screen.getByText(/Sorted by points, high to low/)).toBeInTheDocument();
+    expect(screen.getByText(/Sorted by rank, low to high/)).toBeInTheDocument();
     expect(names()).toEqual(["Alpha", "Charlie", "Bravo"]);
   });
 
@@ -212,14 +213,17 @@ describe("Board sorting after the imported column goes away", () => {
   const pool = (withOpinion: boolean) => [
     player("a", "Alpha", "WR", {
       points: 300,
+      overall_rank: 1,
       second_opinion: withOpinion ? imported(3) : null,
     }),
     player("b", "Bravo", "RB", {
       points: 100,
+      overall_rank: 3,
       second_opinion: withOpinion ? imported(1) : null,
     }),
     player("c", "Charlie", "QB", {
       points: 200,
+      overall_rank: 2,
       second_opinion: withOpinion ? imported(2) : null,
     }),
   ];
@@ -244,10 +248,10 @@ describe("Board sorting after the imported column goes away", () => {
     view.rerender(<Board {...props(false)} positions={["QB", "RB", "WR"]} />);
     expect(names()).toEqual(["Alpha", "Charlie", "Bravo"]);
 
-    // The board now says it is sorted by points, high to low, so clicking the
-    // Pts head has to turn it around.
-    fireEvent.click(screen.getByRole("button", { name: /^Pts, / }));
+    // The board now says it is sorted by rank, low to high, so clicking the
+    // "#" head has to turn it around.
+    fireEvent.click(screen.getByRole("button", { name: /^#, / }));
     expect(names()).toEqual(["Bravo", "Charlie", "Alpha"]);
-    expect(screen.getByText(/Sorted by points, low to high/)).toBeInTheDocument();
+    expect(screen.getByText(/Sorted by rank, high to low/)).toBeInTheDocument();
   });
 });

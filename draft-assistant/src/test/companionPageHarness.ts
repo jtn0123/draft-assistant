@@ -19,7 +19,21 @@ import { vi, type Mock } from "vitest";
 const asset = (file: string): string =>
   readFileSync(resolve(`src-tauri/companion-static/${file}`), "utf8");
 const page = asset("index.html");
-const scripts = ["helpers.js", "clock.js", "pwa.js", "app.js"].map(asset);
+const scripts = [
+  "helpers.js",
+  "clock.js",
+  "pwa.js",
+  "models.js",
+  "pictures.js",
+  "restore.js",
+  "roster.js",
+  "signals.js",
+  "week.js",
+  "available.js",
+  "alerts.js",
+  "compact.js",
+  "app.js",
+].map(asset);
 
 export const TOKEN_KEY = "da.companion.token";
 export const DEVICE_KEY = "da.companion.device";
@@ -77,6 +91,12 @@ export interface Booted {
   stored: (key: string) => string | null;
   /** The address the page last wrote into the bar, or null. */
   address: () => string | null;
+  /** What the page has in session storage, by key. */
+  session: (key: string) => string | null;
+  /** Every `window.scrollTo` the page asked for, as `[x, y]`. */
+  scrolledTo: Mock<(x: number, y: number) => void>;
+  /** The thumb moved: the page hears `scroll` with the window this far down. */
+  scroll: (y: number) => void;
 }
 
 /** What a phone's `navigator.wakeLock` hands back, and what it was asked. */
@@ -125,6 +145,8 @@ export interface BootOptions {
   standalone?: boolean;
   /** Whether the window has an `AbortController`, which the deadline needs. */
   abortable?: boolean;
+  /** What session storage holds when the page opens; empty by default. */
+  session?: Record<string, string>;
 }
 
 /** The real page, booted over the given fetch. */
@@ -141,6 +163,8 @@ export function boot(fetch: Fetch, options: BootOptions = {}): Booted {
   const events = new EventTarget();
   const saved = new Map<string, string>(Object.entries(options.saved ?? { [TOKEN_KEY]: "tok-1" }));
   let address: string | null = null;
+  const session = new Map<string, string>(Object.entries(options.session ?? {}));
+  const scrolledTo = vi.fn<(x: number, y: number) => void>();
   // The window the page sees: the address bar, the storage, its timers and
   // its events.
   const window = {
@@ -161,6 +185,13 @@ export function boot(fetch: Fetch, options: BootOptions = {}): Booted {
       setItem: (key: string, value: string) => void saved.set(key, value),
       removeItem: (key: string) => void saved.delete(key),
     },
+    sessionStorage: {
+      getItem: (key: string) => session.get(key) ?? null,
+      setItem: (key: string, value: string) => void session.set(key, value),
+      removeItem: (key: string) => void session.delete(key),
+    },
+    scrollY: 0,
+    scrollTo: scrolledTo,
     setTimeout: (fn: () => void) => {
       const id = nextTimer;
       nextTimer += 1;
@@ -191,6 +222,12 @@ export function boot(fetch: Fetch, options: BootOptions = {}): Booted {
   return {
     fetch: fetchSpy,
     online: () => void events.dispatchEvent(new Event("online")),
+    session: (key) => session.get(key) ?? null,
+    scrolledTo,
+    scroll: (y) => {
+      window.scrollY = y;
+      events.dispatchEvent(new Event("scroll"));
+    },
     fireTimers: () => {
       const due = [...pending.values()];
       pending.clear();

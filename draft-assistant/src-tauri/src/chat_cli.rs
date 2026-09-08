@@ -14,8 +14,14 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+
+/// Reading the CLI's `stream-json` lines: the text deltas and the result.
+#[path = "chat_cli_stream.rs"]
+mod stream;
+
+use stream::{is_result_line, text_delta};
 
 /// A subscription-backed answer can take a while at high effort; give it room.
 /// Public within the crate because the shared thread's deadline has to outwait
@@ -88,6 +94,10 @@ struct CliUsage {
     input_tokens: u32,
     #[serde(default)]
     output_tokens: u32,
+    #[serde(default)]
+    cache_creation_input_tokens: u32,
+    #[serde(default)]
+    cache_read_input_tokens: u32,
 }
 
 #[derive(Deserialize)]
@@ -139,10 +149,9 @@ fn parse_result(stdout: &str, requested: ChatModel) -> Result<ChatReply, String>
         cancelled: false,
         input_tokens: parsed.usage.input_tokens,
         output_tokens: parsed.usage.output_tokens,
-        // The CLI route reports no cache tiers, and is not billed by the
-        // token anyway.
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
+        // API-equivalent estimates also include subscription cache usage.
+        cache_creation_input_tokens: parsed.usage.cache_creation_input_tokens,
+        cache_read_input_tokens: parsed.usage.cache_read_input_tokens,
         // Filled in by `commands_chat`, which is the layer that knows which
         // route ran and what it is allowed to cost.
         provider: String::new(),
@@ -210,12 +219,17 @@ pub async fn ask(
     context: &str,
     messages: &[ChatMessage],
     cancel: Arc<CancelSignal>,
+    progress: Option<crate::chat::OnProgress>,
 ) -> Result<ChatReply, String> {
-    ask_within(cli, model, effort, context, messages, cancel, TIMEOUT).await
+    ask_within(
+        cli, model, effort, context, messages, cancel, TIMEOUT, progress,
+    )
+    .await
 }
 
 /// The same, with the deadline passed in. Only [`ask`] and the process tests,
 /// which cannot wait four minutes to watch one time out, call this.
+#[allow(clippy::too_many_arguments)]
 async fn ask_within(
     cli: &Path,
     model: ChatModel,
@@ -224,6 +238,7 @@ async fn ask_within(
     messages: &[ChatMessage],
     cancel: Arc<CancelSignal>,
     timeout: Duration,
+    progress: Option<crate::chat::OnProgress>,
 ) -> Result<ChatReply, String> {
     if messages.is_empty() {
         return Err("nothing to ask".into());
@@ -234,8 +249,20 @@ async fn ask_within(
     let system = format!("{GUIDANCE}\n\n{context}");
     let mut child = Command::new(cli)
         .arg("-p")
+        // `stream-json` (which needs `--verbose`) is what lets the panel show
+        // the answer as it is written rather than in one lump at the end;
+        // `--include-partial-messages` is what puts the text deltas on it.
+        .arg("--verbose")
         .arg("--output-format")
-        .arg("json")
+        .arg("stream-json")
+        .arg("--include-partial-messages")
+        // The user's own MCP servers have no business in a question about a
+        // draft board, and they are not free: on this machine they put ~58k
+        // tokens of tool schemas in front of every question, so most of what
+        // the model read was tool documentation rather than the board.
+        .arg("--strict-mcp-config")
+        .arg("--mcp-config")
+        .arg(r#"{"mcpServers":{}}"#)
         .arg("--model")
         .arg(model.id())
         .arg("--effort")
@@ -256,7 +283,15 @@ async fn ask_within(
         .map_err(|e| format!("could not start Claude Code at {}: {e}", cli.display()))?;
 
     let prompt = render_prompt(messages);
-    // Writing and waiting share one deadline. A CLI that never reads its
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Claude Code gave the app no output to read".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Claude Code gave the app no diagnostics pipe".to_string())?;
+    // Writing and reading share one deadline. A CLI that never reads its
     // stdin blocks the write forever once the pipe buffer is full, and that
     // write used to sit outside the timeout entirely.
     let run = async move {
@@ -267,12 +302,65 @@ async fn ask_within(
                 .await
                 .map_err(|e| format!("could not send the prompt to Claude Code: {e}"))?;
         }
-        child
+        // One JSON object per line: text deltas while the model writes, then
+        // the `result` line the parser below reads. Handing the text over as
+        // it lands is the whole point of `stream-json` — the panel showed a
+        // finished wall of text before this.
+        let mut lines = BufReader::new(stdout).lines();
+        let mut written = String::new();
+        let mut told_at: Option<std::time::Instant> = None;
+        let mut result = String::new();
+        // What the CLI printed before it printed anything that parses, so a
+        // binary that is not the CLI at all can be quoted back rather than
+        // reported as an answer that stopped early.
+        let mut head = String::new();
+        let mut saw_json = false;
+        while let Some(line) = lines
+            .next_line()
+            .await
+            .map_err(|e| format!("could not read Claude Code's answer: {e}"))?
+        {
+            if !saw_json {
+                saw_json = line.trim_start().starts_with('{');
+                if !saw_json && head.chars().count() < 160 {
+                    head.push_str(line.trim());
+                }
+            }
+            if let Some(piece) = text_delta(&line) {
+                written.push_str(&piece);
+                // Throttled the way the API route's is: the deltas are a few
+                // characters each, and the panel re-renders on every one.
+                if let Some(watcher) = &progress {
+                    if told_at.is_none_or(|at| at.elapsed() >= crate::chat::PROGRESS_EVERY) {
+                        told_at = Some(std::time::Instant::now());
+                        watcher(&written);
+                    }
+                }
+            } else if is_result_line(&line) {
+                result = line;
+            }
+        }
+        // The last words land in the same breath as the end of the answer and
+        // the throttle above swallows them; the finished reply carries them,
+        // but this is what the panel shows until it lands.
+        if let Some(watcher) = &progress {
+            if !written.is_empty() {
+                watcher(&written);
+            }
+        }
+        let rest = child
             .wait_with_output()
             .await
-            .map_err(|e| format!("Claude Code failed: {e}"))
+            .map_err(|e| format!("Claude Code failed: {e}"))?;
+        Ok::<_, String>((result, head, saw_json, rest))
     };
-    let output = tokio::select! {
+    let run = async {
+        let ((result, head, saw_json, mut output), stderr) =
+            tokio::try_join!(run, stream::drain_stderr(stderr))?;
+        output.stderr = stderr;
+        Ok::<_, String>((result, head, saw_json, output))
+    };
+    let (result, head, saw_json, output) = tokio::select! {
         // Dropping the run drops the child, and `kill_on_drop` above turns
         // that into a kill: a stopped question does not leave the CLI
         // answering it for another four minutes with the app's privileges.
@@ -281,19 +369,26 @@ async fn ask_within(
     }
     .map_err(|_| "Claude Code took too long to answer, try a lower effort".to_string())??;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         // The CLI sometimes reports an error as JSON on stdout with a non-zero
         // exit; prefer that message when it parses.
-        if let Err(message) = parse_result(&stdout, model) {
+        if let Err(message) = parse_result(&result, model) {
             if message.starts_with("Claude Code:") {
                 return Err(message);
             }
         }
         return Err(friendly_failure(&stderr, output.status.code()));
     }
-    parse_result(&stdout, model)
+    if result.is_empty() {
+        return Err(if !saw_json && !head.is_empty() {
+            let head: String = head.chars().take(160).collect();
+            format!("unexpected Claude Code output: {head}")
+        } else {
+            "Claude Code stopped before finishing, try again".to_string()
+        });
+    }
+    parse_result(&result, model)
 }
 
 #[cfg(test)]

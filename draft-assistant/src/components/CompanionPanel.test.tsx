@@ -42,9 +42,7 @@ describe("turning it on", () => {
     open();
     expect(await screen.findByRole("button", { name: "Turn on" })).toBeInTheDocument();
     expect(
-      screen.getByText(
-        /Same Wi-Fi only\. Anyone with the code can read this league and ask questions on your budget\./,
-      ),
+      screen.getByText(/Use the same Wi-Fi or your private Tailscale network\./),
     ).toBeInTheDocument();
     expect(screen.getByText("Off, nothing is being served")).toBeInTheDocument();
   });
@@ -75,6 +73,7 @@ describe("turning it on", () => {
 
     expect(await screen.findByText("http://100.101.102.103:7878/")).toBeInTheDocument();
     expect(screen.getByText(/over Tailscale/)).toBeInTheDocument();
+    expect(screen.queryByText(/No Tailscale address detected/)).not.toBeInTheDocument();
     // Both codes are on screen: the Wi-Fi one and the tailnet one.
     await screen.findByRole("img", { name: /QR code for http:\/\/100\.101\.102\.103/ });
     expect(screen.getAllByRole("img", { name: /QR code for/ })).toHaveLength(2);
@@ -104,6 +103,10 @@ describe("turning it on", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Turn on" }));
     await screen.findByText("http://192.168.1.24:7878/");
     expect(screen.queryByText(/over Tailscale/)).not.toBeInTheDocument();
+    expect(screen.getByText(/No Tailscale address detected/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/connect Tailscale on this Mac and on the phone or second computer/),
+    ).toBeInTheDocument();
     expect(screen.getAllByRole("img", { name: /QR code for/ })).toHaveLength(1);
   });
 });

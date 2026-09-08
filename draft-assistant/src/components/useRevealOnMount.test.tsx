@@ -20,7 +20,7 @@ function widthIs(stacked: boolean) {
 
 function Panel() {
   const ref = useRevealOnMount<HTMLDivElement>();
-  return <div ref={ref}>Ask Claude</div>;
+  return <div ref={ref}>Ask AI</div>;
 }
 
 afterEach(() => {
@@ -47,7 +47,7 @@ describe("revealing a panel that opened off screen", () => {
     vi.stubGlobal("matchMedia", undefined);
     Element.prototype.scrollIntoView = scrollIntoView;
     const { getByText } = render(<Panel />);
-    expect(getByText("Ask Claude")).toBeInTheDocument();
+    expect(getByText("Ask AI")).toBeInTheDocument();
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
@@ -56,6 +56,6 @@ describe("revealing a panel that opened off screen", () => {
     // jsdom leaves this undefined; the hook must not be the thing that throws.
     Reflect.deleteProperty(Element.prototype, "scrollIntoView");
     const { getByText } = render(<Panel />);
-    expect(getByText("Ask Claude")).toBeInTheDocument();
+    expect(getByText("Ask AI")).toBeInTheDocument();
   });
 });

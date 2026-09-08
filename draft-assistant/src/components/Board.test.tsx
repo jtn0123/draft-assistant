@@ -218,15 +218,16 @@ describe("Board across repeated updates", () => {
   it("shows the new projections when a rebuilt board keeps the same players", () => {
     const before = pool();
     const { container, rerender } = render(board(before));
-    // The board opens sorted by points, so new projections have to re-order it.
+    // The board opens in board order, so a re-ranked pool has to re-order it.
     expect(names(container)).toEqual(["Alpha", "Bravo", "Charlie"]);
     expect(points(container)).toEqual(["210", "190", "175"]);
 
-    // "Refresh data": same players, same ids, same order in — new numbers.
+    // "Refresh data": same players, same ids, same order in — new numbers,
+    // and new ranks off the back of them.
     const after = deliver(before, [
-      { ...before[0], points: 150, vorp: 12 },
-      { ...before[1], points: 240, vorp: 55 },
-      { ...before[2], points: 175, vorp: 22 },
+      { ...before[0], points: 150, vorp: 12, overall_rank: 3 },
+      { ...before[1], points: 240, vorp: 55, overall_rank: 1 },
+      { ...before[2], points: 175, vorp: 22, overall_rank: 2 },
     ]);
     expect(after).not.toBe(before);
     rerender(board(after));

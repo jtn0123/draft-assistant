@@ -119,6 +119,8 @@ fn machine_secret_store() -> Option<Arc<dyn SecretStore>> {
 }
 
 pub struct Engine {
+    /// CLI discovery is an instance capability; isolated fixtures opt out.
+    discover_chat_clis: bool,
     pub client: SleeperClient,
     pub data_dir: PathBuf,
     /// Cache writes that failed, waiting to be shown to the user.
@@ -206,11 +208,30 @@ impl Engine {
         // the data directory for the life of the install.
         crate::cache::sweep_stale_temp_files(&data_dir);
         Self {
+            discover_chat_clis: true,
             client,
             data_dir,
             cache_warnings: std::sync::Mutex::new(CacheFailures::default()),
             secrets,
             key_cache: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    /// Keep this engine from discovering or running machine-authenticated CLIs.
+    /// Test fixtures use this instead of changing process-wide PATH or HOME.
+    pub fn without_chat_clis(mut self) -> Self {
+        self.discover_chat_clis = false;
+        self
+    }
+
+    pub(crate) fn chat_cli(&self, model: crate::chat::ChatModel) -> Option<PathBuf> {
+        if !self.discover_chat_clis {
+            return None;
+        }
+        if model.is_openai() {
+            crate::chat_codex::find_cli()
+        } else {
+            crate::chat_cli::find_cli()
         }
     }
 

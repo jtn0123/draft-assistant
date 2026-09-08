@@ -6,7 +6,7 @@
 #  1. It needs a Tauri binary built by `tauri build --features wdio`. That
 #     is a different cargo feature set from everything `verify` builds, so it
 #     shares no artifacts with it -- a second full compile of tauri, wry and
-#     reqwest, plus axum and the two WDIO plugins. Measured locally: ~1
+#     reqwest, plus the two WDIO plugins. Measured locally: ~1
 #     minute warm, several minutes cold, on a runner billed at ten times the
 #     Linux rate.
 #  2. It needs a real window and a real WKWebView, and it talks to the live

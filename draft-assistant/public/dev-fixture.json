@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.5",
+  "schema_version": "1.7",
   "generated_at": 1787882005,
   "league": {
     "league_id": "1389710366300200960",
@@ -8086,5 +8086,287 @@
     "poll_consecutive_failures": 0,
     "poll_last_error": null,
     "second_opinion_loaded_at": 1787860000
-  }
+  },
+  "draft_projections": [
+    {
+      "slot": 1,
+      "name": "197lbsleanmeandadbod",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 1,
+      "title_odds": 1.0,
+      "is_mine": false
+    },
+    {
+      "slot": 2,
+      "name": "McSleeper26",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 2,
+      "title_odds": 0.0,
+      "is_mine": true
+    },
+    {
+      "slot": 3,
+      "name": "adaigle",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 3,
+      "title_odds": 0.0,
+      "is_mine": false
+    },
+    {
+      "slot": 4,
+      "name": "djenks225",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 4,
+      "title_odds": 0.0,
+      "is_mine": false
+    },
+    {
+      "slot": 5,
+      "name": "ChrisWitz",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 5,
+      "title_odds": 0.0,
+      "is_mine": false
+    },
+    {
+      "slot": 6,
+      "name": "MeatballMike09",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 6,
+      "title_odds": 0.0,
+      "is_mine": false
+    },
+    {
+      "slot": 7,
+      "name": "ocrevo",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 7,
+      "title_odds": 0.0,
+      "is_mine": false
+    },
+    {
+      "slot": 8,
+      "name": "fisher23",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 8,
+      "title_odds": 0.0,
+      "is_mine": false
+    },
+    {
+      "slot": 9,
+      "name": "Clemmy20",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 9,
+      "title_odds": 0.0,
+      "is_mine": false
+    },
+    {
+      "slot": 10,
+      "name": "tbonsey",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 10,
+      "title_odds": 0.0,
+      "is_mine": false
+    },
+    {
+      "slot": 11,
+      "name": "skoLinNH",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 11,
+      "title_odds": 0.0,
+      "is_mine": false
+    },
+    {
+      "slot": 12,
+      "name": "AllDay21",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 12,
+      "title_odds": 0.0,
+      "is_mine": false
+    },
+    {
+      "slot": 13,
+      "name": "stompthatass",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 13,
+      "title_odds": 0.0,
+      "is_mine": false
+    },
+    {
+      "slot": 14,
+      "name": "mbarish",
+      "starters": 0.0,
+      "bench": 0.0,
+      "holes": [
+        "QB",
+        "RB",
+        "WR",
+        "TE",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "FLEX",
+        "DEF"
+      ],
+      "rank": 14,
+      "title_odds": 0.0,
+      "is_mine": false
+    }
+  ]
 }

@@ -286,3 +286,58 @@ fn the_system_prompt_is_cached_and_the_board_follows_the_conversation() {
     assert_eq!(messages[1]["role"], "system");
     assert_eq!(messages[1]["content"], "the board\n");
 }
+
+// ---------- an answer while it is still arriving ----------
+
+/// One answer's events, as separate pieces of body, so the stub can dribble
+/// them out the way the API does.
+fn arriving(pieces: &[&str]) -> Vec<String> {
+    let mut parts = vec![
+        message_start("claude-opus-5", r#"{"input_tokens":1}"#),
+        event(
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+        ),
+    ];
+    for piece in pieces {
+        let text = serde_json::to_string(piece).expect("a JSON string");
+        parts.push(event(&format!(
+            r#"{{"type":"content_block_delta","index":0,"delta":{{"type":"text_delta","text":{text}}}}}"#
+        )));
+    }
+    parts.push(event(r#"{"type":"content_block_stop","index":0}"#));
+    parts.push(message_delta("end_turn", r#"{"output_tokens":4}"#));
+    parts
+}
+
+/// The API sends an answer a few words at a time, and this file reassembled it
+/// in silence: the panel sat on "Thinking it through…" for the length of the
+/// call and then painted the whole thing at once. A watcher is now told the
+/// text so far as it lands, which is what the panel shows.
+#[test]
+fn a_watcher_is_told_the_answer_while_it_is_still_arriving() {
+    let url = stub_dribbled(
+        arriving(&["Take ", "Bowers", " at 25."]),
+        // Longer than the hand-over throttle, so each delta is its own telling.
+        PROGRESS_EVERY * 2,
+    );
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let watcher: OnProgress = {
+        let seen = Arc::clone(&seen);
+        Arc::new(move |text: &str| seen.lock().expect("the log").push(text.to_string()))
+    };
+
+    let reply = ask_url_watched(&url, &client(), watcher).expect("a 200 is a reply");
+
+    let seen = seen.lock().expect("the log").clone();
+    assert_eq!(reply.text, "Take Bowers at 25.");
+    assert!(seen.len() > 1, "told more than once: {seen:?}");
+    assert!(
+        seen.windows(2).all(|pair| pair[1].starts_with(&pair[0])),
+        "each telling extends the last: {seen:?}",
+    );
+    assert_eq!(
+        seen.last().map(String::as_str),
+        Some(reply.text.as_str()),
+        "the last telling is the whole answer: {seen:?}",
+    );
+}

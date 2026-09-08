@@ -16,9 +16,12 @@ export function DraftScreen({
   view,
   busy,
   onDraft,
+  readOnly = false,
 }: {
   view: DraftView;
   busy: boolean;
+  /** A follower can inspect picks but only the host records corrections. */
+  readOnly?: boolean;
   onDraft: (id: string, name: string) => void;
 }) {
   // The engine can surface the same player under two modes; showing one card
@@ -45,6 +48,11 @@ export function DraftScreen({
     <div className="draft-screen">
       <ClockBanner view={view} />
       <SnakeStrip view={view} />
+      {readOnly && (
+        <div className="warnings" role="status">
+          Controlled by host. Record manual picks on the host Draft Assistant.
+        </div>
+      )}
 
       {/* An auction is not a draft this app can read. Everything below is
           built on snake pick numbers: who is on the clock, how many picks
@@ -73,6 +81,7 @@ export function DraftScreen({
               featured={rec.mode === FEATURED_MODE}
               positionRank={rankOf(rec.player_id)}
               onDraft={onDraft}
+              readOnly={readOnly}
             />
           ))}
         </div>
@@ -94,6 +103,7 @@ export function DraftScreen({
           // Complete, and the row buttons are off: a pick recorded after the
           // last one is a manual pick into a board nobody is drafting from.
           draftOver={view.draft.status === "complete"}
+          readOnly={readOnly}
           onDraft={onDraft}
         />
       </div>

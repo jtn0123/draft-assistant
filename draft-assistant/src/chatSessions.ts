@@ -1,4 +1,4 @@
-// Saved conversations for the Ask Claude panel.
+// Saved conversations for the Ask AI panel.
 //
 // One storage key per screen and league holds every chat filed under it, so
 // the draft's conversations and the season's never mix — and neither do two

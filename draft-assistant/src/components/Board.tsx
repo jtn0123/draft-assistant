@@ -17,9 +17,16 @@ import {
 const PAGE = 200;
 
 /** Where the sort lands when nothing else has been chosen, and where it is put
- *  back when the column it was on stops existing. */
-const FALLBACK_KEY = "pts" as const;
-const FALLBACK_DIRECTION = "desc" as const;
+ *  back when the column it was on stops existing.
+ *
+ *  Board order, not points. Sorted by points, ALL opened on a wall of
+ *  quarterbacks — a starting QB outscores a starting running back by a
+ *  hundred points a season, which says nothing about who to draft. The "#"
+ *  column is the value-over-replacement rank the whole app already ranks by,
+ *  so the board now opens in the same order the recommendations and the
+ *  phone's best-available list are in. */
+const FALLBACK_KEY = "rank" as const;
+const FALLBACK_DIRECTION = "asc" as const;
 
 const SKELETON_WIDTHS = ["72%", "88%", "64%", "80%", "70%", "84%"];
 
@@ -42,6 +49,7 @@ export function Board({
   replacementDemand,
   secondOpinionLoadedAt = null,
   draftOver = false,
+  readOnly = false,
   onDraft,
 }: {
   players: AvailablePlayer[];
@@ -62,6 +70,8 @@ export function Board({
    *  drafting from, and it used to be one click away for the rest of the
    *  night. Omitted where the caller does not know; the buttons stay live. */
   draftOver?: boolean;
+  /** Host-owned board: filtering is allowed, recording picks is not. */
+  readOnly?: boolean;
   onDraft: (id: string, name: string) => void;
 }) {
   const [pos, setPos] = useState<Position>("ALL");
@@ -70,6 +80,7 @@ export function Board({
   const [direction, setDirection] = useState<Direction>(FALLBACK_DIRECTION);
   const [limit, setLimit] = useState(PAGE);
   const searchRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // "/" jumps to search from anywhere on the screen, unless already typing.
   useEffect(() => {
@@ -152,6 +163,7 @@ export function Board({
   const hasFilters = pos !== "ALL" || query.trim() !== "";
 
   const sortBy = (key: SortKey) => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
     if (key === activeKey) {
       setDirection((d) => (d === "asc" ? "desc" : "asc"));
       return;
@@ -167,11 +179,13 @@ export function Board({
   // button that would have undone it was gone, because there was no longer
   // anything past the first page to hide.
   const choosePos = (next: Position) => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
     setPos(next);
     setLimit(PAGE);
   };
 
   const changeQuery = (next: string) => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
     setQuery(next);
     setLimit(PAGE);
   };
@@ -212,96 +226,106 @@ export function Board({
         </span>
       </div>
 
-      <div className={`board-row board-head${showSecondOpinion ? " has-second" : ""}`}>
-        {columns.map((column) => (
-          <SortHead
-            key={column.key}
-            label={column.label}
-            title={column.title}
-            active={activeKey === column.key}
-            direction={activeDirection}
-            align={column.right ? "right" : undefined}
-            onClick={() => sortBy(column.key)}
-          />
-        ))}
-        <span />
-      </div>
-
-      {loading ? (
-        // Announced, because a silent skeleton is indistinguishable from a
-        // screen that has finished loading with nothing on it.
-        <div className="board-loading" role="status">
-          {SKELETON_WIDTHS.map((width, i) => (
-            <div className="board-row board-skeleton" key={i}>
-              <span className="skel" />
-              <span className="skel" style={{ width }} />
-              <span className="skel is-faint" />
-              <span className="skel is-faint" />
-              <span className="skel is-faint" />
-              <span className="skel" />
-              <span className="skel is-faint" />
-              <span className="skel is-faint" />
-              <span className="skel is-faint" />
-              <span className="skel is-faint" />
-              <span className="skel is-faint" />
-            </div>
+      <div
+        className="board-scroll"
+        ref={scrollRef}
+        role="region"
+        aria-label="Available players"
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The scroll region needs keyboard focus for arrow and Page Down scrolling.
+        tabIndex={0}
+      >
+        <div className={`board-row board-head${showSecondOpinion ? " has-second" : ""}`}>
+          {columns.map((column) => (
+            <SortHead
+              key={column.key}
+              label={column.label}
+              title={column.title}
+              active={activeKey === column.key}
+              direction={activeDirection}
+              align={column.right ? "right" : undefined}
+              onClick={() => sortBy(column.key)}
+            />
           ))}
-          <div className="muted board-loading-note">
-            {boardSize > 0
-              ? `Pulling projections for ${boardSize} players…`
-              : "Pulling projections…"}
-          </div>
+          <span />
         </div>
-      ) : matching.length === 0 ? (
-        <div className="board-empty">
-          <span className="board-empty-title">No players match</span>
-          <span className="mid board-empty-note">
-            {hasFilters
-              ? "Nothing left at this position with the current filter. Clear it to see the full board."
-              : "Every player on the board has been drafted."}
+
+        {loading ? (
+          // Announced, because a silent skeleton is indistinguishable from a
+          // screen that has finished loading with nothing on it.
+          <div className="board-loading" role="status">
+            {SKELETON_WIDTHS.map((width, i) => (
+              <div className="board-row board-skeleton" key={i}>
+                <span className="skel" />
+                <span className="skel" style={{ width }} />
+                <span className="skel is-faint" />
+                <span className="skel is-faint" />
+                <span className="skel is-faint" />
+                <span className="skel" />
+                <span className="skel is-faint" />
+                <span className="skel is-faint" />
+                <span className="skel is-faint" />
+                <span className="skel is-faint" />
+                <span className="skel is-faint" />
+              </div>
+            ))}
+            <div className="muted board-loading-note">
+              {boardSize > 0
+                ? `Pulling projections for ${boardSize} players…`
+                : "Pulling projections…"}
+            </div>
+          </div>
+        ) : matching.length === 0 ? (
+          <div className="board-empty">
+            <span className="board-empty-title">No players match</span>
+            <span className="mid board-empty-note">
+              {hasFilters
+                ? "Nothing left at this position with the current filter. Clear it to see the full board."
+                : "Every player on the board has been drafted."}
+            </span>
+            {hasFilters && (
+              <button type="button" className="btn-ghost" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
+        ) : (
+          visible.map((p) => (
+            <BoardRow
+              key={p.player_id}
+              player={p}
+              showSecondOpinion={showSecondOpinion}
+              disabled={draftOver}
+              readOnly={readOnly}
+              onDraft={onDraft}
+            />
+          ))
+        )}
+
+        <div className="board-foot">
+          <span className="muted">
+            Sorted by {SORT_LABEL[activeKey]},{" "}
+            {activeDirection === "asc" ? "low to high" : "high to low"} · click any column
           </span>
-          {hasFilters && (
-            <button type="button" className="btn-ghost" onClick={clearFilters}>
-              Clear filters
+          {replacementLine && (
+            <span className="muted board-foot-replacement" title={REPLACEMENT_TITLE}>
+              Replacement level: {replacementLine}
+            </span>
+          )}
+          {matching.length > limit && (
+            <button
+              type="button"
+              className="btn-ghost btn-row"
+              onClick={() => setLimit((l) => l + PAGE)}
+            >
+              Show {Math.min(PAGE, matching.length - limit)} more
+            </button>
+          )}
+          {limit > PAGE && (
+            <button type="button" className="btn-ghost btn-row" onClick={() => setLimit(PAGE)}>
+              Show first {PAGE}
             </button>
           )}
         </div>
-      ) : (
-        visible.map((p) => (
-          <BoardRow
-            key={p.player_id}
-            player={p}
-            showSecondOpinion={showSecondOpinion}
-            disabled={draftOver}
-            onDraft={onDraft}
-          />
-        ))
-      )}
-
-      <div className="board-foot">
-        <span className="muted">
-          Sorted by {SORT_LABEL[activeKey]},{" "}
-          {activeDirection === "asc" ? "low to high" : "high to low"} · click any column
-        </span>
-        {replacementLine && (
-          <span className="muted board-foot-replacement" title={REPLACEMENT_TITLE}>
-            Replacement level: {replacementLine}
-          </span>
-        )}
-        {matching.length > limit && (
-          <button
-            type="button"
-            className="btn-ghost btn-row"
-            onClick={() => setLimit((l) => l + PAGE)}
-          >
-            Show {Math.min(PAGE, matching.length - limit)} more
-          </button>
-        )}
-        {limit > PAGE && (
-          <button type="button" className="btn-ghost btn-row" onClick={() => setLimit(PAGE)}>
-            Show first {PAGE}
-          </button>
-        )}
       </div>
     </div>
   );

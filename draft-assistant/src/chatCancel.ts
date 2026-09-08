@@ -2,7 +2,7 @@
 //
 // Deliberately not on `api`: that surface is mirrored by the follower's
 // remote backend and the browser preview, and neither has an answer in
-// flight to stop. Ask Claude only ever runs against the desktop backend, so
+// flight to stop. Ask AI only ever runs against the desktop backend, so
 // this goes straight to it, and does nothing at all anywhere else.
 
 import { invoke } from "@tauri-apps/api/core";

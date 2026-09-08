@@ -16,7 +16,7 @@ use std::collections::HashMap;
 /// The frontend gate in `src/api.ts` refuses any other version outright, and
 /// `tests/fixture_shape.rs` refuses to let it move without the checked-in
 /// `public/dev-fixture.json` moving with it.
-pub const DRAFT_SCHEMA_VERSION: &str = "1.5";
+pub const DRAFT_SCHEMA_VERSION: &str = "1.7";
 
 /// The two platforms a league can come from, as they are spelled on the wire.
 pub const SLEEPER: &str = "sleeper";
@@ -124,6 +124,9 @@ pub struct DraftView {
     pub draft: DraftStatus,
     pub my_roster: Option<TeamRoster>,
     pub rosters: Vec<TeamRoster>,
+    /// What each roster projects for the season from the players drafted so
+    /// far, best first. Empty only before a draft order exists.
+    pub draft_projections: Vec<crate::draft_projection::TeamProjection>,
     pub available: Vec<AvailablePlayer>,
     pub tier_alerts: Vec<TierAlert>,
     pub position_run: Option<PositionRun>,

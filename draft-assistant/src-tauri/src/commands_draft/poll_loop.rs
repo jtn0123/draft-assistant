@@ -156,7 +156,7 @@ pub async fn start_polling<R: tauri::Runtime>(
                         // stretch the poll to 24 seconds.
                         match draft_update(draft) {
                             DraftUpdate::Adopt(draft) => {
-                                changed |= memory.status_changed(&draft.status);
+                                changed |= memory.draft_changed(&draft);
                                 loaded.draft = *draft;
                             }
                             DraftUpdate::Logged(note) => notes.push(note),

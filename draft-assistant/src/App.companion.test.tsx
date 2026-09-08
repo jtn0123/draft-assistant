@@ -13,7 +13,7 @@ import { resetFollowStatus, setFollowStatus } from "./followStatus";
 import { resetHostSync, setHostSync } from "./hostSync";
 import { resetThemePreference } from "./theme";
 import { settle } from "./test/settle";
-import { querySettingsRow } from "./test/settingsRow";
+import { querySettingsRow, openSettingsPage } from "./test/settingsRow";
 import {
   companionStatus,
   draftFixture,
@@ -40,10 +40,7 @@ async function loaded() {
 }
 
 async function openSettings() {
-  await settle(() => {
-    const gear = screen.queryByRole("button", { name: "Settings" });
-    if (gear !== null && screen.queryByRole("menu") === null) gear.click();
-  });
+  await openSettingsPage();
 }
 
 const row = querySettingsRow;
@@ -100,6 +97,22 @@ describe("following a host", () => {
   it("wears the host's name in the header", async () => {
     await loaded();
     expect(screen.getByText("Hosted by Justin's Mac")).toBeInTheDocument();
+  });
+
+  it("prevents follower pick actions before a host-only command can be sent", async () => {
+    await loaded();
+    expect(screen.getByText(/Controlled by host. Record manual picks/)).toBeInTheDocument();
+    const actions = screen.getAllByRole("button", { name: /^(Mark drafted|Draft)$/ });
+    // The top-level Draft screen toggle stays usable; only actual pick actions are restricted.
+    const pickActions = actions.filter((action) => action.closest(".rec, .board-body"));
+    expect(pickActions.length).toBeGreaterThan(0);
+    for (const action of pickActions) {
+      expect(action).toBeDisabled();
+      expect(action).toHaveAttribute("title", "Controlled by host");
+      await settle(() => action.click());
+    }
+    expect(h.api.recordManualPick).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("hides everything the host owns and offers a way out", async () => {
@@ -276,7 +289,7 @@ describe("messages that skipped the timer", () => {
     expect(screen.queryByText("The host revoked this device")).toBeNull();
   });
 
-  it("puts 'the host records the picks' away too", async () => {
+  it("keeps the host-control explanation visible without a refusal toast", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fakeStorage({ "da.screen": "draft", "da.companion.follow": FOLLOW });
     await loaded();
@@ -286,12 +299,15 @@ describe("messages that skipped the timer", () => {
       expect(buttons.length).toBeGreaterThan(1);
       return buttons;
     });
+    expect(rows[rows.length - 1]).toBeDisabled();
     await settle(() => rows[rows.length - 1]?.click());
-    expect(screen.getByText("Justin's Mac records the picks")).toBeInTheDocument();
+    expect(h.api.recordManualPick).not.toHaveBeenCalled();
+    expect(screen.getByText(/Controlled by host. Record manual picks/)).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
+    expect(screen.getByText(/Controlled by host. Record manual picks/)).toBeInTheDocument();
     expect(screen.queryByText("Justin's Mac records the picks")).toBeNull();
   });
 });

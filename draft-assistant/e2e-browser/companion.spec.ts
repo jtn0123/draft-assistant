@@ -30,7 +30,9 @@ test("refuses the wrong code and opens the draft on the right one", async ({ pag
   const host = backend();
   await serve(page, host);
   await pair(page, "000000");
-  await expect(page.getByRole("alert")).toHaveText("That code did not work.");
+  await expect(page.getByRole("alert")).toHaveText(
+    "That code did not work. Check the host’s current six-digit code and try again.",
+  );
   await expect(page.getByRole("button", { name: "Now" })).toBeHidden();
 
   await page.getByLabel("Pairing code").fill(host.code);

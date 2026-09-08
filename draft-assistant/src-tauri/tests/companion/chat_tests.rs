@@ -3,12 +3,13 @@
 use crate::harness::{host, host_over, Host, DEADLINE};
 use draft_assistant_lib::shared_chat::EntryDevice;
 
-/// Put the fixture over its budget, so a question that reaches the model layer
-/// comes back as an error entry without a key, a CLI, or a socket to Anthropic
-/// being involved. Deterministic on any machine, including one with a real key
-/// in its Keychain.
+/// The fixture disables CLI discovery and has no API key, so answers fail locally. Keep an
+/// exhausted legacy cap to prove it no longer blocks provider resolution.
+/// The fixture engine uses an isolated file store, never the real Keychain.
 pub async fn make_answers_fail(host: &Host) {
     let mut config = host.state.config.lock().await;
+    config.chat_provider = Some("api".into());
+    config.anthropic_api_key = None;
     config.chat_budget_usd = Some(1.0);
     config
         .chat_spend_usd
@@ -48,7 +49,10 @@ async fn a_posted_question_is_accepted_at_once_and_answered_later() {
     let answer = &thread["entries"][1];
     assert_eq!(answer["role"], "assistant");
     assert!(
-        answer["error"].as_str().expect("an error").contains("cap"),
+        answer["error"]
+            .as_str()
+            .expect("an error")
+            .contains("no Anthropic API key"),
         "{answer}"
     );
     assert_eq!(answer["device"]["name"], "Rob's iPhone");
@@ -156,17 +160,10 @@ async fn a_phone_question_is_refused_up_front_while_the_desktop_panel_is_mid_ans
     );
     assert_eq!(thread["busy"], false);
 
-    // The desktop's answer lands and the claim goes with it; the phone is
-    // taken next time. Over budget under this league's own key, so the answer
-    // fails without a key, a CLI or a socket being involved.
+    // Releasing the desktop claim lets the phone submit its next question.
+    // Missing API credentials fail the answer locally, without a real CLI.
     drop(desktop_turn);
-    {
-        let mut config = host.state.config.lock().await;
-        config.chat_budget_usd = Some(1.0);
-        config
-            .chat_spend_usd
-            .insert("draft.league-desktop-claim".to_string(), 99.0);
-    }
+    make_answers_fail(&host).await;
     let (status, _) = host
         .post(
             "/api/chat",

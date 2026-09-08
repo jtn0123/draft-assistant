@@ -24,6 +24,44 @@ pub use crate::view_types::{
     DRAFT_SCHEMA_VERSION,
 };
 
+/// Every roster's season, as the draft has bought it so far.
+///
+/// The join is the board: a drafted player is off the available list but is
+/// still on it, with the season points this league's scoring gives him. A
+/// player the board has never heard of has no points, and starts nowhere —
+/// see `draft_projection.rs` for why that is not a zero.
+fn project_rosters(
+    loaded: &LoadedLeague,
+    rosters: &[crate::draft::TeamRoster],
+    my_slot: Option<u32>,
+) -> Vec<crate::draft_projection::TeamProjection> {
+    let scored = |player_id: &str| {
+        loaded
+            .board_index
+            .get(player_id)
+            .and_then(|at| loaded.board.get(*at))
+    };
+    let teams: Vec<crate::draft_projection::Team<'_>> = rosters
+        .iter()
+        .map(|roster| crate::draft_projection::Team {
+            slot: roster.slot,
+            name: roster.display_name.clone(),
+            is_mine: my_slot == Some(roster.slot),
+            players: roster
+                .players
+                .iter()
+                .map(|player| crate::draft_projection::Drafted {
+                    player_id: &player.player_id,
+                    position: &player.position,
+                    team: player.team.as_deref(),
+                    points: scored(&player.player_id).map(|found| found.points),
+                })
+                .collect(),
+        })
+        .collect();
+    crate::draft_projection::project(&loaded.roster_rules, &teams)
+}
+
 pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     let league = &loaded.league;
     let draft = &loaded.draft;
@@ -192,6 +230,9 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         name_of,
     );
     let my_roster = my_slot.and_then(|slot| rosters.get((slot - 1) as usize).cloned());
+    // What the picks are adding up to: every roster's best lineup, scored on
+    // this league's own rules, and how often it wins the season on points.
+    let projections = project_rosters(loaded, &rosters, my_slot);
 
     // Available players with survival probabilities.
     //
@@ -307,6 +348,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
 
     DraftView {
         schema_version: DRAFT_SCHEMA_VERSION.into(),
+        draft_projections: projections,
         generated_at: now_secs(),
         league: LeagueSummary {
             league_id: league.league_id.clone(),

@@ -1,7 +1,6 @@
-//! Tauri commands for the Ask Claude panel.
+//! Tauri commands for the AI chat panel.
 
 use crate::chat::{ChatMessage, ChatModel, ChatReply, Effort};
-use crate::chat_cli;
 use crate::chat_client;
 use crate::chat_context;
 use crate::chat_copy;
@@ -10,7 +9,7 @@ use crate::state::{season_view_for_chat, view_from, AppState};
 use tauri::State;
 use tokio::sync::Mutex;
 
-/// The pure rules: screens, the thread window, the cap and the spend key.
+/// The pure rules: screens, thread windows, legacy inputs and cost tally keys.
 #[path = "commands_chat_budget.rs"]
 mod budget;
 
@@ -22,10 +21,15 @@ mod settle;
 #[path = "commands_chat_route.rs"]
 mod route;
 
-use budget::{billed_model, charged_league, check_budget, check_screen, checked_budget, window};
+/// The panel's window onto an answer that is still being written.
+#[path = "commands_chat_progress.rs"]
+mod progress;
+
+use budget::{billed_model, charged_league, check_screen, checked_budget, window};
 pub use budget::{budget_of, spend_key, DEFAULT_BUDGET_USD};
 #[cfg(test)]
 use budget::{MAX_THREAD_BYTES, MAX_TURNS};
+use progress::progress_events;
 use route::Route;
 pub(crate) use settle::{settle, Books};
 
@@ -39,16 +43,18 @@ pub struct ChatSettings {
     key_hint: Option<String>,
     /// Whether the Claude Code CLI was found on this machine.
     cli_available: bool,
+    /// Whether the ChatGPT-authenticated Codex CLI can be found.
+    codex_available: bool,
     /// "api" or "claude_code" — the one answers will go through.
     provider: &'static str,
     /// Where the key is kept: "keychain" or "file".
     key_store: &'static str,
-    /// The dollar cap a screen's chat runs under. 0 means the user removed it.
+    /// Legacy compatibility field: always zero; chat has no spending limit.
     budget_usd: f64,
     /// `screen.league_id` -> what that screen's chats about that league have
-    /// cost so far, all conversations together. This is what the cap is
-    /// checked against. Bare-screen keys are from an older scheme and are not
-    /// read; see [`spend_key`].
+    /// cost so far as an API-equivalent estimate, all conversations together.
+    /// Bare-screen keys are from an older scheme and are not read;
+    /// see [`spend_key`].
     spend_usd: std::collections::HashMap<String, f64>,
     models: Vec<&'static str>,
     /// Effort levels each model accepts — they differ, and sending the wrong
@@ -77,12 +83,17 @@ async fn ids(state: &AppState, screen: &str) -> String {
 
 /// Which route a question takes. An explicit choice wins; otherwise the CLI
 /// when it is installed and no key has been added, else the API.
-fn resolve_provider(config: &AppConfig, has_key: bool, cli_available: bool) -> &'static str {
-    match config.chat_provider.as_deref() {
-        Some(PROVIDER_CLI) if cli_available => PROVIDER_CLI,
-        Some(PROVIDER_API) => PROVIDER_API,
-        _ if cli_available && !has_key => PROVIDER_CLI,
-        _ => PROVIDER_API,
+pub(crate) fn resolve_provider(cli_available: bool) -> &'static str {
+    // Claude Code wins whenever it is installed — whatever is stored, and
+    // whatever key the app is holding. Answers come out of the subscription
+    // the CLI is signed into, and nothing here quietly bills a key per token.
+    // The API route survives only as the way a machine *without* the CLI can
+    // answer at all; the panel does not offer it as a choice any more, and
+    // `chat_provider` in the config is no longer read.
+    if cli_available {
+        PROVIDER_CLI
+    } else {
+        PROVIDER_API
     }
 }
 
@@ -204,16 +215,14 @@ async fn set_chat_provider_inner(
     let mut guard = state.config.lock().await;
     guard.chat_provider = Some(chosen.to_string());
     let pending = state.engine.prepare_config_save(&guard)?;
-    // Copied, so that neither the write nor the Keychain lookup below holds
-    // the lock.
-    let config = guard.clone();
+    // Dropped so the write below does not hold the lock.
     drop(guard);
     pending.write().await?;
-    let has_key = state.engine.api_key(&config).await.is_some();
+    // The stored choice is remembered but no longer decides anything: the
+    // route is the CLI whenever there is one. What comes back is what will
+    // actually answer, which is what the panel reports.
     Ok(resolve_provider(
-        &config,
-        has_key,
-        chat_cli::find_cli().is_some(),
+        state.engine.chat_cli(ChatModel::Opus5).is_some(),
     ))
 }
 
@@ -233,10 +242,12 @@ async fn chat_settings_inner(state: &AppState) -> Result<ChatSettings, String> {
     let config = state.config.lock().await.clone();
     let key = state.engine.api_key(&config).await;
     let key = key.as_deref();
-    let cli_available = chat_cli::find_cli().is_some();
+    let cli_available = state.engine.chat_cli(ChatModel::Opus5).is_some();
     let mut efforts = std::collections::HashMap::new();
     efforts.insert("Opus 5", chat_copy::effort_levels(ChatModel::Opus5));
-    efforts.insert("Fable 5", chat_copy::effort_levels(ChatModel::Fable5));
+    efforts.insert("Fable 5.1", chat_copy::effort_levels(ChatModel::Fable5));
+    efforts.insert("GPT-6 Astra", chat_copy::effort_levels(ChatModel::Astra));
+    efforts.insert("GPT-5.6 Sol", chat_copy::effort_levels(ChatModel::Sol));
     let mut notes = std::collections::HashMap::new();
     for label in ["Off", "Low", "Medium", "High", "xhigh", "Max"] {
         let (title, foot) = chat_copy::effort_note(Effort::parse(label));
@@ -246,7 +257,8 @@ async fn chat_settings_inner(state: &AppState) -> Result<ChatSettings, String> {
         has_key: key.is_some(),
         key_hint: key.map(chat_copy::mask_key),
         cli_available,
-        provider: resolve_provider(&config, key.is_some(), cli_available),
+        codex_available: state.engine.chat_cli(ChatModel::Sol).is_some(),
+        provider: resolve_provider(cli_available),
         key_store: if state.engine.secret_store().is_some() {
             "keychain"
         } else {
@@ -254,13 +266,14 @@ async fn chat_settings_inner(state: &AppState) -> Result<ChatSettings, String> {
         },
         budget_usd: budget_of(&config),
         spend_usd: config.chat_spend_usd.clone(),
-        models: vec!["Opus 5", "Fable 5"],
+        models: vec!["Opus 5", "Fable 5.1", "GPT-6 Astra", "GPT-5.6 Sol"],
         efforts,
         notes,
     })
 }
 
-/// Set the dollar cap a screen's chat runs under. Zero turns it off.
+/// Compatibility for old clients: validates the input, stores and returns zero.
+/// Positive inputs cannot restore a spending limit.
 #[tauri::command]
 pub async fn set_chat_budget(state: State<'_, AppState>, dollars: f64) -> Result<f64, String> {
     crate::applog::logged!(
@@ -271,7 +284,8 @@ pub async fn set_chat_budget(state: State<'_, AppState>, dollars: f64) -> Result
 }
 
 async fn set_chat_budget_inner(state: &AppState, dollars: f64) -> Result<f64, String> {
-    let dollars = checked_budget(dollars)?;
+    checked_budget(dollars)?;
+    let dollars = 0.0;
     let pending = {
         let mut config = state.config.lock().await;
         config.chat_budget_usd = Some(dollars);
@@ -284,17 +298,19 @@ async fn set_chat_budget_inner(state: &AppState, dollars: f64) -> Result<f64, St
 /// Ask Claude about the board or the week. `screen` selects which view is
 /// summarised into the system prompt.
 #[tauri::command]
-pub async fn ask_claude(
+pub async fn ask_claude<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
     screen: String,
     model: String,
     effort: String,
     messages: Vec<ChatMessage>,
 ) -> Result<ChatReply, String> {
+    let watcher = progress_events(app, &screen);
     crate::applog::logged!(
         "ask_claude",
         ids(&state, &screen).await,
-        answer(&state, &screen, &model, &effort, messages).await
+        answer(&state, &screen, &model, &effort, messages, Some(watcher)).await
     )
 }
 
@@ -341,24 +357,24 @@ async fn cancel_claude_inner(state: &AppState, screen: &str) -> Result<bool, Str
     Ok(state.chat_claims.cancel(&current_key(state, screen).await))
 }
 
-/// One answered turn, provider choice, budget and all.
+/// One answered turn, including provider choice and estimated cost.
 ///
 /// Split out of [`ask_claude`] so the shared chat the companion server runs
 /// goes through exactly the same path: the same context, the same provider
-/// resolution, the same cap, and the same spend written to the same key. A
-/// second implementation would have been a second set of rules about money.
+/// resolution, and the same estimated cost written to the same key.
 pub(crate) async fn answer(
     state: &AppState,
     screen: &str,
     model: &str,
     effort: &str,
     messages: Vec<ChatMessage>,
+    progress: Option<crate::chat::OnProgress>,
 ) -> Result<ChatReply, String> {
     // The screen is checked before anything is done with the thread: it keys
     // the spend, and a name that is not a screen must not get as far as
     // reading the conversation, let alone opening a tally under itself.
     let held = claim(state, screen).await?;
-    answer_holding(state, screen, model, effort, messages, held).await
+    answer_holding(state, screen, model, effort, messages, held, progress).await
 }
 
 /// [`answer`] with the in-flight claim already made by the caller: the shared
@@ -370,19 +386,28 @@ pub(crate) async fn answer_holding(
     effort: &str,
     messages: Vec<ChatMessage>,
     held: chat_client::InFlight,
+    progress: Option<crate::chat::OnProgress>,
 ) -> Result<ChatReply, String> {
     check_screen(screen)?;
     // The whole thread is forwarded to Anthropic or written to the CLI's
     // stdin, so it is bounded here rather than discovered as a bill or a
     // rejected request.
     let messages = window(&messages)?.to_vec();
-    let cli = chat_cli::find_cli();
+    let model = ChatModel::parse(model);
+    let cli = state.engine.chat_cli(model);
     let config = state.config.lock().await.clone();
-    let api_key = state.engine.api_key(&config).await;
-    let provider = resolve_provider(&config, api_key.is_some(), cli.is_some());
-    // The cap is enforced here rather than in the panel, which cannot be the
-    // authority on money: it knows only the conversation in front of it, and
-    // it prices turns it did not pay for.
+    let api_key = if model.is_openai() {
+        None
+    } else {
+        state.engine.api_key(&config).await
+    };
+    let provider = if model.is_openai() {
+        "codex"
+    } else {
+        resolve_provider(cli.is_some())
+    };
+    // The backend records estimated cost under the current screen and league,
+    // including answers requested from a paired device.
     let key = current_key(state, screen).await;
     // The claim travels with the model call and is released when it ends. One
     // made under a key that has since changed (the league switched between
@@ -393,8 +418,7 @@ pub(crate) async fn answer_holding(
         drop(held);
         state.chat_claims.reserve(&key)?
     };
-    let spent = config.chat_spend_usd.get(&key).copied().unwrap_or(0.0);
-    check_budget(spent, budget_of(&config), screen)?;
+    // Estimates are recorded after the answer; old saved caps are ignored.
 
     // Building a season view is seconds of arithmetic. It must not happen with
     // the pollers' mutexes held, so the season screen's own view is reused and
@@ -415,7 +439,6 @@ pub(crate) async fn answer_holding(
         chat_context::draft_split(&view_from(loaded, &config))
     };
 
-    let model = ChatModel::parse(model);
     let effort = Effort::parse(effort);
     let books = Books {
         config: state.config.clone(),
@@ -434,7 +457,7 @@ pub(crate) async fn answer_holding(
         context,
         messages,
     };
-    settle(books, in_flight, route.call(cancel)).await
+    settle(books, in_flight, route.call(cancel, progress)).await
 }
 
 /// Suggested prompts for the current screen.

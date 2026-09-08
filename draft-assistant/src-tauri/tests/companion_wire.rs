@@ -13,6 +13,8 @@ mod headers_tests;
 mod https_tests;
 #[path = "companion/lifecycle_tests.rs"]
 mod lifecycle_tests;
+#[path = "companion/model_tests.rs"]
+mod model_tests;
 #[path = "companion/ws_tests.rs"]
 mod ws_tests;
 
@@ -437,3 +439,6 @@ async fn an_idle_code_is_replaced_after_ten_minutes() {
         .emitted_kinds()
         .contains(&"companion-devices".to_string()));
 }
+
+#[path = "companion/browser_tests.rs"]
+mod browser_tests;

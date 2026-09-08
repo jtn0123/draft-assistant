@@ -37,7 +37,7 @@ interface Companion {
   reduce(state: unknown, action: { type: string; [key: string]: unknown }): { offset: number };
 }
 
-const source = ["helpers.js", "clock.js", "app.js"]
+const source = ["helpers.js", "clock.js", "models.js", "app.js"]
   .map((file) => readFileSync(resolve(`src-tauri/companion-static/${file}`), "utf8"))
   .join("\n");
 

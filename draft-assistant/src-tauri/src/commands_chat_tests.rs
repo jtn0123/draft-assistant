@@ -1,17 +1,10 @@
-//! Tests for the Ask Claude commands: which route answers, what a thread may
-//! carry, what the spend cap does, and where the running spend is filed.
+//! Tests for the AI chat commands: which route answers, what a thread may
+//! carry, and where estimated cost is filed without a spending stop.
 //!
 //! Its own file because `commands_chat.rs` is at the line cap.
 
 use super::*;
 use crate::chat;
-
-fn config(provider: Option<&str>) -> AppConfig {
-    AppConfig {
-        chat_provider: provider.map(str::to_string),
-        ..AppConfig::default()
-    }
-}
 
 #[tokio::test]
 async fn the_config_is_not_held_while_the_key_goes_to_the_keychain() {
@@ -100,27 +93,14 @@ fn only_the_two_real_screens_can_ask_a_question() {
     }
 }
 
+/// The API route billed a key per token while the CLI answered the same
+/// questions out of a subscription already paid for. It is no longer a
+/// choice: Claude Code answers whenever it is installed, and the API route is
+/// left only for a machine that has no CLI to answer with at all.
 #[test]
-fn the_cli_is_preferred_only_when_there_is_no_key() {
-    assert_eq!(resolve_provider(&config(None), false, true), PROVIDER_CLI);
-    assert_eq!(resolve_provider(&config(None), true, true), PROVIDER_API);
-    assert_eq!(resolve_provider(&config(None), false, false), PROVIDER_API);
-}
-
-#[test]
-fn an_explicit_choice_wins_unless_the_cli_is_missing() {
-    assert_eq!(
-        resolve_provider(&config(Some(PROVIDER_CLI)), true, true),
-        PROVIDER_CLI
-    );
-    assert_eq!(
-        resolve_provider(&config(Some(PROVIDER_CLI)), false, false),
-        PROVIDER_API
-    );
-    assert_eq!(
-        resolve_provider(&config(Some(PROVIDER_API)), false, true),
-        PROVIDER_API
-    );
+fn claude_code_answers_whenever_it_is_installed() {
+    assert_eq!(resolve_provider(true), PROVIDER_CLI);
+    assert_eq!(resolve_provider(false), PROVIDER_API);
 }
 
 fn turn(content: &str) -> ChatMessage {
@@ -218,35 +198,15 @@ fn the_turn_is_billed_to_the_league_the_question_is_about() {
 }
 
 #[test]
-fn a_cap_nobody_has_set_is_the_default_and_zero_means_off() {
-    assert_eq!(budget_of(&AppConfig::default()), DEFAULT_BUDGET_USD);
-    let off = AppConfig {
-        chat_budget_usd: Some(0.0),
-        ..AppConfig::default()
-    };
-    assert_eq!(budget_of(&off), 0.0);
-    // A negative cap in a hand-edited config file is not a negative cap.
-    let nonsense = AppConfig {
-        chat_budget_usd: Some(-3.0),
-        ..AppConfig::default()
-    };
-    assert_eq!(budget_of(&nonsense), 0.0);
-}
-
-#[test]
-fn the_cap_stops_the_screen_that_reached_it_and_says_which_one() {
-    assert!(check_budget(4.99, 5.0, "draft").is_ok());
-    let error = check_budget(5.0, 5.0, "draft").unwrap_err();
-    assert!(error.contains("$5.00 of its $5.00 cap"), "{error}");
-    assert!(error.contains("draft screen"), "{error}");
-    assert!(error.contains("Raise the budget"), "{error}");
-    // A turn that overshot lands, and the next one is refused for it.
-    assert!(check_budget(9.40, 5.0, "season").is_err());
-}
-
-#[test]
-fn no_cap_never_stops_anything() {
-    assert!(check_budget(500.0, 0.0, "draft").is_ok());
+fn legacy_saved_caps_never_enable_a_spending_stop() {
+    assert_eq!(budget_of(&AppConfig::default()), 0.0);
+    for legacy in [0.0, 5.0, -3.0, f64::NAN, f64::INFINITY] {
+        let config = AppConfig {
+            chat_budget_usd: Some(legacy),
+            ..AppConfig::default()
+        };
+        assert_eq!(budget_of(&config), 0.0);
+    }
 }
 
 /// A negative cap used to be rounded up to zero, and zero means *no cap*:
@@ -340,7 +300,7 @@ async fn a_refused_chat_command_leaves_an_error_line_naming_it() {
 #[tokio::test]
 async fn a_junk_screen_is_refused_before_the_thread_is_looked_at() {
     let (state, _dir) = AppState::scratch("chat-junk-screen");
-    let error = answer(&state, "settings", "", "", Vec::new())
+    let error = answer(&state, "settings", "", "", Vec::new(), None)
         .await
         .expect_err("not a screen");
     assert!(error.contains("not a screen"), "{error}");
@@ -390,7 +350,7 @@ async fn spent(state: &AppState, key: &str) -> f64 {
 /// moment it accepts the call. That turn used to be billed, discarded, and
 /// never counted — the next question passed a cap it should have failed.
 #[tokio::test]
-async fn a_turn_abandoned_mid_answer_is_still_counted_against_the_cap() {
+async fn a_turn_abandoned_mid_answer_is_still_counted_in_estimated_cost() {
     let (state, _dir) = AppState::scratch("chat-abandoned");
     let key = "draft.abandoned";
     let in_flight = state.chat_claims.reserve(key).expect("first claim");
@@ -449,6 +409,22 @@ async fn a_reply_is_priced_and_recorded_before_it_is_handed_back() {
         .expect("a reply");
     assert!((reply.cost_usd - 0.5).abs() < 1e-9);
     assert_eq!(reply.provider, PROVIDER_API);
+    assert!((reply.screen_spend_usd - 0.5).abs() < 1e-9);
+    assert!((spent(&state, key).await - 0.5).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn subscription_usage_keeps_an_api_equivalent_cost_estimate() {
+    let (state, _dir) = AppState::scratch("chat-cli-estimate");
+    let key = "draft.cli-estimate";
+    let mut ledger = books(&state, key);
+    ledger.provider = PROVIDER_CLI;
+    let claim = state.chat_claims.reserve(key).expect("first claim");
+    let reply = settle(ledger, claim, async { Ok(billed(100_000)) })
+        .await
+        .expect("a subscription reply");
+    assert_eq!(reply.provider, PROVIDER_CLI);
+    assert!((reply.cost_usd - 0.5).abs() < 1e-9);
     assert!((reply.screen_spend_usd - 0.5).abs() < 1e-9);
     assert!((spent(&state, key).await - 0.5).abs() < 1e-9);
 }

@@ -195,6 +195,42 @@ pub(super) fn stub_sequence(
     (url, recv)
 }
 
+/// A 200 whose body arrives in pieces, `pause` apart: what a real answer does,
+/// and the only way to show that a watcher is told about one while it is still
+/// being written rather than once at the end.
+pub(super) fn stub_dribbled(parts: Vec<String>, pause: std::time::Duration) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let url = format!(
+        "http://{}/v1/messages",
+        listener.local_addr().expect("addr")
+    );
+    std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().expect("accept");
+        let mut request = Vec::new();
+        let mut chunk = [0u8; 8192];
+        while !request_is_complete(&request) {
+            match socket.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => request.extend_from_slice(&chunk[..n]),
+            }
+        }
+        let length: usize = parts.iter().map(String::len).sum();
+        let head = format!(
+            "HTTP/1.1 200 X\r\nContent-Type: text/event-stream\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n"
+        );
+        let _ = socket.write_all(head.as_bytes());
+        let _ = socket.flush();
+        for part in parts {
+            std::thread::sleep(pause);
+            let _ = socket.write_all(part.as_bytes());
+            let _ = socket.flush();
+        }
+        let _ = socket.shutdown(std::net::Shutdown::Write);
+    });
+    url
+}
+
 /// True once `bytes` holds the request head and as many body bytes as its
 /// `Content-Length` promised. A head with no length is complete on its own.
 pub(super) fn request_is_complete(bytes: &[u8]) -> bool {
@@ -272,7 +308,28 @@ pub(super) fn ask_url_limited(
             context: &context(),
             messages: &question(),
         };
-        ask_at(call, cancel, limits).await
+        ask_at(call, cancel, limits, None).await
+    })
+}
+
+/// The same again, watching the answer arrive: `progress` is handed the text
+/// so far each time more of it lands.
+pub(super) fn ask_url_watched(
+    url: &str,
+    http: &reqwest::Client,
+    progress: super::OnProgress,
+) -> Result<ChatReply, ChatError> {
+    tokio_test_block(async {
+        let call = Call {
+            endpoint: url,
+            http,
+            api_key: "sk-ant-test",
+            model: ChatModel::Opus5,
+            effort: Effort::High,
+            context: &context(),
+            messages: &question(),
+        };
+        ask_at(call, CancelSignal::never(), TEST_LIMITS, Some(progress)).await
     })
 }
 

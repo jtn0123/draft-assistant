@@ -4,7 +4,7 @@
 import { useEffect, useRef } from "react";
 import type { Platform, PollHealth } from "../types";
 import { age } from "../format";
-import { setChime, useChime, type Screen } from "../prefs";
+import { setChime, useAskButton, useChime, type Screen } from "../prefs";
 import { followStatusMessage, type FollowStatus } from "../followStatus";
 import { MENU_ITEMS, SettingsMenuRow, type SettingsRow } from "./HeaderSettingsRow";
 
@@ -142,17 +142,20 @@ function ChimeIcon({ on }: { on: boolean }) {
 function GearIcon() {
   return (
     <svg
-      width="14"
-      height="14"
-      viewBox="0 0 14 14"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
       aria-hidden="true"
     >
-      <circle cx="7" cy="7" r="2.1" />
-      <path d="M7 1.4v1.4M7 11.2v1.4M1.4 7h1.4M11.2 7h1.4M3 3l1 1M10 10l1 1M11 3l-1 1M4 10l-1 1" />
+      <path
+        d="m9 2-.6 3-1.7 1-2.9-.9-3 5.2L3 12v2l-2.2 1.7 3 5.2 2.9-.9 1.7 1L9 24h6l.6-3 1.7-1 2.9.9 3-5.2L21 14v-2l2.2-1.7-3-5.2-2.9.9-1.7-1L15 2z"
+        transform="translate(1 0) scale(.92)"
+      />
+      <circle cx="12" cy="12" r="3.4" />
     </svg>
   );
 }
@@ -220,6 +223,9 @@ export function Header({
   // The chime is a preference the header owns outright: it reads it from the
   // store and flips it there, rather than being handed both halves as props.
   const chime = useChime();
+  // So is the Ask AI button: whether the header carries one at all is a
+  // preference, and the settings menu below is where it is switched back on.
+  const askButton = useAskButton();
   // Written once here so the header has one thing to render rather than three
   // branches: null while all is well, a sentence when it is not.
   const followNote =
@@ -360,6 +366,16 @@ export function Header({
             >
               Draft
             </button>
+            <button
+              type="button"
+              className={screen === "projections" ? "mode is-on" : "mode"}
+              onClick={() => onScreen("projections")}
+              aria-pressed={screen === "projections"}
+              disabled={seasonOff}
+              title={seasonOff ? SEASON_SLEEPER_ONLY : undefined}
+            >
+              Projections
+            </button>
           </div>
           <span className="muted header-meta">{meta}</span>
           {seasonOff && <span className="muted header-meta">{SEASON_SLEEPER_ONLY}</span>}
@@ -409,14 +425,16 @@ export function Header({
           </>
         )}
 
-        <button
-          type="button"
-          className={chatOpen ? "btn-ask is-open" : "btn-ask"}
-          onClick={onToggleChat}
-          aria-pressed={chatOpen}
-        >
-          Ask Claude
-        </button>
+        {askButton && (
+          <button
+            type="button"
+            className={chatOpen ? "btn-ask is-open" : "btn-ask"}
+            onClick={onToggleChat}
+            aria-pressed={chatOpen}
+          >
+            Ask AI
+          </button>
+        )}
 
         <button
           type="button"

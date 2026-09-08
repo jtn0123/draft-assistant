@@ -33,16 +33,19 @@ const port = Number(process.env.PW_PORT ?? 1420);
 
 export default defineConfig({
   testDir: "./e2e-browser",
+  // The phone walkthrough runs as an iPhone and an Android phone under its
+  // own config (`playwright.mobile.config.ts`), not as a desktop Chrome.
+  testIgnore: /companion-mobile\.spec\.ts/,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   // Never retried, in CI least of all: a test that passes on its second run
   // is a flaky test, and a retry is how one stays that way.
   retries: 0,
-  reporter: process.env.CI ? "list" : [["list"], ["html", { open: "never" }]],
+  reporter: [["list"], ["html", { open: "never" }]],
   outputDir: "./e2e-browser/.results",
   use: {
     baseURL: `http://localhost:${port}`,
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

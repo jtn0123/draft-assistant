@@ -107,9 +107,14 @@ export function JoinHost({
           Join another Draft Assistant
         </span>
         <span className="join-host-note">
-          Watch someone else&rsquo;s league on this Mac. They keep control of the league, the keys
-          and the budget; you get the board, the season and the shared chat.
+          Watch someone else&rsquo;s league on this Mac. They keep control of the league and AI
+          connections; you get the board, the season and the shared chat.
         </span>
+
+        <p className="muted small">
+          On another network, connect this computer and the host to the same private Tailscale
+          network. Paste the host's Tailscale address from Phone &amp; second screen.
+        </p>
 
         {/* Enter joins from any of the three, not only the last one. Typing an
             address and pressing Enter did nothing at all, which reads as a
