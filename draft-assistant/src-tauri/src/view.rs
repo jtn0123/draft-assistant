@@ -352,7 +352,7 @@ pub fn build_view(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
         generated_at: now_secs(),
         league: LeagueSummary {
             league_id: league.league_id.clone(),
-            platform: crate::view_types::platform_for(&league.league_id).to_string(),
+            platform: crate::view_types::Platform::for_league(&league.league_id),
             name: league.name.clone(),
             season: league.season.clone(),
             total_rosters: league.total_rosters,

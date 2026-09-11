@@ -127,9 +127,17 @@ fn rosters_come_back_best_first_with_the_odds_they_win_on_points() {
     assert!(rows[0].is_mine);
     // Six hundred points clear over a season is not a coin flip, and is not a
     // certainty either.
-    assert!(rows[0].title_odds > 0.9, "{:?}", rows[0].title_odds);
-    assert!(rows[1].title_odds < 0.1, "{:?}", rows[1].title_odds);
-    let total: f64 = rows.iter().map(|row| row.title_odds).sum();
+    assert!(
+        rows[0].title_odds.unwrap() > 0.9,
+        "{:?}",
+        rows[0].title_odds
+    );
+    assert!(
+        rows[1].title_odds.unwrap() < 0.1,
+        "{:?}",
+        rows[1].title_odds
+    );
+    let total: f64 = rows.iter().map(|row| row.title_odds.unwrap()).sum();
     assert!(
         (total - 1.0).abs() < 1e-9,
         "the odds are a share of one: {total}"
@@ -156,7 +164,7 @@ fn equal_rosters_split_the_odds_and_the_answer_does_not_wander() {
 
     assert_eq!(once, twice);
     assert!(
-        (once[0].title_odds - 0.5).abs() < 0.05,
+        (once[0].title_odds.unwrap() - 0.5).abs() < 0.05,
         "{:?}",
         once[0].title_odds
     );
@@ -167,7 +175,10 @@ fn an_empty_draft_projects_nothing_rather_than_dividing_by_zero() {
     let rows = project(&rules(), &[team(1, Vec::new())]);
 
     assert_eq!(rows[0].starters, 0.0);
-    assert_eq!(rows[0].title_odds, 1.0, "the only roster wins by default");
+    assert_eq!(
+        rows[0].title_odds, None,
+        "empty rosters have no useful odds"
+    );
     assert_eq!(rows[0].holes.len(), 5);
 }
 
@@ -190,4 +201,46 @@ fn restrictive_flex_slots_fill_before_superflex_regardless_of_order() {
         assert_eq!(rows[0].bench, 90.0);
         assert!(rows[0].holes.is_empty());
     }
+}
+
+#[test]
+fn exact_simulation_ties_share_credit_without_a_seat_advantage() {
+    assert_eq!(
+        title_odds(&[10.0, 10.0, 5.0], &[0.0; 3]),
+        vec![0.5, 0.5, 0.0]
+    );
+}
+
+#[test]
+fn multiple_empty_rosters_have_no_odds_until_projections_exist() {
+    let rows = project(&rules(), &[team(1, vec![]), team(2, vec![])]);
+    let json = serde_json::to_value(rows).unwrap();
+    assert!(json
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|row| row["title_odds"].is_null()));
+}
+
+#[test]
+fn all_missing_player_projections_cannot_make_a_favorite() {
+    let teams: Vec<_> = (1..=3)
+        .map(|slot| {
+            team(
+                slot,
+                vec![Drafted {
+                    player_id: "unpriced",
+                    position: "QB",
+                    team: None,
+                    points: None,
+                }],
+            )
+        })
+        .collect();
+    let json = serde_json::to_value(project(&rules(), &teams)).unwrap();
+    assert!(json
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|row| row["title_odds"].is_null()));
 }

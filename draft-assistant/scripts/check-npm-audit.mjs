@@ -54,19 +54,50 @@ export function verdict(found, allowlist) {
   return { blocking, stale };
 }
 
+/** Validate a subprocess result before any missing fields can look like zero advisories.
+ * @param {{ stdout?: string | null, stderr?: string | null, error?: Error, signal?: string | null, status?: number | null }} result
+ * @param {string} dir
+ */
+export function parseAuditResult(result, dir) {
+  const failed = () =>
+    new Error(`npm audit did not produce a complete report in ${dir}; retry the audit.`);
+  if (result.error || result.signal || ![0, 1].includes(result.status ?? -1) || !result.stdout) {
+    throw failed();
+  }
+  let report;
+  try {
+    report = JSON.parse(result.stdout);
+  } catch {
+    throw failed();
+  }
+  const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  if (
+    !object(report) ||
+    report.error ||
+    report.auditReportVersion !== 2 ||
+    !object(report.vulnerabilities) ||
+    !object(report.metadata?.vulnerabilities) ||
+    !Number.isInteger(report.metadata.vulnerabilities.total) ||
+    report.metadata.vulnerabilities.total < 0 ||
+    Object.values(report.vulnerabilities).some(
+      (entry) => !object(entry) || !Array.isArray(entry.via),
+    )
+  ) {
+    throw failed();
+  }
+  return report;
+}
+
 /** @param {string} dir */
 function runAudit(dir) {
-  // npm exits non-zero whenever it finds anything, so the exit code says
-  // nothing the JSON does not; only a missing body is a failure to run.
+  // Status 1 can mean vulnerabilities or an operational error. Only a complete
+  // versioned report distinguishes a real audit from registry error JSON.
   const result = spawnSync("npm", ["audit", "--json", "--audit-level=high"], {
     cwd: dir,
     encoding: "utf8",
     shell: process.platform === "win32",
   });
-  if (!result.stdout) {
-    throw new Error(`npm audit produced no output in ${dir}: ${result.stderr || result.error}`);
-  }
-  return JSON.parse(result.stdout);
+  return parseAuditResult(result, dir);
 }
 
 async function main() {

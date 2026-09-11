@@ -247,12 +247,15 @@ async fn pair(
 }
 
 async fn draft_state(State(srv): State<Arc<Srv>>, _auth: Auth) -> Response {
-    let loaded = srv.state.loaded.lock().await;
-    let Some(loaded) = loaded.as_ref() else {
-        return fail(StatusCode::NOT_FOUND, "no league loaded");
+    let view = match crate::state::draft_view_snapshot(&srv.state, None).await {
+        Ok(view) => view,
+        Err(error) if error == "no league loaded" => return fail(StatusCode::NOT_FOUND, &error),
+        Err(error) => return fail(StatusCode::INTERNAL_SERVER_ERROR, &error),
     };
-    let config = srv.state.config.lock().await;
-    Json(crate::state::view_from(loaded, &config)).into_response()
+    // Encoding the full board is CPU work too, and holds no shared guards.
+    tokio::task::spawn_blocking(move || Json(view).into_response())
+        .await
+        .unwrap_or_else(|error| fail(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()))
 }
 
 async fn season(State(srv): State<Arc<Srv>>, _auth: Auth) -> Response {

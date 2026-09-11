@@ -9,9 +9,17 @@ there for what it does, how it works, and the module layout.
 
 ## Quick start
 
+Install [Node.js](https://nodejs.org/en/download) 22+ with npm (CI uses the checked-in Node 22).
+For the native Mac app, also install [rustup](https://rustup.rs/) and Apple's
+Command Line Tools (`xcode-select --install`). This checkout pins Rust 1.98.0
+with Clippy/rustfmt in `rust-toolchain.toml`. Check `node --version`,
+`npm --version`, `rustup show active-toolchain` and `xcode-select -p`.
+The browser preview needs only Node/npm; native setup details are in the
+[app README](draft-assistant/README.md#run-dev).
+
 ```bash
 cd draft-assistant
-npm install
+npm ci
 npm run tauri dev
 ```
 

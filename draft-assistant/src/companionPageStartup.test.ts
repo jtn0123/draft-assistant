@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { createContext, runInContext } from "node:vm";
+import { runCompanionScript } from "./test/companionScript";
 import { afterEach, expect, it, vi } from "vitest";
 import { boot, okJson } from "./test/companionPageHarness";
 
@@ -25,7 +25,7 @@ it("shows recovery instructions when a dependent script never arrives", () => {
     document,
     window: { setTimeout, addEventListener: events.addEventListener.bind(events) },
   };
-  runInContext(readFileSync("src-tauri/companion-static/boot.js", "utf8"), createContext(sandbox));
+  runCompanionScript("boot.js", sandbox);
   // No helpers/clock/pwa/app script executes: the shell still must explain itself.
   vi.advanceTimersByTime(10000);
   expect(byId("boot-status").hidden).toBe(false);

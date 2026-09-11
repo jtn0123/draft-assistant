@@ -13,7 +13,8 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { createContext, runInContext } from "node:vm";
+import { createContext } from "node:vm";
+import { runCompanionScript } from "./companionScript";
 import { vi, type Mock } from "vitest";
 
 const asset = (file: string): string =>
@@ -33,7 +34,7 @@ const scripts = [
   "alerts.js",
   "compact.js",
   "app.js",
-].map(asset);
+];
 
 export const TOKEN_KEY = "da.companion.token";
 export const DEVICE_KEY = "da.companion.device";
@@ -217,7 +218,7 @@ export function boot(fetch: Fetch, options: BootOptions = {}): Booted {
     URLSearchParams,
   };
   const context = createContext(sandbox);
-  for (const script of scripts) runInContext(script, context);
+  for (const script of scripts) runCompanionScript(script, context);
   if (document.readyState === "loading") document.dispatchEvent(new Event("DOMContentLoaded"));
   return {
     fetch: fetchSpy,

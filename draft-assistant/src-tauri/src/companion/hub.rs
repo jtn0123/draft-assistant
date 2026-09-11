@@ -158,7 +158,7 @@ impl CompanionHub {
 
     /// Write the pairings and the code down. Called after anything that
     /// changes either, so a restart picks up where the app left off.
-    fn persist(&self) {
+    fn persist(&self) -> Result<(), String> {
         let stored = {
             let inner = self.lock();
             StoredHub {
@@ -174,7 +174,7 @@ impl CompanionHub {
                     .collect(),
             }
         };
-        store::save(self.secrets.as_ref(), &stored);
+        store::save(self.secrets.as_ref(), &stored)
     }
 
     /// The code on the host's screen, rotated first if it has sat there
@@ -211,7 +211,7 @@ impl CompanionHub {
             inner.code = next;
             inner.code_at_ms = now;
         }
-        self.persist();
+        let _ = self.persist();
         // The desktop hears this the same way it hears about devices, and
         // re-reads the status the code is shown from.
         self.publish_devices();
@@ -279,11 +279,10 @@ impl CompanionHub {
             inner.devices.clear();
             inner.lockout.clear();
         }
-        self.persist();
-        // The sockets themselves are closed by the WebSocket task, which
-        // notices its device is gone as soon as it wakes for this frame.
+        let saved = self.persist();
         self.publish_json("revoked", serde_json::json!({}));
         self.publish_devices();
+        saved.map_err(|_| "Devices disconnected, but revocation could not be saved. Retry before restarting; old devices may reconnect after a restart.".to_string())?;
         Ok(code)
     }
 
@@ -376,7 +375,7 @@ impl CompanionHub {
         for token in replaced {
             self.close_token(token);
         }
-        self.persist();
+        let _ = self.persist();
         self.publish_devices();
         if let PairOutcome::Ok { device_id, .. } = &outcome {
             crate::applog::debug(format!("companion: paired device={device_id}"));
@@ -494,3 +493,7 @@ mod publish;
 #[cfg(test)]
 #[path = "hub_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "revocation_tests.rs"]
+mod revocation_tests;

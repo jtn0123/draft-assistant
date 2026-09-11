@@ -207,6 +207,35 @@ pub fn view_from(loaded: &LoadedLeague, config: &AppConfig) -> DraftView {
     build_view(loaded, config)
 }
 
+/// Snapshot a draft under the shared locks, then do the CPU work without them.
+/// The large player dictionaries are shared through Arc; only cheap handles
+/// and the small mutable draft/config state are copied here.
+pub async fn draft_view_snapshot(
+    state: &AppState,
+    expected_draft: Option<&str>,
+) -> Result<DraftView, String> {
+    let (league, config) = {
+        let loaded = state.loaded.lock().await;
+        let league = loaded.as_ref().ok_or("no league loaded")?;
+        if expected_draft.is_some_and(|expected| expected != league.draft.draft_id) {
+            return Err("the league changed while this was loading, try again".into());
+        }
+        let config = state.config.lock().await;
+        (league.clone(), config.clone())
+    };
+    build_view_off_lock(league, config).await
+}
+
+/// Build an owned draft snapshot on the blocking pool, never a runtime worker.
+pub async fn build_view_off_lock(
+    loaded: LoadedLeague,
+    config: AppConfig,
+) -> Result<DraftView, String> {
+    tokio::task::spawn_blocking(move || view_from(&loaded, &config))
+        .await
+        .map_err(|error| format!("the draft view was not built: {error}"))
+}
+
 /// Pull the Sleeper ID out of whatever the user pasted — a bare ID or a full
 /// URL like https://sleeper.com/draft/nfl/139888...?ftue=commish.
 /// Build the season view from whatever is already loaded.
@@ -362,3 +391,7 @@ mod tests {
         assert!(cache_is_usable("league-a", built, "league-a", built - 60));
     }
 }
+
+#[cfg(test)]
+#[path = "draft_snapshot_tests.rs"]
+mod draft_snapshot_tests;

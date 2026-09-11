@@ -45,7 +45,7 @@ pub fn draft_fixture() -> DraftView {
         generated_at: 1_700_000_000,
         league: LeagueSummary {
             league_id: "L1".into(),
-            platform: "sleeper".into(),
+            platform: crate::view_types::Platform::Sleeper,
             name: "The League".into(),
             season: "2026".into(),
             total_rosters: TEAMS,

@@ -290,7 +290,8 @@ fn a_stored_code_is_honoured_by_its_own_age_and_not_by_the_launch() {
                 code_at_ms: at,
                 devices: Vec::new(),
             },
-        );
+        )
+        .unwrap();
     };
 
     let stale = scratch("stale-code");

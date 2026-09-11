@@ -1,222 +1,237 @@
-# Codebase Grade Report — draft-night readiness
+# Codebase Grade Report
 
 **Project:** Draft Assistant 0.3.1
-**Audited:** 2026-09-07
-**Source:** local working tree based on `d7a0bfe`, including the authorized remediation below. Not committed or pushed.
-**Stack:** Tauri 2, Rust/Tokio, React 19, TypeScript, Vite.
+**Audited:** 2026-09-08
+**Source:** local `main` at `8bad391`; clean at audit start. GitHub `origin/main` is `3ef3cdb` after fetch: local is one commit ahead, zero behind.
+**Stack:** Tauri 2, Rust/Tokio, React 19, TypeScript, Vite; plain JavaScript mobile companion.
 
-This fresh audit replaces the August 27 grade report with explicit user approval. The user confirmed tonight’s platform is Sleeper and the requested Claude/Astra/Sol capability concerns Draft Assistant’s built-in chat. Findings below describe the audited source, not the old grade or tracker assertions. The original audit below is retained as the before-state; the remediation addendum records the subsequently authorized implementation and validation.
+This full regrade replaces the September 7 report at the user's request. It grades current source, including the later mobile work and streaming/command tests. No application fixes, push, or live league changes are part of this audit. The previous B+ was a narrower draft-readiness assessment; today's B includes newly validated defects and the expanded phone surface.
 
-## September 7 remediation — current working tree
+## Authorized remediation — 2026-09-08
 
-The user authorized all seven findings and requested removing the budget. This is local, uncommitted work based on `d7a0bfe`; hosted checks for the old commit do not validate these edits.
+All 15 findings are implemented in the local working tree. The grade table below is the original audit baseline, not a new post-fix regrade. No commit, push, installed-app replacement, real-device revocation, or live league change was performed.
 
-| ID | Implemented change | Evidence |
-|---|---|---|
-| B1 | Draft equality includes order/settings; pick signatures include metadata, keeper and slot changes. | Poll decision regressions; draft command tests. |
-| G1 | Optional member lookup uses one request with a three-second bound, instead of full retries delaying picks roughly 25 seconds. | Failing and hanging member endpoint regressions. |
-| C1 | New/Fresh/Carry actions are guarded while sending. | Deferred-answer tests, including choice bar opened before Send; disabled New observed natively. |
-| C2 | Added GPT-6 Astra and GPT-5.6 Sol via the existing ChatGPT-authenticated Codex CLI; retained Claude Code/API routes. | Six transport tests; actual native Astra, Sol and Claude Opus turns passed. |
-| D1 | Added a separately identified, fixture-backed WKWebView rehearsal for setup, advancing picks, manual pick/undo and outage recovery. | Native WKWebView scenario passed in 12.9 seconds; six screenshots retained. |
-| H1 | Corrected embedded companion server/build documentation; documented AI authentication and estimates. | README, TESTING and companion API review. |
-| I1 | CI retains HTML, screenshots and traces on browser failure, even with retries disabled. | Playwright/workflow configuration review; 38 production browser tests passed. |
-
-**Cost-only chat:** removed budget fields, cap warnings and spending rejection from desktop and companion paths. Legacy budget commands/config fields remain harmless compatibility shims returning zero; saved limits cannot block answers. Both subscription routes now report API-equivalent usage estimates, explicitly described as estimates rather than extra token bills. Existing historical subscription turns that were recorded as zero are not retroactively repriced. Provider usage is required for a complete estimate; cancelled CLI turns may not return usage.
-
-**Native AI validation:** the regular release app displayed all four model buttons without overflow, no budget input, and the running estimated cost. Actual low-effort replies were `Draft Astra native OK.`, `Draft Sol native OK.`, and `Draft Claude native OK.`; displayed cumulative estimate reached $0.14. No authentication tokens were read or copied into the app. Codex runs in a private temporary directory, ignores user/project config, disables tools/plugins/hooks and uses existing CLI authentication. This is subscription-backed Codex chat, not a newly implemented OpenAI API-key route. The separate Anthropic API-key path and Fable were not live-called.
-
-### Final grade and readiness
-
-**Overall: B+ (up from today's fresh B audit; the August 27 C+ is obsolete).** All seven addressable audit items are implemented and verified locally.
-
-| Category | Final grade |
+| IDs | Completed behavior |
 |---|---|
-| Architecture | B+ |
-| Backend | B+ |
-| Frontend | B+ |
-| Testing | B+ |
-| Security | B+ |
-| Dependencies | B+ |
-| Performance | B |
-| Documentation | B+ |
-| DevEx | A− |
+| E1 | Revocation immediately ends live access and reports storage failure honestly; successful retry survives host restart. Failure-path tests use a fake secret store. |
+| E2 | Audit error JSON, incomplete reports and process failures fail the dependency gate. |
+| B1 | Missing projection inputs show unavailable odds/ranks; exact simulation ties share credit. |
+| B2 | Identity changes become active only after their ordered settings save succeeds. |
+| C1, C2 | Phone player details refresh when displayed fields change; modal focus skips disabled/hidden controls and handles an empty focus list. |
+| G1 | Desktop and remote snapshots build off-lock on the blocking pool; remote response encoding also runs off async workers. |
+| A1 | Draft DTOs and schema constants are generated from Rust; Platform is a serialized closed enum. CI checks generated output, and unsupported serialization syntax fails generation. Draft schema is now 1.8. |
+| D1, D3 | CI runs Chromium/WebKit phone tests with retained failure evidence, early runtime-error capture and deterministic local image fixtures. |
+| D2 | Separate Istanbul instrumentation measures all 15 shipped phone scripts with enforced coverage floors. Omitting one regression demonstrably reduces coverage. |
+| I1 | Shipped companion JavaScript receives recommended ESLint rules; an injected undefined name correctly fails the gate. |
+| F1 | The E2E extraction exception now records trusted archive sources, a September 8 review, an October 8 deadline and upgrade-triggered rechecks. The upstream vulnerability remains unpatched; this finding's exception-management fix is complete. |
+| H1, H2 | READMEs describe automatic AI routing and clean-Mac prerequisites; TESTING documents generated contracts, phone coverage and mobile CI. |
 
-**Go for tonight as a Sleeper draft helper.** Continue submitting actual picks in Sleeper. The regular 0.3.1 native app is rebuilt and checked, and all three requested AI routes answered in its built-in chat. This is not proof of an uninterrupted entire live draft or the season workflow. The remaining live dependency is external: Sleeper still reports no draft-order seats. Once the commissioner publishes the order, verify that My Roster and your upcoming turns identify you correctly. The latest public API check still reports `pre_draft`, snake, zero seats, and **September 7 at 8:00:51 PM PDT (7:00:51 PM fixed PST)**. No schedule or real league picks were changed.
+**Final verification:** Passed: 1,052 frontend tests, 137 companion coverage tests, 1,451 Rust tests, 51 script tests, 42 production-browser checks (41 in the full run plus the corrected projections case, with both projections tests passing on rerun), and 4 phone-browser checks. Fast gate, generated-contract check, dependency policy and production build passed. The full verify run exposed an old replay-contract test that assumed inline constants; after correcting that test, the complete Rust coverage run and production build passed separately. Frontend coverage: 95.68% lines / 89.19% branches / 91.07% functions. Companion: 94.89% lines / 83.11% branches / 91.05% functions, with enforced 90/78/86 floors (88 statements). Rust: 93.47% lines / 90.62% functions, above the 90/87 floors.
 
-### Final validation evidence
+The current source was tested locally. Native UI, physical-phone/Tailscale sessions and live AI calls were not repeated for this batch. The service worker remains an explicitly uncovered file in the phone report; aggregate coverage is not a claim that every phone feature was exercised.
 
-- `npm run verify`: exit 0. 939 frontend tests in 81 files, 1,417 Rust tests, and 48 script tests passed. Frontend coverage 95.62% lines / 89.37% branches; Rust coverage 93.49% lines / 90.62% functions. Production build passed. The lower frontend count versus the original audit reflects removing obsolete cap tests, with new chat race/provider regressions added.
-- Final `npm run verify:fast`: exit 0 after the new rehearsal files and preview contract updates; LOC, CSS, text, formatting, ESLint, Rust clippy and TypeScript passed. Final rehearsal selector corrections were separately formatted and typechecked.
-- Production Chromium suite: all 38 tests passed without retries. The later preview-only cleanup changed legacy cap values to zero and matched the backend effort lists; TypeScript passed, and direct browser measurement confirmed no overflow of the four model buttons in the 380px panel.
-- Native rehearsal build succeeded with opt-in WDIO and the separate `com.justin.draft-assistant.rehearsal` identifier. After correcting harness screen selection and selectors, the scenario passed in 12.9 seconds against that binary: setup, incoming API pick, manual pick, undo, HTTP 503 sync retry and recovery to Live with the next pick. This uses real IPC and WKWebView with local fixture data, no real league changes. The temporary profile link was removed; logs, fixture requests, isolated data and six screenshots remain at `/var/folders/h2/d10fqbgx4sg3xt10y73ynf_m0000gn/T/draft-native-rehearsal-Meq7Jl`. Final recovered screenshot was inspected. A supported explicit WebDriver window selection removes the service's repeated optional five-second focus probes.
-- Final regular bundle build: exit 0 using the local updater-artifact override, version 0.3.1. `codesign --verify --deep --strict` passed. Bundle: `draft-assistant/src-tauri/target/release/bundle/macos/Draft Assistant.app`. It is locally ad-hoc signed, not a notarized/published release.
-- Targeted Codex process/parser/cancel/timeout tests passed; targeted companion/command tests passed, including ignored legacy caps. Native Astra, Sol and Claude replies and estimated usage are described above.
-- Existing dependency locks were not upgraded. The earlier same-lock audit passed its configured policy with documented exceptions; no claim of zero advisories. Hosted CI was not run for these unpushed edits.
-- Final regular bundle reopened successfully, restored Sharks League on Draft with Live status, and retained the cost tally. Left a fresh GPT-5.6 Sol / Low chat open; saved connection-test history is preserved.
-- `git diff --check` passed. No commit, push, merge or deployment was performed.
-
-## Follow-up: settings, identity, scrolling and remote setup
-
-Implemented the subsequently requested usability work:
-
-- Gear menu now uses a toothed settings icon and keeps only quick draft controls. All settings opens a dedicated page grouped into Draft identity, Remote connections, Appearance & sound, Draft data, and Diagnostics & updates. The underlying draft stays mounted; returning preserves board filters and polling.
-- Sleeper identity includes manual entry and selectable current-league account names, current default and draft-seat status. The league endpoint supplies display names rather than a separate username field; saving uses stable account IDs, never custom fantasy-team names. The native app loaded all 12 current accounts and successfully re-saved the existing identity without changing the selected person.
-- Player rows scroll independently from roster/sidebar/chat, with pinned table headings and fixed filters. Native scrolling was visually verified; browser measurement confirmed the page and chat stayed still.
-- Model picker starts collapsed, expands on demand and collapses after selection, returning keyboard focus to the selected-model button. Verified in native UI with GPT-5.6 Sol.
-- Fixed HTTP 401 follower revocation leaving its socket active. The socket now stops and ignores late connection events, frames and pending refreshed snapshots. Remote draft actions now visibly say Controlled by host and stay disabled; server/API authorization remains enforced.
-- Both remote client flows passed against a real isolated Rust HTTP/WebSocket server: actual phone-page pairing, desktop-frontend pairing, write restrictions, shared chat-reset permission, simultaneous offline/reconnect with newer fixture state, and revoke-all. The final remote run passed in 6.22 seconds and verified disabled draft controls before and after recovery. Six screenshots are in `/var/folders/h2/d10fqbgx4sg3xt10y73ynf_m0000gn/T/draft-assistant-companion-browser-rehearsal-58071-1788826380134143000/browser-evidence`. These were separate Chromium contexts over loopback, not a physical phone and second computer on Wi-Fi.
-- Final `npm run verify` exited 0: 948 frontend tests in 83 files, 1,419 Rust tests and 48 script tests passed. One opt-in remote browser test was excluded from the default Rust run and explicitly passed separately as described above. Frontend coverage 95.60% lines / 89.06% branches; Rust 93.36% lines / 90.62% functions. All 39 production browser tests passed. Final `npm run test:e2e:rehearsal` exited 0: one native WKWebView scenario passed in 13 seconds, including incoming picks, manual pick, undo, outage/recovery with the new scroll wrapper. Final native evidence: `/var/folders/h2/d10fqbgx4sg3xt10y73ynf_m0000gn/T/draft-native-rehearsal-GicKU4`; test profile cleanup confirmed.
-- The user clarified physical clients are on another network. Existing Tailscale/MagicDNS/optional HTTPS support is implemented, but live local inspection found no installed Tailscale executable/application or active tailnet-range interface. Cross-network hardware connectivity remains unverified until the devices have a private route. Tailscale 1.102.3 was subsequently installed from its Apple-notarized, Tailscale-signed standalone package; onboarding reached account sign-in. The Mac subsequently reached Tailscale Running/online and companion hosting was enabled on port 7878. The user initially reported an unchanged Connect button in the iPhone Camera QR browser; after the direct Safari retry instructions, the user confirmed it was working and began testing two phones. The user then confirmed the two-phone setup fully works. This is physical-device success reported by the user, distinct from automated local evidence. Current scripts are served correctly; Chromium, WebKit and simulated iPhone WebKit on the LAN all show the expected invalid-code error. The exact cause of the Camera-browser failure remains unconfirmed. Added a startup loading/error message, disabled Connect until successful startup, and JavaScript-disabled guidance; 60 companion page tests passed. The host was left running during the phone test; the later mobile-polish build was subsequently loaded and live asset bytes verified. No public exposure was configured. Corrected obsolete same-Wi-Fi-only/budget wording and added private-network setup guidance in both host/join dialogs; all 27 focused remote-dialog tests passed after this copy-only follow-up. The final local release build and strict code-signature verification also passed.
-- The final regular 0.3.1 bundle built successfully and strict code-signature verification passed. Reopened the final app on Settings with all 12 account choices, the existing default preserved and polling live behind the page. No commit, push or deployment was requested or performed.
-
-## Mobile polish follow-up
-
-- After the user confirmed the two-phone setup fully works, refined the companion's pairing screen, draft heading, highlighted recommendation, roster, chat bubbles and touch-sized icon navigation. Kept system light/dark appearance and safe-area spacing.
-- Added suggested questions that fill and focus the composer without sending, clear pairing progress/retry messages, and startup failure guidance. Clarified next-turn availability odds and waiting/paused/completed draft states.
-- 73 companion tests passed, with focused lint/format checks. A separate current-source browser preview passed WebKit at 320px light/390px dark and Chromium at 430px light: pairing, tab navigation, hidden season-only tab, no horizontal overflow, suggestion focus, and composer clearance at reduced viewport height. Screenshots are in `/tmp/draft-mobile-polish`; fixture data only. The final real Rust host phone/desktop pairing, permissions, outage recovery and revoke rehearsal passed (1/1, 10.45 seconds). The local release build and strict signature check passed, the native host was restarted, and all five changed served mobile assets matched current source byte-for-byte. No commit or push.
-
-## Mobile feature parity follow-up
-
-- Added a prominent live countdown and remaining-time bar, 15-second warning styling, per-pick duration before starting, and explicit waiting/paused/completed handling.
-- Added upcoming managers, picks until your turn, next personal pick numbers, and an expandable 24-pick queue. Queue ownership uses the desktop plain-snake baseline plus backend trade/third-round-reversal overrides and skips keeper picks. Expansion survives clock ticks and draft updates.
-- Added device-local collapsible model/effort selection. An authenticated, credential-free host catalog advertises Claude Opus/Fable and GPT-6 Astra/GPT-5.6 Sol availability; validated POST fields reach the existing answer path without modifying the host provider or credentials. Older clients retain defaults.
-- Combined companion frontend suite: 80 tests passed; TypeScript and file-length gate passed. Backend lane: 16 targeted tests, Clippy and formatting passed. Current-source WebKit/Chromium mobile previews verify all tabs, model selection/collapse, no horizontal overflow and composer clearance at reduced height. The final isolated real-host phone/desktop pairing and reconnect rehearsal passed (1/1, 8.27 seconds). Release build and strict signature verification passed; the native host was restarted and all six relevant served assets matched source. The new model catalog correctly returned HTTP 401 without pairing. Phone refresh loads the new features; current Sleeper draft order is still pending.
-
-## Original audit summary
+## Summary
 
 | ID | Category | Grade | Items |
-|---|---|---|---|
-| A | Architecture & Design | B+ | 0 |
-| B | Backend Quality | B | 1 |
+|----|----------|-------|-------|
+| A | Architecture & Design | B+ | 1 |
+| B | Backend Quality | B | 2 |
 | C | Frontend Quality | B | 2 |
-| D | Testing & Reliability | B | 1 |
-| E | Security | B+ | 0 |
-| F | Dependencies & Tech Currency | B+ | 0 |
-| G | Performance & Scalability | B− | 1 |
-| H | Documentation & Onboarding | B | 1 |
+| D | Testing & Reliability | B+ | 3 |
+| E | Security | B− | 2 |
+| F | Dependencies & Tech Currency | B | 1 |
+| G | Performance & Scalability | B | 1 |
+| H | Documentation & Onboarding | B | 2 |
 | I | Developer Experience & Tooling | B+ | 1 |
-| **Overall** | | **B** | **7** |
+| **Overall** | | **B** | **15** |
 
-**Top 5 highest-leverage fixes:** G1, B1, C1, D1, C2. C2 is a requested feature gap and should follow draft reliability fixes.
+**Top 5 highest-leverage fixes:** E1, E2, B1, C1, D1
 
-## Original audit verdict (superseded by remediation below)
+The app is a usable draft helper with broad passing checks, but not an A-level reference implementation. Prioritize durable device revocation, honest projections and trustworthy automated gates. Continue submitting actual picks in Sleeper.
 
-Conditional go as a read-only helper for a conventional Sleeper snake draft; not yet a fully rehearsed replacement for the Sleeper draft room. Make picks in Sleeper. The saved active league's live API reports a 2026 snake draft, status `pre_draft`, start timestamp `1788836451000`: September 7 at **20:00:51 America/Los_Angeles (PDT)**, equivalent to **19:00:51 fixed PST**. If the intention was 7 PM local clock time, the stored platform schedule differs by one hour. No league schedule was changed.
+## Audit-baseline verification and limits
 
-The pre-existing release bundle in `draft-assistant/src-tauri/target/release/bundle/macos/Draft Assistant.app` was version **0.1.0**, binary dated August 27, whereas source is **0.3.1**. No copy was found at `/Applications/Draft Assistant.app`. A grade for current source is not evidence for that old bundle.
+- Current fast gate passed: LOC, CSS, text, formatting, ESLint, Clippy and TypeScript. Guard-script tests passed.
+- Current frontend: 1,048 tests in 97 files passed; 95.66% line, 89.14% branch and 91.07% function coverage. These percentages exclude shipped companion JavaScript (D2).
+- Current production browser suite: 42 passed. Current mobile suite: 4 passed across iPhone WebKit and Android Chromium, light and dark. Mobile screenshots were inspected by the frontend reviewer.
+- Current `npm run verify`: exit 0, including 1,441 Rust tests and the production build. Rust coverage: 93.44% lines / 90.61% functions, above the 90% / 87% gates.
+- Live dependency checks: app npm 0 vulnerabilities; E2E 13 high dependency entries from one allowlisted advisory; Cargo 0 non-ignored vulnerabilities and 6 unmaintained warnings. Passing the configured policy is not a claim of no advisories.
+- GitHub CI and native End-to-end succeeded for published `3ef3cdb` ([CI](https://github.com/jtn0123/draft-assistant/actions/runs/34190669916), [native](https://github.com/jtn0123/draft-assistant/actions/runs/34190669912)). The unpublished `8bad391` has no hosted run.
+- No fresh native app launch, physical-phone/Tailscale session, live AI turn, full-draft soak or performance benchmark was performed. Earlier physical-device success remains historical evidence, not a test repeated today.
+- Findings B1, C1 and E2 have scratch reproductions; E1/B2/G1 were validated from direct control flow. No application source was modified for reproductions.
 
-Scope limits: auction order/survival advice is deliberately withheld (`src-tauri/src/draft.rs:51`, `view.rs:134`); IDP slots are excluded with warnings (`engine_assemble.rs:96`). The actual active league's player/projection freshness, user's confirmed seat, and full draft rehearsal remain separate from passing automated tests.
+Dependency primary source: [GitHub GHSA-jmr9-qjv8-65gv](https://github.com/advisories/GHSA-jmr9-qjv8-65gv), checked today, lists extract-zip through 2.0.1 as affected with no patched version.
 
-## Validation
-
-- Static LOC, CSS, text, formatting, lint, Rust clippy and TypeScript checks passed in `npm run verify`.
-- 48 script guard tests passed.
-- 951 frontend tests in 81 files passed; frontend line coverage 95.60%, branches 89.28%.
-- All 38 production Chromium tests passed (`PW_PORT=1437 npm run test:e2e:browser:ci`), without retries.
-- `npm run audit` passed its configured policy. This means no unaccepted high/critical npm advisories, not zero advisories. The allowlist explicitly accepts an extract-zip advisory in the native-test dev tree; Cargo ignores one Linux-only glib unsoundness advisory and reports 16 unmaintained transitive warnings.
-- Installed Claude Code was authenticated. A live tools-disabled, no-session-persistence call using `claude-opus-5`, low effort and the app's JSON CLI argument shape returned `Draft chat connection OK`, without an error. This verifies the CLI provider connection, not an in-app UI round trip or the separate Anthropic API-key route.
-- Full Rust coverage gate and native WKWebView smoke test passed; see final validation addendum below.
-- Current-head hosted CI and End-to-end workflows were running at inspection; no open PRs were returned. No merge, push or release was performed.
+---
 
 ## A — Architecture & Design — B+
 
-Domain rules are separate from commands and transports (`src-tauri/src/draft.rs`, `recommend.rs`, `commands_draft/tick.rs`). The poll loop builds views from snapshots outside shared locks (`commands_draft/poll_loop.rs:227`), and chat transport dispatch has its own module (`commands_chat_route.rs`). No additional architectural refactor is justified before tonight.
+Domain boundaries separate polling from orchestration (`draft-assistant/src-tauri/src/poll.rs:1`) and share application state across desktop and companion (`src-tauri/src/state.rs:15`). Season processing snapshots inputs before off-thread work (`src-tauri/src/state.rs:281`). Independently maintained wire types still permit requiredness drift.
+
+#### ~~A1~~ ✓ done 2026-09-08 — Make serialized view types a single-source contract
+- **Where:** draft-assistant/src-tauri/src/view_types.rs:120–129; draft-assistant/src/types.ts:196–214; draft-assistant/src/api.ts:24–43; draft-assistant/src-tauri/tests/fixture_shape.rs:70–95
+- **What's wrong:** Rust requires draft_projections, while TypeScript declares it optional. The runtime guard checks a version string; fixture-shape checks do not validate TypeScript types or requiredness.
+- **Impact:** Moderate — consumers can compile against a different understanding of the same payload.
+- **Fix:** Generate TypeScript DTOs and schema constants from the Rust serialized contract and check generated output in CI. Retain fixture-shape tests.
+- **Effort:** M
+- **Grade lift:** B+ → A− — removes a demonstrated source of contract drift.
+
+---
 
 ## B — Backend Quality — B
 
-The backend has explicit malformed-response refusal and manual-pick reconciliation (`commands_draft/refusal.rs`, `commands_draft/poll_loop.rs`). League-switch guards protect adoption of network replies, but view change detection omits some meaningful updates.
+Manual draft edits validate inputs and roll back failed writes (`src-tauri/src/commands_draft/edits.rs:37–92`). Polling protects against stale replies, and configuration writes are ordered and atomic (`src-tauri/src/engine/config.rs:195–220,275–306`). Projection output and identity changes still have concrete failure cases.
 
-#### B1 — Publish draft order/settings and pick metadata changes
-- **Where:** `draft-assistant/src-tauri/src/poll.rs:52`, `draft-assistant/src-tauri/src/commands_draft/poll_loop.rs:157`, `draft-assistant/src-tauri/src/commands_draft/poll_loop.rs:227`.
-- **What's wrong:** Pick signatures include pick number and player ID only; draft changes compare status only. Updated order/settings are stored without triggering a rebuilt view. Same-player keeper or draft-slot changes can likewise remain invisible until another detected change or manual refresh.
-- **Impact:** Moderate — commissioner edits may leave draft advice or clock details stale.
-- **Fix:** Include view-relevant draft order/settings and pick metadata in change detection. Test same-status order/timer changes and same-player keeper metadata changes.
+#### ~~B1~~ ✓ done 2026-09-08 — Handle missing projection data honestly
+- **Where:** draft-assistant/src-tauri/src/draft_projection.rs:173–199; draft-assistant/src-tauri/src/season_spread.rs:170–172; draft-assistant/src-tauri/src/draft_projection_tests.rs:165–170
+- **What's wrong:** With zero means and zero spreads, the strict winner comparison awards every simulation to the first roster. Running the unchanged simulation in a temporary harness with three empty rosters returned [1.0, 0.0, 0.0].
+- **Impact:** Major — the app displays an unsupported 100% favorite before useful projection data exists.
+- **Fix:** Represent insufficient projection data explicitly and display unavailable odds until meaningful input exists. Split exact ties fairly; test multiple empty rosters, missing projections and deterministic ties.
 - **Effort:** S
-- **Grade lift:** B → B+ (closes an observable stale-state path).
+- **Grade lift:** B → B+ with B2 — removes misleading numerical output.
+
+#### ~~B2~~ ✓ done 2026-09-08 — Keep identity unchanged when saving fails
+- **Where:** draft-assistant/src-tauri/src/commands_draft.rs:194–210; draft-assistant/src-tauri/src/commands_chat.rs:215–220
+- **What's wrong:** The identity setter mutates live config before its fallible save and propagates the error without rollback. A failed save can change the active identity despite telling the UI it failed.
+- **Impact:** Moderate — the selected roster can change in memory and revert after restart.
+- **Fix:** Use a transactional configuration helper that preserves save ordering and commits or safely rolls back the affected field. Test failed persistence and unchanged in-memory identity.
+- **Effort:** M
+- **Grade lift:** B → B+ with B1 — aligns error results with actual state.
+
+---
 
 ## C — Frontend Quality — B
 
-Setup has loading/error states, draft tables have filtering/paging, and browser tests cover narrow-window layout and replay ordering (`src/components/Board.tsx`, `e2e-browser/draft-board.spec.ts`). The chat UI has a session lifecycle race and does not implement the requested OpenAI providers. No broad visual redesign is needed to address these findings.
+Settings has clear sections and accessible controls (`src/components/SettingsPage.tsx:6–36,46–77`); model pickers collapse and restore focus (`src/components/ChatControls.tsx:49–66`, `src-tauri/companion-static/models.js:71–79`). Lazy screens have loading/error boundaries (`src/components/lazyScreens.tsx:10–32`). Current phone browser screenshots are readable, but stale rows and modal keyboard handling need correction.
 
-#### C1 — Prevent a new chat from inheriting a pending old answer
-- **Where:** `draft-assistant/src/components/Chat.tsx:235`, `draft-assistant/src/components/Chat.tsx:273`, `draft-assistant/src/components/useChatThread.ts:115`, `draft-assistant/src/components/useChatSessions.ts:118`.
-- **What's wrong:** New remains enabled during an answer. Fresh start clears the thread and changes its session ID, but the old completion restores its old history and calls the latest save callback, filing that history under the new session too. A temporary deferred-answer regression reproduced the UI overwrite: Send → New → Fresh start → resolve old answer. The assertion that the old answer stays absent failed. The temporary test was removed; existing source/tests were not edited.
-- **Impact:** Moderate — a new conversation can unexpectedly become a duplicate of the old one.
-- **Fix:** Disable New and both new-chat choices while sending, guard both handlers, and add a deferred-answer regression including opening the choice bar before Send.
+#### ~~C1~~ ✓ done 2026-09-08 — Keep mobile available-player details current
+- **Where:** draft-assistant/src-tauri/companion-static/available.js:47–71,162–175
+- **What's wrong:** The render signature omits displayed name, position, team and bye. A JSDOM reproduction loading the actual modules changed team OLD to NEW and bye 1 to 9 while the DOM retained OLD and Bye 1.
+- **Impact:** Moderate — refreshed player details can remain stale on the phone.
+- **Fix:** Include all displayed fields in the signature or compare complete display data. Add a regression changing only team and bye.
 - **Effort:** S
-- **Grade lift:** B → B+ (protects conversation lifecycle).
+- **Grade lift:** B → B+ with C2 — fixes stale mobile presentation.
 
-#### C2 — Add OpenAI chat support if Astra/Sol are required
-- **Where:** `draft-assistant/src/chat-types.ts:30`, `draft-assistant/src/components/ChatControls.tsx:10`, `draft-assistant/src-tauri/src/chat_types.rs:10`, `draft-assistant/src-tauri/src/commands_chat_route.rs:43`.
-- **What's wrong:** The UI and backend offer Opus 5/Fable 5 through Claude Code or Anthropic API only. There is no OpenAI route or Astra/GPT-5.6 Sol picker.
-- **Impact:** Moderate — the requested provider capability is absent; this is a feature gap rather than a broken Claude path.
-- **Fix:** Add an explicitly selected OpenAI transport, authentication/settings, requested models, response/usage normalization, cancellation and error handling; test dispatch and one real app round trip. Retain existing Claude routes. Choose subscription-backed Codex versus API credentials explicitly before implementation.
-- **Effort:** M
-- **Grade lift:** B → B+ (fulfills requested chat capability; not independently a reliability improvement).
-
-## D — Testing & Reliability — B
-
-Unit and integration tests cover cancellation, wire retries, draft rules, companion authentication and replay ordering (`src-tauri/src/chat_wire_retry_tests.rs`, `src-tauri/tests/league_rules.rs`, `src-tauri/tests/companion/`, `e2e-browser/draft-board.spec.ts`). Coverage floors are enforced in `package.json`. Native end-to-end coverage remains much narrower than those suites.
-
-#### D1 — Rehearse critical draft interactions in the native app
-- **Where:** `draft-assistant/e2e/specs/launch.e2e.ts:25`, `draft-assistant/playwright.config.ts:4`.
-- **What's wrong:** The sole native smoke test proves boot to a resolved setup/header screen. Browser tests stub Tauri IPC; neither proves native league selection, advancing picks, manual fallback/undo and in-app chat together.
-- **Impact:** Moderate — green suites alone do not prove tonight's full desktop workflow.
-- **Fix:** Rehearse current native build with the intended league/seat and fresh data; use an isolated mock/replay to exercise updates, manual pick/undo, reconnect, and chat. Then automate deterministic native coverage for those interactions.
-- **Effort:** M
-- **Grade lift:** B → B+ (covers the desktop boundary and full workflow).
-
-## E — Security — B+
-
-Chat CLI tools are disabled and child processes killed on cancellation/timeout (`src-tauri/src/chat_cli.rs:235`). Credentials have Keychain support, and companion routes require pairing/token checks (`src-tauri/src/companion/hub.rs`). Desktop CSP allows broad network connections for arbitrary companion addresses; root README documents this intentional tradeoff. No exploit was established and a transport redesign is not a tonight blocker. Audit exceptions are stated in validation rather than treated as a clean vulnerability count.
-
-## F — Dependencies & Tech Currency — B+
-
-Both npm trees and Cargo have committed locks; the Rust toolchain is pinned and updater/native test features are separated (`src-tauri/Cargo.toml`, `rust-toolchain.toml`). Live npm registry inspection found newer Playwright 1.63.0, Node types 26.5.0 and typescript-eslint 8.70.0, while TypeScript is pinned at 5.9.3. These are inventory observations, not recommendations for last-minute upgrades. Security policy passes with the documented exceptions. No dependency change is required by this audit.
-
-## G — Performance & Scalability — B−
-
-Production output is split into draft, season and chat chunks (`vite.config.ts`, build output); the largest main chunk is about 282 kB, 89 kB gzip. Poll view construction runs outside the main locks. An optional endpoint can nevertheless delay the latency-critical pick update path.
-
-#### G1 — Keep member lookup retries from delaying picks
-- **Where:** `draft-assistant/src-tauri/src/commands_draft/tick.rs:156`, `draft-assistant/src-tauri/src/sleeper/endpoints.rs:74`, `draft-assistant/src-tauri/src/sleeper.rs:263`, `draft-assistant/src-tauri/src/sleeper.rs:384`.
-- **What's wrong:** When initial member lookup failed, the next ticks join successful picks with a full member lookup retry sequence. Three eight-second timeouts plus backoff can delay applying picks about 24.75 seconds, before the normal polling interval.
-- **Impact:** Major — a board can lag during a short pick clock even when the picks endpoint works.
-- **Fix:** Retry member resolution independently of picks (preferred), or bound its contribution with a short one-attempt request. Add a hanging-member-endpoint test proving successful picks are applied promptly.
+#### ~~C2~~ ✓ done 2026-09-08 — Wrap modal focus around enabled, visible controls
+- **Where:** draft-assistant/src/components/useFocusTrap.ts:5–6,33–44; draft-assistant/src/components/Overlays.tsx:76–88
+- **What's wrong:** The focus trap includes disabled and hidden controls. During manual-pick submission, Tab from Cancel prevents default then attempts to focus disabled Mark drafted, leaving keyboard navigation stalled.
+- **Impact:** Moderate — keyboard interaction breaks while a dialog operation is busy.
+- **Fix:** Filter to enabled, visible, focusable descendants. Focus the dialog when none remain. Test disabled first/last and hidden controls.
 - **Effort:** S
-- **Grade lift:** B− → B (removes optional network work from the critical update delay).
+- **Grade lift:** B → B+ with C1 — makes shared keyboard behavior reliable.
+
+---
+
+## D — Testing & Reliability — B+
+
+The current suite covers cancellation, the command-name contract and Tauri progress events (`src/chatCancel.test.ts`, `src/commandNames.test.ts`, `src-tauri/src/commands_chat_progress_tests.rs`). CI enforces Rust/frontend coverage and production browser checks (`.github/workflows/ci.yml:94–116`). The phone has substantial behavioral tests, but its browser gate and coverage measurement have gaps.
+
+#### ~~D1~~ ✓ done 2026-09-08 — [FE] Run the mobile browser suite in CI
+- **Where:** draft-assistant/playwright.config.ts:42–44; draft-assistant/playwright.mobile.config.ts:15–27; .github/workflows/ci.yml:105–116
+- **What's wrong:** The main browser config excludes companion-mobile.spec.ts. No workflow invokes test:e2e:mobile, so the only WebKit phone walkthrough can regress while CI remains green.
+- **Impact:** Moderate — the phone experience has no continuous browser gate.
+- **Fix:** Install WebKit and Chromium in a dedicated mobile CI job, run test:e2e:mobile, and retain failure screenshots/traces. Keep the desktop production-bundle suite.
+- **Effort:** S
+- **Grade lift:** B+ → A− with D2/D3 — continuously verifies both supported phone browser engines.
+
+#### ~~D2~~ ✓ done 2026-09-08 — [FE] Measure companion JavaScript coverage separately
+- **Where:** draft-assistant/vitest.config.ts:20–28; draft-assistant/src/test/companionPageHarness.ts:19–36
+- **What's wrong:** The coverage include list only covers src TypeScript/TSX. Shipped companion-static JavaScript is evaluated through a VM harness and does not contribute to those coverage floors.
+- **Impact:** Moderate — desktop coverage percentages do not measure the growing phone application.
+- **Fix:** Instrument the shipped companion scripts with preserved filenames, add a separate companion coverage report and a measured baseline floor. Verify deleting a companion regression lowers that report.
+- **Effort:** M
+- **Grade lift:** B+ → A− with D1/D3 — makes reported coverage representative of both clients.
+
+#### ~~D3~~ ✓ done 2026-09-08 — [FE] Make the phone walkthrough detect runtime errors reliably
+- **Where:** draft-assistant/e2e-browser/companion-mobile.spec.ts:57–59,83–92,144–146
+- **What's wrong:** The pageerror listener is installed only after the walkthrough and immediately asserts an empty array, so it misses all earlier errors. The walkthrough also requires a real CDN image despite its comment saying images are not asserted.
+- **Impact:** Moderate — the test can miss runtime errors or fail because of an unrelated CDN outage.
+- **Fix:** Register pageerror collection before navigation and assert at the end. Fulfill image requests with a checked-in image for deterministic layout checks; keep any live-CDN smoke check separately identified.
+- **Effort:** S
+- **Grade lift:** B+ → A− with D1/D2 — removes a vacuous assertion and external flake source.
+
+---
+
+## E — Security — B−
+
+Companion routes authenticate bearer tokens and expose an explicit config subset (`src-tauri/src/companion/routes.rs:160–180,294–321`). Pairing has global and per-address throttles (`pairing.rs:65–82`), tokens use Keychain storage, and CLI tool use is disabled (`chat_cli.rs:263–274`, `chat_codex.rs:167–204`). Persistence failure in revocation and a fail-open audit wrapper prevent a higher grade.
+
+#### ~~E1~~ ✓ done 2026-09-08 — Make device revocation durable or report failure
+- **Where:** draft-assistant/src-tauri/src/companion/store.rs:180–200; draft-assistant/src-tauri/src/companion/hub.rs:104–132,159–177,272–287
+- **What's wrong:** Revoke clears in-memory devices, calls persistence and returns success, while the storage layer swallows write failures. If a Keychain write fails, old stored tokens survive and startup reloads them.
+- **Impact:** Major — restarting can restore access to a device the user was told was revoked.
+- **Fix:** Propagate storage failure through save, persist and revoke, and surface failed durable revocation. Ensure startup cannot restore tokens invalidated by a recorded revocation. Test initial successful persistence, failed revocation persistence, and hub reconstruction.
+- **Effort:** M
+- **Grade lift:** B− → B with E2 — makes revocation results trustworthy across restarts.
+
+#### ~~E2~~ ✓ done 2026-09-08 — Fail the dependency gate when npm cannot audit
+- **Where:** draft-assistant/scripts/check-npm-audit.mjs:23–25,58–69,86–95
+- **What's wrong:** The wrapper accepts any JSON stdout and interprets missing vulnerabilities as clean. A scratch npm emitting ENOAUDIT error JSON and exiting 1 made the real checker return 0 and report both trees clean.
+- **Impact:** Major — CI can claim a security audit passed when it never ran.
+- **Fix:** Reject error JSON and malformed/incomplete reports; distinguish vulnerability exit status from operational failure. Test JSON errors, missing metadata/vulnerabilities, spawn failures and valid reports.
+- **Effort:** S
+- **Grade lift:** B− → B with E1 — restores a reliable security check.
+
+---
+
+## F — Dependencies & Tech Currency — B
+
+Both npm trees and Cargo have locks, with Dependabot coverage (`.github/dependabot.yml`). Today's app npm audit reports zero vulnerabilities; the E2E tree has 13 high dependency entries tracing to one allowlisted extract-zip advisory. Cargo reports zero non-ignored vulnerabilities and six unmaintained warnings under the configured policy, which explicitly ignores Linux glib advisory RUSTSEC-2024-0429.
+
+#### ~~F1~~ ✓ done 2026-09-08 — Bound and review the E2E extraction exception
+- **Where:** draft-assistant/scripts/npm-audit-allowlist.json:4; draft-assistant/e2e/package-lock.json; .github/dependabot.yml:36–50
+- **What's wrong:** The E2E tree retains a high-severity symlink traversal advisory with a reasoned exception but no review date or explicit archive-source constraints. This is a development/test dependency, not a shipped npm dependency.
+- **Impact:** Moderate — test tooling still uses a known vulnerable extractor.
+- **Fix:** Document trusted browser/driver archive sources and a review date. Track upstream replacement, recheck on WDIO upgrades, and remove the exception when the chain is clean. Avoid blindly accepting a suggested major downgrade.
+- **Effort:** S
+- **Grade lift:** B → B+ when the vulnerable chain is replaced; a time-bounded exception improves control meanwhile.
+
+---
+
+## G — Performance & Scalability — B
+
+Season caching and event suppression reduce repeated work (`src-tauri/src/poll.rs:210–338`); immutable inputs are shared with Arc before blocking-pool processing (`src-tauri/src/state.rs:281–348`). The draft poll path also builds outside locks. Several direct snapshot paths still perform expensive work under shared locks; no fresh latency benchmark was run.
+
+#### ~~G1~~ ✓ done 2026-09-08 — Build direct and remote draft snapshots outside locks
+- **Where:** draft-assistant/src-tauri/src/companion/routes.rs:249–255; draft-assistant/src-tauri/src/companion/ws.rs:213–218; draft-assistant/src-tauri/src/commands_draft.rs:238–243; draft-assistant/src-tauri/src/commands_draft/tick.rs:232–255; draft-assistant/src-tauri/src/view.rs:235–258
+- **What's wrong:** Direct reads and companion connection snapshots hold loaded/config guards while building the draft view, including simulations and player copies. HTTP also serializes while holding the guards, unlike the repaired polling path.
+- **Impact:** Moderate — simultaneous phone reconnects can unnecessarily block polling and commands.
+- **Fix:** Move the existing off-lock builder into shared state utilities. Snapshot inputs under locks, release guards, then build and serialize on the blocking pool; preserve caller identity checks. Measure concurrent snapshot/poll latency.
+- **Effort:** M
+- **Grade lift:** B → B+ — extends the existing performance approach to remaining entry points.
+
+---
 
 ## H — Documentation & Onboarding — B
 
-README explains installation, refresh, manual picks, exports and preview limitations; companion API is separately documented. Some statements retained from older architecture are now inaccurate.
+The app README explains polling, caching, architecture and release behavior (`draft-assistant/README.md:152–245,247–345,374–404`). Root documentation covers Tailscale/HTTPS, and TESTING distinguishes fixtures from physical-device evidence (`draft-assistant/TESTING.md:22–29,104–123`). AI setup text is stale and clean-machine prerequisites are missing.
 
-#### H1 — Correct obsolete server/build descriptions
-- **Where:** `draft-assistant/README.md:11`, `draft-assistant/TESTING.md:135`, `draft-assistant/src-tauri/Cargo.toml:73`.
-- **What's wrong:** “No server anywhere” and older Axum-free default-build expectations conflict with the embedded companion server and nonoptional Axum dependency.
-- **Impact:** Minor — onboarding and verification instructions misdescribe the current architecture.
-- **Fix:** Describe the optional embedded LAN server and distinguish legitimate companion dependencies from WDIO-only automation dependencies.
+#### ~~H1~~ ✓ done 2026-09-08 — Match AI setup instructions to automatic routing
+- **Where:** draft-assistant/README.md:87–88,354–365; draft-assistant/src/components/ChatControls.tsx:4–6; draft-assistant/src-tauri/src/commands_chat.rs:86–96
+- **What's wrong:** README directs users to choose a provider or Claude connection in a picker that was removed. Installed Claude CLI now takes precedence automatically and the stored provider preference is ignored.
+- **Impact:** Moderate — authentication and billing troubleshooting points to a nonexistent control.
+- **Fix:** Explain model selection separately from automatic provider routing, CLI precedence and the API-key fallback. Remove the obsolete picker instructions.
 - **Effort:** S
-- **Grade lift:** B → B+ (aligns documentation with the shipped architecture).
+- **Grade lift:** B → B+ with H2 — restores accurate AI onboarding.
+
+#### ~~H2~~ ✓ done 2026-09-08 — Document prerequisites for a clean development Mac
+- **Where:** README.md:10–16; draft-assistant/README.md:91–104
+- **What's wrong:** Quick starts jump to npm installation and tauri dev without listing Node/npm, Rust or Apple developer tool prerequisites.
+- **Impact:** Moderate — new contributors need independent troubleshooting before the documented setup works.
+- **Fix:** List prerequisites using repository-supported toolchain versions, installation links and verification commands. Distinguish browser preview from native build requirements.
+- **Effort:** S
+- **Grade lift:** B → B+ with H1 — makes setup reproducible.
+
+---
 
 ## I — Developer Experience & Tooling — B+
 
-`npm run verify` provides strict formatting, lint, type, test and coverage gates; guard-script tests validate release and consistency tooling (`package.json`, `scripts/`). Native automation uses its own build directory. Failed browser runs currently lose useful CI evidence.
+The repository enforces LOC/CSS rules, formatting, strict TypeScript/React lint and Clippy (`draft-assistant/package.json:6–44`, `draft-assistant/eslint.config.js:32–61`). Pre-commit resolves the actual worktree before verify:mid (`.githooks/pre-commit:8–13`), and workflows pin action SHAs. The companion JavaScript has formatting but no meaningful ESLint rule set.
 
-#### I1 — Retain browser failure artifacts in CI
-- **Where:** `draft-assistant/playwright.config.ts:40`, `.github/workflows/ci.yml:117`.
-- **What's wrong:** CI uses a list reporter and writes screenshots to `e2e-browser/.results`, but uploads `playwright-report`. Traces are configured for first retry while retries are zero.
-- **Impact:** Moderate — browser failures lack the screenshots/traces needed for fast diagnosis.
-- **Fix:** Add HTML reporting in CI, use retain-on-failure traces, and upload both report and results directories.
+#### ~~I1~~ ✓ done 2026-09-08 — Lint the shipped companion JavaScript
+- **Where:** draft-assistant/eslint.config.js:13–33; draft-assistant/src-tauri/companion-static/*.js
+- **What's wrong:** ESLint config blocks cover scripts/configs, browser tests and src TypeScript, but not the shipped phone scripts. eslint --print-config for companion-static/app.js returned an empty rules object.
+- **Impact:** Moderate — lint passes while common JavaScript defects in the phone client are unchecked.
+- **Fix:** Add an ESLint block for companion-static scripts with recommended rules, browser globals and the correct classic-script source type. Declare intentional cross-file globals explicitly; verify an undefined identifier is caught.
 - **Effort:** S
-- **Grade lift:** B+ → A− (makes failed test evidence available).
-
-## Pre-remediation validation
-
-- `npm run verify` exited 0: 1,408 Rust tests passed, none ignored in the reported test summaries. Rust coverage: 93.51% lines, 90.68% functions, above both configured floors. Production build passed.
-- `npm run test:e2e` exited 0: one native WKWebView smoke test passed. It restored the current league shell on the Season screen; this is not a full draft rehearsal. The season screen reported no week-1 matchup rows from Sleeper, relevant to season use rather than pre-draft board support.
-- The harness logged an external `tauri-driver` diagnostic and optional JS-injection warnings. Source inspection of installed `@wdio/tauri-service` showed diagnostics omit the configured embedded provider; the actual embedded native test nevertheless ran and passed. No driver installation or app-security relaxation was needed.
-- C1 was experimentally reproduced with one temporary test; that intentionally failing audit probe was removed.
-- Fresh regular **0.3.1** app built successfully with `npm run tauri build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'`; exit 0. `codesign --verify --deep --strict` passed. It is ad-hoc signed, not notarized. The first invocation built the app but exited 1 at updater signing because no release private key was supplied; the local-only override omitted updater artifact creation without editing repository configuration.
-- The fresh app was opened and visibly restored the league, then switched to Draft. The live draft screen rendered recommendations, a 453-player board, live sync, and the explicit message “The draft order has not been posted yet.” Public Sleeper lookup independently confirms the configured user is a league member but has no assigned draft-order seat yet.
-- Native chat settings detected Claude Code and offered both Opus 5 and Fable 5, with Claude Code/API key routes. A real in-app Opus 5 / Low / Claude Code turn returned **Draft chat connection OK** and was saved as a test conversation. The regular app is left open on Draft with chat visible. Fable and the separate API-key route were not called.
-- Current-head hosted native End-to-end workflow completed successfully; hosted CI was still in progress at the latest inspection. Local canonical verification already passed.
+- **Grade lift:** B+ → A− — applies the existing quality gate to the phone application.

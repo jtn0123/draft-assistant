@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Api } from "./api";
 import type { DraftView } from "./types";
 import type { SeasonView } from "./season-types";
+import { DRAFT_SCHEMA_VERSION } from "./draft-contract.generated";
 
 const invoke = vi.fn();
 const listen = vi.fn();
@@ -16,7 +17,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 const draftView = {
-  schema_version: "1.7",
+  schema_version: DRAFT_SCHEMA_VERSION,
   league: { league_id: "L1", name: "Test", season: "2026", platform: "sleeper" },
 } as unknown as DraftView;
 const seasonView = { schema_version: "1.4" } as unknown as SeasonView;
@@ -46,7 +47,7 @@ describe("schema validation", () => {
     expect(validateDraftView(draftView)).toBe(draftView);
     expect(validateSeasonView(seasonView)).toBe(seasonView);
     expect(() => validateDraftView({ schema_version: "0.9" } as DraftView)).toThrow(
-      /expected schema 1\.7, received 0\.9/,
+      `expected schema ${DRAFT_SCHEMA_VERSION}, received 0.9`,
     );
     expect(() => validateSeasonView({} as SeasonView)).toThrow(/received missing/);
   });

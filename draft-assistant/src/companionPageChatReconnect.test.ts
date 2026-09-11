@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { runInNewContext } from "node:vm";
+import { runCompanionScript } from "./test/companionScript";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import { boot, FakeSocket, flush, okJson } from "./test/companionPageHarness";
 
@@ -193,7 +193,7 @@ describe("boot.js", () => {
         return 1;
       },
     };
-    runInNewContext(asset("boot.js"), { window, document });
+    runCompanionScript("boot.js", { window, document });
     const button = document.getElementById("boot-reload") as HTMLButtonElement;
     expect(button.hidden).toBe(true);
     giveUp!();

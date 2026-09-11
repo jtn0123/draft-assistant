@@ -14,7 +14,6 @@
     DEVICE_KEY,
     DEVICE_ID_KEY,
     HOST_KEY,
-    REVOKED,
     TABS,
     LIVE,
     NOTES,
@@ -26,7 +25,6 @@
     HOST_TIMEOUT,
     timedFetch,
     draftClockFacts,
-    parseMarkdown,
     initialState,
     reduce,
     syncLine,
@@ -220,7 +218,7 @@
         heartbeat.start();
       };
       socket.onmessage = (event) => {
-        let frame = null;
+        let frame;
         try {
           frame = JSON.parse(event.data);
         } catch {

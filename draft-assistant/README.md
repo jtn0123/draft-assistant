@@ -85,13 +85,23 @@ can be saved while the draft seat remains pending.
 
 The available-player list scrolls independently, keeping the draft header and
 other panels in place. In **Ask AI**, expand the model picker to change the
-model, effort, or Claude connection. Choosing a model closes the picker so the
+model or effort. Choosing a model closes the picker so the
 conversation has more room.
 
 ## Run (dev)
 
+For browser preview, install [Node.js](https://nodejs.org/en/download) 22 or
+newer (including npm); CI uses the checked-in Node 22. Native macOS builds also need
+[Rust via rustup](https://rustup.rs/) and Apple's Command Line Tools
+(`xcode-select --install`). The root `rust-toolchain.toml` selects Rust 1.98.0,
+Clippy and rustfmt automatically. Verify with `node --version`, `npm --version`,
+`rustup show active-toolchain` and `xcode-select -p` from this checkout.
+
+Use `npm run dev` for the fixture-backed browser preview. It does not verify
+native Tauri, Keychain, CLI authentication or real-device connectivity.
+
 ```bash
-npm install
+npm ci
 npm run tauri dev
 ```
 
@@ -353,13 +363,17 @@ in `npm run verify`.
 
 ## AI chat
 
-Choose the provider and model in the chat panel:
+Choose the model in the chat panel. The app selects the connection automatically:
 
 - **Claude Code** — runs the `claude` CLI already installed on this Mac, signed
   in with your Claude subscription. No API key needed. Only offered when the
-  CLI is found.
-- **API key** — calls the Anthropic API directly. The key is stored in the
-  macOS Keychain (`secrets.rs`), never in the repo or the config file.
+  CLI is found and takes precedence over an API key when installed. Sign in
+  to the CLI on this Mac before using Claude models.
+- **API key** — used for Claude models when no Claude CLI is installed. Set
+  the Anthropic key in settings. macOS uses Keychain when available; the
+  existing local config fallback applies when Keychain is unavailable. There
+  is no provider picker or automatic API fallback after a CLI authentication
+  error: resolve the CLI sign-in problem first.
 
 - **Codex** — runs the authenticated `codex` CLI for GPT-6 Astra or
   GPT-5.6 Sol. Sign in to Codex on the Mac first; no OpenAI API key is needed.

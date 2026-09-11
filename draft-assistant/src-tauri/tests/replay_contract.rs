@@ -34,15 +34,19 @@ fn frontend_source(name: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
 
-/// The literal in `src/api.ts` that `validateDraftView` compares against.
-/// Pulled out of the source rather than duplicated here, so this test cannot
-/// be the third copy that drifts.
+/// The generated literal imported by the API validator, not a second
+/// hand-maintained version in api.ts. Pin the import and its use as well.
 fn ts_schema_constant(name: &str) -> String {
-    let source = frontend_source("api.ts");
-    let needle = format!("const {name} = \"");
+    let api = frontend_source("api.ts");
+    let generated_name = name.replace("_VIEW", "");
+    assert!(api.contains(&format!("{generated_name} as {name}")));
+    assert!(api.contains("from \"./draft-contract.generated\""));
+    assert!(api.contains(&format!("value.schema_version !== {name}")));
+    let source = frontend_source("draft-contract.generated.ts");
+    let needle = format!("const {generated_name} = \"");
     let start = source
         .find(&needle)
-        .unwrap_or_else(|| panic!("src/api.ts no longer declares {name}"))
+        .unwrap_or_else(|| panic!("generated contract no longer declares {generated_name}"))
         + needle.len();
     let rest = &source[start..];
     let end = rest.find('"').expect("unterminated schema constant");
@@ -134,8 +138,7 @@ fn the_schema_version_agrees_across_rust_the_dump_and_the_typescript_that_valida
         assert_eq!(
             serialized,
             ts_schema_constant(ts_name),
-            "src/api.ts pins {ts_name} at a different version than the {what} dump carries; \
-             bump both together or the browser preview refuses every dump"
+            "the generated {ts_name} differs from the {what} dump; regenerate the contract"
         );
     }
 }

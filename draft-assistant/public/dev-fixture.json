@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.7",
+  "schema_version": "1.8",
   "generated_at": 1787882005,
   "league": {
     "league_id": "1389710366300200960",
@@ -8105,7 +8105,7 @@
         "DEF"
       ],
       "rank": 1,
-      "title_odds": 1.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8125,7 +8125,7 @@
         "DEF"
       ],
       "rank": 2,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": true
     },
     {
@@ -8145,7 +8145,7 @@
         "DEF"
       ],
       "rank": 3,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8165,7 +8165,7 @@
         "DEF"
       ],
       "rank": 4,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8185,7 +8185,7 @@
         "DEF"
       ],
       "rank": 5,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8205,7 +8205,7 @@
         "DEF"
       ],
       "rank": 6,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8225,7 +8225,7 @@
         "DEF"
       ],
       "rank": 7,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8245,7 +8245,7 @@
         "DEF"
       ],
       "rank": 8,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8265,7 +8265,7 @@
         "DEF"
       ],
       "rank": 9,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8285,7 +8285,7 @@
         "DEF"
       ],
       "rank": 10,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8305,7 +8305,7 @@
         "DEF"
       ],
       "rank": 11,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8325,7 +8325,7 @@
         "DEF"
       ],
       "rank": 12,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8345,7 +8345,7 @@
         "DEF"
       ],
       "rank": 13,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     },
     {
@@ -8365,7 +8365,7 @@
         "DEF"
       ],
       "rank": 14,
-      "title_odds": 0.0,
+      "title_odds": null,
       "is_mine": false
     }
   ]

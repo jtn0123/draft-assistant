@@ -326,7 +326,8 @@ describe("SidePanel pick market", () => {
 
   it("survives a view captured before pick pricing existed", () => {
     const view = fixture();
-    delete view.pick_prices;
+    // Deliberately malformed legacy input, outside the current wire contract.
+    Reflect.deleteProperty(view, "pick_prices");
     render(<SidePanel view={view} />);
     expect(screen.queryByText("Pick market")).not.toBeInTheDocument();
   });

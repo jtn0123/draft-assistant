@@ -165,6 +165,10 @@
       all.length,
       rows.map((p) => [
         p.player_id,
+        p.name,
+        p.position,
+        p.team,
+        p.bye_week,
         p.overall_rank,
         p.tier,
         p.adp,

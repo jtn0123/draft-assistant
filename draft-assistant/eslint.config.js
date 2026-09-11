@@ -6,7 +6,15 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["coverage", "dist", "src-tauri/target"] },
+  {
+    ignores: [
+      "coverage",
+      "dist",
+      "src-tauri/target",
+      "coverage-companion",
+      "playwright-report-mobile",
+    ],
+  },
   // The build and lint configs themselves, plus the guard scripts. Previously
   // nothing checked these at all: they sat outside both the ESLint glob and
   // the typechecked project.
@@ -16,6 +24,15 @@ export default tseslint.config(
     languageOptions: {
       ecmaVersion: 2022,
       globals: globals.node,
+    },
+  },
+  {
+    files: ["src-tauri/companion-static/*.js"],
+    extends: [js.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "script",
+      globals: { ...globals.browser, ...globals.serviceworker },
     },
   },
   // The browser end-to-end suite. Node-side test code, not app code: no React

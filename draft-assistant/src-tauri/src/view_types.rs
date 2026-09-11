@@ -16,11 +16,29 @@ use std::collections::HashMap;
 /// The frontend gate in `src/api.ts` refuses any other version outright, and
 /// `tests/fixture_shape.rs` refuses to let it move without the checked-in
 /// `public/dev-fixture.json` moving with it.
-pub const DRAFT_SCHEMA_VERSION: &str = "1.7";
+pub const DRAFT_SCHEMA_VERSION: &str = "1.8";
 
 /// The two platforms a league can come from, as they are spelled on the wire.
 pub const SLEEPER: &str = "sleeper";
 pub const YAHOO: &str = "yahoo";
+
+/// Closed set of platform names serialized in league summaries.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Platform {
+    Sleeper,
+    Yahoo,
+}
+
+impl Platform {
+    pub fn for_league(league_id: &str) -> Self {
+        if is_yahoo_key(league_id) {
+            Self::Yahoo
+        } else {
+            Self::Sleeper
+        }
+    }
+}
 
 /// Which platform an id belongs to, read off the id itself.
 ///
@@ -147,7 +165,7 @@ pub struct LeagueSummary {
     /// "sleeper" or "yahoo" — which platform this league is read from. The
     /// frontend shows it next to the league name and uses it to decide which
     /// attribution line to print.
-    pub platform: String,
+    pub platform: Platform,
     pub name: String,
     pub season: String,
     pub total_rosters: u32,

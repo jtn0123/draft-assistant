@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { gatedAdvisories, verdict } from "./check-npm-audit.mjs";
+import { gatedAdvisories, verdict, parseAuditResult } from "./check-npm-audit.mjs";
 
 const extractZip = {
   url: "https://github.com/advisories/GHSA-jmr9-qjv8-65gv",
@@ -53,4 +53,31 @@ test("lowering nothing: a clean tree with a leftover allowlist entry is reported
   const { blocking, stale } = verdict(new Map(), { "GHSA-jmr9-qjv8-65gv": "fixed upstream since" });
   assert.deepEqual(blocking, []);
   assert.deepEqual(stale, ["GHSA-jmr9-qjv8-65gv"]);
+});
+
+const cleanReport = {
+  auditReportVersion: 2,
+  vulnerabilities: {},
+  metadata: { vulnerabilities: { total: 0 } },
+};
+function result(report, status = 0) {
+  return { stdout: JSON.stringify(report), status };
+}
+test("audit operational failures never count as a clean report", () => {
+  for (const failure of [
+    result({ error: { code: "ENOAUDIT" } }, 1),
+    result({}),
+    result({ vulnerabilities: {} }),
+    result({ metadata: {} }),
+    { stdout: "not json", status: 1 },
+    { stdout: "", error: new Error("spawn failed") },
+    { ...result(cleanReport), signal: "SIGTERM" },
+    result(cleanReport, 2),
+  ])
+    assert.throws(() => parseAuditResult(failure, "."));
+});
+test("a complete clean report and vulnerability exit status remain valid", () => {
+  assert.deepEqual(parseAuditResult(result(cleanReport), "."), cleanReport);
+  const found = { ...cleanReport, vulnerabilities: audit(extractZip).vulnerabilities };
+  assert.deepEqual(parseAuditResult(result(found, 1), "e2e"), found);
 });

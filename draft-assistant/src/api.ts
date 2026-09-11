@@ -21,12 +21,10 @@ import { readFollow } from "./companion";
 import { remoteApi } from "./apiRemote";
 import type { UpdateCheck } from "./updateRow";
 
-// Kept in step with DRAFT_SCHEMA_VERSION in src-tauri/src/view_types.rs and
-// SEASON_SCHEMA_VERSION in src-tauri/src/season.rs. Bump both sides together
-// with the fixtures in public/ — src-tauri/tests/fixture_shape.rs fails if the
-// fixtures and the structs disagree about a single field.
-const DRAFT_VIEW_SCHEMA_VERSION = "1.7";
-const SEASON_VIEW_SCHEMA_VERSION = "1.4";
+import {
+  DRAFT_SCHEMA_VERSION as DRAFT_VIEW_SCHEMA_VERSION,
+  SEASON_SCHEMA_VERSION as SEASON_VIEW_SCHEMA_VERSION,
+} from "./draft-contract.generated";
 
 export function validateDraftView(value: DraftView): DraftView {
   if (value.schema_version !== DRAFT_VIEW_SCHEMA_VERSION) {

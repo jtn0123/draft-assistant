@@ -224,3 +224,13 @@ it("folds the list back when a chip is tapped, and leaves the button out when it
   expect(rows(page)).toHaveLength(12);
   expect(showAll(page)?.textContent).toBe("Show all 13");
 });
+
+it("refreshes displayed player details even when ranking facts are unchanged", async () => {
+  const original = player(1, "WR");
+  const { page, feed } = await picksTab([original]);
+  feed([{ ...original, name: "Updated player", position: "RB", team: "BUF", bye_week: 12 }]);
+  expect(rows(page)[0]).toHaveTextContent("Updated player");
+  expect(rows(page)[0].querySelector(".pos")).toHaveTextContent("RB");
+  expect(rows(page)[0]).toHaveTextContent("BUF");
+  expect(rows(page)[0]).toHaveTextContent("Bye 12");
+});

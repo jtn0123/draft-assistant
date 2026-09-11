@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { createContext, runInContext, runInNewContext } from "node:vm";
+import { createContext } from "node:vm";
+import { runCompanionScript } from "./test/companionScript";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import { boot, FakeSocket, flush, okJson, TOKEN_KEY } from "./test/companionPageHarness";
 
@@ -39,7 +40,7 @@ const asset = (file: string): string =>
   readFileSync(resolve(`src-tauri/companion-static/${file}`), "utf8");
 const loadAlerts = (): Alerts => {
   const window = { Companion: {} };
-  runInNewContext(asset("alerts.js"), { window });
+  runCompanionScript("alerts.js", { window });
   return window.Companion as Alerts;
 };
 const NOW = 1_700_000_000_000;
@@ -294,7 +295,7 @@ const scripts = [
   "alerts",
   "compact",
   "app",
-].map((name) => asset(`${name}.js`));
+].map((name) => `${name}.js`);
 const OFF = { [TOKEN_KEY]: "tok-1", "da.companion.alerts": "off" };
 
 /** The harness's boot over a window with a `navigator` that vibrates and,
@@ -330,7 +331,7 @@ async function phone(options: { saved?: Record<string, string>; audio?: boolean 
   };
   const sandbox = { window, document, navigator, fetch: () => okJson(null), WebSocket: FakeSocket };
   const context = createContext({ ...sandbox, URLSearchParams });
-  for (const script of scripts) runInContext(script, context);
+  for (const script of scripts) runCompanionScript(script, context);
   await flush();
   const socket = FakeSocket.instances[0];
   if (!socket) throw new Error("no socket");

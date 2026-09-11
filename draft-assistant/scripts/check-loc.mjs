@@ -9,6 +9,8 @@ export const EXCLUDED_DIRECTORIES = new Set([
   ".claude",
   ".git",
   "coverage",
+  "coverage-companion",
+  "playwright-report-mobile",
   "dist",
   "gen",
   "icons",

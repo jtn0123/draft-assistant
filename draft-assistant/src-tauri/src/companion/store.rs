@@ -177,22 +177,19 @@ fn migrate_legacy_file(store: &dyn SecretStore, data_dir: &Path, item: Item) -> 
     Some(stored)
 }
 
-/// Put the pairings and the code in the store.
-///
-/// A failed write is logged without any of its content and otherwise ignored:
-/// the pairing the user just made is already live in memory, and losing it at
-/// the next restart is not a reason to refuse it now.
-pub fn save(store: &dyn SecretStore, stored: &StoredHub) {
-    save_item(store, stored, DEVICES);
+/// Persist the pairings, reporting failure without leaking secret-store content.
+pub fn save(store: &dyn SecretStore, stored: &StoredHub) -> Result<(), String> {
+    save_item(store, stored, DEVICES)
 }
 
 /// [`save`] against a named item.
-pub fn save_item(store: &dyn SecretStore, stored: &StoredHub, item: Item) {
-    if write(store, stored, item).is_err() {
-        // Deliberately not the error text: a store error can quote the value
-        // it was handed, and that value is every paired phone's token.
-        crate::applog::warn("could not save the paired devices");
-    }
+pub fn save_item(store: &dyn SecretStore, stored: &StoredHub, item: Item) -> Result<(), String> {
+    write(store, stored, item).map_err(|()| {
+        // Store errors can quote tokens. Only return this fixed message.
+        let message = "could not save the paired devices";
+        crate::applog::warn(message);
+        message.to_string()
+    })
 }
 
 fn write(store: &dyn SecretStore, stored: &StoredHub, item: Item) -> Result<(), ()> {

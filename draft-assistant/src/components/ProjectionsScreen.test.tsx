@@ -210,3 +210,25 @@ it("counts a roster with no seat of yours out of the headline", () => {
   // The table is still the league's, whether or not you are in it.
   expect(document.querySelectorAll(".proj-draft-row.proj-body")).toHaveLength(2);
 });
+
+it("withholds odds and ranks when drafted players have no projections", () => {
+  const draft = board({
+    draft_projections: [1, 2].map((slot) =>
+      drafted({
+        slot,
+        starters: 0,
+        bench: 0,
+        rank: slot,
+        is_mine: slot === 1,
+        title_odds: null,
+        holes: ["QB"],
+      }),
+    ),
+  });
+  render(<ProjectionsScreen draft={draft} season={null} />);
+  expect(screen.queryByText("100%")).not.toBeInTheDocument();
+  expect(screen.queryByText("0%")).not.toBeInTheDocument();
+  expect(screen.queryByText("1st of 2 on projected starters")).not.toBeInTheDocument();
+  expect(screen.getAllByText("Not available")).toHaveLength(3);
+  expect(screen.getByText("Waiting for projected starters")).toBeInTheDocument();
+});

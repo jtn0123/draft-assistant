@@ -202,12 +202,20 @@ async fn set_my_username_inner(state: &AppState, username: String) -> Result<Str
         .user(&username)
         .await
         .map_err(to_message)?;
-    let mut config = state.config.lock().await;
-    config.my_user_id = Some(user.user_id.clone());
-    let pending = state.engine.prepare_config_save(&config)?;
-    drop(config);
-    pending.write().await?;
+    save_identity(state, user.user_id.clone()).await?;
     Ok(user.user_id)
+}
+
+async fn save_identity(state: &AppState, user_id: String) -> Result<(), String> {
+    let mut config = state.config.lock().await;
+    let mut next = config.clone();
+    next.my_user_id = Some(user_id);
+    // Identity is a transactional setting, not optimistic UI state. Keep the
+    // ordering lock until this small user-triggered save finishes, so failure
+    // cannot change the active roster or roll back another settings writer.
+    state.engine.prepare_config_save(&next)?.write().await?;
+    *config = next;
+    Ok(())
 }
 
 #[tauri::command]
@@ -235,10 +243,7 @@ pub async fn get_state(state: State<'_, AppState>) -> Result<DraftView, String> 
 }
 
 async fn get_state_inner(state: &AppState) -> Result<DraftView, String> {
-    let loaded = state.loaded.lock().await;
-    let loaded = loaded.as_ref().ok_or("no league loaded")?;
-    let config = state.config.lock().await;
-    Ok(view_from(loaded, &config))
+    crate::state::draft_view_snapshot(state, None).await
 }
 
 /// Re-poll picks once, right now.
@@ -428,12 +433,7 @@ pub async fn export_state(state: State<'_, AppState>) -> Result<String, String> 
 }
 
 async fn export_state_inner(state: &AppState) -> Result<String, String> {
-    let view = {
-        let loaded = state.loaded.lock().await;
-        let loaded = loaded.as_ref().ok_or("no league loaded")?;
-        let config = state.config.lock().await;
-        view_from(loaded, &config)
-    };
+    let view = crate::state::draft_view_snapshot(state, None).await?;
     // Serialising a whole draft view and writing it out is megabytes of work.
     // Both locks are let go first, so a poll tick landing mid-export is not
     // held up behind the disk.

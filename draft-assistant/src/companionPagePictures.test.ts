@@ -4,9 +4,7 @@
 // script, so the page is booted for real under the harness for the rows, and
 // the loader is run on its own for what the harness window cannot reach.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { runInNewContext } from "node:vm";
+import { runCompanionScript } from "./test/companionScript";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   boot,
@@ -126,7 +124,7 @@ const settle = async () => {
 /** The loader alone, over a window the test owns. */
 const loadPictures = (doc: unknown = document): CreatePictures => {
   const window: { Companion?: { createPictures: CreatePictures } } = {};
-  runInNewContext(readFileSync(resolve("src-tauri/companion-static/pictures.js"), "utf8"), {
+  runCompanionScript("pictures.js", {
     window,
     document: doc,
   });

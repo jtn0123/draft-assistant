@@ -65,3 +65,31 @@ fn a_draft_command_that_fails_leaves_an_error_line_naming_it() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn a_failed_identity_save_does_not_change_the_active_roster() {
+    let (state, dir) = AppState::scratch("identity-transaction");
+    state.config.lock().await.my_user_id = Some("original".into());
+    // A directory cannot be replaced by the settings file, even as root.
+    std::fs::create_dir_all(dir.join("config.json")).unwrap();
+    assert!(save_identity(&state, "replacement".into()).await.is_err());
+    assert_eq!(
+        state.config.lock().await.my_user_id.as_deref(),
+        Some("original")
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn a_successful_identity_save_updates_memory_and_disk_together() {
+    let (state, dir) = AppState::scratch("identity-success");
+    save_identity(&state, "replacement".into()).await.unwrap();
+    assert_eq!(
+        state.config.lock().await.my_user_id.as_deref(),
+        Some("replacement")
+    );
+    let stored: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("config.json")).unwrap()).unwrap();
+    assert_eq!(stored["my_user_id"], "replacement");
+    std::fs::remove_dir_all(dir).unwrap();
+}

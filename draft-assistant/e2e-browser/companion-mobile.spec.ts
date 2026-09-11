@@ -24,6 +24,8 @@ const noOverflow = async (page: Page) => {
 
 for (const scheme of ["light", "dark"] as const) {
   test(`walks every tab in ${scheme}`, async ({ page }, info) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(String(error)));
     await page.emulateMedia({ colorScheme: scheme });
     const p = `${info.project.name}-${scheme}`;
     const host = backend({
@@ -54,9 +56,10 @@ for (const scheme of ["light", "dark"] as const) {
         }),
       }),
     );
-    // Team marks come from Sleeper's CDN; let those through so the pictures
-    // are real in the screenshots. Nothing is asserted about them.
-    await page.route("https://sleepercdn.com/**", (route) => route.continue());
+    // A checked-in image keeps layout and image loading independent of the CDN.
+    await page.route("https://sleepercdn.com/**", (route) =>
+      route.fulfill({ path: "e2e-browser/fixtures/team-mark.svg", contentType: "image/svg+xml" }),
+    );
     await page.goto("/");
     await shot(page, "0-pair", p);
     await pair(page, host.code);
@@ -79,7 +82,7 @@ for (const scheme of ["light", "dark"] as const) {
     await page.getByRole("button", { name: "Picks" }).click();
     await expect(page.locator("#available-filter")).toBeVisible();
     await noOverflow(page);
-    // The first row's team mark is a real picture from the CDN.
+    // The first row must load the deterministic team-mark fixture.
     await expect
       .poll(
         () =>
@@ -141,8 +144,6 @@ for (const scheme of ["light", "dark"] as const) {
     await shot(page, "6-reconnecting", p);
     await page.locator("#reconnect-pill").click();
     await expect(page.locator("#reconnect-pill")).toBeHidden();
-    const errors: string[] = [];
-    page.on("pageerror", (e) => errors.push(String(e)));
     expect(errors).toEqual([]);
   });
 }

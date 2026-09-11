@@ -19,7 +19,7 @@ export const follow: FollowRecord = {
 };
 
 export const draftView = {
-  schema_version: "1.7",
+  schema_version: "1.8",
   league: { league_id: "L1", name: "Test", season: "2026", platform: "sleeper" },
 } as unknown as DraftView;
 

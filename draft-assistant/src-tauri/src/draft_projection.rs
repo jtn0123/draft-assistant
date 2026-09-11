@@ -45,8 +45,9 @@ pub struct TeamProjection {
     pub holes: Vec<String>,
     /// 1 for the roster projecting the most starting points.
     pub rank: u32,
-    /// Share of simulations this roster finishes the season first on points.
-    pub title_odds: f64,
+    /// Share of simulations this roster finishes first on points. Unavailable
+    /// when no roster has projected starters: an empty draft has no favorite.
+    pub title_odds: Option<f64>,
     pub is_mine: bool,
 }
 
@@ -181,21 +182,28 @@ fn title_odds(means: &[f64], sigmas: &[f64]) -> Vec<f64> {
         })
         .max(1);
     let mut rng = Rng(seed);
-    let mut wins = vec![0usize; means.len()];
+    let mut wins = vec![0.0; means.len()];
+    let mut leaders = Vec::with_capacity(means.len());
     for _ in 0..SIMULATIONS {
         let mut best = f64::NEG_INFINITY;
-        let mut at = 0usize;
+        leaders.clear();
         for (index, (mean, sigma)) in means.iter().zip(sigmas).enumerate() {
             let total = mean + sigma * rng.normal();
             if total > best {
                 best = total;
-                at = index;
+                leaders.clear();
+                leaders.push(index);
+            } else if total == best {
+                leaders.push(index);
             }
         }
-        wins[at] += 1;
+        let share = 1.0 / leaders.len() as f64;
+        for &index in &leaders {
+            wins[index] += share;
+        }
     }
     wins.into_iter()
-        .map(|won| won as f64 / SIMULATIONS as f64)
+        .map(|won| won / SIMULATIONS as f64)
         .collect()
 }
 
@@ -224,13 +232,15 @@ pub fn project(rules: &RosterRules, teams: &[Team<'_>]) -> Vec<TeamProjection> {
             bench,
             holes,
             rank: 0,
-            title_odds: 0.0,
+            title_odds: None,
             is_mine: team.is_mine,
         });
     }
     let means: Vec<f64> = rows.iter().map(|row| row.starters).collect();
-    for (row, odds) in rows.iter_mut().zip(title_odds(&means, &sigmas)) {
-        row.title_odds = odds;
+    if means.iter().any(|mean| *mean > 0.0) {
+        for (row, odds) in rows.iter_mut().zip(title_odds(&means, &sigmas)) {
+            row.title_odds = Some(odds);
+        }
     }
     rows.sort_by(|a, b| b.starters.total_cmp(&a.starters));
     for (at, row) in rows.iter_mut().enumerate() {

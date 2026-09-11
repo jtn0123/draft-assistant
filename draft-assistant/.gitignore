@@ -34,3 +34,7 @@ node_modules/.tmp
 playwright-report
 e2e-browser/.results
 e2e-browser/.results-mobile
+
+# Separate phone coverage and browser reports
+coverage-companion
+playwright-report-mobile

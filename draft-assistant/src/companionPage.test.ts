@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { createContext, runInContext } from "node:vm";
+import { createContext } from "node:vm";
+import { runCompanionScript } from "./test/companionScript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -81,15 +80,14 @@ interface Companion {
 // and under jsdom `import.meta.url` is not a file URL.
 // helpers.js publishes `window.Companion`; app.js only reads it back. Both
 // run so a helper app.js needs but helpers.js forgot to publish fails here.
-const source = ["helpers.js", "clock.js", "models.js", "app.js"]
-  .map((file) => readFileSync(resolve(`src-tauri/companion-static/${file}`), "utf8"))
-  .join("\n");
+const scripts = ["helpers.js", "clock.js", "models.js", "app.js"];
 
 const sandbox: { window: { Companion?: Companion }; document: unknown } = {
   window: {},
   document: { readyState: "complete", getElementById: () => null },
 };
-runInContext(source, createContext(sandbox));
+const context = createContext(sandbox);
+for (const script of scripts) runCompanionScript(script, context);
 const companion = sandbox.window.Companion as Companion;
 
 describe("naming the device", () => {

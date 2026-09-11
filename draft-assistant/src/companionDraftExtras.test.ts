@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
+import { runCompanionScript } from "./test/companionScript";
 import { beforeEach, expect, it } from "vitest";
 
 interface QueuePick {
@@ -15,7 +14,7 @@ interface Extras {
 const load = () => {
   const window = { Companion: {} as Extras };
   for (const file of ["helpers.js", "clock.js"]) {
-    runInNewContext(readFileSync(`src-tauri/companion-static/${file}`, "utf8"), {
+    runCompanionScript(file, {
       window,
       document,
     });

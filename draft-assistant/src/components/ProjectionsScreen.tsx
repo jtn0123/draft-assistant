@@ -114,13 +114,25 @@ function FromTheDraft({ rows }: { rows: TeamProjection[] }) {
           <span className="muted small">
             {mine === null
               ? "no seat in this draft"
-              : `${ordinal(mine.rank)} of ${rows.length} on projected starters`}
+              : mine.title_odds === null
+                ? "Waiting for projected starters"
+                : `${ordinal(mine.rank)} of ${rows.length} on projected starters`}
           </span>
         </div>
         <div className="proj-stat">
           <span className="eyebrow">Wins the league</span>
-          <span className="proj-stat-value">{mine === null ? "-" : pct(mine.title_odds)}</span>
-          <span className="muted small">4,000 seasons off these rosters</span>
+          <span className="proj-stat-value">
+            {mine === null
+              ? "-"
+              : mine.title_odds === null
+                ? "Not available"
+                : pct(mine.title_odds)}
+          </span>
+          <span className="muted small">
+            {mine?.title_odds === null
+              ? "Odds need projected starters"
+              : "4,000 seasons off these rosters"}
+          </span>
         </div>
       </div>
       <section className="proj-card proj-table">
@@ -141,11 +153,13 @@ function FromTheDraft({ rows }: { rows: TeamProjection[] }) {
                 : "proj-row proj-draft-row proj-body"
             }
           >
-            <span className="muted num">{row.rank}</span>
+            <span className="muted num">{row.title_odds === null ? "-" : row.rank}</span>
             <span className="ellipsis">{row.name ?? `Slot ${row.slot}`}</span>
             <span className="right num proj-points">{fmt(row.starters, 0)}</span>
             <span className="right num muted">{fmt(row.bench, 0)}</span>
-            <span className="right num">{pct(row.title_odds)}</span>
+            <span className="right num">
+              {row.title_odds === null ? "Not available" : pct(row.title_odds)}
+            </span>
             <span className="muted ellipsis">{row.holes.join(", ") || "·"}</span>
           </div>
         ))}

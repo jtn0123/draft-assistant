@@ -169,7 +169,14 @@ async fn opening_frames(srv: &Srv) -> Vec<String> {
         frame("devices", serde_json::to_value(srv.hub.devices())),
     ];
     if let Some(view) = draft_view(srv).await {
-        frames.push(frame("draft-updated", serde_json::to_value(view)));
+        match tokio::task::spawn_blocking(move || {
+            frame("draft-updated", serde_json::to_value(view))
+        })
+        .await
+        {
+            Ok(snapshot) => frames.push(snapshot),
+            Err(error) => crate::applog::warn(format!("could not encode draft snapshot: {error}")),
+        }
     }
     if let Ok(view) = crate::state::season_view_for_chat(
         &srv.state.loaded,
@@ -212,10 +219,9 @@ fn host_status(srv: &Srv) -> serde_json::Value {
 
 /// The same draft view `GET /api/state` answers with, when a league is open.
 async fn draft_view(srv: &Srv) -> Option<crate::view_types::DraftView> {
-    let loaded = srv.state.loaded.lock().await;
-    let loaded = loaded.as_ref()?;
-    let config = srv.state.config.lock().await;
-    Some(crate::state::view_from(loaded, &config))
+    crate::state::draft_view_snapshot(&srv.state, None)
+        .await
+        .ok()
 }
 
 /// The `type` of a `{ type, payload }` frame, whichever direction it came from.

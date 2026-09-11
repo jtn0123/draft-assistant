@@ -81,7 +81,7 @@ fn every_field_of_a_paired_device_survives_the_round_trip() {
         load(scratch.store.as_ref(), &scratch.data_dir).is_none(),
         "nothing has been written yet"
     );
-    save(scratch.store.as_ref(), &sample());
+    save(scratch.store.as_ref(), &sample()).unwrap();
     let back = load(scratch.store.as_ref(), &scratch.data_dir).expect("the store reads back");
     assert_eq!(back.code, "424242");
     assert_eq!(back.devices.len(), 1);
@@ -127,7 +127,7 @@ fn an_old_plaintext_file_is_moved_into_the_store_and_no_token_or_code_stays_on_d
     // A later save must not bring the file back either.
     let mut changed = sample();
     changed.code = "535353".to_string();
-    save(scratch.store.as_ref(), &changed);
+    save(scratch.store.as_ref(), &changed).unwrap();
     assert!(!path.exists(), "a save recreated the plaintext file");
     assert!(!contains_anywhere(&scratch.data_dir, "535353"));
 
@@ -169,7 +169,7 @@ fn the_headless_host_and_the_desktop_do_not_read_each_others_pairings() {
     let desktop = Item::CompanionDevices;
     let headless = Item::CompanionDevicesHeadless;
 
-    save_item(scratch.store.as_ref(), &sample(), desktop);
+    save_item(scratch.store.as_ref(), &sample(), desktop).unwrap();
     assert!(
         load_item(scratch.store.as_ref(), &scratch.data_dir, headless).is_none(),
         "the headless host read the desktop's pairings"
@@ -178,7 +178,7 @@ fn the_headless_host_and_the_desktop_do_not_read_each_others_pairings() {
     let mut hosts = sample();
     hosts.code = "919191".to_string();
     hosts.devices[0].token = "host-tok".to_string();
-    save_item(scratch.store.as_ref(), &hosts, headless);
+    save_item(scratch.store.as_ref(), &hosts, headless).unwrap();
 
     let desk = load_item(scratch.store.as_ref(), &scratch.data_dir, desktop).expect("desktop");
     assert_eq!(desk.code, "424242");
@@ -205,7 +205,7 @@ fn a_store_filed_under_the_headless_account_keeps_the_hubs_plain_saves_apart() {
     let desktop = DevicesUnder::new(Box::new(FileStore::in_dir(&shared)), Item::CompanionDevices)
         .expect("a companion account");
 
-    save(&headless, &sample());
+    save(&headless, &sample()).unwrap();
     assert!(
         load(&desktop, &data_dir).is_none(),
         "the desktop read the headless host's pairings"

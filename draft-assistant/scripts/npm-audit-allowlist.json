@@ -2,5 +2,13 @@
   "comment": "Advisories `npm run audit:npm` (scripts/check-npm-audit.mjs) accepts at high severity. Each entry says which tree it lives in and why it cannot be fixed; the script fails when an unlisted high or critical advisory appears, and warns when a listed one has gone so the entry can be removed.",
   "advisories": {
     "GHSA-jmr9-qjv8-65gv": "extract-zip symlink traversal, in the e2e dev tree only: pulled by WebdriverIO's tauri-service and every @wdio package above it, no fixed release exists, and nothing in a shipped build links it. Remove once `npm --prefix e2e audit` is clean."
+  },
+  "review": {
+    "reviewed": "2026-09-08",
+    "review_by": "2026-10-08",
+    "trigger": "Recheck on every WebdriverIO or browser/driver downloader upgrade; remove the exception when both npm audit trees are clean.",
+    "upstream": "https://github.com/advisories/GHSA-jmr9-qjv8-65gv",
+    "archive_sources": "Only official browser/driver distribution endpoints selected by the checked-in WDIO/Puppeteer tooling (Google Chrome for Testing storage.googleapis.com/chrome-for-testing-public and vendor distribution URLs). Do not set download mirrors or extract user-supplied archives. Run CI downloads on disposable workers without production credentials.",
+    "status": "No patched extract-zip release exists at review. This bounds accepted development-tool risk; it does not remediate the upstream vulnerability."
   }
 }

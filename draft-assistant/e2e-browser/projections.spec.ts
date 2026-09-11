@@ -22,15 +22,17 @@ test("the projections tab lists every roster in the draft", async ({ page }, inf
   for (const column of ["Starters", "Bench", "Wins it", "Still to fill"]) {
     await expect(page.getByText(column, { exact: true })).toBeVisible();
   }
-  // Ranked 1..14 down the first column, whatever the numbers beside them.
-  const ranks = await rows.locator("span").first().allInnerTexts();
-  expect(ranks[0]).toBe("1");
-  await expect(rows.nth(13).locator("span").first()).toHaveText("14");
+  // Missing projections must not invent a ranking or a 100% favorite.
+  for (const row of await rows.all()) {
+    await expect(row.locator("span").first()).toHaveText("-");
+    await expect(row).toContainText("Not available");
+  }
+  await expect(page.getByText("100%", { exact: true })).toHaveCount(0);
 
   // Exactly one row is yours, and the screen says so twice: in the table and
   // in the sentence under the headline.
   await expect(page.locator(".proj-draft-row.is-mine")).toHaveCount(1);
-  await expect(page.getByText(/of 14 on projected starters/)).toBeVisible();
+  await expect(page.getByText("Waiting for projected starters")).toBeVisible();
 
   // A table this wide is the first thing to overflow a narrow window; the
   // board's own guard covers the board, and this covers the new screen.

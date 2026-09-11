@@ -3,8 +3,9 @@
 Split out of `README.md` to keep both documents within the 500-line cap the
 repo enforces on every first-party file.
 
-`npm run verify` is the gate: format, lint, typecheck, the vitest suite, the
-Rust suite with coverage floors, guard-script tests, and a production `vite build`.
+`npm run verify` is the gate: generated-contract checks, format, lint, typecheck,
+the Vitest and companion suites, Rust tests with coverage floors, guard-script
+tests, and a production `vite build`.
 It does not require live Sleeper or provider requests; Rust compilation and
 coverage can take several minutes, especially on a cold cache.
 
@@ -19,13 +20,21 @@ reason beside each), and the Playwright suite against the production bundle
 1420, where `npm run test:e2e:browser` drives the dev server locally). The
 release workflow calls this one and waits on it, so a tag gets the same gate.
 
-The draft preview fixture uses schema 1.7, including `draft_projections`.
+
+The serialized draft types are generated from Rust into the checked-in frontend
+contract. After changing the Rust contract, run `npm run generate:contract`,
+review its diff, and update affected fixtures and schema expectations.
+`npm run check:contract` verifies that the generated output is current without
+rewriting it; it also runs in `verify:fast`.
+
+The draft preview fixture uses schema 1.8, including `draft_projections`.
 It contains roster identities and picks but no projections for drafted players;
 its available-player list excludes them. Projection rows therefore match the
 engine's missing-data behavior: zero points, every starter slot open, and stable
-roster-order ranks. With zero means and spreads, the current simulation breaks
-all ties toward the first roster (100% versus 0%); those fixture odds are not
-football estimates. Real loaded boards retain drafted-player projections.
+roster-order ranks. Odds serialize as `null` until at least one roster has
+projected starters; the UI shows "Not available" and withholds ranking claims.
+Exact simulation ties share credit equally. Real loaded boards retain
+drafted-player projections.
 `fixture_shape` checks the complete serialized shape without exceptions for this field.
 
 Playwright uses zero retries and retains traces and screenshots on failure.
@@ -39,6 +48,19 @@ not only the files some test imports, so removing a screen's tests lowers the
 number instead of raising it. Its per-test timeout is 20 s: the longest
 `waitFor` budget in `App.test.tsx` is 5 s, which the old 5 s default made
 unreachable under load.
+
+
+The shipped phone JavaScript has a separate Istanbul gate:
+`npm run test:coverage:companion`. The harness instruments all 15 scripts in
+`src-tauri/companion-static`, including files with no executed tests such as the
+service worker. This counts code evaluated inside the companion page that the
+React suite's V8 coverage cannot attribute reliably. Reports are written to
+`coverage-companion/` as HTML, JSON summary and LCOV.
+
+On September 8, 2026, 137 companion tests measured 94.89% line, 92.58% statement,
+91.05% function and 83.11% branch coverage. Enforced floors are 90% lines,
+88% statements, 86% functions and 78% branches. `test:ci` and therefore `verify`
+run this gate separately from React and Rust coverage.
 
 ### What is not covered
 
@@ -107,7 +129,27 @@ verify the actual league, draft order, and start time against live Sleeper too.
 npm run test:e2e:mobile
 ```
 
-Walks the companion page in WebKit as an iPhone 15 and in Chromium as a Pixel 7, light and dark: pairing, the your-turn nudge with the urgent clock, the best-available list, the chat with an answer in flight, and a dropped socket brought back by tapping the pill. No dev server; `e2e-browser/companionServer.ts` serves the shipped files and answers as the host. Screenshots land in `e2e-browser/.results-mobile/`. Team marks are let through to Sleeper's CDN so the pictures in the screenshots are real, and the first one is asserted to have loaded; headshots go through the fake host, which has none. Service workers are blocked in that config on purpose: Chromium treats localhost as a secure context, registers the page's worker, and the worker's fetches go around Playwright's routing to whatever is really on the port. This is browser emulation, not a phone: sound, vibration and the iPhone keyboard are only proven on hardware.
+Walks the companion page in WebKit as an iPhone 15 and Chromium as a Pixel 7,
+in light and dark themes: pairing, the your-turn nudge with the urgent clock,
+the best-available list, chat with an answer in flight, and reconnecting by
+tapping the status pill. `e2e-browser/companionServer.ts` serves the shipped files
+and answers as the host; no dev server or live league is needed.
+
+Team-image requests are fulfilled from the checked-in
+`e2e-browser/fixtures/team-mark.svg`, so image loading and layout assertions do
+not depend on Sleeper's CDN. Headshots use the fake host, which has none.
+Screenshots land in `e2e-browser/.results-mobile/`, and the HTML report is in
+`playwright-report-mobile/`.
+
+CI's **Mobile browsers** job installs Chromium and WebKit and runs the same
+command with zero retries. Failures upload both result directories, including
+traces and screenshots, as the `playwright-mobile` artifact. The macOS bundle
+job waits for both verification and mobile tests.
+
+Service workers are blocked deliberately: Chromium treats localhost as secure,
+and worker fetches can bypass Playwright routing and reach a real local host.
+This is browser emulation; sound, vibration and the iPhone keyboard still need
+physical-device verification.
 
 ### Phone and desktop with a real companion host
 

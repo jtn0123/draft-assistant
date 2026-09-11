@@ -230,32 +230,10 @@ pub(super) fn remove_entered(picks: &mut Vec<Pick>, entered: &Pick) {
 /// the user switched leagues answered with the *new* league's view, and the
 /// screen showed it as the result of a pick it never contained.
 pub(super) async fn view_now(state: &AppState, draft_id: &str) -> Result<DraftView, String> {
-    let loaded = state.loaded.lock().await;
-    let loaded = loaded.as_ref().ok_or("no league loaded")?;
-    if loaded.draft.draft_id != draft_id {
-        return Err(LEAGUE_CHANGED.to_string());
-    }
-    let config = state.config.lock().await;
-    Ok(view_from(loaded, &config))
+    crate::state::draft_view_snapshot(state, Some(draft_id)).await
 }
 
-/// Build a view on the blocking pool from a copy of the league, with no lock
-/// held.
-///
-/// The poll loop used to build under both mutexes on a runtime thread: every
-/// undrafted player is copied into the view, and for the length of that copy
-/// every command, the companion's sockets and the other poller waited on the
-/// locks or the thread. The copy of `LoadedLeague` taken to get here is
-/// cheap, because the board and the dictionaries behind it are shared
-/// `Arc`s; the view that comes out is the same one `view_from` builds.
-pub(super) async fn build_view_off_lock(
-    loaded: LoadedLeague,
-    config: AppConfig,
-) -> Result<DraftView, String> {
-    tokio::task::spawn_blocking(move || view_from(&loaded, &config))
-        .await
-        .map_err(|error| format!("the draft view was not built: {error}"))
-}
+pub(super) use crate::state::build_view_off_lock;
 
 /// Save a manual-pick list on the blocking pool, with no lock held.
 pub(super) async fn save_picks_off_lock(

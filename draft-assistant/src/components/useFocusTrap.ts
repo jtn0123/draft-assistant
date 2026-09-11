@@ -3,7 +3,22 @@
 import { useEffect, type RefObject } from "react";
 
 /** Everything inside a dialog the keyboard can land on. */
-const STOPS = "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";
+const STOPS = "button, [href], input, select, textarea, [tabindex]";
+
+function canFocus(element: HTMLElement): boolean {
+  if (element.tabIndex < 0 || element.matches(":disabled") || element.closest("[hidden], [inert]"))
+    return false;
+  for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.visibility === "collapse"
+    )
+      return false;
+  }
+  return true;
+}
 
 /**
  * Keep Tab inside `container`, close on Escape, and take the page behind out
@@ -31,8 +46,15 @@ export function useFocusTrap(
         return;
       }
       if (e.key !== "Tab") return;
-      const stops = container.current?.querySelectorAll<HTMLElement>(STOPS);
-      if (stops === undefined || stops.length === 0) return;
+      const dialog = container.current;
+      if (!dialog) return;
+      const stops = [...dialog.querySelectorAll<HTMLElement>(STOPS)].filter(canFocus);
+      if (stops.length === 0) {
+        e.preventDefault();
+        if (!dialog.hasAttribute("tabindex")) dialog.tabIndex = -1;
+        dialog.focus();
+        return;
+      }
       const first = stops[0];
       const last = stops[stops.length - 1];
       if (first === undefined || last === undefined) return;

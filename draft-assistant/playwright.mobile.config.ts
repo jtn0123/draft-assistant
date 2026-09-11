@@ -15,9 +15,14 @@ export default defineConfig({
   testDir: "./e2e-browser",
   testMatch: /companion-mobile\.spec\.ts/,
   retries: 0,
-  reporter: [["list"]],
+  reporter: [["list"], ["html", { outputFolder: "playwright-report-mobile", open: "never" }]],
   outputDir: "./e2e-browser/.results-mobile",
-  use: { baseURL: "http://localhost:7999", serviceWorkers: "block", trace: "off" },
+  use: {
+    baseURL: "http://localhost:7999",
+    serviceWorkers: "block",
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+  },
   projects: [
     { name: "iphone-webkit", use: { ...devices["iPhone 15"] } },
     { name: "android-chromium", use: { ...devices["Pixel 7"] } },
