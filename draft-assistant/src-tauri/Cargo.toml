@@ -90,7 +90,7 @@ tauri-plugin-wdio-webdriver = { version = "1.3", optional = true }
 [dev-dependencies]
 # Parse the actual serialized Rust structs for the checked-in frontend contract.
 # syn already exists in the locked graph; this runs only in the generator/tests.
-syn = { version = "2.0.119", features = ["full"] }
+syn = { version = "3.0.4", features = ["full"] }
 # Tauri's own mock runtime, used by tests/command_surface.rs to stand the app
 # up and push real IPC messages through it. Same version as the normal
 # dependency above -- only the `test` feature is extra, so this adds a feature
