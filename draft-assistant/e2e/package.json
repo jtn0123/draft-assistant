@@ -19,6 +19,7 @@
   },
   "overrides": {
     "serialize-javascript": "^7.0.5",
-    "deepmerge-ts": "^8.0.2"
+    "deepmerge-ts": "^8.0.2",
+    "basic-ftp": "^6.2.1"
   }
 }
