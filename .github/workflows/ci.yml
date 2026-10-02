@@ -67,7 +67,7 @@ jobs:
       # The Rust tests run under cargo-llvm-cov, which enforces the coverage
       # floor as well as running them. cargo-audit is the dependency gate
       # below; both arrive as prebuilt binaries, no compile.
-      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-llvm-cov,cargo-audit
 
