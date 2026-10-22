@@ -65,7 +65,12 @@ tauri-plugin-dialog = "2"
 # Pinned to a tested minor for the same reason as reqwest above. Note it
 # brings its own reqwest 0.13 (rustls) into the macOS tree beside our 0.12,
 # so the "one reqwest" observation above dates from before this plugin.
-tauri-plugin-updater = "2.11"
+# Default features minus `zip`: that feature only extracts Windows .zip and
+# Linux AppImage updates (macOS always gets its own tar/flate2 for the
+# .app.tar.gz), and it drags in zip 4.x, which has no patched release for
+# RUSTSEC-2026-0367/0368/0369. Releases are macOS-only (release.yml); add
+# `zip` back if a Windows or Linux updater bundle ever ships.
+tauri-plugin-updater = { version = "2.11", default-features = false, features = ["rustls-tls", "system-proxy"] }
 # The phone / second-screen companion server. Pinned to a tested minor for the
 # same reason as reqwest above. `ws` is the only extra feature, and it is what
 # pulls tokio-tungstenite in; nothing else here is new to the graph -- axum,
