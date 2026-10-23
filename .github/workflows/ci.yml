@@ -59,7 +59,7 @@ jobs:
       # Keyed apart from the bundle job: this one builds llvm-cov-instrumented
       # test targets, that one a release binary, and one cache key would have
       # the two evicting each other.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: draft-assistant/src-tauri
           key: verify
@@ -184,7 +184,7 @@ jobs:
         with:
           toolchain: ${{ steps.rust.outputs.channel }}
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: draft-assistant/src-tauri
           key: bundle
