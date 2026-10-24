@@ -59,7 +59,7 @@ jobs:
       # Keyed apart from the bundle job: this one builds llvm-cov-instrumented
       # test targets, that one a release binary, and one cache key would have
       # the two evicting each other.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: draft-assistant/src-tauri
           key: verify
@@ -67,7 +67,7 @@ jobs:
       # The Rust tests run under cargo-llvm-cov, which enforces the coverage
       # floor as well as running them. cargo-audit is the dependency gate
       # below; both arrive as prebuilt binaries, no compile.
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
           tool: cargo-llvm-cov,cargo-audit
 
@@ -184,7 +184,7 @@ jobs:
         with:
           toolchain: ${{ steps.rust.outputs.channel }}
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: draft-assistant/src-tauri
           key: bundle
